@@ -14,6 +14,7 @@
     {"id": "l35v2_2026", "status": "completed_confirmation", "path": "daily_research/research_records/seq100/l35v2_2026/comparison_summary.json"},
     {"id": "l35v2_2026_vintages", "status": "completed_diagnostic", "path": "daily_research/research_records/seq100/l35v2_2026_vintages/comparison_summary.json"},
     {"id": "latest_signal_20260721", "status": "completed_read_only_signal", "path": "daily_research/research_records/seq100/latest_signal_20260721/audit.json"},
+    {"id": "path_prediction_audit_2020_2026", "status": "completed_read_only_audit", "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report.html"},
     {"id": "current_2026_best", "status": "completed_diagnostic", "path": "daily_research/research_records/seq100/current_2026_best/artifact.json"},
     {"id": "training_window", "status": "retired", "path": "daily_research/research_records/seq100/training_window_retired/comparison_summary.json"},
     {"id": "global_tail", "status": "retired", "path": "daily_research/research_records/seq100/global_tail_retired/retirement.json"},

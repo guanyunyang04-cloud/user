@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "price_anchors": {
+    "signal_close": "Raw model path: each OHLC level is relative to the signal-date close.",
+    "predicted_entry_open": "Published trade path: (1 + raw path) / (1 + predicted D1 open gap) - 1.",
+    "actual_entry_oracle": "Diagnostic only: predicted future levels divided by the realized next open; not deployable."
+  },
+  "score_variants": {
+    "original": "Registered path_value_v2 using the model-predicted entry-open denominator.",
+    "signal_close_anchor": "Path_value_v2 with the entry denominator neutralized at the signal close.",
+    "board_bound_entry": "Path_value_v2 after clipping the predicted D1 open gap to the regular board limit.",
+    "actual_entry_oracle": "Path_value_v2 using the realized next open only for attribution."
+  },
+  "cohorts": [
+    "universe",
+    "top1",
+    "top2",
+    "top3",
+    "top10"
+  ],
+  "horizons": [
+    1,
+    2,
+    3,
+    5,
+    7,
+    10,
+    14,
+    20,
+    30,
+    40,
+    50,
+    60
+  ],
+  "ranking_target": "Realized path_value_v2 with the stored future tradability mask.",
+  "limitations": [
+    "The audit is observational and does not retrain any checkpoint.",
+    "Regular board limits do not identify IPO no-limit periods; >20% diagnostics remain descriptive.",
+    "The 2026-07-21 latest signal has no realized future path at audit time and is assessed by internal consistency only."
+  ],
+  "sources": [
+    "daily_research/models/registry.json",
+    "daily_research/path_policy/qdp_v2_sequence_path_training.py",
+    "daily_research/data/research_store/seq100_current",
+    "daily_research/data/research_store/seq100_l35v2_sixfold_v1",
+    "daily_research/data/research_store/seq100_2026_overlay_v1",
+    "daily_research/research_records/seq100/latest_signal_20260721"
+  ]
+}

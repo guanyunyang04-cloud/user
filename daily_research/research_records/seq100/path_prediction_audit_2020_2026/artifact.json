@@ -1,0 +1,2139 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Seq100 路径预测与入场锚点审计",
+    "description": "L35V2、Structured 100x32 与 Legal 的绝对路径校准、排名敏感性和退出质量只读审计。",
+    "generatedAt": "2026-07-22T16:34:32+08:00",
+    "cards": [
+      {
+        "id": "l35_ic_card",
+        "dataset": "headline",
+        "sourceId": "headline_source",
+        "description": "L35V2 2020-2026 日内 Rank IC 的折等权均值。",
+        "metrics": [
+          {
+            "label": "Original IC",
+            "field": "l35_original_ic",
+            "format": "number"
+          },
+          {
+            "label": "去入场锚 IC",
+            "field": "l35_signal_close_ic",
+            "format": "number",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "gap_dependency_card",
+        "dataset": "headline",
+        "sourceId": "headline_source",
+        "description": "Original score 与负预测开盘缺口的日内秩相关，L35V2 七折均值。",
+        "metrics": [
+          {
+            "label": "Score-gap Spearman",
+            "field": "l35_score_gap_spearman",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "latest_anchor_card",
+        "dataset": "headline",
+        "sourceId": "headline_source",
+        "description": "2026 年 7 月 21 日 L35V2 Top3 的锚点分解。",
+        "metrics": [
+          {
+            "label": "预测次日开盘",
+            "field": "latest_entry_gap",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "label": "展示 D2",
+            "field": "latest_displayed_d2",
+            "format": "percent"
+          },
+          {
+            "label": "收盘锚 D2",
+            "field": "latest_raw_d2",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "scope_card",
+        "dataset": "headline",
+        "sourceId": "headline_source",
+        "description": "完整恢复并复算的注册模型范围。",
+        "metrics": [
+          {
+            "label": "Checkpoint",
+            "field": "checkpoint_count",
+            "format": "number"
+          },
+          {
+            "label": "候选预测",
+            "field": "candidate_predictions",
+            "format": "number"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "gap_chart",
+        "title": "Top3 次日开盘预测与真实值",
+        "subtitle": "各模型族的注册 fold 等权均值；百分比相对信号日收盘。",
+        "type": "bar",
+        "dataset": "gap_model_mean",
+        "sourceId": "gap_chart_source",
+        "encodings": {
+          "x": {
+            "field": "model_label",
+            "type": "ordinal",
+            "label": "模型"
+          },
+          "y": {
+            "field": "entry_gap",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "次日开盘缺口"
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "label": "路径"
+          },
+          "tooltip": [
+            {
+              "field": "model_label",
+              "label": "模型"
+            },
+            {
+              "field": "entry_gap",
+              "format": "percent",
+              "label": "均值"
+            }
+          ]
+        },
+        "valueFormat": "percent",
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "ic_chart",
+        "title": "L35V2 Rank IC 对入场锚点的敏感性",
+        "subtitle": "2020-2026；actual-entry 仅用于归因，不可部署。",
+        "type": "bar",
+        "dataset": "ic_sensitivity",
+        "sourceId": "ic_chart_source",
+        "encodings": {
+          "x": {
+            "field": "year_label",
+            "type": "ordinal",
+            "label": "Fold"
+          },
+          "y": {
+            "field": "rank_ic",
+            "type": "quantitative",
+            "label": "平均日内 Rank IC"
+          },
+          "color": {
+            "field": "variant",
+            "type": "nominal",
+            "label": "评分变体"
+          },
+          "tooltip": [
+            {
+              "field": "rank_ic",
+              "label": "Rank IC"
+            }
+          ]
+        },
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "d2_chart",
+        "title": "L35V2 Top3 的 D2 锚点分解",
+        "subtitle": "预测入场相对值、信号收盘相对值与真实入场收益。",
+        "type": "bar",
+        "dataset": "d2_decomposition",
+        "sourceId": "d2_chart_source",
+        "encodings": {
+          "x": {
+            "field": "year_label",
+            "type": "ordinal",
+            "label": "Fold"
+          },
+          "y": {
+            "field": "return_d2",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "D2 收益"
+          },
+          "color": {
+            "field": "series",
+            "type": "nominal",
+            "label": "锚点 / 实际"
+          },
+          "tooltip": [
+            {
+              "field": "return_d2",
+              "format": "percent",
+              "label": "均值"
+            }
+          ]
+        },
+        "valueFormat": "percent",
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "exit_regret_chart",
+        "title": "L35V2 Top3 的 path-only 退出遗憾",
+        "subtitle": "同一真实路径上，模型计划日相对 D2-D60 oracle 的 V2 utility 损失。",
+        "type": "bar",
+        "dataset": "exit_regret",
+        "sourceId": "exit_quality_source",
+        "encodings": {
+          "x": {
+            "field": "year_label",
+            "type": "ordinal",
+            "label": "Fold"
+          },
+          "y": {
+            "field": "path_only_exit_regret_mean",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "平均退出遗憾"
+          },
+          "tooltip": [
+            {
+              "field": "path_only_exit_regret_mean",
+              "format": "percent",
+              "label": "退出遗憾"
+            }
+          ]
+        },
+        "valueFormat": "percent",
+        "labels": {
+          "values": "all"
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "latest_geometry_table",
+        "title": "2026 年 7 月 21 日 Top4 的 D1 几何",
+        "subtitle": "预测路径先极端低开，再在 D1 日内大幅反弹；实际退出计划为 D19-D20。",
+        "dataset": "latest_table",
+        "sourceId": "latest_signal_source",
+        "defaultSort": {
+          "field": "rank",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "rank",
+            "label": "排名",
+            "format": "number"
+          },
+          {
+            "field": "symbol",
+            "label": "证券",
+            "type": "text"
+          },
+          {
+            "field": "name",
+            "label": "名称",
+            "type": "text"
+          },
+          {
+            "field": "predicted_exit_day",
+            "label": "计划退出",
+            "format": "number"
+          },
+          {
+            "field": "predicted_entry_gap",
+            "label": "预测次日开盘",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "predicted_entry_open_to_close_return",
+            "label": "预测 D1 日内反弹",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "latest_d2_table",
+        "title": "2026 年 7 月 21 日 Top4 的 D2 锚点分解",
+        "subtitle": "同一预测路径分别以预测次日开盘和信号日收盘为基准。",
+        "dataset": "latest_table",
+        "sourceId": "latest_signal_source",
+        "defaultSort": {
+          "field": "rank",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "rank",
+            "label": "排名",
+            "format": "number"
+          },
+          {
+            "field": "symbol",
+            "label": "证券",
+            "type": "text"
+          },
+          {
+            "field": "displayed_entry_relative_d2",
+            "label": "展示 D2",
+            "format": "percent"
+          },
+          {
+            "field": "reconstructed_signal_close_relative_d2",
+            "label": "收盘锚 D2",
+            "format": "percent"
+          },
+          {
+            "field": "anchor_inflation_d2",
+            "label": "锚点放大",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "fold_ranking_table",
+        "title": "全部 15 个模型折的排名敏感性",
+        "subtitle": "原候选集和标签不变；所有 Rank IC 已与注册训练摘要逐折精确复现。",
+        "dataset": "fold_table",
+        "sourceId": "fold_table_source",
+        "defaultSort": {
+          "field": "model_year",
+          "direction": "asc"
+        },
+        "density": "dense",
+        "columns": [
+          {
+            "field": "model_year",
+            "label": "模型 / fold",
+            "type": "text"
+          },
+          {
+            "field": "rank_ic_original",
+            "label": "原 IC",
+            "format": "number"
+          },
+          {
+            "field": "rank_ic_signal_close_anchor",
+            "label": "去锚 IC",
+            "format": "number",
+            "movement": true
+          },
+          {
+            "field": "rank_ic_board_bound_entry",
+            "label": "限幅 IC",
+            "format": "number"
+          },
+          {
+            "field": "score_vs_negative_entry_gap_spearman",
+            "label": "Score-gap",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "fold_calibration_table",
+        "title": "全部 15 个模型折的 Top3 路径校准",
+        "subtitle": "预测与真实次日开盘、D2 收益及完整路径误差；均按各 fold 原 Top3 计算。",
+        "dataset": "fold_table",
+        "sourceId": "fold_table_source",
+        "defaultSort": {
+          "field": "model_year",
+          "direction": "asc"
+        },
+        "density": "dense",
+        "columns": [
+          {
+            "field": "model_year",
+            "label": "模型 / fold",
+            "type": "text"
+          },
+          {
+            "field": "top3_predicted_entry_gap_mean",
+            "label": "预测开盘",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "top3_actual_entry_gap_mean",
+            "label": "真实开盘",
+            "format": "percent"
+          },
+          {
+            "field": "top3_predicted_entry_relative_d2_mean",
+            "label": "预测 D2",
+            "format": "percent"
+          },
+          {
+            "field": "top3_actual_entry_relative_d2_mean",
+            "label": "真实 D2",
+            "format": "percent"
+          },
+          {
+            "field": "top3_entry_relative_path_mae",
+            "label": "Path MAE",
+            "format": "percent"
+          }
+        ]
+      },
+      {
+        "id": "exit_timing_table",
+        "title": "L35V2 Top3 退出时点质量",
+        "subtitle": "Path-only 诊断；比较模型计划日、真实路径 oracle 与完整效用曲线。",
+        "dataset": "exit_table",
+        "sourceId": "exit_quality_source",
+        "defaultSort": {
+          "field": "year",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "year",
+            "label": "Fold",
+            "format": "number"
+          },
+          {
+            "field": "predicted_exit_day_mean",
+            "label": "平均计划日",
+            "format": "number"
+          },
+          {
+            "field": "path_only_oracle_exit_day_mean",
+            "label": "平均 oracle 日",
+            "format": "number"
+          },
+          {
+            "field": "exit_day_mae",
+            "label": "退出日 MAE",
+            "format": "number"
+          },
+          {
+            "field": "utility_curve_spearman_mean",
+            "label": "效用曲线相关",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "exit_outcome_table",
+        "title": "L35V2 Top3 计划退出结果",
+        "subtitle": "Path-only 真实收益、胜率和相对 D2-D60 oracle 的 V2 utility 遗憾。",
+        "dataset": "exit_table",
+        "sourceId": "exit_quality_source",
+        "defaultSort": {
+          "field": "year",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "year",
+            "label": "Fold",
+            "format": "number"
+          },
+          {
+            "field": "realized_return_at_plan_mean",
+            "label": "计划日真实收益",
+            "format": "percent"
+          },
+          {
+            "field": "realized_plan_win_rate",
+            "label": "胜率",
+            "format": "percent"
+          },
+          {
+            "field": "path_only_exit_regret_mean",
+            "label": "退出遗憾",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "headline_source",
+        "label": "审计摘要指标",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_headline.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_headline.csv')",
+          "description": "从 15 个模型折和 7 月 21 日重构结果生成报告摘要指标。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_headline.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/latest_20260721_reconstructed.csv"
+          ],
+          "filters": [
+            "registered checkpoint scope",
+            "L35V2 folds 2020-2026",
+            "latest Top3"
+          ],
+          "metric_definitions": [
+            "All fold-level means are equally weighted across registered folds."
+          ]
+        }
+      },
+      {
+        "id": "model_fold_source",
+        "label": "15 个注册 checkpoint 的路径复算审计",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv')",
+          "description": "逐个恢复注册 checkpoint，在原候选 fold 上复算路径、四种评分锚点与 Top1/2/3/10 校准指标。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/cohort_summary.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/horizon_calibration.csv",
+            "daily_research/models/registry.json"
+          ],
+          "filters": [
+            "registered checkpoints only",
+            "Legal and Structured 100x32: 2023-2026",
+            "L35V2 180x35: 2020-2026",
+            "candidate membership unchanged"
+          ],
+          "metric_definitions": [
+            "Original Rank IC is the mean daily Spearman correlation between registered path_value_v2 score and realized path_value_v2.",
+            "Signal-close anchor removes only the predicted next-open denominator; actual-entry oracle uses realized next open and is attribution-only.",
+            "Regular board-limit flags use 10% main-board, 20% ChiNext/STAR, and 30% Beijing-board limits; IPO no-limit windows are not classified."
+          ]
+        }
+      },
+      {
+        "id": "latest_signal_source",
+        "label": "2026 年 7 月 21 日 L35V2 Top4 路径重构",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_latest_table.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_latest_table.csv')",
+          "description": "用已保存的预测入场缺口反解信号收盘锚定路径，验证 D2 展示值的代数来源。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_latest_table.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/latest_20260721_reconstructed.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/latest_20260721_day1_geometry.csv",
+            "daily_research/research_records/seq100/latest_signal_20260721/top20_primary.csv",
+            "daily_research/research_records/seq100/latest_signal_20260721/top4_predicted_path.csv"
+          ],
+          "filters": [
+            "variant=qdp_strict_carry_forward",
+            "rank <= 4",
+            "signal date=2026-07-21"
+          ],
+          "metric_definitions": [
+            "Displayed return = (1 + signal-close-relative future level) / (1 + predicted next-open gap) - 1.",
+            "No realized July 22 onward path was available in the immutable audit snapshot."
+          ]
+        }
+      },
+      {
+        "id": "exit_quality_source",
+        "label": "Top3 路径形状与退出质量",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_exit_top3.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_exit_top3.csv')",
+          "description": "对每个历史 Top3 的预测与真实路径构造相同 V2 utility curve，比较模型计划退出和 path-only oracle。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_exit_top3.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/exit_quality.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/top3_exit_quality.parquet",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/top3_paths.parquet"
+          ],
+          "filters": [
+            "daily Top3 under the original registered score",
+            "D2-D60",
+            "path-only; no execution deferral"
+          ],
+          "metric_definitions": [
+            "Path-only exit regret = realized-path oracle V2 utility minus realized V2 utility at the model-planned day.",
+            "Utility-curve Spearman compares the 59 predicted and realized D2-D60 utility values for each selected stock."
+          ]
+        }
+      },
+      {
+        "id": "code_contract_source",
+        "label": "当前路径变换与损失实现",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_code_contract.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_code_contract.csv')",
+          "description": "静态审查预测几何、入场锚点换算、V2 score 和训练损失组合。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_code_contract.csv",
+            "daily_research/path_policy/qdp_v2_sequence_path_training.py:1636",
+            "daily_research/path_policy/qdp_v2_sequence_path_training.py:3320",
+            "daily_research/path_policy/qdp_v2_sequence_path_training.py:3597",
+            "daily_research/path_policy/qdp_v2_sequence_path_training.py:2228"
+          ],
+          "filters": [
+            "current repository implementation",
+            "no source modification"
+          ],
+          "metric_definitions": [
+            "Structured gap and body are separately bounded at 0.25 in log space, but the bound is not the symbol/date regulatory price limit.",
+            "For today_close labels, every future OHLC level is divided by the predicted D1 open before V2 summary, value, and rank losses are computed."
+          ]
+        }
+      },
+      {
+        "id": "gap_chart_source",
+        "label": "Top3 次日开盘校准图数据",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_model_mean.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_model_mean.csv')",
+          "description": "先计算每个模型折的 Top3 预测与真实次日开盘均值，再按模型族对 fold 等权平均。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_model_mean.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_comparison.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+          ],
+          "filters": [
+            "cohort=Top3",
+            "fold-equal mean by model family"
+          ],
+          "metric_definitions": [
+            "Entry gap is relative to the signal-date close.",
+            "Each registered fold receives equal weight within its model family."
+          ]
+        }
+      },
+      {
+        "id": "ic_chart_source",
+        "label": "L35V2 Rank IC 锚点敏感性图数据",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_ic_sensitivity.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_ic_sensitivity.csv')",
+          "description": "将 L35V2 四种评分锚点的逐折 Rank IC 转成长表。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_ic_sensitivity.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+          ],
+          "filters": [
+            "model=L35V2",
+            "folds=2020-2026"
+          ],
+          "metric_definitions": [
+            "Actual-entry oracle is attribution-only and is not deployable."
+          ]
+        }
+      },
+      {
+        "id": "d2_chart_source",
+        "label": "L35V2 Top3 D2 锚点分解图数据",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_d2_decomposition.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_d2_decomposition.csv')",
+          "description": "将 L35V2 Top3 D2 的三种口径转成长表。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_d2_decomposition.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+          ],
+          "filters": [
+            "model=L35V2",
+            "cohort=Top3",
+            "horizon=D2"
+          ],
+          "metric_definitions": [
+            "Displayed D2 uses predicted entry open; raw D2 uses signal close; actual D2 uses realized entry open."
+          ]
+        }
+      },
+      {
+        "id": "fold_table_source",
+        "label": "15 个模型折报告表数据",
+        "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_fold_table.csv",
+        "query": {
+          "engine": "python/pandas",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_fold_table.csv')",
+          "description": "从模型折审计摘要选择报告列并生成人类可读模型标签。",
+          "executed_at": "2026-07-22T16:34:32+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_fold_table.csv",
+            "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+          ],
+          "filters": [
+            "all 15 registered checkpoint folds"
+          ],
+          "metric_definitions": [
+            "Values are recomputed on each checkpoint's registered candidate fold."
+          ]
+        }
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# Seq100 路径预测与入场锚点审计\n\nL35V2、Structured 100x32 与 Legal，2020-2026 注册 checkpoint 的只读技术核验。"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 技术结论\n\n**截图中的 D2 约 32% 在代码公式下算得没错，但不能当作可信的绝对收益预测。** 它以模型自己预测的次日开盘为分母；7 月 21 日 Top3 同时预测次日开盘平均下跌 **-20.77%**，把相对信号收盘仅 **4.80%** 的 D2 路径放大成 **32.26%**。三只股票的模型实际退出计划是 D19、D20、D19，并非 D2。\n\n**问题是系统性的。** L35V2 七折原始 Rank IC 均值为 **0.1016**；去掉预测入场分母后变为 **-0.0587**。原 score 与“预测开盘越低”的日内秩相关均值达到 **0.9933**，且 L35V2 Top3 有 **99.98%** 的预测开盘超出常规板块涨跌幅范围。\n\n**这不等于历史账户收益被数学伪造。** 连续账户回测使用真实开盘和真实卖出价，收益本身仍是实证结果；但选股 score 高度依赖一个未校准、物理上不可信的潜变量，因而高 IC 不能再解释为整条未来价格路径预测准确，也不足以支持按预测路径直接交易。"
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "l35_ic_card",
+          "gap_dependency_card",
+          "latest_anchor_card",
+          "scope_card"
+        ],
+        "layout": "full"
+      },
+      {
+        "id": "latest_explanation",
+        "type": "markdown",
+        "sourceId": "latest_signal_source",
+        "layout": "full",
+        "body": "## 7 月 21 日的 32% 是如何产生的\n\n换算关系是 `展示收益 = (1 + 收盘锚路径) / (1 + 预测次日开盘缺口) - 1`。Top3 预测先在次日开盘下跳约 20.5%-20.9%，随后 D1 日内反弹约 25.9%-26.5%，使 D1 收盘又回到信号收盘附近；D2 相对信号收盘只高约 4.5%-5.1%，但相对那个异常低的预测开盘就变成约 32%。这是一条“极端低开、当日几乎完全修复”的路径，而不是 D2 真实可期待 32%。"
+      },
+      {
+        "id": "latest_geometry_table_block",
+        "type": "table",
+        "tableId": "latest_geometry_table",
+        "layout": "full"
+      },
+      {
+        "id": "latest_d2_table_block",
+        "type": "table",
+        "tableId": "latest_d2_table",
+        "layout": "full"
+      },
+      {
+        "id": "systemic_gap_explanation",
+        "type": "markdown",
+        "sourceId": "model_fold_source",
+        "layout": "full",
+        "body": "## 历史 Top 预测也存在同类问题\n\nStructured 100x32 的 Top3 在 2023-2026 平均预测次日开盘约为 -20.2% 至 -21.1%；L35V2 在 2020-2026 为 -18.5% 至 -21.4%；真实 Top3 次日开盘均值都接近 0%。Legal 的偏差较轻但仍为约 -12.0% 至 -15.1%。因此 7 月 21 日不是数据后缀或单一 checkpoint 故障，而是三个模型族都出现、Structured 更严重的共同校准缺陷。"
+      },
+      {
+        "id": "gap_chart_block",
+        "type": "chart",
+        "chartId": "gap_chart",
+        "layout": "full"
+      },
+      {
+        "id": "ranking_explanation",
+        "type": "markdown",
+        "sourceId": "model_fold_source",
+        "layout": "full",
+        "body": "## 高 Rank IC 不等于路径预测准确\n\nL35V2 去掉预测入场分母后，七折 IC 全部转负；将开盘缺口限制到常规板块范围后，均值为 **0.0917**，保留了大部分原始 IC。这说明异常缺口的**方向/相对次序**可能充当了有效的潜在排序信号，但其数值幅度没有校准。限幅后的 2026 Top3 与原 Top3 日均 Jaccard 只有约 14%，所以不能静默替换评分，必须先重跑同一账户合同。"
+      },
+      {
+        "id": "ic_chart_block",
+        "type": "chart",
+        "chartId": "ic_chart",
+        "layout": "full"
+      },
+      {
+        "id": "d2_chart_block",
+        "type": "chart",
+        "chartId": "d2_chart",
+        "layout": "full"
+      },
+      {
+        "id": "fold_ranking_table_block",
+        "type": "table",
+        "tableId": "fold_ranking_table",
+        "layout": "full"
+      },
+      {
+        "id": "fold_calibration_table_block",
+        "type": "table",
+        "tableId": "fold_calibration_table",
+        "layout": "full"
+      },
+      {
+        "id": "exit_explanation",
+        "type": "markdown",
+        "sourceId": "exit_quality_source",
+        "layout": "full",
+        "body": "## 退出路径同样没有得到充分验证\n\nL35V2 Top3 在七折的预测 utility curve 与真实 utility curve 平均 Spearman 仅约 -0.085 至 0.105；计划退出日相对 path-only oracle 的 MAE 为 17.0-22.8 个交易日，平均 V2 退出遗憾为 18.9%-35.7%。2026 完整标签窗口内，Top3 按模型计划日的平均真实收益约为 0%，胜率 47.2%。日期命中率本身不是最终目标，但效用曲线相关和退出遗憾都弱，说明当前模型计划不能因路径图看起来平滑就被视为可靠；固定执行优于模型退出时应继续采用固定 fallback。"
+      },
+      {
+        "id": "exit_chart_block",
+        "type": "chart",
+        "chartId": "exit_regret_chart",
+        "layout": "full"
+      },
+      {
+        "id": "exit_timing_table_block",
+        "type": "table",
+        "tableId": "exit_timing_table",
+        "layout": "full"
+      },
+      {
+        "id": "exit_outcome_table_block",
+        "type": "table",
+        "tableId": "exit_outcome_table",
+        "layout": "full"
+      },
+      {
+        "id": "mechanism",
+        "type": "markdown",
+        "sourceId": "code_contract_source",
+        "layout": "full",
+        "body": "## 最可能的代码机制\n\nStructured geometry 将每日 `gap` 和 `body` 分别限制在 log 空间的 ±0.25，但没有按证券和日期施加真实涨跌幅边界，因此可以生成约 -20% 低开再约 +26% 日内反弹的抵消路径。随后，`today_close` 路径的所有未来 OHLC 都除以该预测 D1 open；summary、value 和 rank 直接受这个分母影响。\n\n训练虽有原始路径、geometry 和 utility-curve 监督，但 D1 open 只是 60x4 路径中的一个点；与此同时 summary/value/rank 合计权重较高且能从低分母直接受益。全量敏感性结果与这个多目标捷径高度一致。它是目前最强的机制解释，但仍属于观测性因果判断；要用梯度冲突审计和重训消融才能最终证明。"
+      },
+      {
+        "id": "recommendations",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 优化方案\n\n1. **立即修正解释层。** 每条路径同时展示“相对信号收盘”和“相对预测入场开盘”；超过证券常规边界的 D1 gap 标为无效点预测。当前绝对路径不用于下单依据。\n2. **先做无需训练的账户复核。** 在相同候选、真实执行和双滑点合同下，对 `original`、`board-bound entry` 与 `signal-close anchor` 三种 score 分别回放 Top1/2/3 和合法槽位。最终仍以连续账户增长选方案；允许 score 不足时持有现金。\n3. **再重训校准版本。** 将 overnight gap 独立成强监督、按板块/状态约束的概率 head；直接预测净交易效用或其分布，避免用两个点预测相除。对 D1 gap 单设 Huber/NLL、可靠性曲线和 Top-K 校准检查，并审计 path、value、rank 各损失的梯度方向。\n4. **重做退出学习。** 同一模型保留排名与退出职责，但改为预测 D2-D60 的软效用分布和 `cash/no-trade` 选项；用 exit regret、单位资本日收益和连续账户增长监督选择。模型自主退出未超过最佳固定期限时，继续使用该模型自己的固定退出 fallback。"
+      },
+      {
+        "id": "limitations",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 边界与下一步判据\n\n本审计没有改代码、没有训练，也没有使用 7 月 22 日之后的真实路径。常规板块边界诊断未单独识别上市前五日无涨跌幅情形，因此它是保守的物理合理性筛查，不是逐笔交易所合规裁决。\n\n下一次实验应先回答两个问题：限幅 score 是否在 2020-2026 仍保持账户增长，以及重训后 Top-K 的 gap 校准、效用曲线相关和退出遗憾能否同时改善。只有两者成立，预测路径才可恢复为决策变量；否则保留排序用途，并固定执行或持有现金。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-07-22T16:34:32+08:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [
+        {
+          "l35_original_ic": 0.1015757512,
+          "l35_signal_close_ic": -0.0587084147,
+          "l35_score_gap_spearman": 0.9933080273,
+          "latest_entry_gap": -0.2076594333,
+          "latest_displayed_d2": 0.3226287266,
+          "latest_raw_d2": 0.0479708434,
+          "checkpoint_count": 15,
+          "candidate_predictions": 8828678
+        }
+      ],
+      "gap_comparison": [
+        {
+          "fold_label": "Legal 23",
+          "model_label": "Legal",
+          "year": 2023,
+          "series": "预测开盘",
+          "entry_gap": -0.1203699633
+        },
+        {
+          "fold_label": "Legal 24",
+          "model_label": "Legal",
+          "year": 2024,
+          "series": "预测开盘",
+          "entry_gap": -0.1507690251
+        },
+        {
+          "fold_label": "Legal 25",
+          "model_label": "Legal",
+          "year": 2025,
+          "series": "预测开盘",
+          "entry_gap": -0.1398843676
+        },
+        {
+          "fold_label": "Legal 26",
+          "model_label": "Legal",
+          "year": 2026,
+          "series": "预测开盘",
+          "entry_gap": -0.1379856467
+        },
+        {
+          "fold_label": "Structured 100x32 23",
+          "model_label": "Structured 100x32",
+          "year": 2023,
+          "series": "预测开盘",
+          "entry_gap": -0.201778993
+        },
+        {
+          "fold_label": "Structured 100x32 24",
+          "model_label": "Structured 100x32",
+          "year": 2024,
+          "series": "预测开盘",
+          "entry_gap": -0.210704878
+        },
+        {
+          "fold_label": "Structured 100x32 25",
+          "model_label": "Structured 100x32",
+          "year": 2025,
+          "series": "预测开盘",
+          "entry_gap": -0.2072994262
+        },
+        {
+          "fold_label": "Structured 100x32 26",
+          "model_label": "Structured 100x32",
+          "year": 2026,
+          "series": "预测开盘",
+          "entry_gap": -0.2068299949
+        },
+        {
+          "fold_label": "L35V2 180x35 20",
+          "model_label": "L35V2 180x35",
+          "year": 2020,
+          "series": "预测开盘",
+          "entry_gap": -0.2144873589
+        },
+        {
+          "fold_label": "L35V2 180x35 21",
+          "model_label": "L35V2 180x35",
+          "year": 2021,
+          "series": "预测开盘",
+          "entry_gap": -0.1975807995
+        },
+        {
+          "fold_label": "L35V2 180x35 22",
+          "model_label": "L35V2 180x35",
+          "year": 2022,
+          "series": "预测开盘",
+          "entry_gap": -0.2125772983
+        },
+        {
+          "fold_label": "L35V2 180x35 23",
+          "model_label": "L35V2 180x35",
+          "year": 2023,
+          "series": "预测开盘",
+          "entry_gap": -0.2028460056
+        },
+        {
+          "fold_label": "L35V2 180x35 24",
+          "model_label": "L35V2 180x35",
+          "year": 2024,
+          "series": "预测开盘",
+          "entry_gap": -0.2075944841
+        },
+        {
+          "fold_label": "L35V2 180x35 25",
+          "model_label": "L35V2 180x35",
+          "year": 2025,
+          "series": "预测开盘",
+          "entry_gap": -0.2005137354
+        },
+        {
+          "fold_label": "L35V2 180x35 26",
+          "model_label": "L35V2 180x35",
+          "year": 2026,
+          "series": "预测开盘",
+          "entry_gap": -0.1853426099
+        },
+        {
+          "fold_label": "Legal 23",
+          "model_label": "Legal",
+          "year": 2023,
+          "series": "真实开盘",
+          "entry_gap": 0.0008753297
+        },
+        {
+          "fold_label": "Legal 24",
+          "model_label": "Legal",
+          "year": 2024,
+          "series": "真实开盘",
+          "entry_gap": 0.0010304252
+        },
+        {
+          "fold_label": "Legal 25",
+          "model_label": "Legal",
+          "year": 2025,
+          "series": "真实开盘",
+          "entry_gap": 0.0010558079
+        },
+        {
+          "fold_label": "Legal 26",
+          "model_label": "Legal",
+          "year": 2026,
+          "series": "真实开盘",
+          "entry_gap": -0.0010180636
+        },
+        {
+          "fold_label": "Structured 100x32 23",
+          "model_label": "Structured 100x32",
+          "year": 2023,
+          "series": "真实开盘",
+          "entry_gap": -0.0002354551
+        },
+        {
+          "fold_label": "Structured 100x32 24",
+          "model_label": "Structured 100x32",
+          "year": 2024,
+          "series": "真实开盘",
+          "entry_gap": -0.0001533555
+        },
+        {
+          "fold_label": "Structured 100x32 25",
+          "model_label": "Structured 100x32",
+          "year": 2025,
+          "series": "真实开盘",
+          "entry_gap": -0.0002968495
+        },
+        {
+          "fold_label": "Structured 100x32 26",
+          "model_label": "Structured 100x32",
+          "year": 2026,
+          "series": "真实开盘",
+          "entry_gap": -0.0006031834
+        },
+        {
+          "fold_label": "L35V2 180x35 20",
+          "model_label": "L35V2 180x35",
+          "year": 2020,
+          "series": "真实开盘",
+          "entry_gap": -0.0004866703
+        },
+        {
+          "fold_label": "L35V2 180x35 21",
+          "model_label": "L35V2 180x35",
+          "year": 2021,
+          "series": "真实开盘",
+          "entry_gap": -0.0014192071
+        },
+        {
+          "fold_label": "L35V2 180x35 22",
+          "model_label": "L35V2 180x35",
+          "year": 2022,
+          "series": "真实开盘",
+          "entry_gap": -0.0005062499
+        },
+        {
+          "fold_label": "L35V2 180x35 23",
+          "model_label": "L35V2 180x35",
+          "year": 2023,
+          "series": "真实开盘",
+          "entry_gap": -6.26175e-05
+        },
+        {
+          "fold_label": "L35V2 180x35 24",
+          "model_label": "L35V2 180x35",
+          "year": 2024,
+          "series": "真实开盘",
+          "entry_gap": -0.0024298921
+        },
+        {
+          "fold_label": "L35V2 180x35 25",
+          "model_label": "L35V2 180x35",
+          "year": 2025,
+          "series": "真实开盘",
+          "entry_gap": 0.0003089116
+        },
+        {
+          "fold_label": "L35V2 180x35 26",
+          "model_label": "L35V2 180x35",
+          "year": 2026,
+          "series": "真实开盘",
+          "entry_gap": -0.0013961768
+        }
+      ],
+      "gap_model_mean": [
+        {
+          "model_label": "Legal",
+          "series": "预测开盘",
+          "entry_gap": -0.1372522507
+        },
+        {
+          "model_label": "Structured 100x32",
+          "series": "预测开盘",
+          "entry_gap": -0.206653323
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "series": "预测开盘",
+          "entry_gap": -0.2029917559
+        },
+        {
+          "model_label": "Legal",
+          "series": "真实开盘",
+          "entry_gap": 0.0004858748
+        },
+        {
+          "model_label": "Structured 100x32",
+          "series": "真实开盘",
+          "entry_gap": -0.0003222109
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "series": "真实开盘",
+          "entry_gap": -0.000855986
+        }
+      ],
+      "ic_sensitivity": [
+        {
+          "year": 2020,
+          "variant": "原始",
+          "rank_ic": 0.1032775367,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "variant": "原始",
+          "rank_ic": 0.0838296846,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "variant": "原始",
+          "rank_ic": 0.1104274956,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "variant": "原始",
+          "rank_ic": 0.0964711905,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "variant": "原始",
+          "rank_ic": 0.1087655502,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "variant": "原始",
+          "rank_ic": 0.1136300147,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "variant": "原始",
+          "rank_ic": 0.0946287858,
+          "year_label": "2026"
+        },
+        {
+          "year": 2020,
+          "variant": "板块限幅",
+          "rank_ic": 0.0985816409,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "variant": "板块限幅",
+          "rank_ic": 0.0603670636,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "variant": "板块限幅",
+          "rank_ic": 0.0968302158,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "variant": "板块限幅",
+          "rank_ic": 0.0946345087,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "variant": "板块限幅",
+          "rank_ic": 0.0911470197,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "variant": "板块限幅",
+          "rank_ic": 0.1097150331,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "variant": "板块限幅",
+          "rank_ic": 0.0909648718,
+          "year_label": "2026"
+        },
+        {
+          "year": 2020,
+          "variant": "去入场锚",
+          "rank_ic": -0.0353166308,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "variant": "去入场锚",
+          "rank_ic": -0.030708775,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "variant": "去入场锚",
+          "rank_ic": -0.0621218884,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "variant": "去入场锚",
+          "rank_ic": -0.0309989389,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "variant": "去入场锚",
+          "rank_ic": -0.0232584036,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "variant": "去入场锚",
+          "rank_ic": -0.1236818644,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "variant": "去入场锚",
+          "rank_ic": -0.104872402,
+          "year_label": "2026"
+        },
+        {
+          "year": 2020,
+          "variant": "真实开盘锚",
+          "rank_ic": -0.0257962368,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "variant": "真实开盘锚",
+          "rank_ic": -0.0201634459,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "variant": "真实开盘锚",
+          "rank_ic": -0.0435572424,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "variant": "真实开盘锚",
+          "rank_ic": -0.0103478498,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "variant": "真实开盘锚",
+          "rank_ic": -0.0090249691,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "variant": "真实开盘锚",
+          "rank_ic": -0.11464792,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "variant": "真实开盘锚",
+          "rank_ic": -0.08434961,
+          "year_label": "2026"
+        }
+      ],
+      "d2_decomposition": [
+        {
+          "year": 2020,
+          "series": "预测入场锚",
+          "return_d2": 0.3619397709,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "series": "预测入场锚",
+          "return_d2": 0.3232940892,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "series": "预测入场锚",
+          "return_d2": 0.3010370788,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "series": "预测入场锚",
+          "return_d2": 0.2967380901,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "series": "预测入场锚",
+          "return_d2": 0.2959735521,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "series": "预测入场锚",
+          "return_d2": 0.2677891573,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "series": "预测入场锚",
+          "return_d2": 0.2547164875,
+          "year_label": "2026"
+        },
+        {
+          "year": 2020,
+          "series": "信号收盘锚",
+          "return_d2": 0.0697555392,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "series": "信号收盘锚",
+          "return_d2": 0.0615980601,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "series": "信号收盘锚",
+          "return_d2": 0.024428126,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "series": "信号收盘锚",
+          "return_d2": 0.033615711,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "series": "信号收盘锚",
+          "return_d2": 0.0267026887,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "series": "信号收盘锚",
+          "return_d2": 0.0134126621,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "series": "信号收盘锚",
+          "return_d2": 0.0220251494,
+          "year_label": "2026"
+        },
+        {
+          "year": 2020,
+          "series": "真实入场收益",
+          "return_d2": 0.0030347854,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "series": "真实入场收益",
+          "return_d2": 0.0045811731,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "series": "真实入场收益",
+          "return_d2": 0.0022784159,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "series": "真实入场收益",
+          "return_d2": 0.006006074,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "series": "真实入场收益",
+          "return_d2": 0.0087062637,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "series": "真实入场收益",
+          "return_d2": 0.0054563153,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "series": "真实入场收益",
+          "return_d2": 0.0049173977,
+          "year_label": "2026"
+        }
+      ],
+      "exit_regret": [
+        {
+          "year": 2020,
+          "path_only_exit_regret_mean": 0.2268490679,
+          "year_label": "2020"
+        },
+        {
+          "year": 2021,
+          "path_only_exit_regret_mean": 0.2306496008,
+          "year_label": "2021"
+        },
+        {
+          "year": 2022,
+          "path_only_exit_regret_mean": 0.2534211829,
+          "year_label": "2022"
+        },
+        {
+          "year": 2023,
+          "path_only_exit_regret_mean": 0.1894510584,
+          "year_label": "2023"
+        },
+        {
+          "year": 2024,
+          "path_only_exit_regret_mean": 0.3573030958,
+          "year_label": "2024"
+        },
+        {
+          "year": 2025,
+          "path_only_exit_regret_mean": 0.2572762625,
+          "year_label": "2025"
+        },
+        {
+          "year": 2026,
+          "path_only_exit_regret_mean": 0.1757582156,
+          "year_label": "2026"
+        }
+      ],
+      "latest_table": [
+        {
+          "rank": 1,
+          "symbol": "603360.SH",
+          "name": "百傲化学",
+          "score": 0.5124720335,
+          "predicted_exit_day": 19,
+          "predicted_entry_gap": -0.2048852593,
+          "regular_board_limit": 0.1000000015,
+          "displayed_entry_relative_d2": 0.3214606643,
+          "reconstructed_signal_close_relative_d2": 0.0507128535,
+          "anchor_inflation_d2": 0.2707478108,
+          "displayed_entry_relative_d7": 0.4339922667,
+          "reconstructed_signal_close_relative_d7": 0.1401883893,
+          "anchor_inflation_d7": 0.2938038773,
+          "displayed_entry_relative_d14": 0.5283015966,
+          "reconstructed_signal_close_relative_d14": 0.2151751278,
+          "anchor_inflation_d14": 0.3131264689,
+          "displayed_entry_relative_d20": 0.5367019176,
+          "reconstructed_signal_close_relative_d20": 0.2218543468,
+          "anchor_inflation_d20": 0.3148475708,
+          "displayed_entry_relative_d60": 0.4172422886,
+          "reconstructed_signal_close_relative_d60": 0.1268702348,
+          "anchor_inflation_d60": 0.2903720537,
+          "predicted_entry_open_to_close_return": 0.2588740587,
+          "reconstructed_signal_close_relative_close": 0.0009493208
+        },
+        {
+          "rank": 2,
+          "symbol": "603121.SH",
+          "name": "华培动力",
+          "score": 0.5097880363,
+          "predicted_exit_day": 20,
+          "predicted_entry_gap": -0.2090928853,
+          "regular_board_limit": 0.1000000015,
+          "displayed_entry_relative_d2": 0.3209846318,
+          "reconstructed_signal_close_relative_d2": 0.0447761437,
+          "anchor_inflation_d2": 0.276208488,
+          "displayed_entry_relative_d7": 0.4190105498,
+          "reconstructed_signal_close_relative_d7": 0.1223055397,
+          "anchor_inflation_d7": 0.2967050101,
+          "displayed_entry_relative_d14": 0.5225973129,
+          "reconstructed_signal_close_relative_d14": 0.2042330477,
+          "anchor_inflation_d14": 0.3183642652,
+          "displayed_entry_relative_d20": 0.5349033475,
+          "reconstructed_signal_close_relative_d20": 0.213965978,
+          "anchor_inflation_d20": 0.3209373695,
+          "displayed_entry_relative_d60": 0.3980261385,
+          "reconstructed_signal_close_relative_d60": 0.1057088196,
+          "anchor_inflation_d60": 0.292317319,
+          "predicted_entry_open_to_close_return": 0.264700532,
+          "reconstructed_signal_close_relative_close": 0.0002606487
+        },
+        {
+          "rank": 3,
+          "symbol": "600791.SH",
+          "name": "京能置业",
+          "score": 0.5059628487,
+          "predicted_exit_day": 19,
+          "predicted_entry_gap": -0.2090001553,
+          "regular_board_limit": 0.1000000015,
+          "displayed_entry_relative_d2": 0.3254408836,
+          "reconstructed_signal_close_relative_d2": 0.0484235331,
+          "anchor_inflation_d2": 0.2770173506,
+          "displayed_entry_relative_d7": 0.420710355,
+          "reconstructed_signal_close_relative_d7": 0.1237816702,
+          "anchor_inflation_d7": 0.2969286849,
+          "displayed_entry_relative_d14": 0.5223823786,
+          "reconstructed_signal_close_relative_d14": 0.204204225,
+          "anchor_inflation_d14": 0.3181781536,
+          "displayed_entry_relative_d20": 0.5302503109,
+          "reconstructed_signal_close_relative_d20": 0.2104277582,
+          "anchor_inflation_d20": 0.3198225527,
+          "displayed_entry_relative_d60": 0.3927271962,
+          "reconstructed_signal_close_relative_d60": 0.1016469959,
+          "anchor_inflation_d60": 0.2910802003,
+          "predicted_entry_open_to_close_return": 0.2649172843,
+          "reconstructed_signal_close_relative_close": 0.0005493754
+        },
+        {
+          "rank": 4,
+          "symbol": "603095.SH",
+          "name": "越剑智能",
+          "score": 0.5047712326,
+          "predicted_exit_day": 19,
+          "predicted_entry_gap": -0.2058152556,
+          "regular_board_limit": 0.1000000015,
+          "displayed_entry_relative_d2": 0.3134540915,
+          "reconstructed_signal_close_relative_d2": 0.0431252019,
+          "anchor_inflation_d2": 0.2703288896,
+          "displayed_entry_relative_d7": 0.4166256189,
+          "reconstructed_signal_close_relative_d7": 0.125062455,
+          "anchor_inflation_d7": 0.2915631639,
+          "displayed_entry_relative_d14": 0.5198366642,
+          "reconstructed_signal_close_relative_d14": 0.2070310926,
+          "anchor_inflation_d14": 0.3128055716,
+          "displayed_entry_relative_d20": 0.528844595,
+          "reconstructed_signal_close_relative_d20": 0.2141850538,
+          "anchor_inflation_d20": 0.3146595411,
+          "displayed_entry_relative_d60": 0.4000445306,
+          "reconstructed_signal_close_relative_d60": 0.1118940076,
+          "anchor_inflation_d60": 0.288150523,
+          "predicted_entry_open_to_close_return": 0.2595200539,
+          "reconstructed_signal_close_relative_close": 0.000291612
+        }
+      ],
+      "fold_table": [
+        {
+          "model_label": "Legal",
+          "year": 2023,
+          "candidate_count": 703468,
+          "rank_ic_original": 0.0941967574,
+          "rank_ic_signal_close_anchor": 0.0878180203,
+          "rank_ic_board_bound_entry": 0.094611675,
+          "score_vs_negative_entry_gap_spearman": 0.9473616944,
+          "top3_predicted_entry_gap_mean": -0.1203699633,
+          "top3_actual_entry_gap_mean": 0.0008753297,
+          "top3_predicted_entry_relative_d2_mean": 0.0759082075,
+          "top3_actual_entry_relative_d2_mean": 0.0035744487,
+          "top3_entry_relative_path_mae": 0.2518959127,
+          "model_year": "Legal / 2023"
+        },
+        {
+          "model_label": "Legal",
+          "year": 2024,
+          "candidate_count": 715878,
+          "rank_ic_original": 0.1489656941,
+          "rank_ic_signal_close_anchor": 0.1336656101,
+          "rank_ic_board_bound_entry": 0.1470656903,
+          "score_vs_negative_entry_gap_spearman": 0.9615250223,
+          "top3_predicted_entry_gap_mean": -0.1507690251,
+          "top3_actual_entry_gap_mean": 0.0010304252,
+          "top3_predicted_entry_relative_d2_mean": 0.1687067231,
+          "top3_actual_entry_relative_d2_mean": 0.0072531925,
+          "top3_entry_relative_path_mae": 0.28470191,
+          "model_year": "Legal / 2024"
+        },
+        {
+          "model_label": "Legal",
+          "year": 2025,
+          "candidate_count": 724125,
+          "rank_ic_original": 0.1630916041,
+          "rank_ic_signal_close_anchor": 0.1346154997,
+          "rank_ic_board_bound_entry": 0.1632726206,
+          "score_vs_negative_entry_gap_spearman": 0.9603999793,
+          "top3_predicted_entry_gap_mean": -0.1398843676,
+          "top3_actual_entry_gap_mean": 0.0010558079,
+          "top3_predicted_entry_relative_d2_mean": 0.1295804472,
+          "top3_actual_entry_relative_d2_mean": 0.0080937272,
+          "top3_entry_relative_path_mae": 0.223057517,
+          "model_year": "Legal / 2025"
+        },
+        {
+          "model_label": "Legal",
+          "year": 2026,
+          "candidate_count": 143840,
+          "rank_ic_original": 0.1256604854,
+          "rank_ic_signal_close_anchor": 0.1055381639,
+          "rank_ic_board_bound_entry": 0.1246848387,
+          "score_vs_negative_entry_gap_spearman": 0.9765359936,
+          "top3_predicted_entry_gap_mean": -0.1379856467,
+          "top3_actual_entry_gap_mean": -0.0010180636,
+          "top3_predicted_entry_relative_d2_mean": 0.1761586979,
+          "top3_actual_entry_relative_d2_mean": 0.0028191381,
+          "top3_entry_relative_path_mae": 0.2263532598,
+          "model_year": "Legal / 2026"
+        },
+        {
+          "model_label": "Structured 100x32",
+          "year": 2023,
+          "candidate_count": 703468,
+          "rank_ic_original": 0.0621713693,
+          "rank_ic_signal_close_anchor": 0.0503296345,
+          "rank_ic_board_bound_entry": 0.0620052335,
+          "score_vs_negative_entry_gap_spearman": 0.9762470589,
+          "top3_predicted_entry_gap_mean": -0.201778993,
+          "top3_actual_entry_gap_mean": -0.0002354551,
+          "top3_predicted_entry_relative_d2_mean": 0.3068219726,
+          "top3_actual_entry_relative_d2_mean": 0.0021886646,
+          "top3_entry_relative_path_mae": 0.5741843225,
+          "model_year": "Structured 100x32 / 2023"
+        },
+        {
+          "model_label": "Structured 100x32",
+          "year": 2024,
+          "candidate_count": 715878,
+          "rank_ic_original": 0.1147353529,
+          "rank_ic_signal_close_anchor": 0.0360753589,
+          "rank_ic_board_bound_entry": 0.1090893958,
+          "score_vs_negative_entry_gap_spearman": 0.9894250483,
+          "top3_predicted_entry_gap_mean": -0.210704878,
+          "top3_actual_entry_gap_mean": -0.0001533555,
+          "top3_predicted_entry_relative_d2_mean": 0.3126571433,
+          "top3_actual_entry_relative_d2_mean": 0.0088479749,
+          "top3_entry_relative_path_mae": 0.4689146717,
+          "model_year": "Structured 100x32 / 2024"
+        },
+        {
+          "model_label": "Structured 100x32",
+          "year": 2025,
+          "candidate_count": 724125,
+          "rank_ic_original": 0.1289183441,
+          "rank_ic_signal_close_anchor": 0.0929742548,
+          "rank_ic_board_bound_entry": 0.1238391548,
+          "score_vs_negative_entry_gap_spearman": 0.9886215076,
+          "top3_predicted_entry_gap_mean": -0.2072994262,
+          "top3_actual_entry_gap_mean": -0.0002968495,
+          "top3_predicted_entry_relative_d2_mean": 0.319123607,
+          "top3_actual_entry_relative_d2_mean": 0.0070857078,
+          "top3_entry_relative_path_mae": 0.5375929659,
+          "model_year": "Structured 100x32 / 2025"
+        },
+        {
+          "model_label": "Structured 100x32",
+          "year": 2026,
+          "candidate_count": 143840,
+          "rank_ic_original": 0.1241678013,
+          "rank_ic_signal_close_anchor": 0.0650970407,
+          "rank_ic_board_bound_entry": 0.1204702705,
+          "score_vs_negative_entry_gap_spearman": 0.9895110522,
+          "top3_predicted_entry_gap_mean": -0.2068299949,
+          "top3_actual_entry_gap_mean": -0.0006031834,
+          "top3_predicted_entry_relative_d2_mean": 0.3151847348,
+          "top3_actual_entry_relative_d2_mean": 0.0007484728,
+          "top3_entry_relative_path_mae": 0.5966034792,
+          "model_year": "Structured 100x32 / 2026"
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "year": 2020,
+          "candidate_count": 623247,
+          "rank_ic_original": 0.1032775367,
+          "rank_ic_signal_close_anchor": -0.0353166308,
+          "rank_ic_board_bound_entry": 0.0985816409,
+          "score_vs_negative_entry_gap_spearman": 0.9978596384,
+          "top3_predicted_entry_gap_mean": -0.2144873589,
+          "top3_actual_entry_gap_mean": -0.0004866703,
+          "top3_predicted_entry_relative_d2_mean": 0.3619397709,
+          "top3_actual_entry_relative_d2_mean": 0.0030347854,
+          "top3_entry_relative_path_mae": 0.6880071513,
+          "model_year": "L35V2 180x35 / 2020"
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "year": 2021,
+          "candidate_count": 659067,
+          "rank_ic_original": 0.0838296846,
+          "rank_ic_signal_close_anchor": -0.030708775,
+          "rank_ic_board_bound_entry": 0.0603670636,
+          "score_vs_negative_entry_gap_spearman": 0.9949066306,
+          "top3_predicted_entry_gap_mean": -0.1975807995,
+          "top3_actual_entry_gap_mean": -0.0014192071,
+          "top3_predicted_entry_relative_d2_mean": 0.3232940892,
+          "top3_actual_entry_relative_d2_mean": 0.0045811731,
+          "top3_entry_relative_path_mae": 0.3477859638,
+          "model_year": "L35V2 180x35 / 2021"
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "year": 2022,
+          "candidate_count": 684971,
+          "rank_ic_original": 0.1104274956,
+          "rank_ic_signal_close_anchor": -0.0621218884,
+          "rank_ic_board_bound_entry": 0.0968302158,
+          "score_vs_negative_entry_gap_spearman": 0.9966728626,
+          "top3_predicted_entry_gap_mean": -0.2125772983,
+          "top3_actual_entry_gap_mean": -0.0005062499,
+          "top3_predicted_entry_relative_d2_mean": 0.3010370788,
+          "top3_actual_entry_relative_d2_mean": 0.0022784159,
+          "top3_entry_relative_path_mae": 0.4022726573,
+          "model_year": "L35V2 180x35 / 2022"
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "year": 2023,
+          "candidate_count": 703468,
+          "rank_ic_original": 0.0964711905,
+          "rank_ic_signal_close_anchor": -0.0309989389,
+          "rank_ic_board_bound_entry": 0.0946345087,
+          "score_vs_negative_entry_gap_spearman": 0.997679058,
+          "top3_predicted_entry_gap_mean": -0.2028460056,
+          "top3_actual_entry_gap_mean": -6.26175e-05,
+          "top3_predicted_entry_relative_d2_mean": 0.2967380901,
+          "top3_actual_entry_relative_d2_mean": 0.006006074,
+          "top3_entry_relative_path_mae": 0.3591315046,
+          "model_year": "L35V2 180x35 / 2023"
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "year": 2024,
+          "candidate_count": 715878,
+          "rank_ic_original": 0.1087655502,
+          "rank_ic_signal_close_anchor": -0.0232584036,
+          "rank_ic_board_bound_entry": 0.0911470197,
+          "score_vs_negative_entry_gap_spearman": 0.991255713,
+          "top3_predicted_entry_gap_mean": -0.2075944841,
+          "top3_actual_entry_gap_mean": -0.0024298921,
+          "top3_predicted_entry_relative_d2_mean": 0.2959735521,
+          "top3_actual_entry_relative_d2_mean": 0.0087062637,
+          "top3_entry_relative_path_mae": 0.4370787258,
+          "model_year": "L35V2 180x35 / 2024"
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "year": 2025,
+          "candidate_count": 724125,
+          "rank_ic_original": 0.1136300147,
+          "rank_ic_signal_close_anchor": -0.1236818644,
+          "rank_ic_board_bound_entry": 0.1097150331,
+          "score_vs_negative_entry_gap_spearman": 0.9855255465,
+          "top3_predicted_entry_gap_mean": -0.2005137354,
+          "top3_actual_entry_gap_mean": 0.0003089116,
+          "top3_predicted_entry_relative_d2_mean": 0.2677891573,
+          "top3_actual_entry_relative_d2_mean": 0.0054563153,
+          "top3_entry_relative_path_mae": 0.2878590875,
+          "model_year": "L35V2 180x35 / 2025"
+        },
+        {
+          "model_label": "L35V2 180x35",
+          "year": 2026,
+          "candidate_count": 143300,
+          "rank_ic_original": 0.0946287858,
+          "rank_ic_signal_close_anchor": -0.104872402,
+          "rank_ic_board_bound_entry": 0.0909648718,
+          "score_vs_negative_entry_gap_spearman": 0.9892567422,
+          "top3_predicted_entry_gap_mean": -0.1853426099,
+          "top3_actual_entry_gap_mean": -0.0013961768,
+          "top3_predicted_entry_relative_d2_mean": 0.2547164875,
+          "top3_actual_entry_relative_d2_mean": 0.0049173977,
+          "top3_entry_relative_path_mae": 0.2666113356,
+          "model_year": "L35V2 180x35 / 2026"
+        }
+      ],
+      "exit_table": [
+        {
+          "model_id": "structured_joint_turnover_180x35_v2",
+          "year": 2020,
+          "cohort": "top3",
+          "n": 729,
+          "predicted_exit_day_mean": 15.1111111111,
+          "path_only_oracle_exit_day_mean": 23.5747599451,
+          "exit_day_mae": 17.9807956104,
+          "exit_day_exact_rate": 0.0164609053,
+          "utility_curve_spearman_mean": 0.0099988118,
+          "predicted_return_at_plan_mean": 0.7845600672,
+          "realized_return_at_plan_mean": -0.0052909737,
+          "realized_plan_win_rate": 0.4362139918,
+          "path_only_exit_regret_mean": 0.2268490679,
+          "path_only_oracle_return_mean": 0.203704496
+        },
+        {
+          "model_id": "structured_joint_turnover_180x35_v2",
+          "year": 2021,
+          "cohort": "top3",
+          "n": 729,
+          "predicted_exit_day_mean": 16.9314128944,
+          "path_only_oracle_exit_day_mean": 25.4197530864,
+          "exit_day_mae": 22.4170096022,
+          "exit_day_exact_rate": 0.0274348422,
+          "utility_curve_spearman_mean": 0.0654895019,
+          "predicted_return_at_plan_mean": 0.4399713025,
+          "realized_return_at_plan_mean": 0.030029546,
+          "realized_plan_win_rate": 0.5075445816,
+          "path_only_exit_regret_mean": 0.2306496008,
+          "path_only_oracle_return_mean": 0.2573096543
+        },
+        {
+          "model_id": "structured_joint_turnover_180x35_v2",
+          "year": 2022,
+          "cohort": "top3",
+          "n": 726,
+          "predicted_exit_day_mean": 34.650137741,
+          "path_only_oracle_exit_day_mean": 27.4903581267,
+          "exit_day_mae": 21.8181818182,
+          "exit_day_exact_rate": 0.0096418733,
+          "utility_curve_spearman_mean": -0.0641484448,
+          "predicted_return_at_plan_mean": 0.4679836475,
+          "realized_return_at_plan_mean": 0.052467925,
+          "realized_plan_win_rate": 0.5316804408,
+          "path_only_exit_regret_mean": 0.2534211829,
+          "path_only_oracle_return_mean": 0.2711200214
+        },
+        {
+          "model_id": "structured_joint_turnover_180x35_v2",
+          "year": 2023,
+          "cohort": "top3",
+          "n": 726,
+          "predicted_exit_day_mean": 19.3168044077,
+          "path_only_oracle_exit_day_mean": 26.0123966942,
+          "exit_day_mae": 17.0399449036,
+          "exit_day_exact_rate": 0.0151515152,
+          "utility_curve_spearman_mean": 0.105178532,
+          "predicted_return_at_plan_mean": 0.4136999244,
+          "realized_return_at_plan_mean": 0.0542976932,
+          "realized_plan_win_rate": 0.6046831956,
+          "path_only_exit_regret_mean": 0.1894510584,
+          "path_only_oracle_return_mean": 0.2353355993
+        },
+        {
+          "model_id": "structured_joint_turnover_180x35_v2",
+          "year": 2024,
+          "cohort": "top3",
+          "n": 726,
+          "predicted_exit_day_mean": 20.4614325069,
+          "path_only_oracle_exit_day_mean": 28.1845730028,
+          "exit_day_mae": 18.7424242424,
+          "exit_day_exact_rate": 0.0192837466,
+          "utility_curve_spearman_mean": -0.0135164999,
+          "predicted_return_at_plan_mean": 0.5260123337,
+          "realized_return_at_plan_mean": 0.0590159643,
+          "realized_plan_win_rate": 0.5950413223,
+          "path_only_exit_regret_mean": 0.3573030958,
+          "path_only_oracle_return_mean": 0.3880860659
+        },
+        {
+          "model_id": "structured_joint_turnover_180x35_v2",
+          "year": 2025,
+          "cohort": "top3",
+          "n": 729,
+          "predicted_exit_day_mean": 13.3635116598,
+          "path_only_oracle_exit_day_mean": 31.6104252401,
+          "exit_day_mae": 22.8038408779,
+          "exit_day_exact_rate": 0.0068587106,
+          "utility_curve_spearman_mean": -0.0847442394,
+          "predicted_return_at_plan_mean": 0.3638291767,
+          "realized_return_at_plan_mean": 0.043041527,
+          "realized_plan_win_rate": 0.6063100137,
+          "path_only_exit_regret_mean": 0.2572762625,
+          "path_only_oracle_return_mean": 0.3066898908
+        },
+        {
+          "model_id": "structured_joint_turnover_180x35_v2",
+          "year": 2026,
+          "cohort": "top3",
+          "n": 144,
+          "predicted_exit_day_mean": 10.6666666667,
+          "path_only_oracle_exit_day_mean": 22.8958333333,
+          "exit_day_mae": 17.4513888889,
+          "exit_day_exact_rate": 0.0208333333,
+          "utility_curve_spearman_mean": 0.0507902299,
+          "predicted_return_at_plan_mean": 0.3099746799,
+          "realized_return_at_plan_mean": -4.44867e-05,
+          "realized_plan_win_rate": 0.4722222222,
+          "path_only_exit_regret_mean": 0.1757582156,
+          "path_only_oracle_return_mean": 0.1773563716
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "headline_source",
+      "label": "审计摘要指标",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_headline.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_headline.csv')",
+        "description": "从 15 个模型折和 7 月 21 日重构结果生成报告摘要指标。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_headline.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/latest_20260721_reconstructed.csv"
+        ],
+        "filters": [
+          "registered checkpoint scope",
+          "L35V2 folds 2020-2026",
+          "latest Top3"
+        ],
+        "metric_definitions": [
+          "All fold-level means are equally weighted across registered folds."
+        ]
+      }
+    },
+    {
+      "id": "model_fold_source",
+      "label": "15 个注册 checkpoint 的路径复算审计",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv')",
+        "description": "逐个恢复注册 checkpoint，在原候选 fold 上复算路径、四种评分锚点与 Top1/2/3/10 校准指标。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/cohort_summary.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/horizon_calibration.csv",
+          "daily_research/models/registry.json"
+        ],
+        "filters": [
+          "registered checkpoints only",
+          "Legal and Structured 100x32: 2023-2026",
+          "L35V2 180x35: 2020-2026",
+          "candidate membership unchanged"
+        ],
+        "metric_definitions": [
+          "Original Rank IC is the mean daily Spearman correlation between registered path_value_v2 score and realized path_value_v2.",
+          "Signal-close anchor removes only the predicted next-open denominator; actual-entry oracle uses realized next open and is attribution-only.",
+          "Regular board-limit flags use 10% main-board, 20% ChiNext/STAR, and 30% Beijing-board limits; IPO no-limit windows are not classified."
+        ]
+      }
+    },
+    {
+      "id": "latest_signal_source",
+      "label": "2026 年 7 月 21 日 L35V2 Top4 路径重构",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_latest_table.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_latest_table.csv')",
+        "description": "用已保存的预测入场缺口反解信号收盘锚定路径，验证 D2 展示值的代数来源。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_latest_table.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/latest_20260721_reconstructed.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/latest_20260721_day1_geometry.csv",
+          "daily_research/research_records/seq100/latest_signal_20260721/top20_primary.csv",
+          "daily_research/research_records/seq100/latest_signal_20260721/top4_predicted_path.csv"
+        ],
+        "filters": [
+          "variant=qdp_strict_carry_forward",
+          "rank <= 4",
+          "signal date=2026-07-21"
+        ],
+        "metric_definitions": [
+          "Displayed return = (1 + signal-close-relative future level) / (1 + predicted next-open gap) - 1.",
+          "No realized July 22 onward path was available in the immutable audit snapshot."
+        ]
+      }
+    },
+    {
+      "id": "exit_quality_source",
+      "label": "Top3 路径形状与退出质量",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_exit_top3.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_exit_top3.csv')",
+        "description": "对每个历史 Top3 的预测与真实路径构造相同 V2 utility curve，比较模型计划退出和 path-only oracle。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_exit_top3.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/exit_quality.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/top3_exit_quality.parquet",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/top3_paths.parquet"
+        ],
+        "filters": [
+          "daily Top3 under the original registered score",
+          "D2-D60",
+          "path-only; no execution deferral"
+        ],
+        "metric_definitions": [
+          "Path-only exit regret = realized-path oracle V2 utility minus realized V2 utility at the model-planned day.",
+          "Utility-curve Spearman compares the 59 predicted and realized D2-D60 utility values for each selected stock."
+        ]
+      }
+    },
+    {
+      "id": "code_contract_source",
+      "label": "当前路径变换与损失实现",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_code_contract.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_code_contract.csv')",
+        "description": "静态审查预测几何、入场锚点换算、V2 score 和训练损失组合。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_code_contract.csv",
+          "daily_research/path_policy/qdp_v2_sequence_path_training.py:1636",
+          "daily_research/path_policy/qdp_v2_sequence_path_training.py:3320",
+          "daily_research/path_policy/qdp_v2_sequence_path_training.py:3597",
+          "daily_research/path_policy/qdp_v2_sequence_path_training.py:2228"
+        ],
+        "filters": [
+          "current repository implementation",
+          "no source modification"
+        ],
+        "metric_definitions": [
+          "Structured gap and body are separately bounded at 0.25 in log space, but the bound is not the symbol/date regulatory price limit.",
+          "For today_close labels, every future OHLC level is divided by the predicted D1 open before V2 summary, value, and rank losses are computed."
+        ]
+      }
+    },
+    {
+      "id": "gap_chart_source",
+      "label": "Top3 次日开盘校准图数据",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_model_mean.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_model_mean.csv')",
+        "description": "先计算每个模型折的 Top3 预测与真实次日开盘均值，再按模型族对 fold 等权平均。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_model_mean.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_gap_comparison.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+        ],
+        "filters": [
+          "cohort=Top3",
+          "fold-equal mean by model family"
+        ],
+        "metric_definitions": [
+          "Entry gap is relative to the signal-date close.",
+          "Each registered fold receives equal weight within its model family."
+        ]
+      }
+    },
+    {
+      "id": "ic_chart_source",
+      "label": "L35V2 Rank IC 锚点敏感性图数据",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_ic_sensitivity.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_ic_sensitivity.csv')",
+        "description": "将 L35V2 四种评分锚点的逐折 Rank IC 转成长表。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_ic_sensitivity.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+        ],
+        "filters": [
+          "model=L35V2",
+          "folds=2020-2026"
+        ],
+        "metric_definitions": [
+          "Actual-entry oracle is attribution-only and is not deployable."
+        ]
+      }
+    },
+    {
+      "id": "d2_chart_source",
+      "label": "L35V2 Top3 D2 锚点分解图数据",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_d2_decomposition.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_d2_decomposition.csv')",
+        "description": "将 L35V2 Top3 D2 的三种口径转成长表。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_d2_decomposition.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+        ],
+        "filters": [
+          "model=L35V2",
+          "cohort=Top3",
+          "horizon=D2"
+        ],
+        "metric_definitions": [
+          "Displayed D2 uses predicted entry open; raw D2 uses signal close; actual D2 uses realized entry open."
+        ]
+      }
+    },
+    {
+      "id": "fold_table_source",
+      "label": "15 个模型折报告表数据",
+      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_fold_table.csv",
+      "query": {
+        "engine": "python/pandas",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_fold_table.csv')",
+        "description": "从模型折审计摘要选择报告列并生成人类可读模型标签。",
+        "executed_at": "2026-07-22T16:34:32+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report_fold_table.csv",
+          "daily_research/research_records/seq100/path_prediction_audit_2020_2026/model_fold_summary.csv"
+        ],
+        "filters": [
+          "all 15 registered checkpoint folds"
+        ],
+        "metric_definitions": [
+          "Values are recomputed on each checkpoint's registered candidate fold."
+        ]
+      }
+    }
+  ],
+  "package_info": {
+    "builder_version": "seq100_path_prediction_audit_report_v1",
+    "audience": "technical",
+    "delivery_mode": "portable_html",
+    "checkpoint_count": 15
+  }
+}

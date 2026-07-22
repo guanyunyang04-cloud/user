@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "stages": {
+    "validation": "passed",
+    "static_charts": "passed",
+    "verification": "passed"
+  },
+  "verification": {
+    "ok": true,
+    "counts": {
+      "blocks": 23,
+      "charts": 4,
+      "html": 0,
+      "metrics": 4,
+      "tables": 6
+    },
+    "html": "H:\\quant_project\\daily_research\\output\\path_policy\\audits\\path_prediction_audit_2020_2026_v1\\staging_record\\report.html.tmp-29804-55020b05-df69-4699-9a0b-3c3752fda40c.html",
+    "sourceDialog": "passed",
+    "sourceInteraction": "keyboard_menu_semantic_click",
+    "timings": {
+      "browserRunMs": 3283.8,
+      "readerReadyMs": 322.8,
+      "contentChecksMs": 31.9,
+      "sourceDialogMs": 32,
+      "responsiveChecksMs": 31.9,
+      "totalMs": 3312.9
+    },
+    "viewports": [
+      1440,
+      390
+    ]
+  },
+  "structural": {
+    "counts": {
+      "blocks": 23,
+      "charts": 4,
+      "html": 0,
+      "metrics": 4,
+      "tables": 6
+    },
+    "html": "H:\\quant_project\\daily_research\\output\\path_policy\\audits\\path_prediction_audit_2020_2026_v1\\staging_record\\report.html.tmp-29804-55020b05-df69-4699-9a0b-3c3752fda40c.html",
+    "ok": true,
+    "title": "Seq100 路径预测与入场锚点审计"
+  },
+  "compatibilityFix": "portable top bar width 100vw -> 100% to account for classic scrollbar width"
+}

@@ -1,0 +1,5 @@
+﻿component,path,line,finding
+Structured OHLC geometry,daily_research/path_policy/qdp_v2_sequence_path_training.py,1636,"gap and body are independently bounded at 0.25 in log space, not at the symbol/date regulatory limit"
+Entry-relative conversion,daily_research/path_policy/qdp_v2_sequence_path_training.py,3320,all future OHLC levels are divided by the predicted D1 open when price_anchor=today_close
+V2 path summary,daily_research/path_policy/qdp_v2_sequence_path_training.py,3597,the converted path feeds the V2 score and planned exit
+Joint training loss,daily_research/path_policy/qdp_v2_sequence_path_training.py,2228,"raw path supervision competes with summary, value, and rank objectives that benefit from the predicted entry denominator"

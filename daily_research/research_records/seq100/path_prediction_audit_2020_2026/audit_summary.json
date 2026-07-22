@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "audit_id": "seq100_path_prediction_audit_2020_2026_v1",
+  "status": "complete",
+  "scope": {
+    "checkpoint_count": 15,
+    "model_families": [
+      "legal_flat_baseline",
+      "structured_joint_turnover_100x32",
+      "structured_joint_turnover_180x35_v2"
+    ],
+    "years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025,
+      2026
+    ],
+    "candidate_predictions": 8828678,
+    "top3_predictions": 9159
+  },
+  "headline": {
+    "mean_top3_entry_gap_mae_all_folds": 0.18610256512959797,
+    "mean_top3_gap_outside_regular_board_limit_rate_all_folds": 0.9894371606071942,
+    "mean_rank_ic_original_all_folds": 0.11152917777932156,
+    "mean_rank_ic_signal_close_anchor_all_folds": 0.019676978652613815,
+    "l35v2_mean_rank_ic_original": 0.10157575115632322,
+    "l35v2_mean_rank_ic_signal_close_anchor": -0.058708414711251745,
+    "latest_top3_mean_predicted_entry_gap": -0.20765943328539527,
+    "latest_top3_mean_displayed_entry_d2": 0.3226287265618642,
+    "latest_top3_mean_signal_close_d2": 0.047970843424335476
+  },
+  "interpretation_boundary": {
+    "verified": [
+      "The displayed trade-return path is algebraically anchored to the model-predicted next open.",
+      "The audit measures calibration, ranking sensitivity, exit distributions, and physical plausibility across registered folds."
+    ],
+    "not_causally_proven": [
+      "The loss-function shortcut is a plausible mechanism supported by sensitivity tests, not a randomized causal proof.",
+      "The board-limit diagnostic uses regular board limits and does not classify IPO no-limit windows."
+    ]
+  }
+}
