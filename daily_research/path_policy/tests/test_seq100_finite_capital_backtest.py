@@ -243,6 +243,44 @@ def test_single_daily_selection_is_reported_as_top1() -> None:
     assert "no_top2" in metric["portfolio_contract"]
 
 
+def test_portfolio_accepts_varying_positive_score_selection_with_cash_days() -> None:
+    book = ForecastBook("v4", top_k=3)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0, 1, 2]),
+        score=np.asarray([0.3, 0.2, 0.0]),
+        planned_day=np.asarray([2, 3, 2]),
+        selection_mask=np.asarray([True, True, False]),
+    )
+    book.add_day(
+        date_idx=1,
+        symbol_idx=np.asarray([0, 1, 2]),
+        score=np.asarray([0.0, 0.0, 0.0]),
+        planned_day=np.asarray([2, 2, 2]),
+        selection_mask=np.asarray([False, False, False]),
+    )
+
+    metric, _equity, _trades, _annual = simulate_portfolio(
+        market=_market(),
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=3,
+        cost_scenario="double_slippage",
+        first_signal_date_idx=0,
+        last_signal_date_idx=1,
+    )
+
+    assert metric["configured_top_k"] == 3
+    assert metric["daily_selection_count"] == 3
+    assert metric["selected_name_count_min"] == 0
+    assert metric["selected_name_count_max"] == 2
+    assert metric["selected_name_count_mean"] == 1.0
+    assert metric["cash_filtered_signal_days"] == 2
+    assert metric["buy_count"] == 2
+    assert book.lookup(1, 0) == (0.0, 2)
+
+
 def test_forecast_book_retains_the_requested_top_k() -> None:
     book = ForecastBook("structured_joint_turnover", top_k=2)
     book.add_day(

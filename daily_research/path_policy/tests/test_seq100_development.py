@@ -81,9 +81,46 @@ def test_compact_status_and_verify_use_only_stable_surfaces(tmp_path: Path, monk
     assert result["research_record_count"] == 1
 
 
-def test_only_batch1024_remains_paused_after_sixfold_completion() -> None:
-    assert set(development.ACTIVE_STUDIES) == {"l35v2-batch1024"}
+def test_active_studies_include_paused_batch1024_and_v4() -> None:
+    assert set(development.ACTIVE_STUDIES) == {
+        "l35v2-batch1024",
+        "signal-close-capital-speed-v4",
+    }
     batch = json.loads(development.ACTIVE_STUDIES["l35v2-batch1024"].read_text(encoding="utf-8"))
     assert batch["status"] == "paused_ready"
     assert "l35v2_sixfold_2020_2025" in batch["sixfold_evidence"]
     assert "gradient_accumulation_as_fake_1024" in batch["forbidden_shortcuts"]
+    v4 = json.loads(
+        development.ACTIVE_STUDIES["signal-close-capital-speed-v4"].read_text(
+            encoding="utf-8"
+        )
+    )
+    assert v4["contract"]["path_value"]["anchor"] == "signal_day_close"
+    assert v4["contract"]["selection"]["cash_filter"] == "score_strictly_positive"
+    assert v4["contract_sha256"] == development._canonical_json_sha256(v4["contract"])
+
+
+def test_verify_rejects_active_study_contract_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    registry = _registry(tmp_path)
+    qdp = tmp_path / "qdp.json"
+    pack = tmp_path / "pack.json"
+    index = tmp_path / "index.json"
+    study = tmp_path / "study.json"
+    _write_json(qdp, {"active_as_of_date": "2026-07-21"})
+    _write_json(pack, {"artifact_type": "pack"})
+    _write_json(index, {"records": []})
+    _write_json(study, {"contract": {"a": 1}, "contract_sha256": "wrong"})
+    monkeypatch.setattr(model_registry, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(development, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(development, "DEFAULT_REGISTRY", registry)
+    monkeypatch.setattr(development, "QDP_ACTIVE", qdp)
+    monkeypatch.setattr(development, "BASE_PACK", pack)
+    monkeypatch.setattr(development, "RECORD_INDEX", index)
+    monkeypatch.setattr(development, "ACTIVE_STUDIES", {"study": study})
+
+    result = development.verify()
+
+    assert result["status"] == "blocked"
+    assert result["errors"] == ["active_study_contract_hash_mismatch:study"]

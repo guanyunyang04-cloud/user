@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Sequence
@@ -21,11 +22,23 @@ QDP_ACTIVE = WORKSPACE_ROOT / "quant_data_platform/data/qdp_v2/active/active.jso
 BASE_PACK = WORKSPACE_ROOT / "daily_research/data/research_store/seq100_current/pack/manifest.json"
 ACTIVE_STUDIES = {
     "l35v2-batch1024": STUDY_ROOT / "l35v2_batch1024.json",
+    "signal-close-capital-speed-v4": STUDY_ROOT / "signal_close_capital_speed_v4.json",
 }
 
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _canonical_json_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def status() -> dict[str, Any]:
@@ -71,6 +84,13 @@ def verify() -> dict[str, Any]:
     for name, path in ACTIVE_STUDIES.items():
         if not path.is_file():
             errors.append(f"missing_active_study:{name}:{path}")
+            continue
+        study = _read_json(path)
+        if isinstance(study.get("contract"), dict):
+            declared = str(study.get("contract_sha256", "") or "")
+            computed = _canonical_json_sha256(study["contract"])
+            if not declared or declared != computed:
+                errors.append(f"active_study_contract_hash_mismatch:{name}")
     return {
         "status": "ok" if not errors else "blocked",
         "model_registry": model_check,

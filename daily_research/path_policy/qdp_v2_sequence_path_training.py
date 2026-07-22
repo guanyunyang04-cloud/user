@@ -71,9 +71,11 @@ PATH_VALUE_V2_TEMPERATURE = 0.03
 PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY = 2
 PATH_VALUE_SEMANTIC_V2 = "path_value_v2"
 PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3 = "capital_speed_v3"
+PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4 = "signal_close_capital_speed_v4"
 PATH_VALUE_SEMANTICS = (
     PATH_VALUE_SEMANTIC_V2,
     PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+    PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
 )
 PATH_VALUE_DEFAULT_SEMANTIC = PATH_VALUE_SEMANTIC_V2
 # Kept as the deterministic fallback for synthetic/legacy callers that do not
@@ -81,6 +83,19 @@ PATH_VALUE_DEFAULT_SEMANTIC = PATH_VALUE_SEMANTIC_V2
 # date-specific proportional multiplier through ``path_value_growth_multiplier``.
 PATH_VALUE_V3_TRANSACTION_COST = 0.002
 PATH_VALUE_V3_EPSILON = 1.0e-6
+PATH_VALUE_V4_TEMPERATURE_FLOOR = 1.0e-5
+PATH_VALUE_V4_TEMPERATURE_IQR_FRACTION = 0.10
+PATH_VALUE_V4_STUDENT_T_DF = 5.0
+PATH_VALUE_V4_STUDENT_T_RANK = 4
+PATH_VALUE_V4_CUMULATIVE_HORIZONS = (1, 2, 3, 5, 7, 10, 14, 20, 30, 40, 60)
+PATH_VALUE_V4_PROBABILITY_CALIBRATION_MAX_ROWS = 16_384
+V4_GRADIENT_CONFLICT_NONE = "none"
+V4_GRADIENT_CONFLICT_PCGRAD = "pcgrad_shared_encoder"
+V4_GRADIENT_CONFLICT_PROFILES = (
+    V4_GRADIENT_CONFLICT_NONE,
+    V4_GRADIENT_CONFLICT_PCGRAD,
+)
+V4_AUXILIARY_GRADIENT_MAX_FRACTION = 0.20
 PATH_VALUE_GRADIENT_PROFILE_SMOOTH = "smooth_current"
 PATH_VALUE_GRADIENT_PROFILE_HARD_ST = "hard_st"
 PATH_VALUE_GRADIENT_PROFILES = (
@@ -162,7 +177,15 @@ UNIFIED_VALUE_TEMPERATURE = 0.03
 RICHER_MODEL_TYPES = {"gru_richer_path_value", "gru_richer_path_value_symbol"}
 OHLCVA_MODEL_TYPES = {"gru_ohlcva_path_value"}
 OHLCVA_AUX_MODEL_TYPES = {"gru_ohlcva_aux_path_value"}
-STRUCTURED_TURNOVER_MODEL_TYPES = {"gru_structured_joint_turnover"}
+CLOSE_EXCURSION_MODEL_TYPES = {
+    "gru_structured_close_excursion",
+    "gru_structured_close_excursion_student_t",
+}
+PROBABILISTIC_CLOSE_MODEL_TYPES = {"gru_structured_close_excursion_student_t"}
+STRUCTURED_TURNOVER_MODEL_TYPES = {
+    "gru_structured_joint_turnover",
+    *CLOSE_EXCURSION_MODEL_TYPES,
+}
 DIRECT_VALUE_MODEL_TYPES = {"gru_direct_value"}
 PATH_VALUE_MODEL_TYPES = {
     "gru_path_value",
@@ -783,8 +806,15 @@ class SequencePathPackDataset(Dataset):
                 np.arange(date_count, dtype=np.int64),
                 self.forward_days,
             )
+            self._v4_date_growth_multiplier = _v3_growth_multiplier_for_dates(
+                self.manifest,
+                np.arange(date_count, dtype=np.int64),
+                self.forward_days,
+                slippage_multiplier=2.0,
+            )
         else:
             self._v3_date_growth_multiplier = None
+            self._v4_date_growth_multiplier = None
         self._path_value_targets_cache: dict[str, np.ndarray] = {}
 
     def _path_value_growth_multiplier(self, date_idx: np.ndarray) -> np.ndarray:
@@ -798,6 +828,20 @@ class SequencePathPackDataset(Dataset):
         return np.full(
             (int(indices.size), self.forward_days),
             1.0 - float(PATH_VALUE_V3_TRANSACTION_COST),
+            dtype=np.float32,
+        )
+
+    def _path_value_v4_growth_multiplier(self, date_idx: np.ndarray) -> np.ndarray:
+        """Manifest-bound proportional double-slippage path for V4."""
+
+        indices = np.asarray(date_idx, dtype=np.int64).reshape(-1)
+        if self._v4_date_growth_multiplier is not None:
+            if bool((indices < 0).any()) or bool((indices >= len(self._v4_date_growth_multiplier)).any()):
+                raise ValueError("path-value date index is outside manifest date_values")
+            return np.asarray(self._v4_date_growth_multiplier[indices], dtype=np.float32)
+        return np.full(
+            (int(indices.size), self.forward_days),
+            1.0 - 2.0 * float(PATH_VALUE_V3_TRANSACTION_COST),
             dtype=np.float32,
         )
 
@@ -851,22 +895,37 @@ class SequencePathPackDataset(Dataset):
                     dtype=np.float32,
                 ).copy()
             )
-            tradable_path = self._future_mask_batch(
-                self.tradable_panel,
-                date_idx,
-                self.symbol_idx_values[start:stop].astype(np.int64, copy=False),
+            tradable_path = (
+                None
+                if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+                else self._future_mask_batch(
+                    self.tradable_panel,
+                    date_idx,
+                    self.symbol_idx_values[start:stop].astype(np.int64, copy=False),
+                )
             )
-            target[start:stop] = _derive_path_summary_numpy(
-                path,
-                price_anchor=self.price_anchor,
-                tradable_path=tradable_path,
-                path_value_semantic=semantic,
-                path_value_growth_multiplier=(
-                    self._path_value_growth_multiplier(date_idx)
-                    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
-                    else None
-                ),
-            )[:, -1]
+            if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+                curve = _signal_close_capital_speed_curve_numpy(
+                    path,
+                    self._path_value_v4_growth_multiplier(date_idx),
+                )
+                finite = np.isfinite(curve)
+                best = np.max(np.where(finite, curve, -np.inf), axis=1)
+                target[start:stop] = np.where(
+                    finite.any(axis=1) & (best > 0.0), best, 0.0
+                ).astype(np.float32, copy=False)
+            else:
+                target[start:stop] = _derive_path_summary_numpy(
+                    path,
+                    price_anchor=self.price_anchor,
+                    tradable_path=tradable_path,
+                    path_value_semantic=semantic,
+                    path_value_growth_multiplier=(
+                        self._path_value_growth_multiplier(date_idx)
+                        if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+                        else None
+                    ),
+                )[:, -1]
             del path, tradable_path
             batch_equivalent = int(math.ceil(stop / 512.0))
             last_trim_chunk, _trim_event = _maybe_trim_training_working_set(
@@ -1018,6 +1077,9 @@ class SequencePathPackDataset(Dataset):
         path_value_growth_multiplier = self._path_value_growth_multiplier(
             np.asarray([date_idx], dtype=np.int64)
         )[0]
+        path_value_v4_growth_multiplier = self._path_value_v4_growth_multiplier(
+            np.asarray([date_idx], dtype=np.int64)
+        )[0]
         return {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
@@ -1032,6 +1094,7 @@ class SequencePathPackDataset(Dataset):
             "trade_date": str(row["trade_date"]),
             "symbol": str(row["symbol"]),
             "path_value_growth_multiplier": torch.from_numpy(path_value_growth_multiplier),
+            "path_value_v4_growth_multiplier": torch.from_numpy(path_value_v4_growth_multiplier),
         }
 
     def get_batch(
@@ -1159,6 +1222,7 @@ class SequencePathPackDataset(Dataset):
             if bool((~label_valid).any()):
                 y_summary[~label_valid, :] = np.nan
         path_value_growth_multiplier = self._path_value_growth_multiplier(date_idx)
+        path_value_v4_growth_multiplier = self._path_value_v4_growth_multiplier(date_idx)
         batch = {
             "x": torch.from_numpy(x),
             "y_path": torch.from_numpy(y_path),
@@ -1197,6 +1261,7 @@ class SequencePathPackDataset(Dataset):
         batch["price_label_valid"] = torch.from_numpy(price_label_valid)
         batch["va_aux_valid"] = torch.from_numpy(va_aux_valid)
         batch["path_value_growth_multiplier"] = torch.from_numpy(path_value_growth_multiplier)
+        batch["path_value_v4_growth_multiplier"] = torch.from_numpy(path_value_v4_growth_multiplier)
         return batch
 
 
@@ -1423,6 +1488,8 @@ class SequencePathModel(nn.Module):
             "gru_ohlcva_path_value",
             "gru_ohlcva_aux_path_value",
             "gru_structured_joint_turnover",
+            "gru_structured_close_excursion",
+            "gru_structured_close_excursion_student_t",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
             "gru_direct_value",
@@ -1431,7 +1498,8 @@ class SequencePathModel(nn.Module):
             raise ValueError(
                 "model_type must be gru_last, gru_attention, gru_path_value, gru_path_value_symbol, "
                 "gru_path_value_residual, gru_ohlcva_path_value, gru_ohlcva_aux_path_value, gru_richer_path_value, "
-                "gru_richer_path_value_symbol, gru_structured_joint_turnover, or gru_direct_value"
+                "gru_richer_path_value_symbol, gru_structured_joint_turnover, gru_structured_close_excursion, "
+                "gru_structured_close_excursion_student_t, or gru_direct_value"
             )
         self.model_type = normalized_model_type
         self.uses_derived_path_value = normalized_model_type in PATH_VALUE_MODEL_TYPES
@@ -1442,6 +1510,8 @@ class SequencePathModel(nn.Module):
         self.uses_ohlcva_path = normalized_model_type in OHLCVA_MODEL_TYPES
         self.uses_ohlcva_aux_path = normalized_model_type in OHLCVA_AUX_MODEL_TYPES
         self.uses_structured_turnover = normalized_model_type in STRUCTURED_TURNOVER_MODEL_TYPES
+        self.uses_close_excursion = normalized_model_type in CLOSE_EXCURSION_MODEL_TYPES
+        self.uses_probabilistic_close = normalized_model_type in PROBABILISTIC_CLOSE_MODEL_TYPES
         checkpoint_profile = str(
             activation_checkpoint_profile or ACTIVATION_CHECKPOINT_PROFILE_NONE
         ).strip().lower()
@@ -1508,16 +1578,43 @@ class SequencePathModel(nn.Module):
                 batch_first=True,
                 dropout=float(dropout) if int(layers) > 1 else 0.0,
             )
-            self.price_geometry_head = nn.Linear(int(hidden_dim), 4)
+            self.price_geometry_head = (
+                None
+                if self.uses_close_excursion
+                else nn.Linear(int(hidden_dim), 4)
+            )
+            self.close_increment_head = (
+                nn.Linear(int(hidden_dim), 1) if self.uses_close_excursion else None
+            )
+            self.excursion_head = (
+                nn.Linear(int(hidden_dim), 2) if self.uses_close_excursion else None
+            )
+            self.close_scale_head = (
+                nn.Linear(int(hidden_dim), 1) if self.uses_probabilistic_close else None
+            )
+            self.close_factor_head = (
+                nn.Linear(int(hidden_dim), PATH_VALUE_V4_STUDENT_T_RANK)
+                if self.uses_probabilistic_close
+                else None
+            )
             self.turnover_head = nn.Linear(int(hidden_dim), 1)
             with torch.no_grad():
-                self.price_geometry_head.bias[2:].fill_(-3.0)
+                if self.price_geometry_head is not None:
+                    self.price_geometry_head.bias[2:].fill_(-3.0)
+                if self.excursion_head is not None:
+                    self.excursion_head.bias.fill_(-3.0)
+                if self.close_scale_head is not None:
+                    self.close_scale_head.bias.fill_(-4.0)
         else:
             self.structured_context = None
             self.horizon_embedding = None
             self.decoder_input = None
             self.future_decoder = None
             self.price_geometry_head = None
+            self.close_increment_head = None
+            self.excursion_head = None
+            self.close_scale_head = None
+            self.close_factor_head = None
             self.turnover_head = None
         if self.uses_derived_path_value:
             self.summary_head = None
@@ -1570,7 +1667,6 @@ class SequencePathModel(nn.Module):
             assert self.horizon_embedding is not None
             assert self.decoder_input is not None
             assert self.future_decoder is not None
-            assert self.price_geometry_head is not None
             assert self.turnover_head is not None
             attention_weights = torch.softmax(self.attention(encoded).squeeze(-1), dim=1)
             attention_context = torch.sum(encoded * attention_weights.unsqueeze(-1), dim=1)
@@ -1590,7 +1686,33 @@ class SequencePathModel(nn.Module):
             future_states, _ = self._run_gru(
                 self.future_decoder, decoder_inputs, encoder_hidden
             )
-            raw_geometry = self.price_geometry_head(self.dropout(future_states))
+            dropped_states = self.dropout(future_states)
+            if self.uses_close_excursion:
+                assert self.close_increment_head is not None
+                assert self.excursion_head is not None
+                close_increment = 0.25 * torch.tanh(
+                    self.close_increment_head(dropped_states).squeeze(-1)
+                )
+                excursions = 0.25 * torch.sigmoid(self.excursion_head(dropped_states))
+                future_path = _close_excursion_to_ohlc_torch(close_increment, excursions)
+                outputs = {
+                    "future_path": future_path,
+                    "future_close_increment": close_increment,
+                    "future_excursion": excursions,
+                    "future_activity_path": self.turnover_head(future_states).squeeze(-1),
+                }
+                if self.uses_probabilistic_close:
+                    assert self.close_scale_head is not None
+                    assert self.close_factor_head is not None
+                    outputs["future_close_scale"] = F.softplus(
+                        self.close_scale_head(dropped_states).squeeze(-1)
+                    ) + 1.0e-4
+                    outputs["future_close_factor"] = 0.05 * torch.tanh(
+                        self.close_factor_head(dropped_states)
+                    )
+                return outputs
+            assert self.price_geometry_head is not None
+            raw_geometry = self.price_geometry_head(dropped_states)
             future_geometry, future_path = _structured_geometry_to_ohlc_torch(raw_geometry)
             return {
                 "future_path": future_path,
@@ -1684,6 +1806,279 @@ def _ohlc_path_to_geometry_torch(path: torch.Tensor) -> torch.Tensor:
         return torch.stack([gap, body, upper, lower], dim=2)
 
 
+def _ohlc_path_to_close_excursion_torch(
+    path: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Collapse open/body into close increments and close-relative high/low excursions."""
+
+    if path.ndim != 3 or int(path.shape[-1]) < 4:
+        raise ValueError("path must have shape [batch, forward_days, >=4]")
+    with torch.amp.autocast(device_type=path.device.type, enabled=False):
+        levels = torch.log(torch.clamp(1.0 + path[:, :, :4].float(), min=1.0e-6))
+        high_log = levels[:, :, 1]
+        low_log = levels[:, :, 2]
+        close_log = levels[:, :, 3]
+        previous_close_log = torch.cat(
+            [torch.zeros_like(close_log[:, :1]), close_log[:, :-1]], dim=1
+        )
+        close_increment = close_log - previous_close_log
+        upper = torch.clamp(high_log - close_log, min=0.0)
+        lower = torch.clamp(close_log - low_log, min=0.0)
+        return close_increment, torch.stack([upper, lower], dim=2)
+
+
+def _close_excursion_to_ohlc_torch(
+    close_increment: torch.Tensor,
+    excursions: torch.Tensor,
+) -> torch.Tensor:
+    """Reconstruct close/high/low exactly; the unused open placeholder equals close."""
+
+    if close_increment.ndim != 2:
+        raise ValueError("close_increment must have shape [batch, forward_days]")
+    if excursions.ndim != 3 or tuple(excursions.shape[:2]) != tuple(close_increment.shape):
+        raise ValueError("excursions must have shape [batch, forward_days, 2]")
+    if int(excursions.shape[-1]) != 2:
+        raise ValueError("excursions must contain upper and lower fields")
+    with torch.amp.autocast(device_type=close_increment.device.type, enabled=False):
+        increment = close_increment.float()
+        excursion = torch.clamp(excursions.float(), min=0.0)
+        close_log = torch.cumsum(increment, dim=1)
+        high_log = close_log + excursion[:, :, 0]
+        low_log = close_log - excursion[:, :, 1]
+        return torch.stack(
+            [
+                torch.expm1(close_log),
+                torch.expm1(high_log),
+                torch.expm1(low_log),
+                torch.expm1(close_log),
+            ],
+            dim=2,
+        )
+
+
+def _lowrank_student_t_nll(
+    target: torch.Tensor,
+    mean: torch.Tensor,
+    scale: torch.Tensor,
+    factor: torch.Tensor,
+    *,
+    degrees_of_freedom: float = 5.0,
+) -> torch.Tensor:
+    """Mean NLL for a multivariate Student-t with diagonal plus low-rank scale."""
+
+    if target.ndim != 2 or tuple(mean.shape) != tuple(target.shape):
+        raise ValueError("target and mean must have shape [batch, horizon]")
+    if tuple(scale.shape) != tuple(target.shape):
+        raise ValueError("scale must match target")
+    if factor.ndim != 3 or tuple(factor.shape[:2]) != tuple(target.shape):
+        raise ValueError("factor must have shape [batch, horizon, rank]")
+    nu = float(degrees_of_freedom)
+    if nu <= 2.0:
+        raise ValueError("degrees_of_freedom must exceed 2")
+    with torch.amp.autocast(device_type=target.device.type, enabled=False):
+        y = target.float()
+        mu = mean.float()
+        diagonal = torch.clamp(scale.float(), min=1.0e-4)
+        lowrank = factor.float()
+        finite = torch.isfinite(y).all(dim=1)
+        if not bool(finite.any()):
+            return mu.sum() * 0.0
+        residual = (y[finite] - mu[finite]).unsqueeze(-1)
+        diagonal_variance = torch.square(diagonal[finite])
+        inverse_diagonal = torch.reciprocal(diagonal_variance)
+        current_factor = lowrank[finite]
+        weighted_factor = current_factor * inverse_diagonal.unsqueeze(-1)
+        rank = int(current_factor.shape[-1])
+        identity = torch.eye(rank, device=y.device, dtype=torch.float32).unsqueeze(0)
+        middle = identity + torch.matmul(current_factor.transpose(1, 2), weighted_factor)
+        middle_cholesky = torch.linalg.cholesky(middle)
+        weighted_residual = residual * inverse_diagonal.unsqueeze(-1)
+        projection = torch.matmul(current_factor.transpose(1, 2), weighted_residual)
+        solved = torch.cholesky_solve(projection, middle_cholesky)
+        quadratic = (
+            torch.sum(torch.square(residual.squeeze(-1)) * inverse_diagonal, dim=1)
+            - torch.matmul(projection.transpose(1, 2), solved).reshape(-1)
+        )
+        logdet = (
+            torch.sum(torch.log(diagonal_variance), dim=1)
+            + 2.0
+            * torch.sum(
+                torch.log(torch.diagonal(middle_cholesky, dim1=1, dim2=2)), dim=1
+            )
+        )
+        dimension = float(target.shape[1])
+        constant = (
+            torch.lgamma(torch.tensor((nu + dimension) / 2.0, device=y.device))
+            - torch.lgamma(torch.tensor(nu / 2.0, device=y.device))
+            - 0.5 * dimension * math.log(nu * math.pi)
+        )
+        log_density = constant - 0.5 * logdet - 0.5 * (nu + dimension) * torch.log1p(
+            torch.clamp(quadratic, min=0.0) / nu
+        )
+        return -log_density.mean()
+
+
+def _lowrank_student_t_covariance(
+    scale: torch.Tensor,
+    factor: torch.Tensor,
+    *,
+    degrees_of_freedom: float = PATH_VALUE_V4_STUDENT_T_DF,
+) -> torch.Tensor:
+    """Return the finite covariance implied by a diagonal-plus-low-rank t scale."""
+
+    if scale.ndim != 2 or factor.ndim != 3 or tuple(factor.shape[:2]) != tuple(scale.shape):
+        raise ValueError("scale/factor must have shapes [batch, horizon] and [batch, horizon, rank]")
+    nu = float(degrees_of_freedom)
+    if nu <= 2.0:
+        raise ValueError("degrees_of_freedom must exceed 2")
+    diagonal = torch.diag_embed(torch.square(torch.clamp(scale.float(), min=1.0e-4)))
+    scale_matrix = diagonal + torch.matmul(factor.float(), factor.float().transpose(1, 2))
+    return scale_matrix * (nu / (nu - 2.0))
+
+
+def _sample_lowrank_student_t(
+    mean: torch.Tensor,
+    scale: torch.Tensor,
+    factor: torch.Tensor,
+    *,
+    sample_count: int,
+    seed: int = DEFAULT_SEED,
+    degrees_of_freedom: float = PATH_VALUE_V4_STUDENT_T_DF,
+) -> torch.Tensor:
+    """Draw coherent horizon paths from the configured low-rank multivariate t."""
+
+    if mean.ndim != 2 or tuple(scale.shape) != tuple(mean.shape):
+        raise ValueError("mean and scale must have shape [batch, horizon]")
+    if factor.ndim != 3 or tuple(factor.shape[:2]) != tuple(mean.shape):
+        raise ValueError("factor must have shape [batch, horizon, rank]")
+    count = int(sample_count)
+    if count <= 0:
+        raise ValueError("sample_count must be positive")
+    nu = float(degrees_of_freedom)
+    if nu <= 2.0:
+        raise ValueError("degrees_of_freedom must exceed 2")
+    generator = torch.Generator(device=mean.device)
+    generator.manual_seed(int(seed))
+    batch, horizon = int(mean.shape[0]), int(mean.shape[1])
+    rank = int(factor.shape[2])
+    diagonal_noise = torch.randn(
+        (count, batch, horizon),
+        generator=generator,
+        device=mean.device,
+        dtype=torch.float32,
+    )
+    factor_noise = torch.randn(
+        (count, batch, rank),
+        generator=generator,
+        device=mean.device,
+        dtype=torch.float32,
+    )
+    gaussian = (
+        diagonal_noise * torch.clamp(scale.float(), min=1.0e-4).unsqueeze(0)
+        + torch.einsum("sbr,bhr->sbh", factor_noise, factor.float())
+    )
+    chi_square = 2.0 * torch._standard_gamma(
+        torch.full(
+            (count, batch),
+            nu / 2.0,
+            device=mean.device,
+            dtype=torch.float32,
+        ),
+        generator=generator,
+    )
+    radial = torch.sqrt(torch.clamp(chi_square / nu, min=1.0e-8)).unsqueeze(-1)
+    return mean.float().unsqueeze(0) + gaussian / radial
+
+
+def _lowrank_student_t_calibration_metrics(
+    target: torch.Tensor,
+    mean: torch.Tensor,
+    scale: torch.Tensor,
+    factor: torch.Tensor,
+    *,
+    sample_count: int = 16,
+    seed: int = DEFAULT_SEED,
+    degrees_of_freedom: float = PATH_VALUE_V4_STUDENT_T_DF,
+) -> dict[str, float | int]:
+    """Return marginal calibration and sample CRPS diagnostics for complete rows."""
+
+    finite = (
+        torch.isfinite(target).all(dim=1)
+        & torch.isfinite(mean).all(dim=1)
+        & torch.isfinite(scale).all(dim=1)
+        & torch.isfinite(factor).all(dim=(1, 2))
+    )
+    if not bool(finite.any()):
+        return {"sample_count": 0}
+    y = target[finite].float()
+    mu = mean[finite].float()
+    sigma = torch.sqrt(
+        torch.square(torch.clamp(scale[finite].float(), min=1.0e-4))
+        + torch.sum(torch.square(factor[finite].float()), dim=2)
+    )
+    standardized = ((y - mu) / torch.clamp(sigma, min=1.0e-6)).detach().cpu().numpy()
+    try:
+        from scipy.special import stdtr
+
+        pit = stdtr(float(degrees_of_freedom), standardized)
+        pit_mean = float(np.mean(pit))
+        pit_variance = float(np.var(pit))
+        ordered = np.sort(pit.reshape(-1))
+        expected = (np.arange(ordered.size, dtype=np.float64) + 0.5) / max(ordered.size, 1)
+        pit_ks = float(np.max(np.abs(ordered - expected))) if ordered.size else np.nan
+    except ImportError:
+        pit_mean = pit_variance = pit_ks = np.nan
+    central_quantiles = {
+        "50": 0.7266868438004227,
+        "80": 1.4758840488558216,
+        "95": 2.570581835636314,
+    }
+    result: dict[str, float | int] = {
+        "sample_count": int(y.shape[0]),
+        "scalar_count": int(y.numel()),
+        "pit_mean": pit_mean,
+        "pit_variance": pit_variance,
+        "pit_ks": pit_ks,
+    }
+    absolute_error = torch.abs(mu - y)
+    result["mean_absolute_error"] = float(absolute_error.mean().item())
+    for label, quantile in central_quantiles.items():
+        half_width = float(quantile) * sigma
+        covered = torch.abs(y - mu) <= half_width
+        result[f"coverage_{label}"] = float(covered.float().mean().item())
+        result[f"mean_interval_width_{label}"] = float((2.0 * half_width).mean().item())
+    samples_a = _sample_lowrank_student_t(
+        mu,
+        scale[finite],
+        factor[finite],
+        sample_count=int(sample_count),
+        seed=int(seed),
+        degrees_of_freedom=degrees_of_freedom,
+    )
+    samples_b = _sample_lowrank_student_t(
+        mu,
+        scale[finite],
+        factor[finite],
+        sample_count=int(sample_count),
+        seed=int(seed) + 1,
+        degrees_of_freedom=degrees_of_freedom,
+    )
+    crps = torch.mean(torch.abs(samples_a - y.unsqueeze(0)), dim=0) - 0.5 * torch.mean(
+        torch.abs(samples_a - samples_b), dim=0
+    )
+    result["crps"] = float(crps.mean().item())
+    result["multivariate_nll"] = float(
+        _lowrank_student_t_nll(
+            y,
+            mu,
+            scale[finite],
+            factor[finite],
+            degrees_of_freedom=degrees_of_freedom,
+        ).item()
+    )
+    return result
+
+
 def _finite_smooth_l1(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     with torch.amp.autocast(device_type=pred.device.type, enabled=False):
         loss_pred = pred.float()
@@ -1737,10 +2132,33 @@ def _normalize_path_value_semantic(value: str | None) -> str:
     return semantic
 
 
+def _v4_temperature_from_targets(values: np.ndarray) -> dict[str, float | int]:
+    targets = np.asarray(values, dtype=np.float64).reshape(-1)
+    positive = targets[np.isfinite(targets) & (targets > 0.0)]
+    if positive.size:
+        q25, q75 = np.quantile(positive, [0.25, 0.75])
+        iqr = max(float(q75 - q25), 0.0)
+    else:
+        q25 = q75 = iqr = 0.0
+    temperature = max(
+        PATH_VALUE_V4_TEMPERATURE_FLOOR,
+        PATH_VALUE_V4_TEMPERATURE_IQR_FRACTION * iqr,
+    )
+    return {
+        "positive_count": int(positive.size),
+        "positive_q25": float(q25),
+        "positive_q75": float(q75),
+        "positive_iqr": float(iqr),
+        "temperature": float(temperature),
+    }
+
+
 def _v3_growth_multiplier_for_dates(
     manifest: Mapping[str, Any],
     date_indices: np.ndarray,
     forward_days: int,
+    *,
+    slippage_multiplier: float = 1.0,
 ) -> np.ndarray:
     """Return proportional round-trip growth multipliers for each path day.
 
@@ -1756,14 +2174,24 @@ def _v3_growth_multiplier_for_dates(
         raise ValueError("forward_days must be positive")
     dates = [pd.Timestamp(value).strftime("%Y-%m-%d") for value in list(manifest.get("date_values", []) or [])]
     if not isinstance(manifest.get("execution_cost_contract"), Mapping) or not dates:
+        fallback_cost = float(PATH_VALUE_V3_TRANSACTION_COST) * (
+            2.0 if float(slippage_multiplier) > 1.0 else 1.0
+        )
         return np.full(
             (int(indices.size), horizon),
-            1.0 - float(PATH_VALUE_V3_TRANSACTION_COST),
+            1.0 - fallback_cost,
             dtype=np.float32,
         )
     contract = parse_execution_cost_contract(manifest)
     schedule = tuple(contract.stamp_tax_schedule)
-    out = np.full((int(indices.size), horizon), 1.0 - float(PATH_VALUE_V3_TRANSACTION_COST), dtype=np.float32)
+    fallback_cost = float(PATH_VALUE_V3_TRANSACTION_COST) * (
+        2.0 if float(slippage_multiplier) > 1.0 else 1.0
+    )
+    out = np.full(
+        (int(indices.size), horizon),
+        1.0 - fallback_cost,
+        dtype=np.float32,
+    )
     if not indices.size:
         return out
     for row, signal_idx in enumerate(indices.tolist()):
@@ -1779,11 +2207,11 @@ def _v3_growth_multiplier_for_dates(
                 else:
                     break
             buy = (
-                (1.0 + float(contract.slippage_bps) / 10_000.0)
+                (1.0 + float(contract.slippage_bps) * float(slippage_multiplier) / 10_000.0)
                 * (1.0 + (float(contract.commission_bps) + float(contract.transfer_fee_bps)) / 10_000.0)
             )
             sell = (
-                (1.0 - float(contract.slippage_bps) / 10_000.0)
+                (1.0 - float(contract.slippage_bps) * float(slippage_multiplier) / 10_000.0)
                 * (1.0 - (float(contract.commission_bps) + float(contract.transfer_fee_bps) + stamp_bps) / 10_000.0)
             )
             out[row, offset] = np.float32(sell / max(buy, 1.0e-12))
@@ -1855,8 +2283,156 @@ def _loss_parts_payload(
         "residual_penalty": residual_penalty,
     }
     if bool(return_tensors):
-        return {key: value.detach() for key, value in tensors.items()}
+        return tensors
     return {key: float(value.detach().cpu().item()) for key, value in tensors.items()}
+
+
+def _v4_shared_encoder_parameters(model: nn.Module) -> list[nn.Parameter]:
+    modules = [
+        getattr(model, name, None)
+        for name in ("input_norm", "proj", "encoder", "attention", "structured_context")
+    ]
+    parameters: list[nn.Parameter] = []
+    seen: set[int] = set()
+    for module in modules:
+        if not isinstance(module, nn.Module):
+            continue
+        for parameter in module.parameters():
+            if parameter.requires_grad and id(parameter) not in seen:
+                seen.add(id(parameter))
+                parameters.append(parameter)
+    if not parameters:
+        raise ValueError("V4 gradient diagnostics require shared encoder parameters")
+    return parameters
+
+
+def _v4_weighted_objectives(
+    parts: Mapping[str, torch.Tensor],
+    *,
+    weights: Mapping[str, float],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    main_names = (
+        "path_loss",
+        "summary_loss",
+        "richer_loss",
+        "price_delta_loss",
+        "va_level_loss",
+        "va_delta_loss",
+        "geometry_loss",
+        "turnover_level_loss",
+        "turnover_delta_loss",
+        "residual_penalty",
+    )
+    reference = parts["path_loss"]
+    main = reference.sum() * 0.0
+    for name in main_names:
+        main = main + float(weights.get(name, 0.0)) * parts[name]
+    utility = (
+        float(weights.get("value_loss", 0.0)) * parts["value_loss"]
+        + float(weights.get("utility_curve_loss", 0.0)) * parts["utility_curve_loss"]
+    )
+    rank = float(weights.get("rank_loss", 0.0)) * parts["rank_loss"]
+    return main, utility, rank
+
+
+def _v4_gradient_vector(
+    objective: torch.Tensor,
+    parameters: list[nn.Parameter],
+) -> torch.Tensor:
+    if not objective.requires_grad:
+        return torch.cat([torch.zeros_like(parameter).reshape(-1) for parameter in parameters])
+    gradients = torch.autograd.grad(
+        objective,
+        parameters,
+        retain_graph=True,
+        allow_unused=True,
+    )
+    return torch.cat(
+        [
+            (torch.zeros_like(parameter) if gradient is None else gradient).reshape(-1)
+            for parameter, gradient in zip(parameters, gradients, strict=True)
+        ]
+    )
+
+
+def _v4_gradient_diagnostics(
+    main: torch.Tensor,
+    utility: torch.Tensor,
+    rank: torch.Tensor,
+    parameters: list[nn.Parameter],
+) -> tuple[dict[str, float], dict[str, torch.Tensor]]:
+    vectors = {
+        "main": _v4_gradient_vector(main, parameters),
+        "utility": _v4_gradient_vector(utility, parameters),
+        "rank": _v4_gradient_vector(rank, parameters),
+    }
+    norms = {
+        name: float(torch.linalg.vector_norm(vector).detach().cpu().item())
+        for name, vector in vectors.items()
+    }
+
+    def cosine(left: str, right: str) -> float:
+        denominator = norms[left] * norms[right]
+        if denominator <= 0.0:
+            return 0.0
+        return float(
+            (torch.dot(vectors[left], vectors[right]) / denominator).detach().cpu().item()
+        )
+
+    diagnostics = {
+        "main_norm": norms["main"],
+        "utility_norm": norms["utility"],
+        "rank_norm": norms["rank"],
+        "main_utility_cosine": cosine("main", "utility"),
+        "main_rank_cosine": cosine("main", "rank"),
+        "utility_rank_cosine": cosine("utility", "rank"),
+    }
+    return diagnostics, vectors
+
+
+def _v4_gradient_budget_scales(diagnostics: Mapping[str, float]) -> dict[str, float]:
+    main_norm = float(diagnostics.get("main_norm", 0.0))
+    if not math.isfinite(main_norm) or main_norm <= 0.0:
+        raise ValueError("V4 main path gradient norm must be finite and positive")
+    cap = V4_AUXILIARY_GRADIENT_MAX_FRACTION * main_norm
+    result: dict[str, float] = {}
+    for name in ("utility", "rank"):
+        norm = float(diagnostics.get(f"{name}_norm", 0.0))
+        result[name] = (
+            1.0
+            if not math.isfinite(norm) or norm <= cap or norm <= 0.0
+            else float(cap / norm)
+        )
+    return result
+
+
+def _v4_pcgrad_vector(vectors: Mapping[str, torch.Tensor]) -> torch.Tensor:
+    active = [vectors[name] for name in ("main", "utility", "rank") if bool(torch.any(vectors[name] != 0.0))]
+    if not active:
+        raise ValueError("PCGrad requires at least one non-zero task gradient")
+    projected: list[torch.Tensor] = []
+    for index, source in enumerate(active):
+        current = source.clone()
+        for other_index, other in enumerate(active):
+            if other_index == index:
+                continue
+            dot = torch.dot(current, other)
+            denominator = torch.dot(other, other)
+            if bool(dot < 0.0) and bool(denominator > 0.0):
+                current = current - dot / denominator * other
+        projected.append(current)
+    return torch.stack(projected, dim=0).sum(dim=0)
+
+
+def _assign_flat_gradient(parameters: list[nn.Parameter], vector: torch.Tensor) -> None:
+    offset = 0
+    for parameter in parameters:
+        count = int(parameter.numel())
+        gradient = vector[offset : offset + count].view_as(parameter).to(parameter.dtype)
+        parameter.grad = gradient.clone()
+        offset += count
+    if offset != int(vector.numel()):
+        raise ValueError("flat gradient length does not match shared parameters")
 
 
 def _rank_loss_by_date(score: torch.Tensor, target: torch.Tensor, date_idx: torch.Tensor, *, max_per_side: int = 64) -> torch.Tensor:
@@ -1946,6 +2522,7 @@ def _derived_path_rank_score_and_target(
     path_value_gradient_profile: str,
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
     path_value_growth_multiplier: torch.Tensor | None = None,
+    path_value_temperature: float = PATH_VALUE_V2_TEMPERATURE,
     target_tradable_path: torch.Tensor | None = None,
     residual_weight: float = 0.25,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1960,6 +2537,7 @@ def _derived_path_rank_score_and_target(
         tradable_path=target_tradable_path,
         path_value_semantic=path_value_semantic,
         path_value_growth_multiplier=path_value_growth_multiplier,
+        path_value_temperature=path_value_temperature,
     ).detach()
     predicted_summary = _derive_path_summary_torch(
         outputs["future_path"],
@@ -1968,6 +2546,7 @@ def _derived_path_rank_score_and_target(
         path_value_gradient_profile=path_value_gradient_profile,
         path_value_semantic=path_value_semantic,
         path_value_growth_multiplier=path_value_growth_multiplier,
+        path_value_temperature=path_value_temperature,
     )
     score = predicted_summary[:, -1]
     if "residual_score" in outputs:
@@ -2020,8 +2599,14 @@ def _multi_horizon_ohlc_summary_features(
     include_full_horizon: bool = True,
     tradable_path: torch.Tensor | None = None,
     earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
 ) -> torch.Tensor:
-    path = _legacy_entry_relative_path_torch(path[:, :, :4], price_anchor=price_anchor)
+    semantic = _normalize_path_value_semantic(path_value_semantic)
+    path = path[:, :, :4]
+    if semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
+    else:
+        tradable_path = None
     batch_size = int(path.shape[0])
     forward_days = int(path.shape[1])
     windows = _summary_loss_windows(forward_days, include_full_horizon=bool(include_full_horizon))
@@ -2103,17 +2688,20 @@ def _multi_horizon_ohlc_summary_loss_vectorized(
     price_anchor: str,
     include_full_horizon: bool = True,
     target_tradable_path: torch.Tensor | None = None,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
 ) -> torch.Tensor:
     target_features = _multi_horizon_ohlc_summary_features(
         target_path,
         price_anchor=price_anchor,
         include_full_horizon=bool(include_full_horizon),
         tradable_path=target_tradable_path,
+        path_value_semantic=path_value_semantic,
     ).detach()
     pred_features = _multi_horizon_ohlc_summary_features(
         pred_path,
         price_anchor=price_anchor,
         include_full_horizon=bool(include_full_horizon),
+        path_value_semantic=path_value_semantic,
     )
     if int(pred_features.shape[1]) == 0:
         return pred_path.sum() * 0.0
@@ -2143,12 +2731,15 @@ def _derived_summary_loss(
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
     path_value_growth_multiplier: torch.Tensor | None = None,
+    path_value_temperature: float = PATH_VALUE_V2_TEMPERATURE,
     target_tradable_path: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     profile = str(summary_loss_profile or SUMMARY_LOSS_PROFILE_BASE).strip().lower()
     if profile not in SUMMARY_LOSS_PROFILES:
         raise ValueError(f"summary_loss_profile must be one of {SUMMARY_LOSS_PROFILES}")
     path_dim = int(pred_path.shape[2])
+    if _normalize_path_value_semantic(path_value_semantic) == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        target_tradable_path = None
 
     if profile == SUMMARY_LOSS_PROFILE_MULTI_HORIZON_OHLC and path_dim == 4:
         summary_loss = _multi_horizon_ohlc_summary_loss_vectorized(
@@ -2156,6 +2747,7 @@ def _derived_summary_loss(
             target_path,
             price_anchor=price_anchor,
             target_tradable_path=target_tradable_path,
+            path_value_semantic=path_value_semantic,
         )
         target_summary = _derive_path_summary_torch(
             target_path,
@@ -2164,6 +2756,7 @@ def _derived_summary_loss(
             tradable_path=target_tradable_path,
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=path_value_growth_multiplier,
+            path_value_temperature=path_value_temperature,
         ).detach()
         pred_summary = _derive_path_summary_torch(
             pred_path,
@@ -2172,6 +2765,7 @@ def _derived_summary_loss(
             path_value_gradient_profile=path_value_gradient_profile,
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=path_value_growth_multiplier,
+            path_value_temperature=path_value_temperature,
         )
         return summary_loss, target_summary, pred_summary
 
@@ -2182,6 +2776,7 @@ def _derived_summary_loss(
             price_anchor=price_anchor,
             include_full_horizon=False,
             target_tradable_path=target_tradable_path,
+            path_value_semantic=path_value_semantic,
         )
         target_summary = _derive_path_summary_torch(
             target_path,
@@ -2190,6 +2785,7 @@ def _derived_summary_loss(
             tradable_path=target_tradable_path,
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=path_value_growth_multiplier,
+            path_value_temperature=path_value_temperature,
         ).detach()
         pred_summary = _derive_path_summary_torch(
             pred_path,
@@ -2198,6 +2794,7 @@ def _derived_summary_loss(
             path_value_gradient_profile=path_value_gradient_profile,
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=path_value_growth_multiplier,
+            path_value_temperature=path_value_temperature,
         )
         return summary_loss, target_summary, pred_summary
 
@@ -2208,6 +2805,7 @@ def _derived_summary_loss(
         tradable_path=target_tradable_path,
         path_value_semantic=path_value_semantic,
         path_value_growth_multiplier=path_value_growth_multiplier,
+        path_value_temperature=path_value_temperature,
     ).detach()
     pred_summary = _derive_path_summary_torch(
         pred_path,
@@ -2216,6 +2814,7 @@ def _derived_summary_loss(
         path_value_gradient_profile=path_value_gradient_profile,
         path_value_semantic=path_value_semantic,
         path_value_growth_multiplier=path_value_growth_multiplier,
+        path_value_temperature=path_value_temperature,
     )
     summary_loss = _finite_smooth_l1_columns(
         pred_summary,
@@ -2257,6 +2856,7 @@ def _compute_loss(
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH,
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
     path_value_growth_multiplier: torch.Tensor | None = None,
+    path_value_temperature: float = PATH_VALUE_V2_TEMPERATURE,
     rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK,
     y_tradable_path: torch.Tensor | None = None,
     return_tensor_parts: bool = False,
@@ -2275,9 +2875,14 @@ def _compute_loss(
             tradable_path=(y_tradable_path[:, :horizon] if y_tradable_path is not None else None),
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=path_value_growth_multiplier,
+            path_value_temperature=path_value_temperature,
         ).detach()
-        value_column = value_column_for_path(horizon, path_dim=4)
-        value_index = derived_path_summary_columns(horizon, path_dim=4).index(value_column)
+        value_column = value_column_for_path(
+            horizon, path_dim=4, path_value_semantic=path_value_semantic
+        )
+        value_index = derived_path_summary_columns(
+            horizon, path_dim=4, path_value_semantic=path_value_semantic
+        ).index(value_column)
         value_target = target_summary[:, int(value_index)]
         path_loss = score.sum() * 0.0
         summary_loss = score.sum() * 0.0
@@ -2338,7 +2943,62 @@ def _compute_loss(
             parts["_ranking_score"] = score.detach()
         return total, parts
 
-    if normalized_path_loss_profile == PATH_LOSS_PROFILE_OHLCVA_EQUAL:
+    if "future_close_increment" in outputs:
+        target_increment, target_excursion = _ohlc_path_to_close_excursion_torch(
+            y_path[:, :, :4]
+        )
+        predicted_increment = outputs["future_close_increment"]
+        predicted_excursion = outputs["future_excursion"]
+        increment_loss = _finite_smooth_l1(predicted_increment, target_increment)
+        predicted_cumulative = torch.cumsum(predicted_increment.float(), dim=1)
+        target_cumulative = torch.cumsum(target_increment.float(), dim=1)
+        horizons = [
+            day - 1
+            for day in PATH_VALUE_V4_CUMULATIVE_HORIZONS
+            if day <= int(predicted_increment.shape[1])
+        ]
+        horizon_index = torch.as_tensor(horizons, device=predicted_increment.device, dtype=torch.long)
+        predicted_horizon = predicted_cumulative.index_select(1, horizon_index)
+        target_horizon = target_cumulative.index_select(1, horizon_index)
+        cumulative_mask = torch.isfinite(target_horizon)
+        safe_target_horizon = torch.where(
+            cumulative_mask, target_horizon, predicted_horizon.detach()
+        )
+        cumulative_raw = F.smooth_l1_loss(
+            predicted_horizon,
+            safe_target_horizon,
+            reduction="none",
+        )
+        horizon_days = horizon_index.to(dtype=torch.float32) + 1.0
+        horizon_weights = torch.rsqrt(horizon_days)
+        horizon_weights = horizon_weights / torch.clamp(horizon_weights.mean(), min=1.0e-6)
+        cumulative_loss = torch.where(
+            cumulative_mask,
+            cumulative_raw * horizon_weights.view(1, -1),
+            torch.zeros_like(cumulative_raw),
+        ).sum() / torch.clamp(cumulative_mask.sum().to(torch.float32), min=1.0)
+        excursion_loss = _finite_smooth_l1(predicted_excursion, target_excursion)
+        if "future_close_scale" in outputs:
+            distribution_loss = _lowrank_student_t_nll(
+                target_increment,
+                predicted_increment,
+                outputs["future_close_scale"],
+                outputs["future_close_factor"],
+                degrees_of_freedom=PATH_VALUE_V4_STUDENT_T_DF,
+            ) / max(float(predicted_increment.shape[1]), 1.0)
+            path_loss = (
+                0.25 * increment_loss
+                + 0.25 * cumulative_loss
+                + 0.10 * excursion_loss
+                + 0.40 * distribution_loss
+            )
+        else:
+            path_loss = (
+                0.40 * increment_loss
+                + 0.40 * cumulative_loss
+                + 0.20 * excursion_loss
+            )
+    elif normalized_path_loss_profile == PATH_LOSS_PROFILE_OHLCVA_EQUAL:
         if y_ohlcva_path is None:
             raise ValueError("path_loss_profile=ohlcva_equal requires y_ohlcva_path")
         predicted_ohlcva = outputs.get("future_ohlcva_aux_path", outputs["future_path"])
@@ -2384,7 +3044,12 @@ def _compute_loss(
         )
         target_curve, _ = _candidate_path_values_torch(
             y_path[:, :, :4],
-            tradable_path=y_tradable_path,
+            tradable_path=(
+                None
+                if _normalize_path_value_semantic(path_value_semantic)
+                == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+                else y_tradable_path
+            ),
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=path_value_growth_multiplier,
         )
@@ -2429,6 +3094,7 @@ def _compute_loss(
             path_value_gradient_profile=path_value_gradient_profile,
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=path_value_growth_multiplier,
+            path_value_temperature=path_value_temperature,
             target_tradable_path=y_tradable_path,
         )
         value_target = target_summary[:, -1]
@@ -2537,6 +3203,25 @@ def _iter_index_batches(dataset: SequencePathPackDataset, *, batch_size: int, sh
     yield from sampler
 
 
+def _batch_path_value_growth_multiplier(
+    batch: Mapping[str, Any],
+    *,
+    semantic: str,
+    device: torch.device | None = None,
+) -> torch.Tensor | None:
+    normalized = _normalize_path_value_semantic(semantic)
+    if normalized == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+        field = "path_value_growth_multiplier"
+    elif normalized == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        field = "path_value_v4_growth_multiplier"
+    else:
+        return None
+    value = batch.get(field)
+    if value is None:
+        raise KeyError(f"batch is missing required {field}")
+    return value if device is None else value.to(device, non_blocking=device.type == "cuda")
+
+
 def _pin_tensor_batch(batch: dict[str, Any]) -> dict[str, Any]:
     for key, value in batch.items():
         if isinstance(value, torch.Tensor) and value.device.type == "cpu":
@@ -2595,6 +3280,7 @@ def _run_global_tail_rank_step(
     amp_enabled: bool,
     path_value_gradient_profile: str,
     path_value_semantic: str,
+    path_value_temperature: float,
     rank_loss_weight: float,
     residual_score_weight: float,
 ) -> tuple[torch.Tensor, int]:
@@ -2614,10 +3300,8 @@ def _run_global_tail_rank_step(
         if batch.get("y_tradable_path") is not None
         else None
     )
-    growth_multiplier = (
-        batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
-        if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
-        else None
+    growth_multiplier = _batch_path_value_growth_multiplier(
+        batch, semantic=path_value_semantic, device=device
     )
     x, y_path, _y_ohlcva, _y_richer, _y_summary, _y_activity, date_idx, symbol_idx = _batch_to_device(batch, device)
     optimizer.zero_grad(set_to_none=True)
@@ -2630,6 +3314,7 @@ def _run_global_tail_rank_step(
             path_value_gradient_profile=path_value_gradient_profile,
             path_value_semantic=path_value_semantic,
             path_value_growth_multiplier=growth_multiplier,
+            path_value_temperature=path_value_temperature,
             target_tradable_path=tradable_path,
             residual_weight=float(residual_score_weight),
         )
@@ -2653,6 +3338,7 @@ def _mine_global_tail_scores(
     amp_enabled: bool,
     path_value_gradient_profile: str,
     path_value_semantic: str,
+    path_value_temperature: float,
     residual_score_weight: float,
 ) -> np.ndarray:
     """Score the full train split from one frozen epoch-end model state."""
@@ -2680,10 +3366,8 @@ def _mine_global_tail_scores(
             )
             x = batch["x"].to(device, non_blocking=device.type == "cuda")
             symbol_idx = batch["symbol_idx"].to(device, non_blocking=device.type == "cuda")
-            growth_multiplier = (
-                batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
-                if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
-                else None
+            growth_multiplier = _batch_path_value_growth_multiplier(
+                batch, semantic=path_value_semantic, device=device
             )
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 outputs = model(x, symbol_idx=symbol_idx)
@@ -2696,6 +3380,7 @@ def _mine_global_tail_scores(
                     path_value_gradient_profile=path_value_gradient_profile,
                     path_value_semantic=path_value_semantic,
                     path_value_growth_multiplier=growth_multiplier,
+                    path_value_temperature=path_value_temperature,
                 )
                 score = predicted_summary[:, -1]
                 if "residual_score" in outputs:
@@ -3224,11 +3909,19 @@ def path_value_v2_column(forward_days: int) -> str:
     return f"path_trade_value_v2_{int(forward_days)}d"
 
 
+def signal_close_capital_speed_v4_column(forward_days: int) -> str:
+    return f"signal_close_capital_speed_v4_{int(forward_days)}d"
+
+
 def unified_path_value_column(forward_days: int) -> str:
     return f"unified_path_trade_value_{int(forward_days)}d"
 
 
-def legacy_derived_path_summary_columns(forward_days: int) -> list[str]:
+def legacy_derived_path_summary_columns(
+    forward_days: int,
+    *,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+) -> list[str]:
     suffix = f"{int(forward_days)}d"
     return [
         f"future_max_return_{suffix}",
@@ -3242,7 +3935,12 @@ def legacy_derived_path_summary_columns(forward_days: int) -> list[str]:
         f"best_exit_day_{suffix}",
         f"best_exit_close_return_{suffix}",
         f"pre_exit_max_drawdown_{suffix}",
-        path_value_v2_column(forward_days),
+        (
+            signal_close_capital_speed_v4_column(forward_days)
+            if _normalize_path_value_semantic(path_value_semantic)
+            == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+            else path_value_v2_column(forward_days)
+        ),
     ]
 
 
@@ -3273,12 +3971,35 @@ def unified_path_summary_columns(forward_days: int) -> list[str]:
     ]
 
 
-def derived_path_summary_columns(forward_days: int, *, path_dim: int = 4) -> list[str]:
-    return unified_path_summary_columns(forward_days) if int(path_dim) >= 6 else legacy_derived_path_summary_columns(forward_days)
+def derived_path_summary_columns(
+    forward_days: int,
+    *,
+    path_dim: int = 4,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+) -> list[str]:
+    return (
+        unified_path_summary_columns(forward_days)
+        if int(path_dim) >= 6
+        else legacy_derived_path_summary_columns(
+            forward_days, path_value_semantic=path_value_semantic
+        )
+    )
 
 
-def value_column_for_path(forward_days: int, *, path_dim: int = 4) -> str:
-    return unified_path_value_column(forward_days) if int(path_dim) >= 6 else path_value_v2_column(forward_days)
+def value_column_for_path(
+    forward_days: int,
+    *,
+    path_dim: int = 4,
+    path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+) -> str:
+    if int(path_dim) >= 6:
+        return unified_path_value_column(forward_days)
+    return (
+        signal_close_capital_speed_v4_column(forward_days)
+        if _normalize_path_value_semantic(path_value_semantic)
+        == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+        else path_value_v2_column(forward_days)
+    )
 
 
 def _derived_summary_loss_indices(forward_days: int, *, path_dim: int = 4) -> list[int]:
@@ -3335,13 +4056,18 @@ def _candidate_path_values_torch(
     path_value_growth_multiplier: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     semantic = _normalize_path_value_semantic(path_value_semantic)
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        tradable_path = None
     forward_days = int(path.shape[1])
     close_ret = path[:, :, 3]
     low_ret = path[:, :, 2]
     worst_low_so_far = torch.cummin(low_ret, dim=1).values
     pre_exit_drawdown = torch.clamp(-worst_low_so_far, min=0.0)
     day = torch.arange(forward_days, device=path.device, dtype=path.dtype)
-    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+    if semantic in {
+        PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+        PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+    }:
         if path_value_growth_multiplier is None:
             multiplier = torch.full_like(close_ret, 1.0 - float(PATH_VALUE_V3_TRANSACTION_COST))
         else:
@@ -3518,6 +4244,7 @@ def _derive_path_summary_torch(
     earliest_exit_day: int = PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
     path_value_growth_multiplier: torch.Tensor | None = None,
+    path_value_temperature: float = PATH_VALUE_V2_TEMPERATURE,
 ) -> torch.Tensor:
     if int(path.shape[2]) >= 6:
         if tradable_path is not None:
@@ -3527,7 +4254,11 @@ def _derive_path_summary_torch(
             smooth_value=smooth_value,
             path_value_gradient_profile=path_value_gradient_profile,
         )
-    path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
+    semantic = _normalize_path_value_semantic(path_value_semantic)
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        tradable_path = None
+    if semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
     forward_days = int(path.shape[1])
     high_ret = path[:, :, 1]
     low_ret = path[:, :, 2]
@@ -3546,11 +4277,21 @@ def _derive_path_summary_torch(
         path,
         tradable_path=tradable_path,
         earliest_exit_day=earliest_exit_day,
-        path_value_semantic=path_value_semantic,
+        path_value_semantic=semantic,
         path_value_growth_multiplier=path_value_growth_multiplier,
     )
     best_value_hard, best_idx = torch.max(candidate, dim=1)
-    if smooth_value:
+    if smooth_value and semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        temperature = max(float(path_value_temperature), PATH_VALUE_V4_TEMPERATURE_FLOOR)
+        cash = torch.zeros((candidate.shape[0], 1), device=path.device, dtype=path.dtype)
+        safe_candidate = torch.where(
+            torch.isfinite(candidate), candidate, torch.full_like(candidate, -1.0e6)
+        )
+        best_value = temperature * torch.logsumexp(
+            torch.cat([cash, safe_candidate], dim=1) / temperature,
+            dim=1,
+        )
+    elif smooth_value:
         best_value = _path_value_with_gradient_profile(
             best_value_hard,
             candidate,
@@ -3563,6 +4304,11 @@ def _derive_path_summary_torch(
     best_exit_close = close_ret.gather(1, best_idx.view(-1, 1)).squeeze(1)
     best_pre_exit_drawdown = pre_exit_drawdown.gather(1, best_idx.view(-1, 1)).squeeze(1)
     has_tradable_exit = torch.isfinite(best_value_hard)
+    choose_cash = (
+        has_tradable_exit & (best_value_hard <= 0.0)
+        if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+        else torch.zeros_like(has_tradable_exit)
+    )
     best_exit_day = torch.where(
         has_tradable_exit,
         best_idx.to(path.dtype) + 1.0,
@@ -3575,6 +4321,14 @@ def _derive_path_summary_torch(
         torch.full_like(best_pre_exit_drawdown, float("nan")),
     )
     best_value = torch.where(has_tradable_exit, best_value, torch.full_like(best_value, float("nan")))
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        best_exit_day = torch.where(choose_cash, torch.zeros_like(best_exit_day), best_exit_day)
+        best_exit_close = torch.where(choose_cash, torch.zeros_like(best_exit_close), best_exit_close)
+        best_pre_exit_drawdown = torch.where(
+            choose_cash, torch.zeros_like(best_pre_exit_drawdown), best_pre_exit_drawdown
+        )
+        if not smooth_value:
+            best_value = torch.where(choose_cash, torch.zeros_like(best_value), best_value)
     return torch.stack(
         [
             max_ret,
@@ -3604,6 +4358,8 @@ def _derive_path_summary_numpy(
     path_value_growth_multiplier: np.ndarray | None = None,
 ) -> np.ndarray:
     semantic = _normalize_path_value_semantic(path_value_semantic)
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        tradable_path = None
     values = np.asarray(path, dtype=np.float32)
     if values.ndim != 3 or values.shape[2] not in {4, 6}:
         raise ValueError("path must have shape [batch, forward_days, 4 or 6]")
@@ -3611,7 +4367,8 @@ def _derive_path_summary_numpy(
         if tradable_path is not None:
             raise ValueError("tradable_path-aware unified OHLCVA value is not implemented")
         return _derive_unified_path_summary_numpy(values)
-    values = _legacy_entry_relative_path_numpy(values, price_anchor=price_anchor)
+    if semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        values = _legacy_entry_relative_path_numpy(values, price_anchor=price_anchor)
     forward_days = int(values.shape[1])
     high_ret = values[:, :, 1].astype(np.float64, copy=False)
     low_ret = values[:, :, 2].astype(np.float64, copy=False)
@@ -3639,7 +4396,10 @@ def _derive_path_summary_numpy(
     worst_low_so_far = np.minimum.accumulate(low_ret, axis=1)
     pre_exit_drawdown = np.maximum(-worst_low_so_far, 0.0)
     day = np.arange(forward_days, dtype=np.float64)
-    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+    if semantic in {
+        PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+        PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+    }:
         if path_value_growth_multiplier is None:
             multiplier = np.full_like(close_ret, 1.0 - float(PATH_VALUE_V3_TRANSACTION_COST))
         else:
@@ -3680,6 +4440,19 @@ def _derive_path_summary_numpy(
     best_exit_close = close_ret[row, best_idx]
     best_pre_exit_drawdown = pre_exit_drawdown[row, best_idx]
     best_value = candidate[row, best_idx]
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        has_legal_exit = np.isfinite(best_value)
+        choose_cash = has_legal_exit & (best_value <= 0.0)
+        best_exit_close = np.where(choose_cash, 0.0, best_exit_close)
+        best_pre_exit_drawdown = np.where(choose_cash, 0.0, best_pre_exit_drawdown)
+        best_value = np.where(choose_cash, 0.0, best_value)
+        best_exit_day = np.where(choose_cash, 0.0, best_idx.astype(np.float64) + 1.0)
+        best_exit_close = np.where(has_legal_exit, best_exit_close, np.nan)
+        best_pre_exit_drawdown = np.where(has_legal_exit, best_pre_exit_drawdown, np.nan)
+        best_value = np.where(has_legal_exit, best_value, np.nan)
+        best_exit_day = np.where(has_legal_exit, best_exit_day, np.nan)
+    else:
+        best_exit_day = best_idx + 1
     summary = np.column_stack(
         [
             max_ret,
@@ -3690,7 +4463,7 @@ def _derive_path_summary_numpy(
             drawdown_after_peak,
             time_above,
             time_below,
-            best_idx + 1,
+            best_exit_day,
             best_exit_close,
             best_pre_exit_drawdown,
             best_value,
@@ -3727,14 +4500,25 @@ def _realize_path_value_v2_plan_numpy(
     """
 
     semantic = _normalize_path_value_semantic(path_value_semantic)
-    values = _legacy_entry_relative_path_numpy(np.asarray(true_path, dtype=np.float32), price_anchor=price_anchor)
+    raw_values = np.asarray(true_path, dtype=np.float32)
+    values = (
+        raw_values
+        if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+        else _legacy_entry_relative_path_numpy(raw_values, price_anchor=price_anchor)
+    )
     summary = np.asarray(pred_summary, dtype=np.float64)
     horizon = int(forward_days)
     if values.ndim != 3 or int(values.shape[1]) != horizon or int(values.shape[2]) < 4:
         raise ValueError("true_path must have shape [batch, forward_days, >=4]")
-    columns = legacy_derived_path_summary_columns(horizon)
+    columns = legacy_derived_path_summary_columns(
+        horizon, path_value_semantic=semantic
+    )
     exit_day_idx = columns.index(f"best_exit_day_{horizon}d")
-    value_idx = columns.index(path_value_v2_column(horizon))
+    value_idx = columns.index(
+        value_column_for_path(
+            horizon, path_dim=4, path_value_semantic=semantic
+        )
+    )
     n = int(values.shape[0])
     if path_value_growth_multiplier is None:
         growth_multiplier = np.full(
@@ -3799,7 +4583,10 @@ def _realize_path_value_v2_plan_numpy(
     low_ret = values[:, :, 2].astype(np.float64, copy=False)
     pre_exit_drawdown = np.maximum(-np.minimum.accumulate(low_ret, axis=1), 0.0)
     day = np.arange(horizon, dtype=np.float64)
-    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+    if semantic in {
+        PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+        PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+    }:
         net_growth = (1.0 + close_ret) * growth_multiplier
         candidate = np.full_like(net_growth, -np.inf, dtype=np.float64)
         valid = np.isfinite(net_growth) & (net_growth > 0.0)
@@ -3833,6 +4620,14 @@ def _realize_path_value_v2_plan_numpy(
     for row in range(n):
         raw_day = summary[row, exit_day_idx]
         if not np.isfinite(raw_day):
+            continue
+        if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4 and float(raw_day) <= 0.0:
+            predicted_exit_day[row] = 0.0
+            realized_exit_day[row] = 0.0
+            realized_return[row] = 0.0
+            realized_drawdown[row] = 0.0
+            realized_value[row] = 0.0
+            realized_covered[row] = 1.0
             continue
         # The entry occurs on path day 1.  A-share T+1 makes path day 2 the
         # earliest legal exit even if the predicted path peaks immediately.
@@ -3870,7 +4665,10 @@ def _realize_path_value_v2_plan_numpy(
                 wait_penalty = float(PATH_VALUE_V2_WAITING_PENALTY) * math.sqrt(
                     float(actual + 1) / max(float(execution_days), 1.0)
                 )
-                if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3:
+                if semantic in {
+                    PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+                    PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+                }:
                     resolved_offset = min(actual, horizon - 1)
                     growth = (1.0 + gross_return) * float(growth_multiplier[row, resolved_offset])
                     realized_value[row] = np.float32(
@@ -3895,7 +4693,10 @@ def _realize_path_value_v2_plan_numpy(
                 realized_drawdown[row] = np.float32(1.0 - recovery)
                 realized_value[row] = np.float32(
                     math.log(max(recovery, PATH_VALUE_V3_EPSILON)) / max(float(execution_days), 1.0)
-                    if semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+                    if semantic in {
+                        PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+                        PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+                    }
                     else recovery - 1.0
                 )
             continue
@@ -3936,6 +4737,71 @@ def _entry_exit_ret_numpy(path: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     entry_ret = 0.50 * low_ret + 0.25 * open_ret + 0.25 * close_ret
     exit_ret = 0.50 * high_ret + 0.25 * open_ret + 0.25 * close_ret
     return entry_ret, exit_ret
+
+
+def _signal_close_capital_speed_curve_numpy(
+    path: np.ndarray,
+    growth_multiplier: np.ndarray,
+) -> np.ndarray:
+    values = np.asarray(path, dtype=np.float64)
+    if values.ndim != 3 or int(values.shape[2]) < 4:
+        raise ValueError("path must have shape [batch, horizon, >=4]")
+    multiplier = np.asarray(growth_multiplier, dtype=np.float64)
+    if multiplier.ndim == 1:
+        multiplier = multiplier.reshape(1, -1)
+    if multiplier.shape not in {values[:, :, 3].shape, (1, int(values.shape[1]))}:
+        raise ValueError("growth_multiplier shape does not match the path")
+    close = values[:, :, 3]
+    growth = (1.0 + close) * multiplier
+    days = np.arange(1, int(values.shape[1]) + 1, dtype=np.float64).reshape(1, -1)
+    curve = np.full_like(close, np.nan, dtype=np.float64)
+    valid = np.isfinite(growth) & (growth > 0.0)
+    curve[valid] = np.broadcast_to(np.log(growth) / days, curve.shape)[valid]
+    curve[:, : PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY - 1] = np.nan
+    return curve
+
+
+def _executable_capital_speed_v4_score_numpy(
+    executable_curve: np.ndarray,
+    *,
+    entry_filled: np.ndarray,
+    price_label_valid: np.ndarray,
+) -> np.ndarray:
+    curve = np.asarray(executable_curve, dtype=np.float64)
+    if curve.ndim != 2:
+        raise ValueError("executable_curve must be two-dimensional")
+    filled = np.asarray(entry_filled, dtype=bool).reshape(-1)
+    label_valid = np.asarray(price_label_valid, dtype=bool).reshape(-1)
+    if filled.shape[0] != curve.shape[0] or label_valid.shape[0] != curve.shape[0]:
+        raise ValueError("entry_filled and price_label_valid must match executable_curve rows")
+
+    finite = np.isfinite(curve)
+    has_legal_exit = finite.any(axis=1)
+    best = np.max(np.where(finite, curve, -np.inf), axis=1)
+    score = np.full(curve.shape[0], np.nan, dtype=np.float64)
+    valid_unfilled = label_valid & ~filled
+    valid_filled = label_valid & filled & has_legal_exit
+    score[valid_unfilled] = 0.0
+    score[valid_filled] = np.maximum(best[valid_filled], 0.0)
+    return score.astype(np.float32, copy=False)
+
+
+def _pearson_from_sufficient_statistics(
+    count: int,
+    sum_x: float,
+    sum_y: float,
+    sum_x2: float,
+    sum_y2: float,
+    sum_xy: float,
+) -> float:
+    n = int(count)
+    if n < 2:
+        return np.nan
+    numerator = float(sum_xy) - float(sum_x) * float(sum_y) / n
+    left = float(sum_x2) - float(sum_x) * float(sum_x) / n
+    right = float(sum_y2) - float(sum_y) * float(sum_y) / n
+    denominator = math.sqrt(max(left, 0.0) * max(right, 0.0))
+    return float(numerator / denominator) if denominator > 0.0 else np.nan
 
 
 def _unified_trade_candidates_numpy(path: np.ndarray) -> tuple[np.ndarray, dict[str, np.ndarray]]:
@@ -4139,15 +5005,35 @@ def _predict_split(
     uses_ohlcva_aux_path = bool(getattr(model, "uses_ohlcva_aux_path", False))
     output_path_fields = PATH_OHLCVA_FIELDS if output_path_dim >= 6 else PATH_OHLC_FIELDS
     if uses_direct_value:
-        summary_columns = derived_path_summary_columns(eval_forward_days, path_dim=4)
-        value_column = value_column_for_path(eval_forward_days, path_dim=4)
+        summary_columns = derived_path_summary_columns(
+            eval_forward_days,
+            path_dim=4,
+            path_value_semantic=path_value_semantic,
+        )
+        value_column = value_column_for_path(
+            eval_forward_days,
+            path_dim=4,
+            path_value_semantic=path_value_semantic,
+        )
     else:
         summary_columns = (
-            derived_path_summary_columns(dataset.forward_days, path_dim=output_path_dim)
+            derived_path_summary_columns(
+                dataset.forward_days,
+                path_dim=output_path_dim,
+                path_value_semantic=path_value_semantic,
+            )
             if uses_derived_path_value
             else list(dataset.path_summary_columns)
         )
-        value_column = value_column_for_path(dataset.forward_days, path_dim=output_path_dim) if uses_derived_path_value else str(dataset.value_column)
+        value_column = (
+            value_column_for_path(
+                dataset.forward_days,
+                path_dim=output_path_dim,
+                path_value_semantic=path_value_semantic,
+            )
+            if uses_derived_path_value
+            else str(dataset.value_column)
+        )
     candidate_complete_development = bool(
         str(split) == "development" and str(dataset.index_role) == "candidate"
     )
@@ -4193,6 +5079,8 @@ def _predict_split(
     ic_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
     topk_daily_rows_by_score: dict[str, list[dict[str, Any]]] = {"score": []}
     topk_candidate_rows: list[dict[str, Any]] = []
+    executable_ic_rows: list[dict[str, Any]] = []
+    gap_attribution_rows: list[dict[str, Any]] = []
     row_count = 0
     date_values: set[str] = set()
     target_sum = 0.0
@@ -4211,6 +5099,26 @@ def _predict_split(
     tradable_path_total = 0
     entry_filled_count = 0
     entry_candidate_count = 0
+    probability_batches: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    probability_row_count = 0
+    v4_close_weighted_error_sum = 0.0
+    v4_close_zero_weighted_error_sum = 0.0
+    v4_close_weight_sum = 0.0
+    v4_utility_error_sum = 0.0
+    v4_utility_zero_error_sum = 0.0
+    v4_utility_count = 0
+    v4_utility_stats = np.zeros(6, dtype=np.float64)
+    v4_increment_stats = np.zeros(6, dtype=np.float64)
+    v4_horizon_stats = np.zeros((int(dataset.forward_days), 7), dtype=np.float64)
+    v4_exit_regret_sum = 0.0
+    v4_exit_count = 0
+    v4_exit_exact_count = 0
+    v4_exit_within2_count = 0
+    v4_exit_within5_count = 0
+    v4_true_score_chunks: list[np.ndarray] = []
+    v4_predicted_score_chunks: list[np.ndarray] = []
+    v4_true_exit_counts = np.zeros(int(dataset.forward_days) + 1, dtype=np.int64)
+    v4_predicted_exit_counts = np.zeros(int(dataset.forward_days) + 1, dtype=np.int64)
     first_write = True
     model.eval()
 
@@ -4343,6 +5251,56 @@ def _predict_split(
                 for row in candidate_rows:
                     row["score_column"] = "score"
                 topk_candidate_rows.extend(candidate_rows)
+        if "executable_capital_speed_v4" in date_frame.columns:
+            executable_ic_rows.extend(
+                _daily_spearman(
+                    date_frame,
+                    score_col="score",
+                    target_col="executable_capital_speed_v4",
+                ).to_dict("records")
+            )
+            score_order = np.argsort(
+                -pd.to_numeric(date_frame["score"], errors="coerce").to_numpy(dtype=np.float64),
+                kind="mergesort",
+            )
+            proxy_order = np.argsort(
+                -pd.to_numeric(date_frame[value_column], errors="coerce").to_numpy(dtype=np.float64),
+                kind="mergesort",
+            )
+            executable_order = np.argsort(
+                -pd.to_numeric(
+                    date_frame["executable_capital_speed_v4"], errors="coerce"
+                ).to_numpy(dtype=np.float64),
+                kind="mergesort",
+            )
+            for current_top_k in sorted(set(int(value) for value in top_k)):
+                selected = score_order[:current_top_k]
+                proxy_top = set(proxy_order[:current_top_k].tolist())
+                executable_top = set(executable_order[:current_top_k].tolist())
+                selected_set = set(selected.tolist())
+                proxy_values = pd.to_numeric(
+                    date_frame.iloc[selected][value_column], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                executable_values = pd.to_numeric(
+                    date_frame.iloc[selected]["executable_capital_speed_v4"], errors="coerce"
+                ).to_numpy(dtype=np.float64)
+                gap_attribution_rows.append(
+                    {
+                        "trade_date": str(date_frame["trade_date"].iloc[0]),
+                        "top_k": int(current_top_k),
+                        "selected_proxy_mean": float(np.nanmean(proxy_values)),
+                        "selected_executable_mean": float(np.nanmean(executable_values)),
+                        "proxy_to_executable_loss": float(
+                            np.nanmean(proxy_values) - np.nanmean(executable_values)
+                        ),
+                        "true_proxy_top_overlap": float(
+                            len(selected_set & proxy_top) / max(current_top_k, 1)
+                        ),
+                        "true_executable_top_overlap": float(
+                            len(selected_set & executable_top) / max(current_top_k, 1)
+                        ),
+                    }
+                )
         pending_frames = []
         pending_date = None
 
@@ -4368,9 +5326,12 @@ def _predict_split(
         )
         entry_filled_np = batch["entry_filled"].numpy().astype(bool, copy=False)
         price_label_valid_np = batch["price_label_valid"].numpy().astype(bool, copy=False)
+        path_value_growth_multiplier_tensor = _batch_path_value_growth_multiplier(
+            batch, semantic=path_value_semantic
+        )
         path_value_growth_multiplier_np = (
-            batch["path_value_growth_multiplier"].numpy().astype(np.float32, copy=False)
-            if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
+            path_value_growth_multiplier_tensor.numpy().astype(np.float32, copy=False)
+            if path_value_growth_multiplier_tensor is not None
             else None
         )
         signal_date_idx_np = batch["date_idx"].numpy().astype(np.int64, copy=True)
@@ -4405,6 +5366,22 @@ def _predict_split(
         pred_aux_np = None
         with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
             out = model(x, symbol_idx=symbol_idx)
+        if bool(getattr(model, "uses_probabilistic_close", False)):
+            remaining = PATH_VALUE_V4_PROBABILITY_CALIBRATION_MAX_ROWS - probability_row_count
+            if remaining > 0:
+                take = min(int(remaining), int(target_path.shape[0]))
+                target_increment, _target_excursion = _ohlc_path_to_close_excursion_torch(
+                    target_path[:take, :, :4]
+                )
+                probability_batches.append(
+                    (
+                        target_increment.detach().float().cpu(),
+                        out["future_close_increment"][:take].detach().float().cpu(),
+                        out["future_close_scale"][:take].detach().float().cpu(),
+                        out["future_close_factor"][:take].detach().float().cpu(),
+                    )
+                )
+                probability_row_count += int(take)
         true_path_np = target_path.detach().float().cpu().numpy()
         if uses_direct_value:
             score_np = out["score"].detach().float().cpu().numpy()
@@ -4476,11 +5453,165 @@ def _predict_split(
                         np.abs(pred_field[finite_field] - true_field[finite_field]).sum()
                     )
                     price_path_abs_count[field_idx] += int(finite_field.sum())
+        if (
+            path_value_semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+            and not uses_direct_value
+            and int(pred_path_np.shape[1]) > 0
+        ):
+            if path_value_growth_multiplier_np is None:
+                raise ValueError("V4 evaluation requires the double-slippage growth multiplier")
+            true_close_log = np.log(
+                np.clip(1.0 + true_path_np[:, :, 3].astype(np.float64), 1.0e-8, None)
+            )
+            pred_close_log = np.log(
+                np.clip(1.0 + pred_path_np[:, :, 3].astype(np.float64), 1.0e-8, None)
+            )
+            close_mask = np.isfinite(true_close_log) & np.isfinite(pred_close_log)
+            horizon_weights = 1.0 / np.sqrt(
+                np.arange(1, int(dataset.forward_days) + 1, dtype=np.float64)
+            )
+            expanded_weights = np.broadcast_to(horizon_weights.reshape(1, -1), close_mask.shape)
+            v4_close_weighted_error_sum += float(
+                np.sum(np.abs(pred_close_log - true_close_log)[close_mask] * expanded_weights[close_mask])
+            )
+            v4_close_zero_weighted_error_sum += float(
+                np.sum(np.abs(true_close_log)[close_mask] * expanded_weights[close_mask])
+            )
+            v4_close_weight_sum += float(np.sum(expanded_weights[close_mask]))
+            for horizon in range(int(dataset.forward_days)):
+                horizon_mask = close_mask[:, horizon]
+                if not bool(horizon_mask.any()):
+                    continue
+                predicted_values = pred_close_log[horizon_mask, horizon]
+                target_values_horizon = true_close_log[horizon_mask, horizon]
+                v4_horizon_stats[horizon] += np.asarray(
+                    [
+                        int(horizon_mask.sum()),
+                        predicted_values.sum(),
+                        target_values_horizon.sum(),
+                        np.square(predicted_values).sum(),
+                        np.square(target_values_horizon).sum(),
+                        (predicted_values * target_values_horizon).sum(),
+                        np.abs(predicted_values - target_values_horizon).sum(),
+                    ],
+                    dtype=np.float64,
+                )
+            true_increment = np.diff(
+                np.concatenate([np.zeros((true_close_log.shape[0], 1)), true_close_log], axis=1),
+                axis=1,
+            )
+            pred_increment = np.diff(
+                np.concatenate([np.zeros((pred_close_log.shape[0], 1)), pred_close_log], axis=1),
+                axis=1,
+            )
+            increment_mask = np.isfinite(true_increment) & np.isfinite(pred_increment)
+            increment_target = true_increment[increment_mask]
+            increment_prediction = pred_increment[increment_mask]
+            v4_increment_stats += np.asarray(
+                [
+                    int(increment_mask.sum()),
+                    increment_prediction.sum(),
+                    increment_target.sum(),
+                    np.square(increment_prediction).sum(),
+                    np.square(increment_target).sum(),
+                    (increment_prediction * increment_target).sum(),
+                ],
+                dtype=np.float64,
+            )
+            true_curve = _signal_close_capital_speed_curve_numpy(
+                true_path_np[:, :, :4], path_value_growth_multiplier_np
+            )
+            pred_curve = _signal_close_capital_speed_curve_numpy(
+                pred_path_np[:, :, :4], path_value_growth_multiplier_np
+            )
+            zero_path = np.zeros_like(true_path_np[:, :, :4], dtype=np.float32)
+            zero_curve = _signal_close_capital_speed_curve_numpy(
+                zero_path, path_value_growth_multiplier_np
+            )
+            curve_mask = np.isfinite(true_curve) & np.isfinite(pred_curve)
+            true_curve_values = true_curve[curve_mask]
+            pred_curve_values = pred_curve[curve_mask]
+            zero_curve_values = zero_curve[curve_mask]
+            v4_utility_error_sum += float(
+                np.abs(pred_curve_values - true_curve_values).sum()
+            )
+            v4_utility_zero_error_sum += float(
+                np.abs(zero_curve_values - true_curve_values).sum()
+            )
+            v4_utility_count += int(curve_mask.sum())
+            v4_utility_stats += np.asarray(
+                [
+                    int(curve_mask.sum()),
+                    pred_curve_values.sum(),
+                    true_curve_values.sum(),
+                    np.square(pred_curve_values).sum(),
+                    np.square(true_curve_values).sum(),
+                    (pred_curve_values * true_curve_values).sum(),
+                ],
+                dtype=np.float64,
+            )
+            true_exit = true_summary_np[:, summary_columns.index(f"best_exit_day_{dataset.forward_days}d")]
+            predicted_exit = pred_summary_np[:, summary_columns.index(f"best_exit_day_{dataset.forward_days}d")]
+            true_score = true_summary_np[:, summary_columns.index(value_column)]
+            finite_true_scores = true_score[np.isfinite(true_score)].astype(
+                np.float32, copy=True
+            )
+            finite_predicted_scores = path_value_score_np[
+                np.isfinite(path_value_score_np)
+            ].astype(np.float32, copy=True)
+            v4_true_score_chunks.append(finite_true_scores)
+            v4_predicted_score_chunks.append(finite_predicted_scores)
+            for source, counts in (
+                (true_exit, v4_true_exit_counts),
+                (predicted_exit, v4_predicted_exit_counts),
+            ):
+                rounded = np.rint(source[np.isfinite(source)]).astype(np.int64)
+                legal = rounded[(rounded >= 0) & (rounded <= int(dataset.forward_days))]
+                counts += np.bincount(
+                    legal, minlength=int(dataset.forward_days) + 1
+                )[: int(dataset.forward_days) + 1]
+            exit_valid = np.isfinite(true_exit) & np.isfinite(predicted_exit) & np.isfinite(true_score)
+            if bool(exit_valid.any()):
+                valid_rows = np.flatnonzero(exit_valid)
+                planned = np.rint(predicted_exit[valid_rows]).astype(np.int64)
+                realized_utility = np.zeros(len(valid_rows), dtype=np.float64)
+                trading = planned > 0
+                if bool(trading.any()):
+                    clipped = np.clip(planned[trading], 2, int(dataset.forward_days)) - 1
+                    realized_utility[trading] = true_curve[valid_rows[trading], clipped]
+                finite_realized = np.isfinite(realized_utility)
+                valid_rows = valid_rows[finite_realized]
+                planned = planned[finite_realized]
+                realized_utility = realized_utility[finite_realized]
+                regret = np.maximum(
+                    true_score[valid_rows].astype(np.float64) - realized_utility,
+                    0.0,
+                )
+                true_day = np.rint(true_exit[valid_rows]).astype(np.int64)
+                distance = np.abs(planned - true_day)
+                v4_exit_regret_sum += float(regret.sum())
+                v4_exit_count += int(len(valid_rows))
+                v4_exit_exact_count += int((distance == 0).sum())
+                v4_exit_within2_count += int((distance <= 2).sum())
+                v4_exit_within5_count += int((distance <= 5).sum())
         rows: dict[str, Any] = {
             "trade_date": trade_dates,
             "symbol": symbols,
             "score": score_np,
         }
+        if path_value_semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+            executable_path = _legacy_entry_relative_path_numpy(
+                true_path_np[:, :, :4], price_anchor=dataset.price_anchor
+            )
+            executable_curve = _signal_close_capital_speed_curve_numpy(
+                executable_path,
+                path_value_growth_multiplier_np,
+            )
+            rows["executable_capital_speed_v4"] = _executable_capital_speed_v4_score_numpy(
+                executable_curve,
+                entry_filled=entry_filled_np,
+                price_label_valid=price_label_valid_np,
+            )
         if "score" not in out and residual_np is not None:
             rows["path_value_score"] = path_value_score_np
             rows["residual_score"] = residual_np
@@ -4530,7 +5661,16 @@ def _predict_split(
                 chunk = pd.concat([chunk, pd.DataFrame(path_rows)], axis=1, copy=False)
             chunk.to_csv(pred_path, index=False, mode="w" if first_write else "a", header=first_write, encoding="utf-8-sig")
             first_write = False
-        metric_frame = chunk[["trade_date", "symbol", "score", *[f"true_{c}" for c in summary_columns], *realized_cols]].copy()
+        metric_columns = [
+            "trade_date",
+            "symbol",
+            "score",
+            *[f"true_{c}" for c in summary_columns],
+            *realized_cols,
+        ]
+        if "executable_capital_speed_v4" in chunk.columns:
+            metric_columns.append("executable_capital_speed_v4")
+        metric_frame = chunk[metric_columns].copy()
         for optional_score in ["path_value_score", "residual_score"]:
             if optional_score in chunk.columns:
                 metric_frame[optional_score] = chunk[optional_score].to_numpy(copy=False)
@@ -4624,6 +5764,170 @@ def _predict_split(
         "tradable_path_rate": float(tradable_path_count / tradable_path_total) if tradable_path_total else np.nan,
         "prediction_csv": prediction_csv,
     }
+    if probability_batches:
+        probability_metrics = _lowrank_student_t_calibration_metrics(
+            torch.cat([item[0] for item in probability_batches], dim=0),
+            torch.cat([item[1] for item in probability_batches], dim=0),
+            torch.cat([item[2] for item in probability_batches], dim=0),
+            torch.cat([item[3] for item in probability_batches], dim=0),
+            sample_count=16,
+            seed=DEFAULT_SEED,
+        )
+        metrics["probability_calibration"] = probability_metrics
+        metrics["probability_calibration_scope"] = {
+            "candidate_rows": int(probability_row_count),
+            "maximum_candidate_rows": int(
+                PATH_VALUE_V4_PROBABILITY_CALIBRATION_MAX_ROWS
+            ),
+            "selection": "first_candidate_rows_in_deterministic_index_order",
+        }
+        metrics.update(
+            {
+                f"probability_{key}": value
+                for key, value in probability_metrics.items()
+                if isinstance(value, (int, float))
+            }
+        )
+    if (
+        path_value_semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+        and not uses_direct_value
+    ):
+        true_scores = (
+            np.concatenate(v4_true_score_chunks)
+            if v4_true_score_chunks
+            else np.asarray([], dtype=np.float32)
+        )
+        predicted_scores = (
+            np.concatenate(v4_predicted_score_chunks)
+            if v4_predicted_score_chunks
+            else np.asarray([], dtype=np.float32)
+        )
+
+        def score_distribution(values: np.ndarray) -> dict[str, Any]:
+            finite = np.asarray(values, dtype=np.float64)
+            if not finite.size:
+                return {"count": 0}
+            return {
+                "count": int(finite.size),
+                "positive_rate": float(np.mean(finite > 0.0)),
+                "zero_rate": float(np.mean(finite == 0.0)),
+                "minimum": float(np.min(finite)),
+                "q01": float(np.quantile(finite, 0.01)),
+                "q10": float(np.quantile(finite, 0.10)),
+                "median": float(np.median(finite)),
+                "q90": float(np.quantile(finite, 0.90)),
+                "q99": float(np.quantile(finite, 0.99)),
+                "maximum": float(np.max(finite)),
+            }
+
+        def exit_distribution(counts: np.ndarray) -> dict[str, Any]:
+            total = int(counts.sum())
+            return {
+                "count": total,
+                "cash_rate": float(counts[0] / max(total, 1)),
+                "d2_rate": float(counts[2] / max(total, 1)),
+                "d60_rate": float(counts[int(dataset.forward_days)] / max(total, 1)),
+                "nonzero_days": int(np.count_nonzero(counts[1:])),
+                "counts": {
+                    ("cash" if day == 0 else f"d{day}"): int(count)
+                    for day, count in enumerate(counts.tolist())
+                    if count
+                },
+            }
+
+        close_mae = float(
+            v4_close_weighted_error_sum / max(v4_close_weight_sum, 1.0e-12)
+        )
+        close_zero_mae = float(
+            v4_close_zero_weighted_error_sum / max(v4_close_weight_sum, 1.0e-12)
+        )
+        utility_mae = float(v4_utility_error_sum / max(v4_utility_count, 1))
+        utility_zero_mae = float(v4_utility_zero_error_sum / max(v4_utility_count, 1))
+        horizon_metrics: list[dict[str, Any]] = []
+        for horizon, stats in enumerate(v4_horizon_stats, start=1):
+            count, sum_pred, sum_true, sum_pred2, sum_true2, sum_cross, abs_error = stats
+            horizon_metrics.append(
+                {
+                    "day": int(horizon),
+                    "count": int(count),
+                    "bias": float((sum_pred - sum_true) / max(count, 1.0)),
+                    "mae": float(abs_error / max(count, 1.0)),
+                    "correlation": _pearson_from_sufficient_statistics(
+                        int(count), sum_pred, sum_true, sum_pred2, sum_true2, sum_cross
+                    ),
+                }
+            )
+        metrics.update(
+            {
+                "v4_weighted_close_path_mae": close_mae,
+                "v4_zero_return_weighted_close_path_mae": close_zero_mae,
+                "v4_close_path_beats_zero": bool(close_mae < close_zero_mae),
+                "v4_utility_curve_mae": utility_mae,
+                "v4_zero_return_utility_curve_mae": utility_zero_mae,
+                "v4_utility_curve_beats_zero": bool(utility_mae < utility_zero_mae),
+                "v4_utility_curve_correlation": _pearson_from_sufficient_statistics(
+                    int(v4_utility_stats[0]),
+                    *[float(value) for value in v4_utility_stats[1:]],
+                ),
+                "v4_daily_increment_correlation": _pearson_from_sufficient_statistics(
+                    int(v4_increment_stats[0]),
+                    *[float(value) for value in v4_increment_stats[1:]],
+                ),
+                "v4_exit_regret_mean": float(
+                    v4_exit_regret_sum / max(v4_exit_count, 1)
+                ),
+                "v4_exit_day_exact_rate": float(
+                    v4_exit_exact_count / max(v4_exit_count, 1)
+                ),
+                "v4_exit_day_within_2_rate": float(
+                    v4_exit_within2_count / max(v4_exit_count, 1)
+                ),
+                "v4_exit_day_within_5_rate": float(
+                    v4_exit_within5_count / max(v4_exit_count, 1)
+                ),
+                "v4_close_horizon_metrics": horizon_metrics,
+                "v4_true_score_distribution": score_distribution(true_scores),
+                "v4_predicted_score_distribution": score_distribution(
+                    predicted_scores
+                ),
+                "v4_true_exit_distribution": exit_distribution(v4_true_exit_counts),
+                "v4_predicted_exit_distribution": exit_distribution(
+                    v4_predicted_exit_counts
+                ),
+            }
+        )
+    if path_value_semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        executable_ic = pd.DataFrame(executable_ic_rows)
+        metrics.update(
+            {
+                "executable_capital_speed_rank_ic_mean": float(
+                    executable_ic["rank_ic"].mean()
+                )
+                if not executable_ic.empty
+                else np.nan,
+                "executable_capital_speed_rank_ic_positive_day_rate": float(
+                    (executable_ic["rank_ic"] > 0.0).mean()
+                )
+                if not executable_ic.empty
+                else np.nan,
+                "gap_attribution": (
+                    pd.DataFrame(gap_attribution_rows)
+                    .groupby("top_k", as_index=False, sort=True)[
+                        [
+                            "selected_proxy_mean",
+                            "selected_executable_mean",
+                            "proxy_to_executable_loss",
+                            "true_proxy_top_overlap",
+                            "true_executable_top_overlap",
+                        ]
+                    ]
+                    .mean()
+                    .to_dict("records")
+                    if gap_attribution_rows
+                    else []
+                ),
+            }
+        )
     if candidate_complete_development:
         contract_hashes = sorted(
             {
@@ -4815,6 +6119,9 @@ class TrainConfig:
     evaluation_mode: str = EVALUATION_MODE_STANDARD
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC
+    path_value_temperature: float = 0.0
+    v4_gradient_budget: bool = False
+    gradient_conflict_profile: str = V4_GRADIENT_CONFLICT_NONE
     rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK
     rank_batch_size: int = 512
     rank_interval: int = 4
@@ -5122,7 +6429,11 @@ def _evaluate_development_loss(
     amp_enabled: bool,
     path_value_gradient_profile: str,
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
+    path_value_temperature: float = PATH_VALUE_V2_TEMPERATURE,
     rank_training_profile: str,
+    value_loss_weight: float | None = None,
+    rank_loss_weight: float | None = None,
+    utility_curve_loss_weight: float | None = None,
 ) -> dict[str, Any]:
     """Evaluate the configured mathematical objective over every supervised row."""
 
@@ -5168,10 +6479,8 @@ def _evaluate_development_loss(
                 if batch.get("y_tradable_path") is not None
                 else None
             )
-            path_value_growth_multiplier = (
-                batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
-                if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
-                else None
+            path_value_growth_multiplier = _batch_path_value_growth_multiplier(
+                batch, semantic=path_value_semantic, device=device
             )
             x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, date_idx, symbol_idx = _batch_to_device(
                 batch, device
@@ -5191,15 +6500,27 @@ def _evaluate_development_loss(
                     path_weight=float(config.path_loss_weight),
                     path_loss_profile=str(config.path_loss_profile),
                     summary_weight=float(config.summary_loss_weight),
-                    value_weight=float(config.value_loss_weight),
-                    rank_weight=float(config.rank_loss_weight),
+                    value_weight=float(
+                        config.value_loss_weight
+                        if value_loss_weight is None
+                        else value_loss_weight
+                    ),
+                    rank_weight=float(
+                        config.rank_loss_weight
+                        if rank_loss_weight is None
+                        else rank_loss_weight
+                    ),
                     richer_weight=float(config.richer_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
                     price_delta_weight=float(config.price_delta_loss_weight),
                     va_level_weight=float(config.va_level_loss_weight),
                     va_delta_weight=float(config.va_delta_loss_weight),
                     geometry_weight=float(config.geometry_loss_weight),
-                    utility_curve_weight=float(config.utility_curve_loss_weight),
+                    utility_curve_weight=float(
+                        config.utility_curve_loss_weight
+                        if utility_curve_loss_weight is None
+                        else utility_curve_loss_weight
+                    ),
                     turnover_level_weight=float(config.turnover_level_loss_weight),
                     turnover_delta_weight=float(config.turnover_delta_loss_weight),
                     residual_weight=float(config.residual_score_weight),
@@ -5210,6 +6531,7 @@ def _evaluate_development_loss(
                     path_value_gradient_profile=path_value_gradient_profile,
                     path_value_semantic=path_value_semantic,
                     path_value_growth_multiplier=path_value_growth_multiplier,
+                    path_value_temperature=path_value_temperature,
                     rank_training_profile=rank_training_profile,
                     y_tradable_path=y_tradable_path,
                     return_tensor_parts=True,
@@ -5263,6 +6585,16 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     path_value_gradient_profile = _normalize_path_value_gradient_profile(config.path_value_gradient_profile)
     path_value_semantic = _normalize_path_value_semantic(config.path_value_semantic)
     rank_training_profile = _normalize_rank_training_profile(config.rank_training_profile)
+    gradient_conflict_profile = str(config.gradient_conflict_profile or V4_GRADIENT_CONFLICT_NONE).strip().lower()
+    if gradient_conflict_profile not in V4_GRADIENT_CONFLICT_PROFILES:
+        raise ValueError(
+            f"gradient_conflict_profile must be one of {V4_GRADIENT_CONFLICT_PROFILES}"
+        )
+    if (
+        bool(config.v4_gradient_budget)
+        or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
+    ) and path_value_semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        raise ValueError("V4 gradient controls require signal_close_capital_speed_v4")
     development_selector = str(
         config.early_stopping_metric or EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
     ).strip().lower()
@@ -5316,6 +6648,41 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         max_samples=int(config.max_samples_per_split),
         input_channel_profile=str(config.input_channel_profile),
     )
+    configured_temperature = float(config.path_value_temperature)
+    temperature_diagnostics: dict[str, Any]
+    if path_value_semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        if configured_temperature < 0.0:
+            raise ValueError("path_value_temperature must be non-negative")
+        if configured_temperature > 0.0:
+            path_value_temperature = max(
+                configured_temperature, PATH_VALUE_V4_TEMPERATURE_FLOOR
+            )
+            temperature_diagnostics = {
+                "source": "configured",
+                "temperature": float(path_value_temperature),
+            }
+        else:
+            _write_json(
+                progress_path,
+                {"status": "deriving_v4_temperature", "updated_at": _now()},
+            )
+            temperature_diagnostics = {
+                "source": "positive_training_target_iqr",
+                **_v4_temperature_from_targets(
+                    train_ds.path_value_targets(path_value_semantic=path_value_semantic)
+                ),
+            }
+            path_value_temperature = float(temperature_diagnostics["temperature"])
+    else:
+        path_value_temperature = (
+            configured_temperature
+            if configured_temperature > 0.0
+            else PATH_VALUE_V2_TEMPERATURE
+        )
+        temperature_diagnostics = {
+            "source": "legacy_constant" if configured_temperature <= 0.0 else "configured",
+            "temperature": float(path_value_temperature),
+        }
     expected_input_dim = int(development_contract_binding.get("expected_input_dim", 0) or 0)
     if evaluation_mode == EVALUATION_MODE_DEVELOPMENT and expected_input_dim > 0:
         if int(train_ds.input_dim) != expected_input_dim:
@@ -5397,6 +6764,21 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             raise ValueError("structured turnover model requires relative_turnover_supplement")
         if str(train_ds.price_anchor) != "today_close":
             raise ValueError("structured OHLC reconstruction requires price_anchor=today_close")
+    if path_value_semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        if str(train_ds.price_anchor) != "today_close":
+            raise ValueError("signal_close_capital_speed_v4 requires price_anchor=today_close")
+        if str(config.model_type) not in (CLOSE_EXCURSION_MODEL_TYPES | DIRECT_VALUE_MODEL_TYPES):
+            raise ValueError(
+                "signal_close_capital_speed_v4 training requires a close/excursion model "
+                "or the isolated direct-value probe"
+            )
+    elif str(config.model_type) in CLOSE_EXCURSION_MODEL_TYPES:
+        raise ValueError("close/excursion models require signal_close_capital_speed_v4")
+    if (
+        bool(config.v4_gradient_budget)
+        or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
+    ) and str(config.model_type) not in CLOSE_EXCURSION_MODEL_TYPES:
+        raise ValueError("V4 gradient controls are only valid for close/excursion path models")
     model = SequencePathModel(
         input_dim=train_ds.input_dim,
         hidden_dim=int(config.hidden_dim),
@@ -5423,6 +6805,23 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         raise ValueError("global_tail_512 currently requires a price-only derived path-value model")
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+    effective_value_loss_weight = float(config.value_loss_weight)
+    effective_rank_loss_weight = float(config.rank_loss_weight)
+    effective_utility_curve_loss_weight = float(config.utility_curve_loss_weight)
+    gradient_budget_initialized = not bool(config.v4_gradient_budget)
+    gradient_budget_diagnostics: dict[str, Any] = {
+        "enabled": bool(config.v4_gradient_budget),
+        "max_fraction_per_auxiliary": float(V4_AUXILIARY_GRADIENT_MAX_FRACTION),
+        "initial": None,
+        "snapshots": [],
+        "gradient_conflict_profile": gradient_conflict_profile,
+    }
+    shared_encoder_parameters = (
+        _v4_shared_encoder_parameters(model)
+        if bool(config.v4_gradient_budget)
+        or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
+        else []
+    )
     best_val_ic = -1e9
     best_development_loss = float("inf")
     best_epoch = 0
@@ -5503,10 +6902,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 if batch.get("y_tradable_path") is not None
                 else None
             )
-            path_value_growth_multiplier = (
-                batch["path_value_growth_multiplier"].to(device, non_blocking=device.type == "cuda")
-                if path_value_semantic == PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3
-                else None
+            path_value_growth_multiplier = _batch_path_value_growth_multiplier(
+                batch, semantic=path_value_semantic, device=device
             )
             x, y_path, y_ohlcva_path, y_richer_path, y_summary, y_activity_path, date_idx, symbol_idx = _batch_to_device(batch, device)
             target_path = y_ohlcva_path if uses_ohlcva_path and y_ohlcva_path is not None else y_path
@@ -5526,11 +6923,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     path_weight=float(config.path_loss_weight),
                     path_loss_profile=str(config.path_loss_profile),
                     summary_weight=float(config.summary_loss_weight),
-                    value_weight=float(config.value_loss_weight),
+                    value_weight=float(effective_value_loss_weight),
                     rank_weight=(
                         0.0
                         if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
-                        else float(config.rank_loss_weight)
+                        else float(effective_rank_loss_weight)
                     ),
                     richer_weight=float(config.richer_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
@@ -5538,7 +6935,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     va_level_weight=float(config.va_level_loss_weight),
                     va_delta_weight=float(config.va_delta_loss_weight),
                     geometry_weight=float(config.geometry_loss_weight),
-                    utility_curve_weight=float(config.utility_curve_loss_weight),
+                    utility_curve_weight=float(effective_utility_curve_loss_weight),
                     turnover_level_weight=float(config.turnover_level_loss_weight),
                     turnover_delta_weight=float(config.turnover_delta_loss_weight),
                     residual_weight=float(config.residual_score_weight),
@@ -5549,12 +6946,106 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     path_value_gradient_profile=path_value_gradient_profile,
                     path_value_semantic=path_value_semantic,
                     path_value_growth_multiplier=path_value_growth_multiplier,
+                    path_value_temperature=path_value_temperature,
                     rank_training_profile=RANK_TRAINING_PROFILE_LOCAL_CHUNK,
                     y_tradable_path=y_tradable_path,
                     return_tensor_parts=True,
                 )
+            effective_weights = {
+                "path_loss": float(config.path_loss_weight),
+                "summary_loss": float(config.summary_loss_weight),
+                "richer_loss": float(config.richer_loss_weight),
+                "price_delta_loss": float(config.price_delta_loss_weight),
+                "va_level_loss": float(config.va_level_loss_weight),
+                "va_delta_loss": float(config.va_delta_loss_weight),
+                "geometry_loss": float(config.geometry_loss_weight),
+                "turnover_level_loss": float(config.turnover_level_loss_weight),
+                "turnover_delta_loss": float(config.turnover_delta_loss_weight),
+                "residual_penalty": float(config.residual_penalty_weight),
+                "value_loss": float(effective_value_loss_weight),
+                "utility_curve_loss": float(effective_utility_curve_loss_weight),
+                "rank_loss": (
+                    0.0
+                    if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
+                    else float(effective_rank_loss_weight)
+                ),
+            }
+            if not gradient_budget_initialized:
+                initial_main, initial_utility, initial_rank = _v4_weighted_objectives(
+                    parts, weights=effective_weights
+                )
+                initial_diagnostics, _initial_vectors = _v4_gradient_diagnostics(
+                    initial_main,
+                    initial_utility,
+                    initial_rank,
+                    shared_encoder_parameters,
+                )
+                budget_scales = _v4_gradient_budget_scales(initial_diagnostics)
+                effective_value_loss_weight *= float(budget_scales["utility"])
+                effective_utility_curve_loss_weight *= float(budget_scales["utility"])
+                effective_rank_loss_weight *= float(budget_scales["rank"])
+                effective_weights["value_loss"] = float(effective_value_loss_weight)
+                effective_weights["utility_curve_loss"] = float(
+                    effective_utility_curve_loss_weight
+                )
+                effective_weights["rank_loss"] = float(effective_rank_loss_weight)
+                gradient_budget_diagnostics["initial"] = {
+                    **initial_diagnostics,
+                    "utility_scale": float(budget_scales["utility"]),
+                    "rank_scale": float(budget_scales["rank"]),
+                    "effective_value_loss_weight": float(effective_value_loss_weight),
+                    "effective_utility_curve_loss_weight": float(
+                        effective_utility_curve_loss_weight
+                    ),
+                    "effective_rank_loss_weight": float(effective_rank_loss_weight),
+                }
+                gradient_budget_initialized = True
+            main_objective, utility_objective, rank_objective = _v4_weighted_objectives(
+                parts, weights=effective_weights
+            )
+            if bool(config.v4_gradient_budget):
+                loss = main_objective + utility_objective + rank_objective
+                parts["loss"] = loss
+            current_batch_number = int(batch_count) + 1
+            snapshot_bucket = min(
+                10,
+                int(math.floor(10.0 * current_batch_number / max(total_batches, 1))),
+            )
+            recorded_buckets = {
+                int(row["bucket"])
+                for row in list(gradient_budget_diagnostics["snapshots"])
+            }
+            needs_gradient_vectors = bool(
+                gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
+                or (
+                    bool(config.v4_gradient_budget)
+                    and snapshot_bucket not in recorded_buckets
+                )
+            )
+            pcgrad_vector: torch.Tensor | None = None
+            if needs_gradient_vectors:
+                snapshot, task_vectors = _v4_gradient_diagnostics(
+                    main_objective,
+                    utility_objective,
+                    rank_objective,
+                    shared_encoder_parameters,
+                )
+                if bool(config.v4_gradient_budget) and snapshot_bucket not in recorded_buckets:
+                    gradient_budget_diagnostics["snapshots"].append(
+                        {
+                            "epoch": int(epoch),
+                            "batch": int(current_batch_number),
+                            "total_batches": int(total_batches),
+                            "bucket": int(snapshot_bucket),
+                            **snapshot,
+                        }
+                    )
+                if gradient_conflict_profile == V4_GRADIENT_CONFLICT_PCGRAD:
+                    pcgrad_vector = _v4_pcgrad_vector(task_vectors)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
+            if pcgrad_vector is not None:
+                _assign_flat_gradient(shared_encoder_parameters, pcgrad_vector)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
@@ -5579,6 +7070,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         amp_enabled=amp_enabled,
                         path_value_gradient_profile=path_value_gradient_profile,
                         path_value_semantic=path_value_semantic,
+                        path_value_temperature=path_value_temperature,
                         rank_loss_weight=float(config.rank_loss_weight),
                         residual_score_weight=float(config.residual_score_weight),
                     )
@@ -5624,6 +7116,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     amp_enabled=amp_enabled,
                     path_value_gradient_profile=path_value_gradient_profile,
                     path_value_semantic=path_value_semantic,
+                    path_value_temperature=path_value_temperature,
                     rank_loss_weight=float(config.rank_loss_weight),
                     residual_score_weight=float(config.residual_score_weight),
                 )
@@ -5645,6 +7138,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 amp_enabled=amp_enabled,
                 path_value_gradient_profile=path_value_gradient_profile,
                 path_value_semantic=path_value_semantic,
+                path_value_temperature=path_value_temperature,
                 residual_score_weight=float(config.residual_score_weight),
             )
             mining_seconds = float(time.perf_counter() - mining_started_at)
@@ -5720,6 +7214,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "optimizer_step_count": int(optimizer_step_count),
                         "best_validation_rank_ic_mean": best_val_ic,
                         "checkpoint_policy": "best_validation_rank_ic",
+                        "path_value_temperature": float(path_value_temperature),
+                        "v4_gradient_diagnostics": gradient_budget_diagnostics,
                     },
                     best_path,
                 )
@@ -5753,7 +7249,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 amp_enabled=amp_enabled,
                 path_value_gradient_profile=path_value_gradient_profile,
                 path_value_semantic=path_value_semantic,
+                path_value_temperature=path_value_temperature,
                 rank_training_profile=rank_training_profile,
+                value_loss_weight=effective_value_loss_weight,
+                rank_loss_weight=effective_rank_loss_weight,
+                utility_curve_loss_weight=effective_utility_curve_loss_weight,
             )
             # Older callers and test doubles return only VALIDATION_LOSS_KEYS.  Keep
             # that contract valid by deriving the price-only selector locally when
@@ -5808,6 +7308,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "fixed_final_development_epoch"
                         if fixed_final_epoch else f"best_{development_selector}"
                     ),
+                    "path_value_temperature": float(path_value_temperature),
+                    "v4_gradient_diagnostics": gradient_budget_diagnostics,
                     "is_best": bool(improved),
                 }
             )
@@ -5849,6 +7351,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "fixed_final_development_epoch"
                         if fixed_final_epoch else f"best_{development_selector}"
                     ),
+                    "path_value_temperature": float(path_value_temperature),
+                    "v4_gradient_diagnostics": gradient_budget_diagnostics,
                 }
                 checkpoint_payload[f"best_{development_selector}"] = float(
                     best_development_loss
@@ -5878,6 +7382,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "status": "epoch_completed",
                 "epoch": int(epoch),
                 "checkpoint_policy": "final_epoch",
+                "path_value_temperature": float(path_value_temperature),
+                "v4_gradient_diagnostics": gradient_budget_diagnostics,
                 "oos_evaluated": False,
                 "updated_at": _now(),
             }
@@ -5933,6 +7439,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "best_optimizer_step": int(best_optimizer_step),
                 "optimizer_step_count": int(optimizer_step_count),
                 "checkpoint_policy": "final_epoch",
+                "path_value_temperature": float(path_value_temperature),
+                "v4_gradient_diagnostics": gradient_budget_diagnostics,
             },
             best_path,
         )
@@ -6001,16 +7509,32 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     baseline_summary = _find_latest_baseline_summary(baseline_forward_days)
     active_path_dim = 6 if bool(getattr(model, "uses_ohlcva_path", False)) else 4
     active_value_column = (
-        value_column_for_path(int(config.direct_value_horizon), path_dim=4)
+        value_column_for_path(
+            int(config.direct_value_horizon),
+            path_dim=4,
+            path_value_semantic=path_value_semantic,
+        )
         if uses_direct_value
-        else value_column_for_path(train_ds.forward_days, path_dim=active_path_dim)
+        else value_column_for_path(
+            train_ds.forward_days,
+            path_dim=active_path_dim,
+            path_value_semantic=path_value_semantic,
+        )
         if bool(getattr(model, "uses_derived_path_value", False))
         else train_ds.value_column
     )
     active_summary_columns = (
-        derived_path_summary_columns(int(config.direct_value_horizon), path_dim=4)
+        derived_path_summary_columns(
+            int(config.direct_value_horizon),
+            path_dim=4,
+            path_value_semantic=path_value_semantic,
+        )
         if uses_direct_value
-        else derived_path_summary_columns(train_ds.forward_days, path_dim=active_path_dim)
+        else derived_path_summary_columns(
+            train_ds.forward_days,
+            path_dim=active_path_dim,
+            path_value_semantic=path_value_semantic,
+        )
         if bool(getattr(model, "uses_derived_path_value", False))
         else list(train_ds.path_summary_columns)
     )
@@ -6055,6 +7579,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "value_column": str(active_value_column),
         "path_value_gradient_profile": path_value_gradient_profile,
         "path_value_semantic": path_value_semantic,
+        "path_value_temperature": float(path_value_temperature),
+        "path_value_temperature_diagnostics": temperature_diagnostics,
         "rank_training_profile": rank_training_profile,
         "path_summary_columns": list(active_summary_columns),
         "direct_value_horizon": int(config.direct_value_horizon) if uses_direct_value else 0,
@@ -6143,6 +7669,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "uses_ohlcva_path": bool(getattr(model, "uses_ohlcva_path", False)),
             "uses_ohlcva_aux_path": bool(getattr(model, "uses_ohlcva_aux_path", False)),
             "uses_structured_turnover": bool(getattr(model, "uses_structured_turnover", False)),
+            "uses_close_excursion": bool(getattr(model, "uses_close_excursion", False)),
+            "uses_probabilistic_close": bool(
+                getattr(model, "uses_probabilistic_close", False)
+            ),
             "path_dim": int(getattr(model, "path_dim", 4)),
             "richer_path_dim": int(getattr(model, "richer_path_dim", 4)),
             "richer_path_fields": list(train_ds.richer_path_fields) if bool(getattr(model, "uses_richer_path", False)) else [],
@@ -6155,10 +7685,12 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "summary": float(config.summary_loss_weight),
             "richer": float(config.richer_loss_weight) if bool(getattr(model, "uses_richer_path", False)) else 0.0,
             "price_delta": float(config.price_delta_loss_weight),
-            "value": float(config.value_loss_weight),
+            "value": float(effective_value_loss_weight),
+            "requested_value": float(config.value_loss_weight),
             "path_value_gradient_profile": path_value_gradient_profile,
             "path_value_semantic": path_value_semantic,
-            "rank": float(config.rank_loss_weight),
+            "rank": float(effective_rank_loss_weight),
+            "requested_rank": float(config.rank_loss_weight),
             "rank_training_profile": rank_training_profile,
             "rank_batch_size": int(config.rank_batch_size),
             "rank_interval": int(config.rank_interval),
@@ -6167,7 +7699,8 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "va_level": float(config.va_level_loss_weight),
             "va_delta": float(config.va_delta_loss_weight),
             "geometry": float(config.geometry_loss_weight),
-            "utility_curve": float(config.utility_curve_loss_weight),
+            "utility_curve": float(effective_utility_curve_loss_weight),
+            "requested_utility_curve": float(config.utility_curve_loss_weight),
             "turnover_level": float(config.turnover_level_loss_weight),
             "turnover_delta": float(config.turnover_delta_loss_weight),
         },
@@ -6176,6 +7709,33 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "exit_argmax_domain": [PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY, int(train_ds.forward_days)],
             "tie_break": "earliest_legal_day",
         },
+        "signal_close_capital_speed_v4_contract": (
+            {
+                "semantic": PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+                "proxy_anchor": "signal_day_close",
+                "actual_execution_entry": "next_trading_day_open",
+                "cost_scenario": "double_slippage_proportional",
+                "cash_option": True,
+                "cash_score": 0.0,
+                "score_domain": [0.0, "positive_infinity"],
+                "prediction_days": [2, int(train_ds.forward_days)],
+                "execution_deferral_is_not_a_prediction_target": True,
+                "student_t_degrees_of_freedom": (
+                    float(PATH_VALUE_V4_STUDENT_T_DF)
+                    if bool(getattr(model, "uses_probabilistic_close", False))
+                    else None
+                ),
+                "student_t_factor_rank": (
+                    int(PATH_VALUE_V4_STUDENT_T_RANK)
+                    if bool(getattr(model, "uses_probabilistic_close", False))
+                    else None
+                ),
+            }
+            if path_value_semantic
+            == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+            else None
+        ),
+        "v4_gradient_diagnostics": gradient_budget_diagnostics,
         "ranking_contract": {
             "profile": rank_training_profile,
             "path_and_rank_batches_separate": bool(
@@ -6310,6 +7870,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "gru_ohlcva_path_value",
             "gru_ohlcva_aux_path_value",
             "gru_structured_joint_turnover",
+            "gru_structured_close_excursion",
+            "gru_structured_close_excursion_student_t",
             "gru_richer_path_value",
             "gru_richer_path_value_symbol",
             "gru_direct_value",
@@ -6375,6 +7937,26 @@ def _build_parser() -> argparse.ArgumentParser:
         default=PATH_VALUE_DEFAULT_SEMANTIC,
         choices=PATH_VALUE_SEMANTICS,
         help="Economic path-value target used for value/rank supervision and planned exits.",
+    )
+    train.add_argument(
+        "--path-value-temperature",
+        type=float,
+        default=0.0,
+        help=(
+            "Smooth value-envelope temperature. Zero derives V4 from 10% of the "
+            "positive training-target IQR and keeps the legacy constant for V2/V3."
+        ),
+    )
+    train.add_argument(
+        "--v4-gradient-budget",
+        action="store_true",
+        help="Cap V4 utility and rank encoder gradients at 20% of the main path gradient.",
+    )
+    train.add_argument(
+        "--gradient-conflict-profile",
+        default=V4_GRADIENT_CONFLICT_NONE,
+        choices=V4_GRADIENT_CONFLICT_PROFILES,
+        help="Optional conditional PCGrad treatment for the shared encoder.",
     )
     train.add_argument(
         "--rank-training-profile",
@@ -6498,6 +8080,9 @@ def main(argv: list[str] | None = None) -> int:
         evaluation_mode=str(args.evaluation_mode),
         path_value_gradient_profile=str(args.path_value_gradient_profile),
         path_value_semantic=str(args.path_value_semantic),
+        path_value_temperature=float(args.path_value_temperature),
+        v4_gradient_budget=bool(args.v4_gradient_budget),
+        gradient_conflict_profile=str(args.gradient_conflict_profile),
         rank_training_profile=str(args.rank_training_profile),
         rank_batch_size=int(args.rank_batch_size),
         rank_interval=int(args.rank_interval),

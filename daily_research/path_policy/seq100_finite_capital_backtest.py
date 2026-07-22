@@ -129,13 +129,21 @@ class ForecastBook:
         symbol_idx: np.ndarray,
         score: np.ndarray,
         planned_day: np.ndarray,
+        selection_mask: np.ndarray | None = None,
     ) -> None:
         symbols = np.asarray(symbol_idx, dtype=np.int32)
         scores = np.asarray(score, dtype=np.float64)
         planned = np.asarray(planned_day, dtype=np.int16)
+        eligible = (
+            np.ones(len(symbols), dtype=bool)
+            if selection_mask is None
+            else np.asarray(selection_mask, dtype=bool)
+        )
         if not (symbols.ndim == scores.ndim == planned.ndim == 1):
             raise ValueError("forecast day arrays must be one-dimensional")
-        if not (len(symbols) == len(scores) == len(planned)):
+        if eligible.ndim != 1 or not (
+            len(symbols) == len(scores) == len(planned) == len(eligible)
+        ):
             raise ValueError("forecast day arrays have different lengths")
         if int(date_idx) in self.days:
             raise ValueError(f"duplicate forecast date_idx={date_idx} for {self.profile}")
@@ -143,6 +151,7 @@ class ForecastBook:
         symbols = symbols[order]
         scores = scores[order]
         planned = planned[order]
+        eligible = eligible[order]
         if len(symbols) > 1 and bool(np.any(symbols[1:] == symbols[:-1])):
             raise ValueError(f"duplicate symbol forecast on date_idx={date_idx}")
         if not bool(np.isfinite(scores).all()):
@@ -151,7 +160,9 @@ class ForecastBook:
             raise ValueError(f"illegal planned day on date_idx={date_idx}")
         # Candidate rows are symbol sorted; stable descending score therefore gives
         # symbol order as the deterministic tie-break.
-        top_positions = np.argsort(-scores, kind="mergesort")[: self.top_k]
+        eligible_positions = np.flatnonzero(eligible)
+        top_local = np.argsort(-scores[eligible_positions], kind="mergesort")[: self.top_k]
+        top_positions = eligible_positions[top_local]
         top3 = tuple(int(value) for value in symbols[top_positions])
         self.days[int(date_idx)] = ForecastDay(
             symbol_idx=symbols,
@@ -790,12 +801,20 @@ def simulate_portfolio(
         raise ValueError("slots must be positive")
     if cost_scenario not in {"base", "double_slippage"}:
         raise ValueError(f"unknown cost scenario: {cost_scenario}")
-    selection_counts = {len(day.top3_symbol_idx) for day in book.days.values()}
-    if len(selection_counts) != 1:
-        raise ValueError(f"forecast book has inconsistent daily selection counts: {selection_counts}")
-    daily_selection_count = int(next(iter(selection_counts)))
-    if daily_selection_count <= 0:
-        raise ValueError("forecast book daily selection count must be positive")
+    if not book.days:
+        raise ValueError("forecast book must contain at least one signal date")
+    selection_sizes = [len(day.top3_symbol_idx) for day in book.days.values()]
+    selection_counts = set(selection_sizes)
+    if any(count < 0 or count > int(book.top_k) for count in selection_counts):
+        raise ValueError(f"forecast book contains an invalid daily selection count: {selection_counts}")
+    # Preserve the established explicitly-truncated Top-K contract when every
+    # day has the same positive width.  V4 cash filtering may vary by day (and
+    # may select nobody), in which case book.top_k remains the configured cap.
+    daily_selection_count = (
+        int(next(iter(selection_counts)))
+        if len(selection_counts) == 1 and int(next(iter(selection_counts))) > 0
+        else int(book.top_k)
+    )
     guard = memory_guard or _MemoryGuard()
     multiplier = (
         1.0
@@ -1083,6 +1102,13 @@ def simulate_portfolio(
     counters["turnover_to_starting_cash"] = float(
         counters["turnover_notional_cny"] / float(starting_cash)
     )
+    counters["cash_filtered_signal_days"] = int(
+        sum(len(day.top3_symbol_idx) < int(book.top_k) for day in book.days.values())
+    )
+    counters["configured_top_k"] = int(book.top_k)
+    counters["selected_name_count_min"] = int(min(selection_sizes))
+    counters["selected_name_count_max"] = int(max(selection_sizes))
+    counters["selected_name_count_mean"] = float(np.mean(selection_sizes))
     equity_frame = pd.DataFrame(equity_rows)
     trade_frame = pd.DataFrame(trade_rows)
     metric, annual = _simulation_metric(

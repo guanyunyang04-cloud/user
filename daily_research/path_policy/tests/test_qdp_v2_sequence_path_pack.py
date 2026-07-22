@@ -1198,6 +1198,220 @@ def test_path_value_v2_realized_plan_reports_exit_timing_regret_and_defers_suspe
 def test_multi_horizon_ohlc_summary_loss_uses_available_windows() -> None:
     assert _summary_loss_windows(20) == (5, 10, 20)
     assert _summary_loss_windows(60) == (5, 10, 20, 40, 60)
+
+
+def test_signal_close_capital_speed_v4_ignores_open_and_allows_cash() -> None:
+    path = np.zeros((2, 6, 4), dtype=np.float32)
+    path[0, :, 3] = [-0.01, 0.03, 0.02, 0.04, 0.03, 0.02]
+    path[0, :, 1] = np.maximum(path[0, :, 3], 0.0)
+    path[0, :, 2] = np.minimum(path[0, :, 3], 0.0)
+    path[1, :, 3] = -0.05
+    path[1, :, 1] = 0.0
+    path[1, :, 2] = -0.05
+    growth = np.ones((2, 6), dtype=np.float32)
+
+    original = sequence_training._derive_path_summary_numpy(
+        path,
+        price_anchor="today_close",
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=growth,
+    )
+    changed = path.copy()
+    changed[:, :, 0] = np.linspace(-0.90, 2.0, 6, dtype=np.float32)
+    modified = sequence_training._derive_path_summary_numpy(
+        changed,
+        price_anchor="today_close",
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=growth,
+    )
+
+    assert np.array_equal(original[:, 8:], modified[:, 8:])
+    assert original[0, 8] == 2.0
+    assert np.isclose(original[0, -1], np.log1p(0.03) / 2.0)
+    assert original[1, 8] == 0.0
+    assert original[1, -1] == 0.0
+
+
+def test_signal_close_capital_speed_v4_preserves_missing_labels() -> None:
+    missing_numpy = np.full((1, 6, 4), np.nan, dtype=np.float32)
+    numpy_summary = sequence_training._derive_path_summary_numpy(
+        missing_numpy,
+        price_anchor="today_close",
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=np.ones((1, 6), dtype=np.float32),
+    )
+    assert np.isnan(numpy_summary[0, 8])
+    assert np.isnan(numpy_summary[0, -1])
+
+    missing_torch = torch.full((1, 6, 4), float("nan"), dtype=torch.float32)
+    torch_summary = sequence_training._derive_path_summary_torch(
+        missing_torch,
+        price_anchor="today_close",
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=torch.ones((1, 6), dtype=torch.float32),
+        smooth_value=False,
+    )
+    assert bool(torch.isnan(torch_summary[0, 8]))
+    assert bool(torch.isnan(torch_summary[0, -1]))
+
+
+def test_executable_capital_speed_v4_distinguishes_missing_from_unfilled() -> None:
+    curve = np.asarray(
+        [
+            [0.01, 0.02, np.nan],
+            [0.03, 0.01, np.nan],
+            [np.nan, np.nan, np.nan],
+            [np.nan, np.nan, np.nan],
+        ],
+        dtype=np.float64,
+    )
+    score = sequence_training._executable_capital_speed_v4_score_numpy(
+        curve,
+        entry_filled=np.asarray([True, False, True, False]),
+        price_label_valid=np.asarray([True, True, False, True]),
+    )
+    assert np.isclose(score[0], 0.02)
+    assert score[1] == 0.0
+    assert np.isnan(score[2])
+    assert score[3] == 0.0
+
+
+def test_signal_close_capital_speed_v4_cost_day_and_tie_break() -> None:
+    path = np.zeros((1, 6, 4), dtype=np.float32)
+    path[0, 1, 3] = np.expm1(0.02)
+    path[0, 3, 3] = np.expm1(0.04)
+    path[0, :, 1] = np.maximum(path[0, :, 3], 0.0)
+    growth = np.full((1, 6), np.exp(-0.004), dtype=np.float32)
+    summary = sequence_training._derive_path_summary_numpy(
+        path,
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=growth,
+    )
+
+    assert summary[0, 8] == 4.0
+    assert np.isclose(summary[0, -1], (0.04 - 0.004) / 4.0, atol=1.0e-7)
+
+    tied_path = np.zeros((1, 6, 4), dtype=np.float32)
+    tied_path[0, 1, 3] = 1.0
+    tied_path[0, 3, 3] = 3.0
+    tied_path[0, :, 1] = tied_path[0, :, 3]
+    no_cost = np.ones((1, 6), dtype=np.float32)
+    tied = sequence_training._derive_path_summary_numpy(
+        tied_path,
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=no_cost,
+    )
+    assert tied[0, 8] == 2.0
+    assert np.isclose(tied[0, -1], np.log(2.0) / 2.0, atol=1.0e-7)
+
+
+def test_signal_close_capital_speed_v4_prefers_faster_lower_total_return() -> None:
+    path = np.zeros((1, 20, 4), dtype=np.float32)
+    path[0, 1, 3] = 0.03
+    path[0, 19, 3] = 0.20
+    path[0, :, 1] = np.maximum(path[0, :, 3], 0.0)
+    summary = sequence_training._derive_path_summary_numpy(
+        path,
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=np.ones((1, 20), dtype=np.float32),
+    )
+    assert summary[0, 8] == 2.0
+    assert summary[0, 9] == np.float32(0.03)
+
+
+def test_close_excursion_representation_reconstructs_close_high_low_legally() -> None:
+    _geometry, source = sequence_training._structured_geometry_to_ohlc_torch(
+        torch.randn(4, 12, 4)
+    )
+    increment, excursion = sequence_training._ohlc_path_to_close_excursion_torch(source)
+    reconstructed = sequence_training._close_excursion_to_ohlc_torch(increment, excursion)
+
+    assert torch.allclose(reconstructed[:, :, 1:], source[:, :, 1:], atol=2.0e-5, rtol=2.0e-5)
+    assert bool(
+        torch.all(
+            reconstructed[:, :, 1]
+            >= torch.maximum(reconstructed[:, :, 0], reconstructed[:, :, 3])
+        )
+    )
+    assert bool(
+        torch.all(
+            reconstructed[:, :, 2]
+            <= torch.minimum(reconstructed[:, :, 0], reconstructed[:, :, 3])
+        )
+    )
+
+
+def test_joint_student_t_lowrank_is_positive_definite_and_deterministic() -> None:
+    mean = torch.zeros(2, 5)
+    scale = torch.full((2, 5), 0.02)
+    factor = torch.randn(2, 5, 4) * 0.01
+    covariance = sequence_training._lowrank_student_t_covariance(scale, factor)
+    eigenvalues = torch.linalg.eigvalsh(covariance)
+    assert bool(torch.all(eigenvalues > 0.0))
+
+    first = sequence_training._sample_lowrank_student_t(
+        mean, scale, factor, sample_count=32, seed=7
+    )
+    second = sequence_training._sample_lowrank_student_t(
+        mean, scale, factor, sample_count=32, seed=7
+    )
+    assert first.shape == (32, 2, 5)
+    assert torch.equal(first, second)
+
+
+def test_joint_student_t_nll_and_calibration_are_finite() -> None:
+    mean = torch.zeros(8, 6, requires_grad=True)
+    scale = torch.full((8, 6), 0.03, requires_grad=True)
+    factor = (torch.randn(8, 6, 4) * 0.01).requires_grad_()
+    target = torch.randn(8, 6) * 0.02
+    loss = sequence_training._lowrank_student_t_nll(target, mean, scale, factor)
+    loss.backward()
+    assert torch.isfinite(loss)
+    assert mean.grad is not None and bool(torch.isfinite(mean.grad).all())
+    metrics = sequence_training._lowrank_student_t_calibration_metrics(
+        target.detach(), mean.detach(), scale.detach(), factor.detach(), sample_count=4
+    )
+    for key in ("multivariate_nll", "crps", "pit_mean", "coverage_50", "coverage_80", "coverage_95"):
+        assert np.isfinite(float(metrics[key]))
+
+
+def test_v4_temperature_and_gradient_controls_obey_registered_caps() -> None:
+    diagnostics = sequence_training._v4_temperature_from_targets(
+        np.asarray([-1.0, 0.0, 0.01, 0.02, 0.03, np.nan])
+    )
+    assert diagnostics["positive_count"] == 3
+    assert np.isclose(diagnostics["temperature"], 0.001)
+
+    scales = sequence_training._v4_gradient_budget_scales(
+        {"main_norm": 10.0, "utility_norm": 5.0, "rank_norm": 1.0}
+    )
+    assert np.isclose(scales["utility"], 0.4)
+    assert scales["rank"] == 1.0
+
+    projected = sequence_training._v4_pcgrad_vector(
+        {
+            "main": torch.tensor([1.0, 0.0]),
+            "utility": torch.tensor([-1.0, 1.0]),
+            "rank": torch.tensor([0.0, 0.0]),
+        }
+    )
+    assert bool(torch.isfinite(projected).all())
+    assert float(torch.dot(projected, torch.tensor([1.0, 0.0]))) >= 0.0
+
+
+def test_v4_smooth_cash_envelope_distributes_gradient_without_hard_argmax() -> None:
+    path = torch.zeros(1, 6, 4, requires_grad=True)
+    path.data[0, 1:, 3] = torch.tensor([0.03, 0.04, 0.05, 0.06, 0.07])
+    value = sequence_training._derive_path_summary_torch(
+        path,
+        smooth_value=True,
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_growth_multiplier=torch.ones(1, 6),
+        path_value_temperature=0.01,
+    )[0, -1]
+    value.backward()
+    legal_close_grad = path.grad[0, 1:, 3]
+    assert int((torch.abs(legal_close_grad) > 0.0).sum()) > 1
     assert _summary_loss_windows(60, include_full_horizon=False) == (5, 10, 20, 40)
 
     true_path = torch.zeros(4, 60, 4)

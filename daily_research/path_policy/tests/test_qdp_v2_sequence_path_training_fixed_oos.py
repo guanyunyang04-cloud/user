@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
+import torch
 
 from daily_research.path_policy import qdp_v2_sequence_path_training as training
 
@@ -163,6 +164,124 @@ def _config(
         early_stopping_min_delta=0.0,
         evaluation_mode=evaluation_mode,
     )
+
+
+def _make_v4_tiny_pack(tmp_path: Path) -> Path:
+    manifest_path = _build_tiny_pack(tmp_path, fixed_oos=True)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    date_count = len(manifest.get("symbol_values", [])) + 2
+    symbol_count = len(manifest["symbol_values"])
+    turnover = np.zeros((date_count, symbol_count, 2), dtype=np.float32)
+    turnover[:, :, 0] = 0.1
+    turnover[:, :, 1] = 0.2
+    log_turnover = np.full((date_count, symbol_count), 0.2, dtype=np.float32)
+    turnover_baseline = np.full((date_count, symbol_count), 0.1, dtype=np.float32)
+    manifest["feature_channels"]["turnover"] = {
+        **_write_float32(tmp_path / "turnover.float32.dat", turnover),
+        "columns": ["log_turnover_pct", "turnover_relative_to_past20"],
+    }
+    manifest["normalization"]["turnover"] = {
+        "mean": [0.0, 0.0],
+        "std": [1.0, 1.0],
+    }
+    manifest["relative_turnover_supplement"] = {
+        "log_turnover_pct": _write_float32(
+            tmp_path / "log_turnover_pct.float32.dat", log_turnover
+        ),
+        "past20_positive_median": _write_float32(
+            tmp_path / "turnover_baseline.float32.dat", turnover_baseline
+        ),
+    }
+    manifest["label_arrays"]["future_ohlc_path"]["price_anchor"] = "today_close"
+    manifest["execution_cost_contract"] = {
+        "contract": "a_share_round_trip_cashflow_v1",
+        "lot_size": 100,
+        "commission_bps": 3.0,
+        "minimum_commission_cny": 5.0,
+        "transfer_fee_bps": 0.1,
+        "slippage_bps": 7.0,
+        "stress_slippage_multiplier": 2.0,
+        "stamp_tax_schedule": [
+            {"effective_date": "1900-01-01", "stamp_tax_bps": 10.0}
+        ],
+    }
+    from daily_research.path_policy.seq100_fold_contract import compute_fold_training_contract
+
+    manifest["fold_training_contract"] = compute_fold_training_contract(manifest)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    return manifest_path
+
+
+@pytest.mark.parametrize(
+    ("model_type", "rank_weight", "probabilistic"),
+    [
+        ("gru_structured_close_excursion", 0.0, False),
+        ("gru_structured_close_excursion", 0.15, False),
+        ("gru_structured_close_excursion_student_t", 0.15, True),
+    ],
+)
+def test_v4_close_excursion_training_runs_end_to_end(
+    tmp_path: Path,
+    model_type: str,
+    rank_weight: float,
+    probabilistic: bool,
+) -> None:
+    manifest_path = _make_v4_tiny_pack(tmp_path)
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        run_tag=f"v4_{model_type}_{rank_weight}",
+        model_type=model_type,
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER,
+        path_value_semantic=training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_value_gradient_profile=training.PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+        path_loss_weight=0.35,
+        summary_loss_weight=0.20,
+        value_loss_weight=0.15,
+        rank_loss_weight=rank_weight,
+        geometry_loss_weight=0.10,
+        utility_curve_loss_weight=0.05,
+        turnover_level_loss_weight=0.02,
+        turnover_delta_loss_weight=0.01,
+        v4_gradient_budget=True,
+        top_k=(1, 2, 3),
+    )
+
+    summary = training.train_sequence_path_model(config)
+
+    assert summary["checkpoint_policy"] == "final_epoch"
+    assert summary["signal_close_capital_speed_v4_contract"]["cash_option"] is True
+    assert summary["model"]["uses_probabilistic_close"] is probabilistic
+    assert summary["v4_gradient_diagnostics"]["initial"] is not None
+    assert len(summary["v4_gradient_diagnostics"]["snapshots"]) >= 1
+    checkpoint = torch.load(summary["best_checkpoint"], map_location="cpu", weights_only=False)
+    assert checkpoint["path_value_temperature"] >= training.PATH_VALUE_V4_TEMPERATURE_FLOOR
+    assert checkpoint["v4_gradient_diagnostics"]["initial"] is not None
+
+
+def test_v4_direct_rank_probe_has_no_path_or_strategy_head(tmp_path: Path) -> None:
+    manifest_path = _make_v4_tiny_pack(tmp_path)
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        run_tag="v4_direct_rank_probe",
+        model_type="gru_direct_value",
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER,
+        direct_value_horizon=2,
+        path_value_semantic=training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+        path_loss_weight=0.0,
+        summary_loss_weight=0.0,
+        value_loss_weight=0.0,
+        rank_loss_weight=1.0,
+        v4_gradient_budget=False,
+        top_k=(1, 2, 3),
+    )
+
+    summary = training.train_sequence_path_model(config)
+
+    assert summary["model"]["uses_direct_value"] is True
+    assert summary["model"]["uses_close_excursion"] is False
+    assert summary["loss_weights"]["path"] == 0.0
+    assert summary["loss_weights"]["value"] == 0.0
+    assert summary["loss_weights"]["rank"] == 1.0
 
 
 def _install_fake_evaluation(monkeypatch: pytest.MonkeyPatch) -> list[str]:
