@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-22T14:01:32+08:00",
+  "files": {
+    "capital_annual_metrics.csv": {
+      "size": 2911074,
+      "sha256": "aa4a440de4d08a66b2440907ad613fcfeb200fc8d4fab8241c69cea762fa3a28"
+    },
+    "capital_metrics.csv": {
+      "size": 1877952,
+      "sha256": "d2126fb1f8301ca58b09e5d9e341b2339b28c853b3d0a4df568d92963f2c2fa4"
+    },
+    "comparison_summary.json": {
+      "size": 39947,
+      "sha256": "3aed13ed37be39f6b022c858d4c9e76ac46b6aca5a763c45f6a88f795978354b"
+    },
+    "comparison_summary.md": {
+      "size": 1587,
+      "sha256": "0763f1ae7120868542bea08f76505d025121f00639aeb7f3758cc69e3186e019"
+    },
+    "contract.json": {
+      "size": 2664,
+      "sha256": "b29df4c152ef976cf9b6fa8b1e6a41625c5e3a721cc29c50f7907e36f89baa6e"
+    },
+    "evaluation.json": {
+      "size": 243,
+      "sha256": "c974f3ede87c08bf8e19cf6210ed0a744b449b1162a38e8a9c2a25c603bd83e3"
+    },
+    "fold_contracts.json": {
+      "size": 474308,
+      "sha256": "98e15cb14d3481ea22dc15448e39661ad104e1d8107f557e9e54fe2f90275643"
+    },
+    "registry_additions.json": {
+      "size": 1772,
+      "sha256": "ebebae05b2b834633b6d9a5e41a09a020405c376f9a6ef83b338a98bceb3e7b4"
+    },
+    "strategy_stability.csv": {
+      "size": 141719,
+      "sha256": "f1e57f35f52afca95eb3cfd8ea24ed96fcb4bd54db9fc7150200b71bf9c29930"
+    },
+    "unit_time_alpha.csv": {
+      "size": 811859,
+      "sha256": "5cbcad05f0662e41f85f420eb7bfa33d0fa590d903465839c5e6ecc1623a8fe5"
+    },
+    "vintage_metrics.csv": {
+      "size": 6154,
+      "sha256": "2685cc21a94d959bafd5863637f2210fb5b7eddaf196ca69677395191a1c98de"
+    },
+    "winner_equity.csv": {
+      "size": 225915,
+      "sha256": "b7a6e404b2c4c8fb3d973fc8aeac44d5df566ae7379fdbd8f7e12a2632860ea6"
+    },
+    "winner_trades.csv": {
+      "size": 28378,
+      "sha256": "7a792bd256600d653f74e981223bb8aa0b7467071939d1346a23ae213b33abe3"
+    }
+  },
+  "bundle_sha256": "961092297c0f37f2886fed0f7f4a478a5cd2b140e510ed77530f2be6e6d2de1f"
+}

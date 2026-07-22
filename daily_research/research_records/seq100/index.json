@@ -10,6 +10,7 @@
     {"id": "legal_structured_2023_2025", "status": "completed", "path": "daily_research/research_records/seq100/legal_structured_2023_2025/research_summary.json"},
     {"id": "legal_structured_2026", "status": "completed_confirmation", "path": "daily_research/research_records/seq100/legal_structured_2026/comparison_summary.json"},
     {"id": "l35v2_2023_2025", "status": "selected_baseline_evidence", "path": "daily_research/research_records/seq100/l35v2_2023_2025/summary.json"},
+    {"id": "l35v2_sixfold_2020_2025", "status": "completed_historical_durability", "path": "daily_research/research_records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"},
     {"id": "l35v2_2026", "status": "completed_confirmation", "path": "daily_research/research_records/seq100/l35v2_2026/comparison_summary.json"},
     {"id": "l35v2_2026_vintages", "status": "completed_diagnostic", "path": "daily_research/research_records/seq100/l35v2_2026_vintages/comparison_summary.json"},
     {"id": "latest_signal_20260721", "status": "completed_read_only_signal", "path": "daily_research/research_records/seq100/latest_signal_20260721/audit.json"},
@@ -19,7 +20,6 @@
     {"id": "l35v3", "status": "retired", "path": "daily_research/research_records/seq100/l35v3_retired/artifact.json"}
   ],
   "active_studies": [
-    "daily_research/studies/l35v2_sixfold_2020_2025.json",
     "daily_research/studies/l35v2_batch1024.json"
   ]
 }

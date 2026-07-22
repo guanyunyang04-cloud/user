@@ -2,7 +2,7 @@
   "schema_version": 1,
   "registry_id": "seq100_model_registry_v1",
   "selected_research_baseline": "structured_joint_turnover_180x35_v2",
-  "selection_scope": "2023-2025 double-slippage continuous-account evidence; 2026 is confirmation only",
+  "selection_scope": "selected on 2023-2025 double-slippage continuous-account evidence; 2020-2022 are historical durability confirmation and 2026 is time-out confirmation",
   "bundles": [
     {
       "model_id": "legal_flat_baseline",
@@ -83,6 +83,36 @@
       "checkpoint_sha256": "6fe5e8c4e470774aeeed75f03601c25c5c661f549c906e84de66420f4151a3d5",
       "training_summary": "daily_research/models/seq100/structured_joint_turnover_100x32/2026/training_summary.json",
       "training_summary_sha256": "02d94757f82017450ca3b98c0b6a3e6d5683a66cde1fcb6aaabee12d09528aa7"
+    },
+    {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "year": 2020,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2020/checkpoint.pt",
+      "checkpoint_sha256": "023063b9804f56f9026b50b2be1a4ad9f7d383931d93b684a0c322705bf48cb3",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2020/training_summary.json",
+      "training_summary_sha256": "90824b83f9b832b30ef2834596840aaa24e9f7e25b1b41097c6ae5f0d500ebbe"
+    },
+    {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "year": 2021,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2021/checkpoint.pt",
+      "checkpoint_sha256": "7d5b6aa4c49a1aab9c321304e2b2668b90acfed8f647a42e13918602530b8306",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2021/training_summary.json",
+      "training_summary_sha256": "e17b96b83e612730ba9e1686872740154f6798822508aee4be36d3a87beda0f6"
+    },
+    {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "year": 2022,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "checkpoint": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2022/checkpoint.pt",
+      "checkpoint_sha256": "3af46e6373f36d470d30d9fe037a2bc60e21f677eb617e455f7589cb779bcded",
+      "training_summary": "daily_research/models/seq100/structured_joint_turnover_180x35_v2/2022/training_summary.json",
+      "training_summary_sha256": "e6f196565b692de2b8e0854976f1c68dc119e6459457b1bd729273bed8142cc6"
     },
     {
       "model_id": "structured_joint_turnover_180x35_v2",

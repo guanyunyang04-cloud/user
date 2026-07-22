@@ -329,6 +329,39 @@ def _qdp_source_manifest_bindings(
 def qdp_source_freshness(manifest: Mapping[str, Any]) -> dict[str, Any]:
     if str(manifest.get("artifact_type", "") or "") != "qdp_v2_sequence_path_pack":
         return {"status": "not_applicable", "errors": []}
+    policy = dict(manifest.get("qdp_source_freshness_policy", {}) or {})
+    if str(policy.get("mode", "") or "") == "immutable_research_pack_v1":
+        errors: list[str] = []
+        try:
+            # A materialized research pack remains a valid historical snapshot
+            # after QDP's active datasets advance.  Its own source manifest,
+            # indexes, and backing-file inventory must still be byte/identity
+            # identical; this is deliberately stronger than a blanket stale
+            # source waiver.
+            from daily_research.path_policy.seq100_fold_contract import (
+                validate_source_view_provenance,
+            )
+
+            validate_source_view_provenance(manifest)
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            errors.append(f"immutable_pack_material_invalid:{exc}")
+        attachments = list(policy.get("attachments", []) or [])
+        if not attachments:
+            errors.append("immutable_pack_attachments_missing")
+        for number, raw in enumerate(attachments):
+            item = dict(raw or {})
+            path = Path(str(item.get("path", "") or "")).resolve()
+            expected = str(item.get("sha256", "") or "")
+            if not path.is_file():
+                errors.append(f"immutable_pack_attachment_missing:{number}")
+            elif not expected or _file_sha256(path) != expected:
+                errors.append(f"immutable_pack_attachment_hash_mismatch:{number}")
+        return {
+            "status": "stale_qdp_source" if errors else "ok",
+            "mode": "immutable_research_pack_v1",
+            "active_qdp_identity_required": False,
+            "errors": errors,
+        }
     bindings = dict(manifest.get("qdp_source_manifests", {}) or {})
     if not bindings:
         return {

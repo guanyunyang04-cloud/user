@@ -20,7 +20,6 @@ STUDY_ROOT = WORKSPACE_ROOT / "daily_research/studies"
 QDP_ACTIVE = WORKSPACE_ROOT / "quant_data_platform/data/qdp_v2/active/active.json"
 BASE_PACK = WORKSPACE_ROOT / "daily_research/data/research_store/seq100_current/pack/manifest.json"
 ACTIVE_STUDIES = {
-    "l35v2-sixfold": STUDY_ROOT / "l35v2_sixfold_2020_2025.json",
     "l35v2-batch1024": STUDY_ROOT / "l35v2_batch1024.json",
 }
 

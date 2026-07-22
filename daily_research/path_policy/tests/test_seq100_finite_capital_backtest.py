@@ -241,3 +241,38 @@ def test_single_daily_selection_is_reported_as_top1() -> None:
     assert metric["daily_selection_count"] == 1
     assert "daily_top1" in metric["portfolio_contract"]
     assert "no_top2" in metric["portfolio_contract"]
+
+
+def test_forecast_book_retains_the_requested_top_k() -> None:
+    book = ForecastBook("structured_joint_turnover", top_k=2)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0, 1, 2]),
+        score=np.asarray([0.1, 0.3, 0.2]),
+        planned_day=np.asarray([7, 8, 9]),
+    )
+    assert book.days[0].top3_symbol_idx == (1, 2)
+
+
+def test_forecast_book_rejects_nonpositive_top_k() -> None:
+    try:
+        ForecastBook("structured_joint_turnover", top_k=0)
+    except ValueError as exc:
+        assert "top_k must be positive" in str(exc)
+    else:
+        raise AssertionError("nonpositive top_k was accepted")
+
+
+def test_simulation_accepts_an_explicit_calendar_year_set() -> None:
+    _metric, _equity, _trades, annual = simulate_portfolio(
+        market=_market(),
+        book=_book(),
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=1,
+        calendar_years=(2023,),
+    )
+    assert [int(row["year"]) for row in annual] == [2023]

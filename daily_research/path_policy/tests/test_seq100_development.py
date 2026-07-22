@@ -81,11 +81,9 @@ def test_compact_status_and_verify_use_only_stable_surfaces(tmp_path: Path, monk
     assert result["research_record_count"] == 1
 
 
-def test_paused_study_contracts_preserve_resume_order() -> None:
-    sixfold = json.loads(development.ACTIVE_STUDIES["l35v2-sixfold"].read_text(encoding="utf-8"))
+def test_only_batch1024_remains_paused_after_sixfold_completion() -> None:
+    assert set(development.ACTIVE_STUDIES) == {"l35v2-batch1024"}
     batch = json.loads(development.ACTIVE_STUDIES["l35v2-batch1024"].read_text(encoding="utf-8"))
-    assert sixfold["completed_folds"] == [2023, 2024, 2025]
-    assert sixfold["pending_folds"] == [2020, 2021, 2022]
-    assert sixfold["training"]["epochs"] == 1
-    assert batch["status"] == "paused_pending_sixfold"
+    assert batch["status"] == "paused_ready"
+    assert "l35v2_sixfold_2020_2025" in batch["sixfold_evidence"]
     assert "gradient_accumulation_as_fake_1024" in batch["forbidden_shortcuts"]

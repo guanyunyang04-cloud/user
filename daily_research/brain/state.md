@@ -3,12 +3,14 @@
 Updated: `2026-07-22`
 
 - Current baseline: `structured_joint_turnover_180x35_v2`.
-- Registered vintages: Legal flat, Structured 100×32, and L35V2 for 2023–2026.
+- Registered vintages: Legal flat and Structured 100×32 for 2023–2026; L35V2
+  for 2020–2026.
 - Current compact evidence: `daily_research/research_records/seq100/index.json`.
-- Paused work:
-  - train/evaluate L35V2 development folds for 2020, 2021, and 2022, then
-    summarize 2020–2025;
-  - after that, test the same L35V2 recipe with true batch 1024.
+- Completed durability evidence: L35V2 folds for 2020–2025. All six Rank ICs
+  are positive (`0.0838–0.1136`). Top1/1 + D14 maximizes six-year growth but
+  has a negative 2022; Top3/3 + D42 is the highest-growth strategy with all six
+  years positive; Top3/3 model-plan is the strongest autonomous exit.
+- Paused work: test the same L35V2 recipe with true batch 1024.
 - Retired routes: global-tail, intraday inputs, Capital Speed V3, bounded training
   windows, Q-curve branches, historical alpha-v2/path20 frameworks, and all old
   frontend/execution code.

@@ -23,9 +23,9 @@ and layout-compatibility tests are then removed.
 
 The selected research baseline is `structured_joint_turnover_180x35_v2`
 (`L35V2`), selected on 2023–2025 double-slippage continuous-account evidence.
-The 2026 evidence is confirmation only. Two studies remain paused and described
-under `studies/`: the 2020–2022 fold extension/six-fold summary and the later
-true-batch-1024 comparison.
+The 2026 evidence is confirmation only. The 2020–2025 historical durability
+extension is complete and retained under `research_records/seq100/`; the later
+true-batch-1024 comparison is the only paused study under `studies/`.
 
 ## Commands
 

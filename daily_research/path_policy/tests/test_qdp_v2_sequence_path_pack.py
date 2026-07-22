@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -581,6 +582,66 @@ def test_qdp_source_hash_mismatch_is_reported_as_stale(tmp_path) -> None:
     assert_qdp_source_fresh(manifest)
     dataset_json.write_text('{"row_count": 2}\n', encoding="utf-8")
     with pytest.raises(ValueError, match="stale_qdp_source"):
+        assert_qdp_source_fresh(manifest)
+
+
+def test_immutable_research_pack_survives_active_qdp_manifest_advance(tmp_path) -> None:
+    source = tmp_path / "pack" / "manifest.json"
+    source.parent.mkdir(parents=True)
+    sample = source.parent / "sample_index.parquet"
+    candidate = source.parent / "candidate_index.parquet"
+    panel = source.parent / "daily.float32.dat"
+    pd.DataFrame({"split": ["train"]}).to_parquet(sample, index=False)
+    pd.DataFrame({"split": ["development"]}).to_parquet(candidate, index=False)
+    panel.write_bytes(np.asarray([1.0], dtype=np.float32).tobytes())
+    source_payload = {
+        "artifact_type": "qdp_v2_sequence_path_pack",
+        "sample_index_path": str(sample),
+        "candidate_index_path": str(candidate),
+        "feature_channels": {
+            "daily_raw": {"path": str(panel), "shape": [1, 1, 1]}
+        },
+        "label_arrays": {},
+        "execution_arrays": {},
+        "masks": {},
+    }
+    source.write_text(json.dumps(source_payload), encoding="utf-8")
+    stat = panel.stat()
+    inventory = [{"path": str(panel.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}]
+    attachment = tmp_path / "overlay.json"
+    attachment.write_text('{"version": 1}\n', encoding="utf-8")
+    manifest = {
+        **source_payload,
+        "source_view_provenance": {
+            "schema_version": 1,
+            "manifest_path": str(source),
+            "manifest_sha256": sequence_pack._file_sha256(source),
+            "sample_index_path": str(sample),
+            "sample_index_sha256": sequence_pack._file_sha256(sample),
+            "candidate_index_path": str(candidate),
+            "candidate_index_sha256": sequence_pack._file_sha256(candidate),
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "backing_files": inventory,
+            "backing_files_sha256": hashlib.sha256(
+                json.dumps(
+                    inventory,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+            ).hexdigest(),
+        },
+        "qdp_source_freshness_policy": {
+            "mode": "immutable_research_pack_v1",
+            "attachments": [
+                {"path": str(attachment), "sha256": sequence_pack._file_sha256(attachment)}
+            ],
+        },
+    }
+    assert_qdp_source_fresh(manifest)
+    attachment.write_text('{"version": 2}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="immutable_pack_attachment_hash_mismatch"):
         assert_qdp_source_fresh(manifest)
 
 

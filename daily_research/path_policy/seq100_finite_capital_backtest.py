@@ -115,8 +115,11 @@ class ForecastDay:
 class ForecastBook:
     """Compact, date-indexed forecasts without a multi-million-key Python dict."""
 
-    def __init__(self, profile: str) -> None:
+    def __init__(self, profile: str, *, top_k: int = TOP_K) -> None:
         self.profile = str(profile)
+        self.top_k = int(top_k)
+        if self.top_k <= 0:
+            raise ValueError("forecast-book top_k must be positive")
         self.days: dict[int, ForecastDay] = {}
 
     def add_day(
@@ -148,7 +151,7 @@ class ForecastBook:
             raise ValueError(f"illegal planned day on date_idx={date_idx}")
         # Candidate rows are symbol sorted; stable descending score therefore gives
         # symbol order as the deterministic tie-break.
-        top_positions = np.argsort(-scores, kind="mergesort")[:TOP_K]
+        top_positions = np.argsort(-scores, kind="mergesort")[: self.top_k]
         top3 = tuple(int(value) for value in symbols[top_positions])
         self.days[int(date_idx)] = ForecastDay(
             symbol_idx=symbols,
@@ -683,6 +686,7 @@ def _simulation_metric(
     starting_cash: float,
     allow_pyramiding: bool,
     daily_selection_count: int,
+    calendar_years: Sequence[int] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     signal_frame = equity_frame[
         equity_frame["date_idx"].astype(int).between(
@@ -709,7 +713,7 @@ def _simulation_metric(
     annual = _calendar_year_metrics(
         signal_frame,
         starting_cash=float(starting_cash),
-        years=YEARS,
+        years=YEARS if calendar_years is None else tuple(int(value) for value in calendar_years),
     )
     win_rate = 0.0
     mean_occupied = 0.0
@@ -779,6 +783,7 @@ def simulate_portfolio(
     starting_cash: float = STARTING_CASH_CNY,
     memory_guard: _MemoryGuard | None = None,
     allow_pyramiding: bool = False,
+    calendar_years: Sequence[int] | None = None,
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
     policy.validate()
     if int(slots) <= 0:
@@ -1093,6 +1098,7 @@ def simulate_portfolio(
         starting_cash=float(starting_cash),
         allow_pyramiding=bool(allow_pyramiding),
         daily_selection_count=daily_selection_count,
+        calendar_years=calendar_years,
     )
     return metric, equity_frame, trade_frame, annual
 
