@@ -258,6 +258,38 @@ def test_v4_close_excursion_training_runs_end_to_end(
     assert checkpoint["v4_gradient_diagnostics"]["initial"] is not None
 
 
+def test_signal_close_path_value_v2_close_excursion_training_runs_end_to_end(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _make_v4_tiny_pack(tmp_path)
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        run_tag="signal_close_path_value_v2",
+        model_type="gru_structured_close_excursion",
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER,
+        path_value_semantic=training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2,
+        path_value_gradient_profile=training.PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+        path_loss_weight=0.35,
+        summary_loss_weight=0.20,
+        value_loss_weight=0.15,
+        rank_loss_weight=0.15,
+        geometry_loss_weight=0.10,
+        utility_curve_loss_weight=0.05,
+        turnover_level_loss_weight=0.02,
+        turnover_delta_loss_weight=0.01,
+        top_k=(1, 2, 3),
+    )
+
+    summary = training.train_sequence_path_model(config)
+
+    assert summary["path_value_semantic"] == "signal_close_path_value_v2"
+    assert summary["value_column"] == "signal_close_path_value_v2_2d"
+    assert summary["signal_close_path_value_v2_contract"]["cash_option"] is False
+    assert summary["signal_close_path_value_v2_contract"]["tradable_exit_required"] is True
+    assert summary["signal_close_capital_speed_v4_contract"] is None
+    assert summary["model"]["uses_close_excursion"] is True
+
+
 def test_v4_direct_rank_probe_has_no_path_or_strategy_head(tmp_path: Path) -> None:
     manifest_path = _make_v4_tiny_pack(tmp_path)
     config = replace(

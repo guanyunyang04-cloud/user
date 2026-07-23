@@ -1,21 +1,35 @@
 # Daily Research state
 
-Updated: `2026-07-22`
+Updated: `2026-07-24`
 
-- Current baseline: `structured_joint_turnover_180x35_v2`.
-- Registered vintages: Legal flat and Structured 100×32 for 2023–2026; L35V2
-  for 2020–2026.
-- Current compact evidence: `daily_research/research_records/seq100/index.json`.
-- Completed durability evidence: L35V2 folds for 2020–2025. All six Rank ICs
-  are positive (`0.0838–0.1136`). Top1/1 + D14 maximizes six-year growth but
-  has a negative 2022; Top3/3 + D42 is the highest-growth strategy with all six
-  years positive; Top3/3 model-plan is the strongest autonomous exit.
-- Paused work: test the same L35V2 recipe with true batch 1024.
-- Retired routes: global-tail, intraday inputs, Capital Speed V3, bounded training
-  windows, Q-curve branches, historical alpha-v2/path20 frameworks, and all old
-  frontend/execution code.
-- The latest preserved read-only signal evidence uses signal date 2026-07-21.
-- Old generated output, duplicate checkpoints, terminal experiment runners, and
-  layout-compatibility tests were removed after stable model/evidence migration.
-  Fold identity validation now lives in the small shared
-  `seq100_fold_contract.py` module instead of an experiment orchestrator.
+- The registered frozen baseline remains `structured_joint_turnover_180x35_v2`
+  (`L35V2`), but it is no longer valid selection evidence for deployment. The
+  complete-PIT frozen audit found severe survivorship bias and a legacy
+  next-open denominator distortion.
+- The formal audit is
+  `daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/`.
+  For the legacy-selected Top1/1 + D14 strategy, 2023-2025 liquidated ending
+  equity fell from CNY 52.18m to CNY 13.82m on the complete PIT universe; the
+  2020-2025 replay ended at CNY 21.48 after a zero-recovery delisting.
+- The complete PIT 180x35 pack is
+  `daily_research/data/research_store/seq100_pit_l35v2_v1/`. It contains
+  8,531,565 samples over 3,419 securities and six development fold views. The
+  training purge is 60 trading days; execution-tail observations are not model
+  targets.
+- The only active route is
+  `daily_research/studies/signal_close_path_value_2x2_v1.json`: deterministic
+  V2C-P0/P1 versus V4-P0/P1 on the same pack, architecture, seed, folds, and
+  account contract. V2C keeps V2 penalties and legal exits while anchoring the
+  proxy path to signal-day close.
+- P1 training is gated on a continuous dynamic rank-gradient budget. The old
+  first-batch calibration followed by a frozen rank weight is forbidden.
+- Probability variants and strict OOF tree reranking are deferred until one
+  deterministic semantic qualifies in at least two of three 2023-2025 folds.
+  The true-batch-1024 study remains paused and resumes only on explicit request.
+- The old V4 pilot is diagnostic evidence only. It fixed the fictitious low-open
+  path but selected pre-signal overheated names whose next-open execution often
+  preceded mean reversion; it must not be resumed under its old contract.
+- 2026 remains frozen confirmation only. No 2026 result may select a model,
+  ranking rule, exit rule, Top-K, slot count, or account behavior.
+- Protected packs and registered checkpoints remain unchanged. No training was
+  started during the 2026-07-24 takeover.

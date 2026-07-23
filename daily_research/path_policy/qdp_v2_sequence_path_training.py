@@ -70,11 +70,17 @@ PATH_VALUE_V2_TRANSACTION_COST = 0.002
 PATH_VALUE_V2_TEMPERATURE = 0.03
 PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY = 2
 PATH_VALUE_SEMANTIC_V2 = "path_value_v2"
+PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2 = "signal_close_path_value_v2"
 PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3 = "capital_speed_v3"
 PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4 = "signal_close_capital_speed_v4"
 PATH_VALUE_SEMANTICS = (
     PATH_VALUE_SEMANTIC_V2,
+    PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2,
     PATH_VALUE_SEMANTIC_CAPITAL_SPEED_V3,
+    PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
+)
+PATH_VALUE_SIGNAL_CLOSE_SEMANTICS = (
+    PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2,
     PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
 )
 PATH_VALUE_DEFAULT_SEMANTIC = PATH_VALUE_SEMANTIC_V2
@@ -872,8 +878,16 @@ class SequencePathPackDataset(Dataset):
         cached = self._path_value_targets_cache.get(semantic)
         if cached is not None:
             return cached
-        if semantic == PATH_VALUE_SEMANTIC_V2:
-            for column in ("path_trade_value_v2_target", path_value_v2_column(self.forward_days)):
+        if semantic in {
+            PATH_VALUE_SEMANTIC_V2,
+            PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2,
+        }:
+            columns = (
+                ("path_trade_value_v2_target", path_value_v2_column(self.forward_days))
+                if semantic == PATH_VALUE_SEMANTIC_V2
+                else (signal_close_path_value_v2_column(self.forward_days),)
+            )
+            for column in columns:
                 if column in self.sample_index.columns:
                     target = pd.to_numeric(self.sample_index[column], errors="coerce").to_numpy(dtype=np.float32, copy=True)
                     self._path_value_targets_cache[semantic] = target
@@ -2604,10 +2618,10 @@ def _multi_horizon_ohlc_summary_features(
 ) -> torch.Tensor:
     semantic = _normalize_path_value_semantic(path_value_semantic)
     path = path[:, :, :4]
-    if semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
-        path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
-    else:
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
         tradable_path = None
+    if semantic not in PATH_VALUE_SIGNAL_CLOSE_SEMANTICS:
+        path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
     batch_size = int(path.shape[0])
     forward_days = int(path.shape[1])
     windows = _summary_loss_windows(forward_days, include_full_horizon=bool(include_full_horizon))
@@ -3916,6 +3930,10 @@ def path_value_v2_column(forward_days: int) -> str:
     return f"path_trade_value_v2_{int(forward_days)}d"
 
 
+def signal_close_path_value_v2_column(forward_days: int) -> str:
+    return f"signal_close_path_value_v2_{int(forward_days)}d"
+
+
 def signal_close_capital_speed_v4_column(forward_days: int) -> str:
     return f"signal_close_capital_speed_v4_{int(forward_days)}d"
 
@@ -3930,6 +3948,14 @@ def legacy_derived_path_summary_columns(
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC,
 ) -> list[str]:
     suffix = f"{int(forward_days)}d"
+    semantic = _normalize_path_value_semantic(path_value_semantic)
+    value_column = (
+        signal_close_path_value_v2_column(forward_days)
+        if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2
+        else signal_close_capital_speed_v4_column(forward_days)
+        if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+        else path_value_v2_column(forward_days)
+    )
     return [
         f"future_max_return_{suffix}",
         f"future_min_return_{suffix}",
@@ -3942,12 +3968,7 @@ def legacy_derived_path_summary_columns(
         f"best_exit_day_{suffix}",
         f"best_exit_close_return_{suffix}",
         f"pre_exit_max_drawdown_{suffix}",
-        (
-            signal_close_capital_speed_v4_column(forward_days)
-            if _normalize_path_value_semantic(path_value_semantic)
-            == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
-            else path_value_v2_column(forward_days)
-        ),
+        value_column,
     ]
 
 
@@ -4001,12 +4022,12 @@ def value_column_for_path(
 ) -> str:
     if int(path_dim) >= 6:
         return unified_path_value_column(forward_days)
-    return (
-        signal_close_capital_speed_v4_column(forward_days)
-        if _normalize_path_value_semantic(path_value_semantic)
-        == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
-        else path_value_v2_column(forward_days)
-    )
+    semantic = _normalize_path_value_semantic(path_value_semantic)
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2:
+        return signal_close_path_value_v2_column(forward_days)
+    if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+        return signal_close_capital_speed_v4_column(forward_days)
+    return path_value_v2_column(forward_days)
 
 
 def _derived_summary_loss_indices(forward_days: int, *, path_dim: int = 4) -> list[int]:
@@ -4264,7 +4285,7 @@ def _derive_path_summary_torch(
     semantic = _normalize_path_value_semantic(path_value_semantic)
     if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
         tradable_path = None
-    if semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+    if semantic not in PATH_VALUE_SIGNAL_CLOSE_SEMANTICS:
         path = _legacy_entry_relative_path_torch(path, price_anchor=price_anchor)
     forward_days = int(path.shape[1])
     high_ret = path[:, :, 1]
@@ -4374,7 +4395,7 @@ def _derive_path_summary_numpy(
         if tradable_path is not None:
             raise ValueError("tradable_path-aware unified OHLCVA value is not implemented")
         return _derive_unified_path_summary_numpy(values)
-    if semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
+    if semantic not in PATH_VALUE_SIGNAL_CLOSE_SEMANTICS:
         values = _legacy_entry_relative_path_numpy(values, price_anchor=price_anchor)
     forward_days = int(values.shape[1])
     high_ret = values[:, :, 1].astype(np.float64, copy=False)
@@ -4510,7 +4531,7 @@ def _realize_path_value_v2_plan_numpy(
     raw_values = np.asarray(true_path, dtype=np.float32)
     values = (
         raw_values
-        if semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+        if semantic in PATH_VALUE_SIGNAL_CLOSE_SEMANTICS
         else _legacy_entry_relative_path_numpy(raw_values, price_anchor=price_anchor)
     )
     summary = np.asarray(pred_summary, dtype=np.float64)
@@ -6794,16 +6815,25 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             raise ValueError("structured turnover model requires relative_turnover_supplement")
         if str(train_ds.price_anchor) != "today_close":
             raise ValueError("structured OHLC reconstruction requires price_anchor=today_close")
+    if (
+        path_value_semantic in PATH_VALUE_SIGNAL_CLOSE_SEMANTICS
+        and str(train_ds.price_anchor) != "today_close"
+    ):
+        raise ValueError(f"{path_value_semantic} requires price_anchor=today_close")
     if path_value_semantic == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
-        if str(train_ds.price_anchor) != "today_close":
-            raise ValueError("signal_close_capital_speed_v4 requires price_anchor=today_close")
         if str(config.model_type) not in (CLOSE_EXCURSION_MODEL_TYPES | DIRECT_VALUE_MODEL_TYPES):
             raise ValueError(
                 "signal_close_capital_speed_v4 training requires a close/excursion model "
                 "or the isolated direct-value probe"
             )
-    elif str(config.model_type) in CLOSE_EXCURSION_MODEL_TYPES:
-        raise ValueError("close/excursion models require signal_close_capital_speed_v4")
+    elif (
+        str(config.model_type) in CLOSE_EXCURSION_MODEL_TYPES
+        and path_value_semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2
+    ):
+        raise ValueError(
+            "close/excursion models require signal_close_path_value_v2 "
+            "or signal_close_capital_speed_v4"
+        )
     if (
         bool(config.v4_gradient_budget)
         or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
@@ -7739,6 +7769,22 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "exit_argmax_domain": [PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY, int(train_ds.forward_days)],
             "tie_break": "earliest_legal_day",
         },
+        "signal_close_path_value_v2_contract": (
+            {
+                "semantic": PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2,
+                "proxy_anchor": "signal_day_close",
+                "actual_execution_entry": "next_trading_day_open",
+                "cash_option": False,
+                "tradable_exit_required": True,
+                "waiting_penalty": float(PATH_VALUE_V2_WAITING_PENALTY),
+                "drawdown_penalty": float(PATH_VALUE_V2_DRAWDOWN_PENALTY),
+                "transaction_cost": float(PATH_VALUE_V2_TRANSACTION_COST),
+                "prediction_days": [2, int(train_ds.forward_days)],
+            }
+            if path_value_semantic
+            == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2
+            else None
+        ),
         "signal_close_capital_speed_v4_contract": (
             {
                 "semantic": PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4,
@@ -7966,7 +8012,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--path-value-semantic",
         default=PATH_VALUE_DEFAULT_SEMANTIC,
         choices=PATH_VALUE_SEMANTICS,
-        help="Economic path-value target used for value/rank supervision and planned exits.",
+        help=(
+            "Economic path-value target used for value/rank supervision and planned exits. "
+            "signal_close_path_value_v2 keeps V2 penalties and legal exits without the "
+            "legacy next-open denominator conversion."
+        ),
     )
     train.add_argument(
         "--path-value-temperature",

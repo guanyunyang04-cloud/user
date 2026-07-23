@@ -2,7 +2,8 @@
   "schema_version": 1,
   "artifact_type": "seq100_current_study",
   "study_id": "seq100_structured_signal_close_capital_speed_v4_v1",
-  "status": "active_pilot_2023",
+  "status": "superseded_by_signal_close_path_value_2x2_v1",
+  "superseded_by": "daily_research/studies/signal_close_path_value_2x2_v1.json",
   "contract": {
     "schema_version": 1,
     "contract_id": "seq100_structured_signal_close_capital_speed_v4_v1",

@@ -19,10 +19,11 @@ from daily_research.model_registry import (
 RECORD_INDEX = WORKSPACE_ROOT / "daily_research/research_records/seq100/index.json"
 STUDY_ROOT = WORKSPACE_ROOT / "daily_research/studies"
 QDP_ACTIVE = WORKSPACE_ROOT / "quant_data_platform/data/qdp_v2/active/active.json"
-BASE_PACK = WORKSPACE_ROOT / "daily_research/data/research_store/seq100_current/pack/manifest.json"
+BASE_PACK = WORKSPACE_ROOT / "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
 ACTIVE_STUDIES = {
+    "signal-close-path-value-2x2": STUDY_ROOT / "signal_close_path_value_2x2_v1.json",
+    "pit-oof-trees": STUDY_ROOT / "pit_l35v2_oof_trees_v1.json",
     "l35v2-batch1024": STUDY_ROOT / "l35v2_batch1024.json",
-    "signal-close-capital-speed-v4": STUDY_ROOT / "signal_close_capital_speed_v4.json",
 }
 
 

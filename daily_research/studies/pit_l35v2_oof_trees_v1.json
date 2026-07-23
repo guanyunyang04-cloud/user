@@ -2,7 +2,8 @@
   "schema_version": 1,
   "artifact_type": "seq100_current_study",
   "study_id": "seq100_pit_l35v2_oof_trees_v1",
-  "status": "active_data_build",
+  "status": "deferred_until_signal_close_semantic_winner",
+  "resume_after": "one deterministic arm in signal_close_path_value_2x2_v1 qualifies in at least 2 of 3 development folds",
   "contract": {
     "schema_version": 1,
     "contract_id": "seq100_pit_l35v2_oof_trees_v1",

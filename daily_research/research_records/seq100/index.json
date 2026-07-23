@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-22",
+  "updated_at": "2026-07-24",
   "current_model": "structured_joint_turnover_180x35_v2",
   "selection_window": "2023-2025",
   "confirmation_window": "2026",
@@ -15,12 +15,13 @@
     {"id": "l35v2_2026_vintages", "status": "completed_diagnostic", "path": "daily_research/research_records/seq100/l35v2_2026_vintages/comparison_summary.json"},
     {"id": "latest_signal_20260721", "status": "completed_read_only_signal", "path": "daily_research/research_records/seq100/latest_signal_20260721/audit.json"},
     {"id": "path_prediction_audit_2020_2026", "status": "completed_read_only_audit", "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report.html"},
+    {"id": "pit_l35v2_survivorship_frozen_audit_2020_2025", "status": "completed_read_only_audit", "path": "daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/artifact.json"},
     {"id": "current_2026_best", "status": "completed_diagnostic", "path": "daily_research/research_records/seq100/current_2026_best/artifact.json"},
     {"id": "training_window", "status": "retired", "path": "daily_research/research_records/seq100/training_window_retired/comparison_summary.json"},
     {"id": "global_tail", "status": "retired", "path": "daily_research/research_records/seq100/global_tail_retired/retirement.json"},
     {"id": "l35v3", "status": "retired", "path": "daily_research/research_records/seq100/l35v3_retired/artifact.json"}
   ],
   "active_studies": [
-    "daily_research/studies/l35v2_batch1024.json"
+    "daily_research/studies/signal_close_path_value_2x2_v1.json"
   ]
 }

@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_current_study",
+  "study_id": "seq100_signal_close_path_value_2x2_v1",
+  "status": "active_implementation",
+  "contract": {
+    "schema_version": 1,
+    "contract_id": "seq100_signal_close_path_value_2x2_v1",
+    "objective": "select_the_signal_close_path_semantic_that_maximizes_2023_2025_double_slippage_continuous_account_log_growth_under_finite_capital_and_slots",
+    "data": {
+      "qdp_active_as_of_date": "2026-07-21",
+      "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+      "pack_status": "completed",
+      "universe": "shanghai_shenzhen_mainboard_point_in_time_survivorship_complete",
+      "lookback_days": 180,
+      "input_channel_profile": "daily_only_turnover",
+      "input_dim": 35,
+      "prediction_horizon_days": 60,
+      "purge_trading_days": 60,
+      "price_anchor": "today_close",
+      "actual_account_entry": "next_trading_day_open",
+      "terminal_failures_retained": true
+    },
+    "shared_training": {
+      "architecture": "gru_structured_close_excursion_hidden128_layers2_dropout0.1",
+      "representation": "deterministic",
+      "seed": 7,
+      "batch_size": 512,
+      "epochs": 1,
+      "checkpoint_policy": "fixed_final_epoch_without_oos_checkpoint_selection",
+      "learning_rate": 0.001,
+      "weight_decay": 0.0001,
+      "loss_weights_except_rank": {
+        "path": 0.35,
+        "summary": 0.2,
+        "geometry": 0.1,
+        "value": 0.15,
+        "utility_curve": 0.05,
+        "turnover_level": 0.02,
+        "turnover_delta": 0.01
+      }
+    },
+    "arms": {
+      "V2C-P0": {
+        "path_value_semantic": "signal_close_path_value_v2",
+        "rank_auxiliary": false,
+        "rank_weight": 0.0
+      },
+      "V2C-P1": {
+        "path_value_semantic": "signal_close_path_value_v2",
+        "rank_auxiliary": true,
+        "rank_weight_ceiling": 0.15,
+        "rank_control": "continuous_dynamic_gradient_budget"
+      },
+      "V4-P0": {
+        "path_value_semantic": "signal_close_capital_speed_v4",
+        "rank_auxiliary": false,
+        "rank_weight": 0.0
+      },
+      "V4-P1": {
+        "path_value_semantic": "signal_close_capital_speed_v4",
+        "rank_auxiliary": true,
+        "rank_weight_ceiling": 0.15,
+        "rank_control": "continuous_dynamic_gradient_budget"
+      }
+    },
+    "p1_implementation_gate": {
+      "status": "required_before_p1_training",
+      "requirement": "recompute_and_enforce_the_rank_gradient_budget_throughout_training",
+      "forbidden": "calibrate_on_the_first_fixed_batch_then_freeze_the_rank_weight"
+    },
+    "development": {
+      "years": [2023, 2024, 2025],
+      "split_roles": {
+        "fit": "train",
+        "evaluation": "development"
+      },
+      "train_window": "expanding_from_2010",
+      "normalization": "feature_dates_strictly_before_development_start",
+      "candidate_rule": "signal_date_known_eligibility_only",
+      "minimum_qualifying_folds": 2
+    },
+    "selection": {
+      "headline": "double_slippage_continuous_account_annualized_log_growth_and_liquidated_ending_equity",
+      "also_report": "daily_independent_cohort_unit_capital_day_efficiency",
+      "top_k": [1, 2, 3],
+      "include_all_legal_slot_counts": true,
+      "candidate_replacement": "scan_ranked_top10_for_signal_day_legal_candidates_then_cash",
+      "next_day_buy_failure_replacement": false,
+      "cash_is_legal": true,
+      "fixed_exit_domain": "D2_to_D60",
+      "autonomous_exit_fallback": "own_best_fixed_exit_unless_strictly_better",
+      "cross_model_rank_exit_hybrid": false
+    },
+    "probability_gate": {
+      "train_probability_model_before_deterministic_winner": false,
+      "required": "one_deterministic_semantic_qualifies_in_at_least_2_of_3_folds",
+      "action": "train_only_the_matching_single_probability_variant"
+    },
+    "oos_2026": {
+      "selection_authority": false,
+      "all_model_ranking_exit_and_account_rules_frozen_from_2023_2025": true
+    },
+    "evidence": {
+      "frozen_survivorship_audit": "daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/artifact.json",
+      "legacy_v4_contract": "daily_research/studies/signal_close_capital_speed_v4.json"
+    },
+    "protection": {
+      "overwrite_existing_pack": false,
+      "overwrite_registered_checkpoints": false,
+      "qdp_mutation": false,
+      "commit_push_publish": false,
+      "one_foreground_training_task_per_invocation": true
+    }
+  },
+  "contract_sha256": "0a1a9b8d146f6d3a464e4b81255216a5cf251ee4710d0551b79dda6e971c8d0b"
+}

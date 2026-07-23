@@ -1583,6 +1583,93 @@ def test_today_close_anchor_path_value_matches_next_open_anchor() -> None:
     assert np.allclose(torch_summary, next_summary, atol=1.0e-6)
 
 
+def test_signal_close_path_value_v2_skips_open_denominator_and_keeps_v2_contract() -> None:
+    path = np.zeros((1, 4, 4), dtype=np.float32)
+    path[0, :, 0] = [-0.20, 0.01, 0.02, 0.03]
+    path[0, :, 1] = [0.03, 0.20, 0.19, 0.18]
+    path[0, :, 2] = [-0.02, 0.00, 0.00, 0.00]
+    path[0, :, 3] = [0.01, 0.20, 0.19, 0.18]
+    changed_open = path.copy()
+    changed_open[0, 0, 0] = 0.20
+    semantic = sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2
+    tradable = np.asarray([[True, False, True, True]], dtype=bool)
+
+    original = _derive_path_summary_numpy(
+        path,
+        price_anchor="today_close",
+        tradable_path=tradable,
+        path_value_semantic=semantic,
+    )
+    modified = _derive_path_summary_numpy(
+        changed_open,
+        price_anchor="today_close",
+        tradable_path=tradable,
+        path_value_semantic=semantic,
+    )
+    torch_summary = _derive_path_summary_torch(
+        torch.from_numpy(path),
+        smooth_value=False,
+        price_anchor="today_close",
+        tradable_path=torch.from_numpy(tradable),
+        path_value_semantic=semantic,
+    ).detach().numpy()
+    legacy_original = _derive_path_summary_numpy(
+        path,
+        price_anchor="today_close",
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_V2,
+    )
+    legacy_modified = _derive_path_summary_numpy(
+        changed_open,
+        price_anchor="today_close",
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_V2,
+    )
+    columns = derived_path_summary_columns(4, path_value_semantic=semantic)
+
+    assert np.array_equal(original, modified)
+    assert np.allclose(original, torch_summary, atol=1.0e-6)
+    assert not np.allclose(legacy_original, legacy_modified)
+    assert original[0, columns.index("best_exit_day_4d")] == 3.0
+    assert columns[-1] == sequence_training.signal_close_path_value_v2_column(4)
+
+    negative = np.zeros((1, 4, 4), dtype=np.float32)
+    negative[0, :, 1] = 0.0
+    negative[0, :, 2] = -0.05
+    negative[0, :, 3] = -0.05
+    negative_summary = _derive_path_summary_numpy(
+        negative,
+        price_anchor="today_close",
+        path_value_semantic=semantic,
+    )
+    assert negative_summary[0, columns.index("best_exit_day_4d")] >= 2.0
+    assert negative_summary[0, -1] < 0.0
+
+
+def test_signal_close_path_value_v2_multi_horizon_summary_ignores_open_only_error() -> None:
+    target = torch.zeros((1, 5, 4), dtype=torch.float32)
+    target[:, :, 1] = 0.05
+    target[:, :, 2] = -0.01
+    target[:, :, 3] = 0.03
+    predicted = target.clone()
+    predicted[:, 0, 0] = 0.50
+    semantic = sequence_training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2
+
+    signal_close_loss = _multi_horizon_ohlc_summary_loss_vectorized(
+        predicted,
+        target,
+        price_anchor="today_close",
+        path_value_semantic=semantic,
+    )
+    legacy_loss = _multi_horizon_ohlc_summary_loss_vectorized(
+        predicted,
+        target,
+        price_anchor="today_close",
+        path_value_semantic=sequence_training.PATH_VALUE_SEMANTIC_V2,
+    )
+
+    assert signal_close_loss.item() == pytest.approx(0.0)
+    assert legacy_loss.item() > 0.0
+
+
 def test_path_value_v2_penalizes_later_same_return() -> None:
     early = np.zeros((1, 4, 4), dtype=np.float32)
     late = np.zeros((1, 4, 4), dtype=np.float32)
