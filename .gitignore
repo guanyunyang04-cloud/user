@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .tmp/
+tmp/*.txt
 .qdp_tmp/
 node_modules/
 *.tsbuildinfo
