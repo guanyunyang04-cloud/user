@@ -39,6 +39,11 @@ from quant_data_platform.qdp_v2.permanent_exclusions import (
     registry_consistency,
     registry_path,
 )
+from quant_data_platform.qdp_v2.pit_history import (
+    LIFECYCLE_NORMALIZE_DOMAINS,
+    PitHistoryError,
+    audit_symbol_lifecycle_effectivity,
+)
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
@@ -423,6 +428,7 @@ def audit_database(
                     root=root,
                     daily=manifests["market_daily_raw"],
                     intraday=manifests["market_intraday_5m"],
+                    history=manifests.get("symbol_history"),
                     sample_limit=max(1, int(sample_limit)),
                 )
                 cross_checks["daily_intraday_5m"] = consistency
@@ -587,6 +593,37 @@ def audit_database(
                             auxiliary,
                         )
                     )
+
+    lifecycle_domains = tuple(
+        domain for domain in LIFECYCLE_NORMALIZE_DOMAINS if domain in datasets
+    )
+    if deep and lifecycle_domains and {
+        "security_identity",
+        "symbol_history",
+    }.issubset(datasets):
+        try:
+            lifecycle = audit_symbol_lifecycle_effectivity(
+                workspace_root=workspace,
+                domains=lifecycle_domains,
+                sample_limit=max(1, int(sample_limit)),
+            )
+        except PitHistoryError as exc:
+            lifecycle = {
+                "status": "error",
+                "error": str(exc),
+                "domains": list(lifecycle_domains),
+            }
+        cross_checks["symbol_lifecycle_effectivity"] = lifecycle
+        if lifecycle["status"] != "ok":
+            findings.append(
+                _finding(
+                    "high",
+                    "identity",
+                    "daily_research_domains",
+                    "symbol_lifecycle_effective_interval_violation",
+                    lifecycle,
+                )
+            )
 
     exclusion_file = registry_path(workspace_root=workspace_root)
     exclusion_required = (
@@ -1317,6 +1354,7 @@ def _daily_intraday_consistency_check(
     root: Path,
     daily: DatasetManifest,
     intraday: DatasetManifest,
+    history: DatasetManifest | None = None,
     sample_limit: int,
 ) -> dict[str, Any]:
     totals = {
@@ -1334,6 +1372,11 @@ def _daily_intraday_consistency_check(
     daily_entries = [
         (resolve_manifest_path(item.path, root=root), item) for item in daily.shards
     ]
+    history_paths = (
+        [str(resolve_manifest_path(item.path, root=root)) for item in history.shards]
+        if history is not None
+        else []
+    )
     for intraday_entry in intraday.shards:
         start_date = str(intraday_entry.start_date or "")
         end_date = str(intraday_entry.end_date or "")
@@ -1350,9 +1393,9 @@ def _daily_intraday_consistency_check(
         ]
         if not daily_paths:
             raise ValueError(f"intraday_consistency_daily_paths_missing:{start_date}")
-        joined = """
-          WITH five AS (
-            SELECT cast(symbol AS VARCHAR) AS symbol,
+        five_source = """
+          five_source AS (
+            SELECT upper(cast(symbol AS VARCHAR)) AS source_symbol,
                    cast(trade_date AS VARCHAR) AS trade_date,
                    count(*) AS bars,
                    arg_min(try_cast(open AS DOUBLE),cast(bar_time AS VARCHAR)) AS open,
@@ -1362,8 +1405,64 @@ def _daily_intraday_consistency_check(
                    sum(try_cast(volume AS DOUBLE)) AS volume,
                    sum(try_cast(amount AS DOUBLE)) AS amount
             FROM read_parquet(?, union_by_name=true)
-            GROUP BY symbol,trade_date
-          ), day AS (
+            GROUP BY source_symbol,trade_date
+          )
+        """
+        if history_paths:
+            five_tables = (
+                """
+                  lifecycle_history AS (
+                    SELECT cast(security_id AS VARCHAR) AS security_id,
+                           upper(cast(symbol AS VARCHAR)) AS symbol,
+                           cast(effective_from AS VARCHAR) AS effective_from,
+                           cast(effective_to AS VARCHAR) AS effective_to
+                    FROM read_parquet(?, union_by_name=true)
+                  ), lifecycle_multi_ids AS (
+                    SELECT security_id FROM lifecycle_history
+                    GROUP BY security_id HAVING count(DISTINCT symbol)>1
+                  ), lifecycle AS (
+                    SELECT h.* FROM lifecycle_history h
+                    JOIN lifecycle_multi_ids m USING(security_id)
+                  ),
+                """
+                + five_source
+                + """,
+                  five_mapped AS (
+                    SELECT coalesce(target.symbol,f.source_symbol) AS canonical_symbol,
+                           f.*
+                    FROM five_source f
+                    LEFT JOIN lifecycle source
+                      ON f.source_symbol=source.symbol
+                    LEFT JOIN lifecycle target
+                      ON source.security_id=target.security_id
+                     AND f.trade_date BETWEEN target.effective_from AND target.effective_to
+                  ), five AS (
+                    SELECT canonical_symbol AS symbol,trade_date,bars,open,high,low,
+                           close,volume,amount
+                    FROM five_mapped
+                    QUALIFY row_number() OVER(
+                      PARTITION BY canonical_symbol,trade_date
+                      ORDER BY CASE WHEN source_symbol=canonical_symbol THEN 0 ELSE 1 END,
+                               source_symbol
+                    )=1
+                  )
+                """
+            )
+            five_params: list[Any] = [history_paths, [str(intraday_path)]]
+        else:
+            five_tables = (
+                five_source
+                + """,
+                  five AS (
+                    SELECT source_symbol AS symbol,trade_date,bars,open,high,low,
+                           close,volume,amount
+                    FROM five_source
+                  )
+                """
+            )
+            five_params = [[str(intraday_path)]]
+        joined = f"""
+          WITH {five_tables}, day AS (
             SELECT cast(symbol AS VARCHAR) AS symbol,
                    cast(trade_date AS VARCHAR) AS trade_date,
                    try_cast(open AS DOUBLE) AS open,
@@ -1393,7 +1492,12 @@ def _daily_intraday_consistency_check(
             FROM day d FULL OUTER JOIN five f USING(symbol,trade_date)
           )
         """
-        params = [[str(intraday_path)], [str(path) for path in daily_paths], start_date, end_date]
+        params = [
+            *five_params,
+            [str(path) for path in daily_paths],
+            start_date,
+            end_date,
+        ]
         row = con.execute(
             joined
             + """

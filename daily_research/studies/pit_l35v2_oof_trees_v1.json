@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_current_study",
+  "study_id": "seq100_pit_l35v2_oof_trees_v1",
+  "status": "active_data_build",
+  "contract": {
+    "schema_version": 1,
+    "contract_id": "seq100_pit_l35v2_oof_trees_v1",
+    "objective": "maximize_2023_2025_double_slippage_continuous_account_log_growth_under_finite_capital_and_slots",
+    "data": {
+      "qdp_active_as_of_date": "2026-07-21",
+      "survivorship_policy": "point_in_time_no_future_exclusion",
+      "universe": "shanghai_shenzhen_mainboard_pit_listed_and_same_day_status_eligible",
+      "sample_filter": "current_qdp_candidate_complete",
+      "lookback_days": 180,
+      "input_channel_profile": "daily_only_turnover",
+      "input_dim": 35,
+      "prediction_horizon_days": 60,
+      "training_label_dependency_days": 60,
+      "execution_deferral_days": 20,
+      "execution_dependency_days": 80,
+      "model_target_uses_deferral_days": false,
+      "long_suspension_break_open_days": 20,
+      "price_adjustment": "back_adjust",
+      "entry_rule": "next_open_below_exchange_limit_tick",
+      "signal_start": "2010-01-04",
+      "latest_complete_signal_date": "2026-03-24"
+    },
+    "base_model": {
+      "model_id": "structured_joint_turnover_180x35_v2_pit_v1",
+      "architecture": "gru_structured_joint_turnover_hidden128_layers2_dropout0.1",
+      "path_value_semantic": "path_value_v2",
+      "seed": 7,
+      "batch_size": 512,
+      "epochs": 1,
+      "checkpoint_policy": "fixed_final_epoch_without_oos_checkpoint_selection",
+      "learning_rate": 0.001,
+      "weight_decay": 0.0001,
+      "loss_weights": {
+        "path": 0.35,
+        "summary": 0.2,
+        "geometry": 0.1,
+        "value": 0.15,
+        "utility_curve": 0.05,
+        "turnover_level": 0.02,
+        "turnover_delta": 0.01,
+        "rank": 0.15
+      },
+      "rank_training_profile": "local_chunk",
+      "daily_prediction_retention": 200
+    },
+    "oof_protocol": {
+      "base_oof_years": [
+        2020,
+        2021,
+        2022,
+        2023,
+        2024,
+        2025
+      ],
+      "train_window": "expanding_from_2010",
+      "split_roles": {
+        "fit": "train",
+        "evaluation": "development"
+      },
+      "purge_trading_days": 60,
+      "purge_uses_execution_tail": false,
+      "normalization": "feature_dates_strictly_before_development_start",
+      "candidate_rule": "signal_date_known_eligibility_only",
+      "development_checkpoint_selection": false
+    },
+    "rerankers": {
+      "scope": "rerank_only_within_each_base_model_daily_top200",
+      "training_rows": "strict_base_model_oof_predictions_only",
+      "walkforward": "for_year_y_fit_only_oof_years_before_y",
+      "models": {
+        "path_value_v2_tree": {
+          "target": "realized_path_value_v2"
+        },
+        "capital_speed_v4_tree": {
+          "target": "realized_signal_close_anchored_double_slippage_log_return_per_holding_day_with_cash_zero"
+        }
+      },
+      "cross_model_rank_exit_hybrid": false
+    },
+    "selection": {
+      "years": [
+        2023,
+        2024,
+        2025
+      ],
+      "headline": "double_slippage_continuous_account_annualized_log_growth_and_ending_equity",
+      "also_report": "daily_independent_cohort_mean_unit_time_utility",
+      "top_k": [
+        1,
+        2,
+        3
+      ],
+      "include_all_legal_slot_counts": true,
+      "candidate_replacement": "scan_ranked_top10_then_cash",
+      "cash_is_legal": true,
+      "fixed_exit_domain": "D2_to_D60",
+      "autonomous_exit_fallback": "own_best_fixed_exit_unless_strictly_better",
+      "d7_special_status": false
+    },
+    "oos_2026": {
+      "selection_authority": false,
+      "model_tree_execution_and_account_rules_frozen_from_2023_2025": true,
+      "available_complete_signal_end": "2026-03-24",
+      "result_labels": [
+        "confirmed",
+        "failed",
+        "unstable"
+      ]
+    },
+    "protection": {
+      "overwrite_existing_pack": false,
+      "overwrite_registered_checkpoints": false,
+      "qdp_mutation": false,
+      "commit_push_publish": false
+    }
+  },
+  "contract_sha256": "6fe92056055e7bcd971db6b3854d590541306757895fe755b2da1e3eb14367f6"
+}

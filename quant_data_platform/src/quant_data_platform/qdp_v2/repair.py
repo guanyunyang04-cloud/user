@@ -881,6 +881,7 @@ def mutate_active_shards_from_parquet(
     workspace_root: str | Path | None = None,
     primary_keys_prevalidated: bool = False,
     expected_mutation_id: str = "",
+    allow_selected_schema_superset: bool = False,
 ) -> dict[str, Any]:
     """Atomically replace, remove, and append active Parquet shards.
 
@@ -895,6 +896,11 @@ def mutate_active_shards_from_parquet(
     at least one replacement or append.  It lets a domain-specific validator
     reuse its stronger, partition-aware primary-key proof instead of
     materializing the same large key set a second time.
+
+    ``allow_selected_schema_superset`` accepts a selected old shard only when
+    it contains every reference field with the exact same Arrow field contract
+    plus optional extra fields.  Prepared and retained active shards must still
+    match the reference schema exactly.
     """
 
     repair_reason = _required_reason(reason)
@@ -1049,6 +1055,7 @@ def mutate_active_shards_from_parquet(
             context,
             selected_entries,
             reference_schema=reference_schema,
+            allow_schema_superset=bool(allow_selected_schema_superset),
         )
 
         selected_keys = {
@@ -1708,6 +1715,7 @@ def _validate_selected_old_shards(
     entries: Sequence[ShardManifestEntry],
     *,
     reference_schema: pa.Schema,
+    allow_schema_superset: bool = False,
 ) -> dict[str, str]:
     hashes: dict[str, str] = {}
     for entry in entries:
@@ -1727,7 +1735,24 @@ def _validate_selected_old_shards(
             raise QdpV2RepairError(
                 f"qdp_v2_repair_active_shard_row_count_mismatch:{path}"
             )
-        if not parquet.schema_arrow.equals(reference_schema, check_metadata=False):
+        actual_schema = parquet.schema_arrow
+        schema_matches = actual_schema.equals(
+            reference_schema,
+            check_metadata=False,
+        )
+        if (
+            not schema_matches
+            and allow_schema_superset
+            and set(reference_schema.names).issubset(actual_schema.names)
+        ):
+            schema_matches = all(
+                actual_schema.field(field.name).equals(
+                    field,
+                    check_metadata=False,
+                )
+                for field in reference_schema
+            )
+        if not schema_matches:
             raise QdpV2RepairError(
                 f"qdp_v2_repair_active_shard_schema_mismatch:{path}"
             )

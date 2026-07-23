@@ -6316,14 +6316,21 @@ def _validate_development_split_contract(
     train_ds: SequencePathPackDataset,
     development_ds: SequencePathPackDataset,
 ) -> None:
+    contract = dict(manifest.get("development_walkforward", {}) or {})
+    contract_schema = int(contract.get("schema_version", 1) or 1)
     dependency_days = int(
-        dict(manifest.get("development_walkforward", {}) or {}).get(
-            "max_label_dependency_days",
-            manifest.get("max_label_dependency_days", train_ds.forward_days),
+        contract.get(
+            "training_label_dependency_days",
+            contract.get(
+                "max_label_dependency_days",
+                manifest.get("max_label_dependency_days", train_ds.forward_days),
+            ),
         )
     )
     if dependency_days <= 0:
         raise ValueError("development max_label_dependency_days must be positive")
+    if contract_schema >= 2 and dependency_days != int(train_ds.forward_days):
+        raise ValueError("development training purge must equal forward_days")
     if int(development_ds.forward_days) != int(train_ds.forward_days):
         raise ValueError("development train and evaluation forward_days must match")
     train_date_idx = _validated_sample_date_indices(
@@ -6335,16 +6342,20 @@ def _validate_development_split_contract(
         context="development supervised sample index",
     )
     development_start_idx = int(development_date_idx.min())
-    dependency_column = next(
+    dependency_columns = (
         (
-            name
-            for name in (
-                "dependency_end_date_idx",
-                "max_label_dependency_date_idx",
-                "label_dependency_end_date_idx",
-            )
-            if name in train_ds.sample_index.columns
-        ),
+            "training_label_end_date_idx",
+            "label_end_date_idx",
+        )
+        if contract_schema >= 2
+        else (
+            "dependency_end_date_idx",
+            "max_label_dependency_date_idx",
+            "label_dependency_end_date_idx",
+        )
+    )
+    dependency_column = next(
+        (name for name in dependency_columns if name in train_ds.sample_index.columns),
         "",
     )
     if dependency_column:
@@ -6361,7 +6372,6 @@ def _validate_development_split_contract(
             "development requires every training label dependency to end before development: "
             f"label_overlap_count={overlap_count}"
         )
-    contract = dict(manifest.get("development_walkforward", {}) or {})
     declared_start = int(
         contract.get("development_start_date_idx", contract.get("oos_start_date_idx", -1))
     )

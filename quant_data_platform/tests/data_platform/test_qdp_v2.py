@@ -554,6 +554,86 @@ def test_full_audit_reports_duplicate_primary_keys(tmp_path: Path) -> None:
     assert report["checks"]["primary_key"]["duplicate_rows"] == 1
 
 
+def test_full_audit_reports_symbol_lifecycle_effectivity_as_high(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    security_id = "QDP-SECURITY-1"
+    datasets = {
+        "security_identity": _write_domain(
+            root,
+            "security_identity",
+            pd.DataFrame(
+                {
+                    "security_id": [security_id],
+                    "exchange": ["SZ"],
+                    "list_date": ["2010-01-01"],
+                    "current_symbol": ["000002.SZ"],
+                }
+            ),
+            contract="unit_identity_v1",
+            primary_key=["security_id"],
+        ),
+        "symbol_history": _write_domain(
+            root,
+            "symbol_history",
+            pd.DataFrame(
+                {
+                    "security_id": [security_id, security_id],
+                    "symbol": ["000001.SZ", "000002.SZ"],
+                    "effective_from": ["2010-01-01", "2020-01-01"],
+                    "effective_to": ["2019-12-31", "9999-12-31"],
+                    "name_on_date": ["Old Co", "New Co"],
+                }
+            ),
+            contract="unit_symbol_history_v1",
+            primary_key=["security_id", "symbol", "effective_from"],
+        ),
+        "market_daily_raw": _write_domain(
+            root,
+            "market_daily_raw",
+            pd.DataFrame(
+                {
+                    "symbol": ["000002.SZ"],
+                    "trade_date": ["2019-06-03"],
+                    "open": [10.0],
+                    "high": [10.0],
+                    "low": [10.0],
+                    "close": [10.0],
+                    "volume": [100.0],
+                    "amount": [1000.0],
+                    "source": ["unit"],
+                    "adjusted_flag": ["none"],
+                }
+            ),
+            contract="qdp_v2_market_daily_raw_v1",
+            primary_key=["trade_date", "symbol"],
+        ),
+    }
+    _write_active(root, datasets, as_of="2019-06-03")
+
+    payload = audit_database(
+        workspace_root=workspace,
+        deep=True,
+        max_shards=1,
+        write=False,
+    )
+
+    finding = next(
+        item
+        for item in payload["findings"]
+        if item["code"] == "symbol_lifecycle_effective_interval_violation"
+    )
+    assert finding["severity"] == "high"
+    lifecycle = payload["cross_dataset_checks"]["symbol_lifecycle_effectivity"]
+    assert lifecycle["status"] == "needs_repair"
+    assert lifecycle["outside_effective_interval_rows"] == 1
+    assert lifecycle["domains"]["market_daily_raw"][
+        "outside_effective_interval_rows"
+    ] == 1
+
+
 def test_intraday_overlapping_date_shards_verify_actual_keys(tmp_path: Path) -> None:
     def write(name: str, symbol: str) -> tuple[Path, ShardManifestEntry]:
         path = tmp_path / f"{name}.parquet"
@@ -691,6 +771,92 @@ def test_cross_frequency_check_rejects_100x_intraday_volume(tmp_path: Path) -> N
 
     assert result["volume_100x_day_count"] == 1
     assert result["invalid_day_count"] == 1
+
+
+def test_cross_frequency_check_resolves_intraday_ticker_lifecycle(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    dates = ["2019-01-02", "2019-01-03"]
+    daily_id = _write_domain(
+        root,
+        "market_daily_raw",
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ", "000001.SZ"],
+                "trade_date": dates,
+                "open": [10.0, 10.0],
+                "high": [10.2, 10.2],
+                "low": [9.8, 9.8],
+                "close": [10.1, 10.1],
+                "volume": [4800.0, 4800.0],
+                "amount": [48_000.0, 48_000.0],
+            }
+        ),
+        contract="unit",
+        primary_key=["trade_date", "symbol"],
+    )
+    bars: list[pd.DataFrame] = []
+    for date, symbol, price in (
+        (dates[0], "000001.SZ", 10.0),
+        (dates[0], "000002.SZ", 99.0),
+        (dates[1], "000002.SZ", 10.0),
+    ):
+        bars.append(
+            pd.DataFrame(
+                {
+                    "symbol": [symbol] * 48,
+                    "trade_date": [date] * 48,
+                    "bar_time": EXPECTED_BAR_TIMES,
+                    "open": [price] * 48,
+                    "high": [price + 0.2] * 48,
+                    "low": [price - 0.2] * 48,
+                    "close": [price + 0.1] * 48,
+                    "volume": [100.0] * 48,
+                    "amount": [1000.0] * 48,
+                }
+            )
+        )
+    five_id = _write_domain(
+        root,
+        "market_intraday_5m",
+        pd.concat(bars, ignore_index=True),
+        contract="unit",
+        primary_key=["trade_date", "symbol", "bar_time"],
+    )
+    history_id = _write_domain(
+        root,
+        "symbol_history",
+        pd.DataFrame(
+            {
+                "security_id": ["SEC-1", "SEC-1"],
+                "symbol": ["000001.SZ", "000002.SZ"],
+                "effective_from": ["2010-01-01", "2020-01-01"],
+                "effective_to": ["2019-12-31", "9999-12-31"],
+            }
+        ),
+        contract="unit",
+        primary_key=["security_id", "symbol", "effective_from"],
+    )
+    with open_guarded_duckdb(
+        temp_directory=workspace / "lifecycle-five-spill",
+        threads=1,
+        memory_sampler=lambda: 8 * 1024**3,
+        total_memory_sampler=lambda: 16 * 1024**3,
+    ) as con:
+        result = _daily_intraday_consistency_check(
+            con,
+            root=root,
+            daily=_active_manifest(root, daily_id, "market_daily_raw"),
+            intraday=_active_manifest(root, five_id, "market_intraday_5m"),
+            history=_active_manifest(root, history_id, "symbol_history"),
+            sample_limit=5,
+        )
+
+    assert result["complete_positive_daily_count"] == 2
+    assert result["missing_daily_for_5m_count"] == 0
+    assert result["invalid_day_count"] == 0
 
 
 def test_status_daily_semantics_detects_both_mismatch_directions(tmp_path: Path) -> None:

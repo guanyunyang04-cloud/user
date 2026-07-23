@@ -1,8 +1,13 @@
 # Current workspace state
 
-Updated: `2026-07-22`
+Updated: `2026-07-23`
 
-- QDP is usable with `active_as_of_date=2026-07-21`; quick validation passes.
+- QDP is usable with `active_as_of_date=2026-07-21`; quick and full validation
+  pass. PIT main-board daily history now includes historical ST, long
+  suspensions, and delisted securities; historical 5-minute gaps remain an
+  explicit non-blocking warning.
+- Daily domains are normalized to `symbol_history` effective ticker intervals
+  for both code-change identities. The 5-minute dataset was not rewritten.
 - Protected QDP and research datasets remain in place.
 - The stable model registry contains 15 bundles: Legal flat and Structured
   100×32 for 2023–2026, plus Structured 180×35 V2 for 2020–2026.

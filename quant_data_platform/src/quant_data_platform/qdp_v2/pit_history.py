@@ -1985,7 +1985,9 @@ def _symbol_lifecycle_tables(
     ).dt.strftime("%Y-%m-%d")
     ordered = intervals.sort_values(["security_id", "effective_from", "effective_to"])
     prior_end = ordered.groupby("security_id")["effective_to"].shift(1)
-    overlap = prior_end.notna() & ordered["effective_from"].le(prior_end)
+    overlap = prior_end.notna() & ordered["effective_from"].le(
+        prior_end.fillna("")
+    )
     if overlap.any():
         examples = ordered.loc[overlap, ["security_id", "symbol", "effective_from"]]
         raise PitHistoryError(
@@ -2159,6 +2161,24 @@ def _normalized_lifecycle_projection(
                 f"CASE WHEN m.remap_priority=1 THEN m.target_delist_date "
                 f"ELSE m.{quoted} END AS {quoted}"
             )
+        elif context.domain == "adjust_factor" and column in {
+            "adjust_factor",
+            "fore_adjust_factor",
+            "back_adjust_factor",
+        }:
+            expressions.append(
+                f"CASE WHEN m.remap_priority=1 THEN "
+                f"try_cast(m.{quoted} AS DOUBLE)*m.factor_scale "
+                f"ELSE m.{quoted} END AS {quoted}"
+            )
+        elif context.domain == "adjust_factor" and column == "source":
+            expressions.append(
+                f"CASE WHEN m.remap_priority=1 "
+                f"AND abs(m.factor_scale-1.0)>1e-12 THEN "
+                f"concat(coalesce(cast(m.{quoted} AS VARCHAR),''),"
+                f"'+lifecycle_factor_scale_overlap_v1') "
+                f"ELSE m.{quoted} END AS {quoted}"
+            )
         else:
             expressions.append(f"m.{quoted}")
     projection = ",".join(expressions)
@@ -2168,16 +2188,78 @@ def _normalized_lifecycle_projection(
     return projection, partition
 
 
+def _manifest_column_projection(*, context: Any, alias: str) -> str:
+    columns = [str(item.get("name", "")) for item in context.manifest.schema]
+    columns = [item for item in columns if item]
+    if not columns:
+        raise PitHistoryError(
+            f"pit_history_symbol_lifecycle_manifest_schema_missing:{context.domain}"
+        )
+    return ",".join(
+        f"{alias}.{_quoted_identifier(column)}" for column in columns
+    )
+
+
+def _validate_lifecycle_prepared_schemas(
+    *,
+    context: Any,
+    paths: Sequence[Path],
+) -> None:
+    import pyarrow.parquet as pq
+
+    reference = pq.ParquetFile(context.shard_paths[0]).schema_arrow
+    expected_columns = [
+        str(item.get("name", "")) for item in context.manifest.schema
+    ]
+    expected_columns = [item for item in expected_columns if item]
+    for path in paths:
+        actual = pq.ParquetFile(path).schema_arrow
+        if actual.names != expected_columns or not actual.equals(
+            reference,
+            check_metadata=False,
+        ):
+            raise PitHistoryError(
+                "pit_history_symbol_lifecycle_prepared_schema_mismatch:"
+                f"{context.domain}:{path.name}:"
+                f"expected={reference}:actual={actual}"
+            )
+
+
+def _validate_lifecycle_source_schemas(
+    *,
+    context: Any,
+    paths: Sequence[Path],
+) -> None:
+    import pyarrow.parquet as pq
+
+    reference = pq.ParquetFile(context.shard_paths[0]).schema_arrow
+    for path in paths:
+        actual = pq.ParquetFile(path).schema_arrow
+        if actual.equals(reference, check_metadata=False):
+            continue
+        if set(reference.names).issubset(actual.names) and all(
+            actual.field(field.name).equals(field, check_metadata=False)
+            for field in reference
+        ):
+            continue
+        raise PitHistoryError(
+            "pit_history_symbol_lifecycle_source_schema_incompatible:"
+            f"{context.domain}:{path.name}:"
+            f"expected={reference}:actual={actual}"
+        )
+
+
 def _prepare_lifecycle_domain_mutation(
     ctx: PitHistoryContext,
     *,
     domain: str,
     intervals: pd.DataFrame,
     symbol_map: pd.DataFrame,
-    cutoff: str,
 ) -> tuple[list[tuple[Path, Path]], list[Path], list[Path], dict[str, Any]]:
     context = resolve_active_domain(domain, workspace_root=ctx.workspace)
     prepared_dir = ctx.runtime / "lifecycle_effectivity" / "prepared" / domain
+    if prepared_dir.exists():
+        shutil.rmtree(prepared_dir.resolve(strict=True))
     prepared_dir.mkdir(parents=True, exist_ok=True)
     replacements: list[tuple[Path, Path]] = []
     removals: list[Path] = []
@@ -2190,24 +2272,26 @@ def _prepare_lifecycle_domain_mutation(
     ) as con:
         con.register("lifecycle_intervals", intervals)
         con.register("lifecycle_symbol_map", symbol_map)
+        retained_projection = _manifest_column_projection(
+            context=context,
+            alias="d",
+        )
         for index, old_path in enumerate(context.shard_paths):
             row = con.execute(
                 f"SELECT count(*) FROM {_parquet_scan([old_path])} d "
                 "JOIN lifecycle_symbol_map s "
-                "ON upper(cast(d.symbol AS VARCHAR))=s.symbol "
-                "WHERE cast(d.trade_date AS VARCHAR)<=?",
-                [cutoff],
+                "ON upper(cast(d.symbol AS VARCHAR))=s.symbol",
             ).fetchone()
             if not int(row[0] or 0):
                 continue
             affected.append(old_path)
             target = prepared_dir / f"retained_{index:04d}.parquet"
             query = (
-                f"SELECT d.* FROM {_parquet_scan([old_path])} d "
+                f"SELECT {retained_projection} "
+                f"FROM {_parquet_scan([old_path])} d "
                 "LEFT JOIN lifecycle_symbol_map s "
                 "ON upper(cast(d.symbol AS VARCHAR))=s.symbol "
-                "WHERE s.symbol IS NULL OR cast(d.trade_date AS VARCHAR)>"
-                f"{_sql_literal(cutoff)}"
+                "WHERE s.symbol IS NULL"
             )
             count = _copy_lifecycle_query(con, query, target)
             if count:
@@ -2222,18 +2306,17 @@ def _prepare_lifecycle_domain_mutation(
                 "affected_shard_count": 0,
                 "source_row_count": 0,
             }
+        _validate_lifecycle_source_schemas(context=context, paths=affected)
         scans = _parquet_scan(affected)
         missing_mapping = int(
             con.execute(
                 f"WITH source_rows AS ("
                 f" SELECT d.*,upper(cast(d.symbol AS VARCHAR)) source_symbol,"
                 f" s.security_id FROM {scans} d JOIN lifecycle_symbol_map s "
-                " ON upper(cast(d.symbol AS VARCHAR))=s.symbol "
-                " WHERE cast(d.trade_date AS VARCHAR)<=?"
+                " ON upper(cast(d.symbol AS VARCHAR))=s.symbol"
                 ") SELECT count(*) FROM source_rows r LEFT JOIN lifecycle_intervals i "
                 " ON i.security_id=r.security_id AND cast(r.trade_date AS VARCHAR) "
-                " BETWEEN i.effective_from AND i.effective_to WHERE i.symbol IS NULL",
-                [cutoff],
+                " BETWEEN i.effective_from AND i.effective_to WHERE i.symbol IS NULL"
             ).fetchone()[0]
             or 0
         )
@@ -2243,6 +2326,64 @@ def _prepare_lifecycle_domain_mutation(
             )
         projection, partition = _normalized_lifecycle_projection(context=context)
         canonical = prepared_dir / "canonicalized.parquet"
+        if context.domain == "adjust_factor":
+            mapped_ctes = """
+              mapped_base AS (
+                SELECT r.*,i.symbol canonical_symbol,
+                       i.name_on_date target_name,
+                       i.list_date target_list_date,
+                       i.canonical_delist_date target_delist_date,
+                       CASE WHEN r.source_symbol=i.symbol THEN 0 ELSE 1 END remap_priority
+                FROM source_rows r
+                JOIN lifecycle_intervals i
+                  ON i.security_id=r.security_id
+                 AND cast(r.trade_date AS VARCHAR)
+                     BETWEEN i.effective_from AND i.effective_to
+              ), factor_scales AS (
+                SELECT remapped.security_id,remapped.source_symbol,
+                       remapped.canonical_symbol,
+                       median(
+                         try_cast(official.adjust_factor AS DOUBLE)
+                         /try_cast(remapped.adjust_factor AS DOUBLE)
+                       ) AS factor_scale
+                FROM mapped_base remapped
+                JOIN mapped_base official
+                  ON remapped.security_id=official.security_id
+                 AND remapped.canonical_symbol=official.canonical_symbol
+                 AND remapped.trade_date=official.trade_date
+                 AND official.source_symbol=official.canonical_symbol
+                WHERE remapped.source_symbol<>remapped.canonical_symbol
+                  AND isfinite(try_cast(remapped.adjust_factor AS DOUBLE))
+                  AND try_cast(remapped.adjust_factor AS DOUBLE)>0
+                  AND isfinite(try_cast(official.adjust_factor AS DOUBLE))
+                  AND try_cast(official.adjust_factor AS DOUBLE)>0
+                GROUP BY remapped.security_id,remapped.source_symbol,
+                         remapped.canonical_symbol
+              ), mapped AS (
+                SELECT b.*,coalesce(s.factor_scale,1.0) AS factor_scale
+                FROM mapped_base b
+                LEFT JOIN factor_scales s
+                  ON b.security_id=s.security_id
+                 AND b.source_symbol=s.source_symbol
+                 AND b.canonical_symbol=s.canonical_symbol
+              )
+            """
+        else:
+            mapped_ctes = """
+              mapped AS (
+                SELECT r.*,i.symbol canonical_symbol,
+                       i.name_on_date target_name,
+                       i.list_date target_list_date,
+                       i.canonical_delist_date target_delist_date,
+                       CASE WHEN r.source_symbol=i.symbol THEN 0 ELSE 1 END remap_priority,
+                       1.0 AS factor_scale
+                FROM source_rows r
+                JOIN lifecycle_intervals i
+                  ON i.security_id=r.security_id
+                 AND cast(r.trade_date AS VARCHAR)
+                     BETWEEN i.effective_from AND i.effective_to
+              )
+            """
         query = f"""
           WITH source_rows AS (
             SELECT d.*,upper(cast(d.symbol AS VARCHAR)) source_symbol,
@@ -2250,19 +2391,7 @@ def _prepare_lifecycle_domain_mutation(
             FROM {scans} d
             JOIN lifecycle_symbol_map s
               ON upper(cast(d.symbol AS VARCHAR))=s.symbol
-            WHERE cast(d.trade_date AS VARCHAR)<={_sql_literal(cutoff)}
-          ), mapped AS (
-            SELECT r.*,i.symbol canonical_symbol,
-                   i.name_on_date target_name,
-                   i.list_date target_list_date,
-                   i.canonical_delist_date target_delist_date,
-                   CASE WHEN r.source_symbol=i.symbol THEN 0 ELSE 1 END remap_priority
-            FROM source_rows r
-            JOIN lifecycle_intervals i
-              ON i.security_id=r.security_id
-             AND cast(r.trade_date AS VARCHAR)
-                 BETWEEN i.effective_from AND i.effective_to
-          ), normalized AS (
+          ), {mapped_ctes}, normalized AS (
             SELECT {projection},m.remap_priority,m.source_symbol
             FROM mapped m
           )
@@ -2278,15 +2407,17 @@ def _prepare_lifecycle_domain_mutation(
         source_rows = int(
             con.execute(
                 f"SELECT count(*) FROM {scans} d JOIN lifecycle_symbol_map s "
-                "ON upper(cast(d.symbol AS VARCHAR))=s.symbol "
-                "WHERE cast(d.trade_date AS VARCHAR)<=?",
-                [cutoff],
+                "ON upper(cast(d.symbol AS VARCHAR))=s.symbol",
             ).fetchone()[0]
             or 0
         )
     shutil.rmtree(
         ctx.runtime / "lifecycle_effectivity" / "spill" / domain,
         ignore_errors=True,
+    )
+    _validate_lifecycle_prepared_schemas(
+        context=context,
+        paths=[item[1] for item in replacements] + [canonical],
     )
     return replacements, removals, [canonical], {
         "status": "prepared",
@@ -2297,6 +2428,260 @@ def _prepare_lifecycle_domain_mutation(
         "canonical_row_count": canonical_rows,
         "deduplicated_row_count": source_rows - canonical_rows,
         "retained_row_count": kept_rows,
+        "manifest_row_count_before": int(context.manifest.row_count),
+        "projected_manifest_row_count": int(
+            context.manifest.row_count - source_rows + canonical_rows
+        ),
+    }
+
+
+def _cleanup_lifecycle_prepared_domain(
+    ctx: PitHistoryContext,
+    domain: str,
+) -> None:
+    prepared_dir = ctx.runtime / "lifecycle_effectivity" / "prepared" / domain
+    if prepared_dir.exists():
+        shutil.rmtree(prepared_dir.resolve(strict=True))
+
+
+def _lifecycle_factor_scale_stitch_plan(
+    ctx: PitHistoryContext,
+    *,
+    intervals: pd.DataFrame,
+) -> list[dict[str, Any]]:
+    factor = resolve_active_domain("adjust_factor", workspace_root=ctx.workspace)
+    ordered = intervals.sort_values(
+        ["security_id", "effective_from", "effective_to"]
+    ).copy()
+    ordered["next_symbol"] = ordered.groupby("security_id")["symbol"].shift(-1)
+    ordered["next_effective_from"] = ordered.groupby("security_id")[
+        "effective_from"
+    ].shift(-1)
+    transitions = ordered.loc[ordered["next_symbol"].notna()].copy()
+    if transitions.empty:
+        return []
+    paths = [str(item) for item in factor.shard_paths]
+    plans: list[dict[str, Any]] = []
+    with open_guarded_duckdb(
+        temp_directory=ctx.runtime / "lifecycle_effectivity" / "factor_scale_spill",
+        threads=2,
+    ) as con:
+        for row in transitions.itertuples(index=False):
+            result = con.execute(
+                """
+                  WITH factors AS (
+                    SELECT upper(cast(symbol AS VARCHAR)) AS symbol,
+                           cast(trade_date AS VARCHAR) AS trade_date,
+                           try_cast(adjust_factor AS DOUBLE) AS factor,
+                           cast(source AS VARCHAR) AS source
+                    FROM read_parquet(?, union_by_name=true)
+                  ), target AS (
+                    SELECT * FROM factors
+                    WHERE symbol=? AND trade_date BETWEEN ? AND ?
+                      AND source LIKE '%pit_history_restore%'
+                      AND source NOT LIKE '%lifecycle_factor_scale_%'
+                  ), bounds AS (
+                    SELECT min(trade_date) AS first_date,
+                           max(trade_date) AS last_date,
+                           arg_min(factor,trade_date) AS first_factor,
+                           arg_max(factor,trade_date) AS last_factor,
+                           count(*) AS target_rows
+                    FROM target
+                  )
+                  SELECT b.*,
+                         (SELECT arg_max(factor,trade_date)
+                          FROM factors,bounds
+                          WHERE symbol=? AND trade_date<bounds.first_date
+                            AND factor>0 AND isfinite(factor)) AS prior_factor,
+                         (SELECT arg_min(factor,trade_date)
+                          FROM factors
+                          WHERE symbol=? AND trade_date>=?
+                            AND factor>0 AND isfinite(factor)) AS next_factor
+                  FROM bounds b
+                """,
+                [
+                    paths,
+                    str(row.symbol),
+                    str(row.effective_from),
+                    str(row.effective_to),
+                    str(row.symbol),
+                    str(row.next_symbol),
+                    str(row.next_effective_from),
+                ],
+            ).fetchone()
+            if result is None or int(result[4] or 0) == 0:
+                continue
+            (
+                first_date,
+                last_date,
+                first_factor,
+                last_factor,
+                target_rows,
+                prior_factor,
+                next_factor,
+            ) = result
+            values = [first_factor, last_factor, prior_factor, next_factor]
+            if any(value is None or not np.isfinite(float(value)) for value in values):
+                raise PitHistoryError(
+                    "pit_history_lifecycle_factor_scale_boundary_missing:"
+                    f"{row.symbol}:{first_date}:{last_date}"
+                )
+            if any(float(value) <= 0 for value in values):
+                raise PitHistoryError(
+                    "pit_history_lifecycle_factor_scale_boundary_nonpositive:"
+                    f"{row.symbol}:{first_date}:{last_date}"
+                )
+            left_scale = float(prior_factor) / float(first_factor)
+            right_scale = float(next_factor) / float(last_factor)
+            relative_difference = abs(left_scale / right_scale - 1.0)
+            if relative_difference > 0.01:
+                raise PitHistoryError(
+                    "pit_history_lifecycle_factor_scale_evidence_conflict:"
+                    f"{row.symbol}:left={left_scale}:right={right_scale}"
+                )
+            if abs(left_scale - 1.0) <= 1e-12:
+                continue
+            plans.append(
+                {
+                    "security_id": str(row.security_id),
+                    "symbol": str(row.symbol),
+                    "next_symbol": str(row.next_symbol),
+                    "first_date": str(first_date),
+                    "last_date": str(last_date),
+                    "target_row_count": int(target_rows),
+                    "scale": left_scale,
+                    "right_boundary_scale": right_scale,
+                    "boundary_scale_relative_difference": relative_difference,
+                }
+            )
+    shutil.rmtree(
+        ctx.runtime / "lifecycle_effectivity" / "factor_scale_spill",
+        ignore_errors=True,
+    )
+    return plans
+
+
+def _normalize_lifecycle_factor_scale_stitches(
+    ctx: PitHistoryContext,
+    *,
+    intervals: pd.DataFrame,
+    apply: bool,
+) -> dict[str, Any]:
+    plans = _lifecycle_factor_scale_stitch_plan(ctx, intervals=intervals)
+    if not plans:
+        return {"status": "already_aligned", "plans": []}
+    if not apply:
+        return {"status": "planned", "plans": plans}
+    context = resolve_active_domain("adjust_factor", workspace_root=ctx.workspace)
+    prepared_dir = (
+        ctx.runtime / "lifecycle_effectivity" / "factor_scale_prepared"
+    )
+    if prepared_dir.exists():
+        shutil.rmtree(prepared_dir.resolve(strict=True))
+    prepared_dir.mkdir(parents=True, exist_ok=True)
+    predicates = [
+        "(" + " AND ".join(
+            (
+                f"upper(cast(d.symbol AS VARCHAR))={_sql_literal(item['symbol'])}",
+                f"cast(d.trade_date AS VARCHAR) BETWEEN "
+                f"{_sql_literal(item['first_date'])} AND {_sql_literal(item['last_date'])}",
+                "cast(d.source AS VARCHAR) LIKE '%pit_history_restore%'",
+                "cast(d.source AS VARCHAR) NOT LIKE '%lifecycle_factor_scale_%'",
+            )
+        ) + ")"
+        for item in plans
+    ]
+    combined_predicate = " OR ".join(predicates)
+    columns = [str(item.get("name", "")) for item in context.manifest.schema]
+    columns = [item for item in columns if item]
+    replacements: list[tuple[Path, Path]] = []
+    with open_guarded_duckdb(
+        temp_directory=ctx.runtime / "lifecycle_effectivity" / "factor_scale_apply_spill",
+        threads=4,
+    ) as con:
+        for index, old_path in enumerate(context.shard_paths):
+            count = int(
+                con.execute(
+                    f"SELECT count(*) FROM {_parquet_scan([old_path])} d "
+                    f"WHERE {combined_predicate}"
+                ).fetchone()[0]
+                or 0
+            )
+            if not count:
+                continue
+            expressions: list[str] = []
+            for column in columns:
+                quoted = _quoted_identifier(column)
+                if column in {
+                    "adjust_factor",
+                    "fore_adjust_factor",
+                    "back_adjust_factor",
+                }:
+                    branches = " ".join(
+                        f"WHEN {predicate} THEN "
+                        f"try_cast(d.{quoted} AS DOUBLE)*{repr(float(plan['scale']))}"
+                        for predicate, plan in zip(predicates, plans, strict=True)
+                    )
+                    expressions.append(
+                        f"CASE {branches} ELSE d.{quoted} END AS {quoted}"
+                    )
+                elif column == "source":
+                    expressions.append(
+                        f"CASE WHEN {combined_predicate} THEN "
+                        f"concat(coalesce(cast(d.{quoted} AS VARCHAR),''),"
+                        f"'+lifecycle_factor_scale_stitch_v1') "
+                        f"ELSE d.{quoted} END AS {quoted}"
+                    )
+                else:
+                    expressions.append(f"d.{quoted}")
+            target = prepared_dir / f"factor_scale_{index:04d}.parquet"
+            order = ",".join(
+                _quoted_identifier(item) for item in context.manifest.primary_key
+            )
+            _copy_lifecycle_query(
+                con,
+                f"SELECT {','.join(expressions)} "
+                f"FROM {_parquet_scan([old_path])} d ORDER BY {order}",
+                target,
+            )
+            replacements.append((old_path, target))
+    shutil.rmtree(
+        ctx.runtime / "lifecycle_effectivity" / "factor_scale_apply_spill",
+        ignore_errors=True,
+    )
+    if not replacements:
+        raise PitHistoryError("pit_history_lifecycle_factor_scale_target_missing")
+    _validate_lifecycle_prepared_schemas(
+        context=context,
+        paths=[item[1] for item in replacements],
+    )
+    mutation = mutate_active_shards_from_parquet(
+        "adjust_factor",
+        replacements=replacements,
+        reason="align lifecycle-restored adjustment-factor absolute scales",
+        workspace_root=ctx.workspace,
+    )
+    update_active_manifest_metadata(
+        "adjust_factor",
+        reason="record lifecycle adjustment-factor scale alignment",
+        workspace_root=ctx.workspace,
+        source_updates={
+            "lifecycle_factor_scale_semantics": "constant_scale_stitched_across_provider_and_ticker_boundaries",
+            "lifecycle_factor_scale_normalized_at": utc_now(),
+            "lifecycle_factor_scale_plans": plans,
+        },
+        quality_updates={"lifecycle_factor_scale_continuous": True},
+    )
+    shutil.rmtree(prepared_dir.resolve(strict=True))
+    after = _lifecycle_factor_scale_stitch_plan(ctx, intervals=intervals)
+    if after:
+        raise PitHistoryError(
+            f"pit_history_lifecycle_factor_scale_incomplete:{len(after)}"
+        )
+    return {
+        "status": str(mutation.get("status", "")),
+        "mutation_id": str(mutation.get("mutation_id", "")),
+        "plans": plans,
     }
 
 
@@ -2316,24 +2701,60 @@ def normalize_symbol_lifecycle_effectivity(
         workspace_root=ctx.workspace,
         domains=domains,
     )
-    if before["status"] == "ok":
-        return {"status": "already_normalized", "before": before, "domains": {}}
-    if not apply:
-        return {"status": "planned", "before": before, "domains": {}}
     intervals, symbol_map, cutoff = _symbol_lifecycle_tables(ctx)
+    if before["status"] == "ok":
+        factor_scale = (
+            _normalize_lifecycle_factor_scale_stitches(
+                ctx,
+                intervals=intervals,
+                apply=apply,
+            )
+            if "adjust_factor" in domains and not intervals.empty
+            else {"status": "not_applicable", "plans": []}
+        )
+        if factor_scale["status"] in {"already_aligned", "not_applicable"}:
+            return {
+                "status": "already_normalized",
+                "before": before,
+                "domains": {},
+                "factor_scale": factor_scale,
+            }
+        payload = {
+            "status": "normalized" if apply else "planned",
+            "before": before,
+            "after": before if apply else {},
+            "domains": {},
+            "factor_scale": factor_scale,
+            "intraday_5m_changed": False,
+            "completed_at": utc_now() if apply else "",
+        }
+        if apply:
+            atomic_write_json(
+                ctx.runtime / "lifecycle_effectivity" / "normalization.json",
+                payload,
+            )
+        return json_safe(payload)
     results: dict[str, Any] = {}
     for domain in domains:
         finding = dict(before["domains"].get(domain, {}) or {})
         if finding.get("status") == "ok":
-            results[domain] = {"status": "already_normalized"}
+            context = resolve_active_domain(domain, workspace_root=ctx.workspace)
+            results[domain] = {
+                "status": "already_normalized",
+                "manifest_row_count_before": int(context.manifest.row_count),
+                "projected_manifest_row_count": int(context.manifest.row_count),
+            }
             continue
         replacements, removals, appends, prepared = _prepare_lifecycle_domain_mutation(
             ctx,
             domain=domain,
             intervals=intervals,
             symbol_map=symbol_map,
-            cutoff=cutoff,
         )
+        if not apply:
+            results[domain] = {**prepared, "status": "planned"}
+            _cleanup_lifecycle_prepared_domain(ctx, domain)
+            continue
         mutation = mutate_active_shards_from_parquet(
             domain,
             replacements=replacements,
@@ -2341,6 +2762,7 @@ def normalize_symbol_lifecycle_effectivity(
             appends=appends,
             reason="canonicalize ticker rows to symbol_history effective intervals",
             workspace_root=ctx.workspace,
+            allow_selected_schema_superset=True,
         )
         update_active_manifest_metadata(
             domain,
@@ -2363,11 +2785,27 @@ def normalize_symbol_lifecycle_effectivity(
             "mutation_id": str(mutation.get("mutation_id", "")),
             "manifest_row_count": int(mutation.get("manifest_row_count", 0) or 0),
         }
-        prepared_dir = (
-            ctx.runtime / "lifecycle_effectivity" / "prepared" / domain
+        _cleanup_lifecycle_prepared_domain(ctx, domain)
+    if not apply:
+        return json_safe(
+            {
+                "status": "planned",
+                "before": before,
+                "effective_cutoff": cutoff,
+                "domains": results,
+                "factor_scale": {"status": "pending_symbol_normalization"},
+                "intraday_5m_changed": False,
+            }
         )
-        if prepared_dir.exists():
-            shutil.rmtree(prepared_dir.resolve(strict=True))
+    factor_scale = (
+        _normalize_lifecycle_factor_scale_stitches(
+            ctx,
+            intervals=intervals,
+            apply=True,
+        )
+        if "adjust_factor" in domains and not intervals.empty
+        else {"status": "not_applicable", "plans": []}
+    )
     after = audit_symbol_lifecycle_effectivity(
         workspace_root=ctx.workspace,
         domains=domains,
@@ -2382,6 +2820,7 @@ def normalize_symbol_lifecycle_effectivity(
         "before": before,
         "after": after,
         "domains": results,
+        "factor_scale": factor_scale,
         "intraday_5m_changed": False,
         "completed_at": utc_now(),
     }

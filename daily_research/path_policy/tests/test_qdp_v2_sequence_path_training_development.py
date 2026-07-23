@@ -187,6 +187,82 @@ def _install_development_diagnostics(monkeypatch: pytest.MonkeyPatch) -> list[st
     return calls
 
 
+def test_v2_development_contract_purges_only_the_prediction_horizon(tmp_path: Path) -> None:
+    manifest_path = _build_development_pack(tmp_path)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    sample_path = Path(manifest["sample_index_path"])
+    candidate_path = Path(manifest["candidate_index_path"])
+    samples = pd.read_parquet(sample_path)
+    candidates = pd.read_parquet(candidate_path)
+    samples["year"] = samples["trade_date"].astype(str).str[:4].astype(int)
+    candidates["year"] = candidates["trade_date"].astype(str).str[:4].astype(int)
+    samples["entry_trade_date"] = "2022-01-05"
+    candidates["entry_trade_date"] = "2022-01-05"
+    samples.to_parquet(sample_path, index=False)
+    candidates.to_parquet(candidate_path, index=False)
+    manifest["max_label_dependency_days"] = 2
+    manifest["max_execution_dependency_days"] = 3
+    manifest["development_contract"] = dict(manifest["research_contract"])
+    manifest["development_walkforward"].update(
+        {
+            "schema_version": 2,
+            "forward_days": 2,
+            "execution_tail_days": 1,
+            "max_label_dependency_days": 2,
+            "training_label_dependency_days": 2,
+            "execution_dependency_days": 3,
+            "purge_rule": "training_label_end_date_idx < development_start_date_idx",
+        }
+    )
+    manifest["normalization"]["development_feature_date_count"] = 0
+
+    from daily_research.path_policy.seq100_fold_contract import (
+        compute_development_fold_training_contract,
+    )
+
+    contract = compute_development_fold_training_contract(manifest)
+
+    assert contract["payload"]["training_label_dependency_days"] == 2
+    assert contract["payload"]["execution_dependency_days"] == 3
+    manifest["development_walkforward"]["training_label_dependency_days"] = 3
+    with pytest.raises(ValueError, match="purge must equal forward_days"):
+        compute_development_fold_training_contract(manifest)
+
+
+def test_build_development_fold_view_keeps_execution_tail_out_of_purge(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    manifest_path = _build_development_pack(source_root)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    sample_path = Path(manifest["sample_index_path"])
+    candidate_path = Path(manifest["candidate_index_path"])
+    for path in (sample_path, candidate_path):
+        frame = pd.read_parquet(path)
+        frame["year"] = frame["trade_date"].astype(str).str[:4].astype(int)
+        frame["entry_trade_date"] = "2022-01-05"
+        frame.to_parquet(path, index=False)
+    manifest["artifact_type"] = "qdp_v2_sequence_path_pack"
+    manifest["max_label_dependency_days"] = 2
+    manifest["max_execution_dependency_days"] = 3
+    manifest["research_contract"] = _bind_research_contract(APPROVED_CONTRACT)
+    manifest["development_contract"] = dict(manifest["research_contract"])
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    from daily_research.path_policy.seq100_fold_contract import build_development_fold_view
+
+    result = build_development_fold_view(
+        source_manifest=manifest_path,
+        output_root=tmp_path / "folds",
+        development_year=2022,
+    )
+    view = json.loads(Path(result["view_path"]).read_text(encoding="utf-8"))
+
+    assert view["development_walkforward"]["training_label_dependency_days"] == 2
+    assert view["development_walkforward"]["execution_dependency_days"] == 3
+    assert view["development_walkforward"]["purged_signal_date_count"] == 2
+    assert view["development_fold_training_contract"]["schema_version"] == 2
+
+
 def test_development_early_stops_on_total_loss_and_restores_best_epoch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

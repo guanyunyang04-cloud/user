@@ -533,7 +533,7 @@ def test_long_suspension_break_triggers_on_twentieth_open_day_only() -> None:
     assert int(breaks_20.sum()) == 1
 
 
-def test_continuity_break_invalidates_crossing_input_and_dependency_tail() -> None:
+def test_continuity_break_invalidates_only_the_d60_training_path() -> None:
     n_dates = 70
     raw = _raw_panel(
         open_values=[10.0] * n_dates,
@@ -558,8 +558,27 @@ def test_continuity_break_invalidates_crossing_input_and_dependency_tail() -> No
 
     assert not input_valid[50, 0]  # lookback crosses the reopen break
     assert input_valid[54, 0]  # five observations beginning on the reopen day
-    assert not label_valid[27, 0]  # forward path is clear, but the tail reaches the long halt
+    assert label_valid[27, 0]  # execution-only tail reaches the halt but cannot change D2 supervision
     assert not label_valid[48, 0]  # forward path crosses the break
+
+
+def test_relative_turnover_baseline_uses_only_latest_positive_observations() -> None:
+    values = np.asarray(
+        [1.0, 2.0, 0.0, np.nan, 3.0, 4.0, 5.0, 0.0, 6.0],
+        dtype=np.float32,
+    )
+
+    baseline = sequence_pack._rolling_positive_observation_median(
+        values,
+        observation_count=3,
+    )
+
+    assert np.isnan(baseline[:4]).all()
+    assert baseline[4] == 2.0
+    assert baseline[5] == 3.0
+    assert baseline[6] == 4.0
+    assert baseline[7] == 4.0
+    assert baseline[8] == 5.0
 
 
 def test_qdp_source_hash_mismatch_is_reported_as_stale(tmp_path) -> None:

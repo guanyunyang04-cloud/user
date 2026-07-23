@@ -14,6 +14,12 @@ There are no generation, candidate, publish, rollback, legacy lake, memmap, or
 ## Current boundary
 
 - Active date: `2026-07-21`; 14 active domains; quick check passes.
+- The PIT main-board inventory contains 3,419 securities; 3,416 have daily
+  history. Historical restoration added 378 securities, including 228
+  delisted names, plus dated ST and suspension state.
+- Daily research domains use the ticker effective on each date for the two
+  code-change identities. Historical 5-minute bytes remain unchanged and are
+  resolved through `symbol_history` only when cross-frequency checks run.
 - Daily, 5-minute, factor, calendar, status, universe, industry, and index tails
   reach July 21.
 - Share capital, valuation, and corporate actions remain through July 16 because
@@ -21,8 +27,8 @@ There are no generation, candidate, publish, rollback, legacy lake, memmap, or
   guard to make freshness look complete.
 - BaoStock and mootdx are the normal current-update providers. A stock-day is
   never stitched across providers and missing bars are not interpolated.
-- The store is a user-selected current-survivor research store; it does not
-  claim survivorship-bias-free delisting research semantics.
+- Historical 5-minute data was not restored for the added PIT securities;
+  those explicit coverage gaps are a non-blocking warning for daily research.
 
 ## Commands
 

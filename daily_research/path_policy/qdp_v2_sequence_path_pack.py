@@ -1493,8 +1493,8 @@ def _compute_future_path_and_masks(
         raise ValueError(
             "long_suspension_panel and continuity_break_panel must match the daily date/symbol shape"
         )
-    dependency_tail = int(execution_tail_days)
-    if dependency_tail < 0:
+    execution_tail = int(execution_tail_days)
+    if execution_tail < 0:
         raise ValueError("execution_tail_days must be non-negative")
     input_valid = np.zeros((n_dates, n_symbols), dtype=bool)
     entry_buyable = np.zeros((n_dates, n_symbols), dtype=bool)
@@ -1533,7 +1533,6 @@ def _compute_future_path_and_masks(
         start = date_idx - int(lookback_days) + 1
         entry_idx = date_idx + 1
         end_idx = entry_idx + int(forward_days)
-        dependency_end_idx = end_idx + dependency_tail
         if start < 0:
             continue
         same_input_segment = (
@@ -1544,7 +1543,7 @@ def _compute_future_path_and_masks(
         input_valid[date_idx] = (
             finite_close[start : date_idx + 1].all(axis=0) & same_input_segment
         )
-        if dependency_end_idx > n_dates:
+        if end_idx > n_dates:
             continue
         entry_open = open_panel[entry_idx].astype("float64", copy=False)
         execution_entry_open = execution_open_panel[entry_idx].astype("float64", copy=False)
@@ -1581,12 +1580,15 @@ def _compute_future_path_and_masks(
             & np.isfinite(trailing_volume_log)
             & np.isfinite(trailing_amount_log)
         )
-        dependency_ok = ~(
-            long_suspension_values[entry_idx:dependency_end_idx].any(axis=0)
-            | continuity_break_values[entry_idx:dependency_end_idx].any(axis=0)
+        # Training targets end at D{forward_days}.  The optional execution tail
+        # is only consumed by account replay after a predicted exit is blocked;
+        # it must not change label membership or the train/OOS purge boundary.
+        label_dependency_ok = ~(
+            long_suspension_values[entry_idx:end_idx].any(axis=0)
+            | continuity_break_values[entry_idx:end_idx].any(axis=0)
         )
-        price_ok &= dependency_ok
-        va_ok &= dependency_ok
+        price_ok &= label_dependency_ok
+        va_ok &= label_dependency_ok
         if str(price_anchor) == "today_close":
             denom = np.where(signal_close != 0.0, signal_close, np.nan)
         elif str(price_anchor) == "next_open":
@@ -1674,6 +1676,151 @@ def _fit_normalization(panel: np.ndarray, train_date_mask: np.ndarray) -> dict[s
     mean = np.where(np.isfinite(mean), mean, 0.0).astype(np.float32)
     std = np.where(np.isfinite(std) & (std > 1e-6), std, 1.0).astype(np.float32)
     return {"mean": mean.tolist(), "std": std.tolist()}
+
+
+def _rolling_positive_observation_median(
+    values: np.ndarray,
+    *,
+    observation_count: int = 20,
+) -> np.ndarray:
+    """Past-only rolling median over the latest positive observations.
+
+    The resulting baseline is available from the Nth positive observation and
+    is carried through zero-volume or missing-share dates until a later
+    positive observation updates it.  A feature row still requires the current
+    turnover value itself to be finite.
+    """
+
+    source = np.asarray(values, dtype=np.float64).reshape(-1)
+    count = int(observation_count)
+    if count <= 0:
+        raise ValueError("observation_count must be positive")
+    result = np.full(source.shape, np.nan, dtype=np.float32)
+    positive_idx = np.flatnonzero(np.isfinite(source) & (source > 0.0))
+    if positive_idx.size < count:
+        return result
+    positive_values = source[positive_idx]
+    windows = np.lib.stride_tricks.sliding_window_view(
+        positive_values,
+        window_shape=count,
+    )
+    medians = np.median(windows, axis=1).astype(np.float32, copy=False)
+    update_idx = positive_idx[count - 1 :]
+    lookup = np.searchsorted(update_idx, np.arange(source.size), side="right") - 1
+    available = lookup >= 0
+    result[available] = medians[lookup[available]]
+    return result
+
+
+def _build_relative_turnover_panels(
+    *,
+    root: Path,
+    active: Mapping[str, Any],
+    date_values: list[str],
+    symbol_values: list[str],
+    daily_raw: np.ndarray,
+    panel_dir: Path,
+    mask_dir: Path,
+) -> tuple[np.memmap, np.memmap, np.memmap, np.memmap, dict[str, Any]]:
+    n_dates = len(date_values)
+    n_symbols = len(symbol_values)
+    shape = (n_dates, n_symbols)
+    date_to_idx = {value: idx for idx, value in enumerate(date_values)}
+    symbol_to_idx = {value: idx for idx, value in enumerate(symbol_values)}
+    log_path = panel_dir / "log_turnover_pct.float32.dat"
+    baseline_path = panel_dir / "turnover_past20_positive_median.float32.dat"
+    feature_path = panel_dir / "turnover.float32.dat"
+    valid_path = mask_dir / "turnover_valid.bool.dat"
+    log_turnover = _fill_float_memmap(log_path, shape, fill_value=np.nan)
+    baseline = _fill_float_memmap(baseline_path, shape, fill_value=np.nan)
+    turnover = _fill_float_memmap(feature_path, (n_dates, n_symbols, 2), fill_value=np.nan)
+    turnover_valid = _fill_bool_memmap(valid_path, shape)
+    volume_idx = DAILY_RAW_FEATURES.index("volume")
+
+    duplicate_key_count = 0
+    aligned_share_row_count = 0
+    for year in range(int(date_values[0][:4]), int(date_values[-1][:4]) + 1):
+        frame = _read_dataset_date_range(
+            root,
+            active,
+            "share_capital",
+            ["symbol", "trade_date", "float_share"],
+            f"{year}-01-01",
+            f"{year}-12-31",
+        )
+        if frame.empty:
+            continue
+        duplicate_key_count += int(frame.duplicated(["trade_date", "symbol"]).sum())
+        if duplicate_key_count:
+            raise ValueError("share_capital contains duplicate date/symbol rows")
+        date_idx = frame["trade_date"].map(date_to_idx)
+        symbol_idx = frame["symbol"].map(symbol_to_idx)
+        in_axis = date_idx.notna() & symbol_idx.notna()
+        if not bool(in_axis.any()):
+            continue
+        di = date_idx[in_axis].astype(np.int64).to_numpy()
+        si = symbol_idx[in_axis].astype(np.int64).to_numpy()
+        shares = pd.to_numeric(frame.loc[in_axis, "float_share"], errors="coerce").to_numpy(
+            dtype=np.float64,
+            na_value=np.nan,
+        )
+        volumes = np.asarray(daily_raw[di, si, volume_idx], dtype=np.float64)
+        valid = (
+            np.isfinite(shares)
+            & (shares > 0.0)
+            & np.isfinite(volumes)
+            & (volumes >= 0.0)
+        )
+        if bool(valid.any()):
+            log_turnover[di[valid], si[valid]] = np.log1p(
+                100.0 * volumes[valid] / shares[valid]
+            ).astype(np.float32, copy=False)
+            aligned_share_row_count += int(valid.sum())
+        del frame
+        gc.collect()
+
+    for symbol_idx in range(n_symbols):
+        values = np.asarray(log_turnover[:, symbol_idx], dtype=np.float32)
+        symbol_baseline = _rolling_positive_observation_median(values)
+        baseline[:, symbol_idx] = symbol_baseline
+        valid = np.isfinite(values) & np.isfinite(symbol_baseline)
+        turnover_valid[:, symbol_idx] = valid
+        turnover[valid, symbol_idx, 0] = values[valid]
+        turnover[valid, symbol_idx, 1] = values[valid] - symbol_baseline[valid]
+
+    log_turnover.flush()
+    baseline.flush()
+    turnover.flush()
+    turnover_valid.flush()
+    volume = np.asarray(daily_raw[:, :, volume_idx], dtype=np.float32)
+    observed_nonnegative_volume = np.isfinite(volume) & (volume >= 0.0)
+    stats = {
+        "schema_version": 1,
+        "artifact_type": "seq100_relative_turnover_embedded_v1",
+        "formula": "log1p(100 * daily_volume / same_day_float_share)",
+        "activity_target": "future_log_turnover_pct - median(last_20_positive_observed_log_turnover_pct_through_signal_date)",
+        "positive_observation_count": 20,
+        "uses_signal_date_or_earlier_only": True,
+        "future_reference_count": 0,
+        "aligned_share_row_count": int(aligned_share_row_count),
+        "missing_share_for_nonnegative_volume_count": int(
+            np.count_nonzero(observed_nonnegative_volume & ~np.isfinite(log_turnover))
+        ),
+        "valid_cell_count": int(np.count_nonzero(turnover_valid)),
+        "log_turnover_pct": {
+            "path": str(log_path.resolve()),
+            "shape": [n_dates, n_symbols],
+            "dtype": "float32",
+            "sha256": _file_sha256(log_path),
+        },
+        "past20_positive_median": {
+            "path": str(baseline_path.resolve()),
+            "shape": [n_dates, n_symbols],
+            "dtype": "float32",
+            "sha256": _file_sha256(baseline_path),
+        },
+    }
+    return turnover, turnover_valid, log_turnover, baseline, stats
 
 
 def _build_sample_index(
@@ -1951,6 +2098,7 @@ class SequencePackConfig:
     pit_universe_manifest: Path | None = None
     dataset_view: Path | None = None
     feature_profile: str = FEATURE_PROFILE_ALL
+    include_relative_turnover: bool = False
 
 
 def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
@@ -2194,6 +2342,9 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         if feature_profile == FEATURE_PROFILE_ALL
         else None
     )
+    turnover_panel: np.memmap | None = None
+    turnover_valid_panel: np.memmap | None = None
+    turnover_supplement: dict[str, Any] | None = None
     up_limit_panel = _fill_float_memmap(label_dir / "entry_up_limit.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
     down_limit_panel = _fill_float_memmap(label_dir / "exit_down_limit.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
     raw_open_panel = _fill_float_memmap(label_dir / "entry_open_raw.float32.dat", (n_dates, n_symbols), fill_value=np.nan)
@@ -2488,6 +2639,31 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             has_bar_panel=has_bar_panel,
         )
 
+    if bool(config.include_relative_turnover):
+        memory_guard("relative_turnover")
+        _write_json(
+            progress_path,
+            {"status": "writing_relative_turnover", "updated_at": _now()},
+        )
+        (
+            turnover_panel,
+            turnover_valid_panel,
+            _turnover_log_panel,
+            _turnover_baseline_panel,
+            turnover_supplement,
+        ) = _build_relative_turnover_panels(
+            root=root,
+            active=active,
+            date_values=date_values,
+            symbol_values=symbol_values,
+            daily_raw=daily_raw,
+            panel_dir=panel_dir,
+            mask_dir=mask_dir,
+        )
+        del _turnover_log_panel, _turnover_baseline_panel
+        gc.collect()
+        _trim_process_working_set()
+
     if feature_profile == FEATURE_PROFILE_ALL:
         assert intraday_summary is not None and limit_structure is not None
         for domain, columns, feature_columns, panel in [
@@ -2695,6 +2871,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "daily_raw": _fit_normalization(daily_raw, train_date_mask),
         "daily_state": _fit_normalization(daily_state, train_date_mask),
     }
+    if turnover_panel is not None:
+        normalization["turnover"] = _fit_normalization(turnover_panel, train_date_mask)
     if intraday_summary is not None and limit_structure is not None:
         normalization["intraday_summary"] = _fit_normalization(intraday_summary, train_date_mask)
         normalization["limit_structure"] = _fit_normalization(limit_structure, train_date_mask)
@@ -2760,6 +2938,14 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "columns": RAW_SIGNAL_COLUMNS,
         },
     }
+    if turnover_panel is not None:
+        feature_channels["turnover"] = {
+            "path": str((panel_dir / "turnover.float32.dat").resolve()),
+            "shape": [n_dates, n_symbols, 2],
+            "columns": ["log_turnover_pct", "relative_turnover_20"],
+            "dtype": "float32",
+            "sha256": _file_sha256(panel_dir / "turnover.float32.dat"),
+        }
     if intraday_summary is not None and limit_structure is not None:
         feature_channels.update(
             {
@@ -2795,7 +2981,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "lookback_days": int(config.lookback_days),
         "forward_days": int(config.forward_days),
         "execution_tail_days": execution_tail_days,
-        "max_label_dependency_days": required_dependency_days,
+        "max_label_dependency_days": int(config.forward_days),
+        "max_execution_dependency_days": required_dependency_days,
         "dependency_padding_complete": bool(dependency_padding_complete),
         "available_dependency_padding_days": int(panel_end_pos - sample_end_pos),
         "resource_guard": {
@@ -2827,12 +3014,17 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "entry_tick_size": 0.01,
             "sample_filter": sample_filter,
             "suspension_fill": suspension_fill,
-            "model_input_mask_features": [] if feature_profile == FEATURE_PROFILE_DAILY_ONLY else None,
+            "model_input_mask_features": (
+                ["turnover_valid"]
+                if turnover_panel is not None
+                else ([] if feature_profile == FEATURE_PROFILE_DAILY_ONLY else None)
+            ),
             "continuity_break_rule": {
                 "minimum_consecutive_suspended_open_days": LONG_SUSPENSION_MIN_OPEN_DAYS,
                 "break_position": "first_non_suspended_open_day_after_qualifying_run",
                 "input_rule": "lookback_must_remain_within_one_continuity_segment",
-                "label_rule": "forward_path_and_execution_tail_must_not_include_long_suspension_or_break",
+                "label_rule": "forward_path_only_must_not_include_long_suspension_or_break",
+                "execution_tail_rule": "tail_is_account_replay_only_and_does_not_change_supervision_membership",
             },
             "label_valid_alias": "price_label_valid" if separate_price_va_validity else "complete_ohlcva_label_valid",
             "candidate_filter": (
@@ -2977,6 +3169,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "earliest_exit": "path day 2 (T+1 after the next-open entry day)",
             "exit_fill": "planned close exit defers to the first observed, status-valid, non-suspended, non-delisted day whose raw close is above the tick-rounded down limit",
             "exit_retry_window": f"prediction remains {int(config.forward_days)} days; exit may defer for {execution_tail_days} additional trading days",
+            "training_dependency": f"all supervised targets end at D{int(config.forward_days)}; execution-tail observations are excluded from labels and purge",
             "unresolved_exit": f"after the retry window recover {unresolved_exit_recovery_fraction:.6f} of entry notional before costs",
             "price_anchor": str(config.price_anchor),
             "future_ohlc_path": f"OHLC returns are relative to {path_anchor_name}; price adjustment={price_adjustment}.",
@@ -2988,6 +3181,20 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "path_type_labels": "derived_explanation_only_not_primary_training_target",
         },
     }
+    if turnover_supplement is not None and turnover_valid_panel is not None:
+        manifest["relative_turnover_supplement"] = turnover_supplement
+        manifest["masks"]["turnover_valid"] = {
+            "path": str((mask_dir / "turnover_valid.bool.dat").resolve()),
+            "shape": [n_dates, n_symbols],
+        }
+        manifest["data_semantics"]["relative_turnover"] = {
+            "formula": str(turnover_supplement["formula"]),
+            "baseline": "median_last_20_positive_observations_including_signal_date",
+            "uses_future_values": False,
+            "input_dim_with_daily_channels_and_validity_mask": int(
+                len(DAILY_RAW_FEATURES) + len(RAW_SIGNAL_COLUMNS) + 2 + 1
+            ),
+        }
     manifest_path = output_dir / "manifest.json"
     _write_json(manifest_path, manifest)
     _write_json(progress_path, {"status": "completed", "manifest_json": str(manifest_path.resolve()), "updated_at": _now()})
@@ -3299,6 +3506,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Materialize all input channels or the daily-only channels used by the current seq100 study.",
     )
     build.add_argument(
+        "--include-relative-turnover",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Add the two PIT turnover features, their validity mask, and the D60 activity-label supplement on the pack's own axes.",
+    )
+    build.add_argument(
         "--suspension-fill",
         choices=(SUSPENSION_FILL_NONE, SUSPENSION_FILL_CARRY_CLOSE),
         default=SUSPENSION_FILL_NONE,
@@ -3426,6 +3639,7 @@ def main(argv: list[str] | None = None) -> int:
             pit_universe_manifest=Path(args.pit_universe_manifest) if args.pit_universe_manifest is not None else None,
             dataset_view=Path(args.dataset_view) if args.dataset_view is not None else None,
             feature_profile=str(args.feature_profile),
+            include_relative_turnover=bool(args.include_relative_turnover),
         )
         result = build_sequence_pack(cfg)
     elif args.command == "reanchor":
