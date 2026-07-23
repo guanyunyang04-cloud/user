@@ -1,22 +1,24 @@
 {
-  "schema_version": 2,
+  "schema": "workspace-brain/v1",
   "brain_id": "workspace",
-  "brain_type": "main",
-  "entrypoint": "brain/README.md",
-  "state": "brain/state.md",
-  "object_registry": "brain/object_registry.json",
+  "brain_type": "project",
+  "project_name": "quant_project",
+  "roles": {
+    "identity": "brain/README.md",
+    "working_memory": "brain/state.md",
+    "semantic_memory": "brain/README.md",
+    "procedural_memory": "AGENTS.md",
+    "executive_control": "brain/object_registry.json",
+    "episodic_memory": "brain/references"
+  },
   "children": [
     {
       "brain_id": "daily_research",
-      "root": "daily_research/brain",
-      "entrypoint": "daily_research/brain/README.md"
+      "manifest": "daily_research/brain/brain_manifest.json"
     },
     {
       "brain_id": "quant_data_platform",
-      "root": "quant_data_platform/brain",
-      "entrypoint": "quant_data_platform/brain/README.md"
+      "manifest": "quant_data_platform/brain/brain_manifest.json"
     }
-  ],
-  "canonical_skill": "brain/skills/workspace-brain/SKILL.md",
-  "installed_skill": "C:/Users/ASUS/.codex/skills/workspace-brain/SKILL.md"
+  ]
 }

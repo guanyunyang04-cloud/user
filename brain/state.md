@@ -1,6 +1,6 @@
 # Current workspace state
 
-Updated: `2026-07-23`
+Updated: `2026-07-24`
 
 - QDP is usable with `active_as_of_date=2026-07-21`; quick and full validation
   pass. PIT main-board daily history now includes historical ST, long
@@ -29,3 +29,7 @@ Updated: `2026-07-23`
   78 QDP/brain integrity tests).
 - The full cleanup evidence is
   `brain/references/repository_simplification_20260722.md`.
+- The workspace brain now uses the portable `workspace-brain/v1` role contract.
+  The reusable skill and tools are globally deployed from an independent source;
+  this repository owns only its project facts, protected objects, and child-brain
+  state.

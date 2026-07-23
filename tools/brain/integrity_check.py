@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Sequence
 
 from daily_research.model_registry import verify_registry
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+BRAIN_SCHEMA = "workspace-brain/v1"
+OBJECT_SCHEMA = "workspace-brain/objects/v1"
+REQUIRED_BRAIN_ROLES = {
+    "identity",
+    "working_memory",
+    "semantic_memory",
+    "procedural_memory",
+    "executive_control",
+    "episodic_memory",
+}
 ALLOWED_TOP_LEVEL_DIRECTORIES = {
     ".git",
     ".pytest_cache",
@@ -54,48 +63,169 @@ def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(4 * 1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _record_error(errors: list[str], condition: bool, message: str) -> None:
     if not condition:
         errors.append(message)
 
 
+def _project_path(root: Path, value: object) -> Path | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.replace("\\", "/")
+    posix = PurePosixPath(normalized)
+    windows = PureWindowsPath(value)
+    if posix.is_absolute() or windows.is_absolute() or windows.drive:
+        return None
+    if ".." in posix.parts:
+        return None
+    path = (root / Path(*posix.parts)).resolve()
+    if path != root and root not in path.parents:
+        return None
+    return path
+
+
+def _check_brain_manifest(
+    root: Path,
+    manifest_path: Path,
+    errors: list[str],
+    *,
+    expected_type: str,
+    seen: set[Path],
+) -> dict[str, Any]:
+    resolved = manifest_path.resolve()
+    if resolved in seen:
+        errors.append(f"brain_manifest_cycle_or_duplicate:{manifest_path}")
+        return {}
+    seen.add(resolved)
+    _record_error(errors, manifest_path.is_file(), f"missing:brain_manifest:{manifest_path}")
+    if not manifest_path.is_file():
+        return {}
+    try:
+        manifest = _read_json(manifest_path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        errors.append(f"invalid:brain_manifest:{manifest_path}:{exc}")
+        return {}
+    label = manifest_path.relative_to(root).as_posix()
+    _record_error(errors, manifest.get("schema") == BRAIN_SCHEMA, f"brain_manifest_schema:{label}")
+    _record_error(
+        errors,
+        manifest.get("brain_type") == expected_type,
+        f"brain_manifest_type:{label}:{expected_type}",
+    )
+    _record_error(
+        errors,
+        isinstance(manifest.get("brain_id"), str) and bool(manifest["brain_id"].strip()),
+        f"brain_manifest_id:{label}",
+    )
+    _record_error(
+        errors,
+        isinstance(manifest.get("project_name"), str),
+        f"brain_manifest_project_name:{label}",
+    )
+    roles = manifest.get("roles")
+    _record_error(errors, isinstance(roles, dict), f"brain_manifest_roles:{label}")
+    if not isinstance(roles, dict):
+        roles = {}
+    for role in sorted(REQUIRED_BRAIN_ROLES):
+        _record_error(errors, role in roles, f"brain_manifest_missing_role:{label}:{role}")
+    for role, value in roles.items():
+        path = _project_path(root, value)
+        _record_error(errors, path is not None, f"brain_manifest_unsafe_path:{label}:{role}")
+        if path is None:
+            continue
+        if role == "episodic_memory":
+            _record_error(errors, path.is_dir(), f"missing:brain_role_dir:{label}:{role}:{path}")
+        else:
+            _record_error(errors, path.is_file(), f"missing:brain_role_file:{label}:{role}:{path}")
+    parent = manifest.get("parent")
+    if parent is not None:
+        parent_path = _project_path(root, parent)
+        _record_error(errors, parent_path is not None, f"brain_manifest_unsafe_parent:{label}")
+        if parent_path is not None:
+            _record_error(errors, parent_path.is_file(), f"missing:brain_parent:{label}:{parent_path}")
+    children = manifest.get("children")
+    _record_error(errors, isinstance(children, list), f"brain_manifest_children:{label}")
+    if not isinstance(children, list):
+        return manifest
+    child_ids: set[str] = set()
+    for index, child in enumerate(children):
+        child_label = f"{label}:children[{index}]"
+        if not isinstance(child, dict):
+            errors.append(f"brain_manifest_child_object:{child_label}")
+            continue
+        child_id = child.get("brain_id")
+        _record_error(
+            errors,
+            isinstance(child_id, str) and bool(child_id.strip()),
+            f"brain_manifest_child_id:{child_label}",
+        )
+        if isinstance(child_id, str):
+            _record_error(
+                errors,
+                child_id not in child_ids,
+                f"brain_manifest_duplicate_child_id:{child_label}:{child_id}",
+            )
+            child_ids.add(child_id)
+        child_path = _project_path(root, child.get("manifest"))
+        _record_error(errors, child_path is not None, f"brain_manifest_unsafe_child:{child_label}")
+        if child_path is None:
+            continue
+        child_manifest = _check_brain_manifest(
+            root, child_path, errors, expected_type="child", seen=seen
+        )
+        if child_manifest and child_id:
+            _record_error(
+                errors,
+                child_manifest.get("brain_id") == child_id,
+                f"brain_manifest_child_id_mismatch:{child_label}:{child_id}",
+            )
+    return manifest
+
+
 def _check_brain(root: Path, errors: list[str]) -> dict[str, Any]:
     manifest_path = root / "brain/brain_manifest.json"
-    registry_path = root / "brain/object_registry.json"
-    _record_error(errors, manifest_path.is_file(), "missing:brain_manifest")
-    _record_error(errors, registry_path.is_file(), "missing:object_registry")
-    if not manifest_path.is_file() or not registry_path.is_file():
+    manifest = _check_brain_manifest(
+        root, manifest_path, errors, expected_type="project", seen=set()
+    )
+    roles = manifest.get("roles", {}) if manifest else {}
+    registry_path = _project_path(root, roles.get("executive_control"))
+    _record_error(errors, registry_path is not None, "missing:object_registry_role")
+    if registry_path is None or not registry_path.is_file():
         return {}
-    manifest = _read_json(manifest_path)
     registry = _read_json(registry_path)
-    _record_error(errors, int(manifest.get("schema_version", 0)) == 2, "brain_manifest_schema")
-    _record_error(errors, int(registry.get("schema_version", 0)) == 2, "object_registry_schema")
-    for key in ("entrypoint", "state", "object_registry"):
-        path = root / str(manifest.get(key, ""))
-        _record_error(errors, path.is_file(), f"missing:brain:{key}:{path}")
-    for child in list(manifest.get("children", []) or []):
-        entry = root / str(child.get("entrypoint", ""))
-        _record_error(errors, entry.is_file(), f"missing:child_entry:{entry}")
-    canonical = root / str(manifest.get("canonical_skill", ""))
-    installed = Path(str(manifest.get("installed_skill", "")))
-    _record_error(errors, canonical.is_file(), f"missing:canonical_skill:{canonical}")
-    _record_error(errors, installed.is_file(), f"missing:installed_skill:{installed}")
-    if canonical.is_file() and installed.is_file():
-        _record_error(errors, _sha256(canonical) == _sha256(installed), "workspace_brain_skill_drift")
-    for path in (root / "brain/workflows", root / "brain/skills/workspace-brain/agents", root / "brain/skills/workspace-brain/scripts"):
-        _record_error(errors, not path.exists(), f"retired_brain_runtime_present:{path}")
-    if installed.parent.is_dir():
-        for name in ("agents", "scripts"):
-            _record_error(errors, not (installed.parent / name).exists(), f"installed_skill_runtime_present:{name}")
-    return {"manifest": manifest, "object_count": len(list(registry.get("objects", []) or []))}
+    _record_error(errors, registry.get("schema") == OBJECT_SCHEMA, "object_registry_schema")
+    objects = registry.get("objects")
+    _record_error(errors, isinstance(objects, list), "object_registry_objects")
+    if not isinstance(objects, list):
+        objects = []
+    object_ids: set[str] = set()
+    for index, item in enumerate(objects):
+        label = f"object_registry[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{label}:object")
+            continue
+        for field in ("object_id", "owner", "type", "truth", "mutation"):
+            _record_error(
+                errors,
+                isinstance(item.get(field), str) and bool(item[field].strip()),
+                f"{label}:missing:{field}",
+            )
+        object_id = item.get("object_id")
+        if isinstance(object_id, str):
+            _record_error(errors, object_id not in object_ids, f"{label}:duplicate:{object_id}")
+            object_ids.add(object_id)
+        paths = item.get("paths")
+        _record_error(errors, isinstance(paths, list), f"{label}:paths")
+        if not isinstance(paths, list):
+            continue
+        for value in paths:
+            path = _project_path(root, value)
+            _record_error(errors, path is not None, f"{label}:unsafe_path:{value}")
+            if path is not None:
+                _record_error(errors, path.exists(), f"{label}:missing_path:{path}")
+    local_skill = root / "brain/skills/workspace-brain"
+    _record_error(errors, not local_skill.exists(), f"repository_local_workspace_brain_skill:{local_skill}")
+    return {"manifest": manifest, "object_count": len(objects)}
 
 
 def _check_qdp(root: Path, errors: list[str]) -> dict[str, Any]:

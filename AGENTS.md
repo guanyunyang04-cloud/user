@@ -1,5 +1,11 @@
 # Workspace instructions
 
+<!-- workspace-brain:start -->
+## Project brain
+
+本项目使用 `brain/` 保存持久项目记忆。处理项目接管、当前状态、记忆写回、受保护对象或结构治理时，使用全局 `workspace-brain` Skill，先读取 `brain/brain_manifest.json`，再按任务激活相关角色。当前事实写入 `state`，稳定知识写入 `knowledge`，可重复方法写入 `operations`，日期化证据写入 `references/`。
+<!-- workspace-brain:end -->
+
 ## Runtime
 
 - Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` for Python and pytest.

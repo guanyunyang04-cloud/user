@@ -1,10 +1,18 @@
 {
-  "schema_version": 2,
+  "schema": "workspace-brain/v1",
   "brain_id": "daily_research",
   "brain_type": "child",
+  "project_name": "Daily Research",
   "parent": "brain/brain_manifest.json",
-  "entrypoint": "daily_research/brain/README.md",
-  "state": "daily_research/brain/state.md",
+  "roles": {
+    "identity": "daily_research/brain/README.md",
+    "working_memory": "daily_research/brain/state.md",
+    "semantic_memory": "daily_research/brain/README.md",
+    "procedural_memory": "daily_research/brain/README.md",
+    "executive_control": "brain/object_registry.json",
+    "episodic_memory": "daily_research/brain/references"
+  },
+  "children": [],
   "stable_surfaces": {
     "data": "daily_research/data/research_store",
     "models": "daily_research/models/registry.json",

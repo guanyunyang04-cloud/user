@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema": "workspace-brain/objects/v1",
   "objects": [
     {
       "object_id": "qdp_datasets",

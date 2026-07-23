@@ -24,6 +24,7 @@ lives in `state.md`. Project detail belongs in each child brain's `README.md` an
 - Prefer direct code, explicit paths, and Git recovery over compatibility and
   migration ceremony.
 
-The only canonical custom skill source is
-`brain/skills/workspace-brain/SKILL.md`; the installed user copy is a deployment
-copy and must match it byte for byte.
+This directory is the `quant_project` brain instance. The globally installed
+`workspace-brain` skill defines the reusable method and template; project facts
+remain here, and always-on operating constraints remain in `AGENTS.md`. This
+repository does not carry a second copy of the global skill.

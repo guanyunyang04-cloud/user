@@ -1,10 +1,18 @@
 {
-  "schema_version": 2,
+  "schema": "workspace-brain/v1",
   "brain_id": "quant_data_platform",
   "brain_type": "child",
+  "project_name": "Quant Data Platform",
   "parent": "brain/brain_manifest.json",
-  "entrypoint": "quant_data_platform/brain/README.md",
-  "state": "quant_data_platform/brain/state.md",
+  "roles": {
+    "identity": "quant_data_platform/brain/README.md",
+    "working_memory": "quant_data_platform/brain/state.md",
+    "semantic_memory": "quant_data_platform/brain/README.md",
+    "procedural_memory": "quant_data_platform/brain/README.md",
+    "executive_control": "brain/object_registry.json",
+    "episodic_memory": "quant_data_platform/brain/references"
+  },
+  "children": [],
   "data_root": "quant_data_platform/data/qdp_v2",
   "cli": "quant_data_platform.cli:main"
 }
