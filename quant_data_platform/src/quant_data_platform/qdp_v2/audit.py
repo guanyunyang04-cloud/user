@@ -14,7 +14,7 @@ from quant_data_platform.qdp_v2.manifest import (
     read_dataset_manifest,
     utc_now,
 )
-from quant_data_platform.qdp_v2.status import _active_dataset_refs, _dataset_file_index, _manifest_path_key
+from quant_data_platform.qdp_v2.status import _active_dataset_refs, _manifest_path
 
 
 def audit_active(*, workspace_root: str | Path | None = None, write: bool = False, verify_footers: bool = True) -> dict[str, Any]:
@@ -34,10 +34,9 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = Fals
         missing_shards: list[str] = []
         footer_errors: list[str] = []
         footer_rows = 0
-        file_index = _dataset_file_index(manifest_path.parent)
         for shard in manifest.shards:
-            shard_path = Path(shard.path) if Path(shard.path).is_absolute() else root / shard.path
-            if _manifest_path_key(shard.path, root) not in file_index:
+            shard_path = _manifest_path(shard.path, root)
+            if not shard_path.is_file():
                 missing_shards.append(str(shard_path))
                 continue
             if verify_footers:

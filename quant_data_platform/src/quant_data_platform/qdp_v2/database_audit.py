@@ -438,13 +438,28 @@ def audit_database(
                     )
                 coverage = float(consistency["complete_coverage_ratio"])
                 missing_days = int(consistency["missing_positive_daily_count"])
+                intraday_history_complete = bool(
+                    dict(active.get("scope", {}) or {}).get(
+                        "intraday_5m_restored_for_historical_symbols",
+                        True,
+                    )
+                )
                 if missing_days:
+                    consistency["coverage_contract"] = (
+                        "full_daily_intraday_history"
+                        if intraday_history_complete
+                        else "daily_pit_history_with_explicit_intraday_gaps"
+                    )
                     findings.append(
                         _finding(
-                            "high",
+                            "high" if intraday_history_complete else "medium",
                             "coverage",
                             "market_intraday_5m",
-                            "historical_5m_coverage_not_100_percent",
+                            (
+                                "historical_5m_coverage_not_100_percent"
+                                if intraday_history_complete
+                                else "historical_5m_unavailable_for_restored_daily_symbols"
+                            ),
                             consistency,
                         )
                     )
@@ -578,7 +593,7 @@ def audit_database(
         str(dict(active.get("scope", {}) or {}).get("permanent_exclusion_policy", ""))
         == POLICY_ID
     )
-    if exclusion_file.exists():
+    if exclusion_file.exists() and exclusion_required:
         registry = load_registry(workspace_root=workspace_root, required=True)
         registry_check = registry_consistency(registry)
         residuals = audit_exclusion_residuals(
@@ -610,6 +625,13 @@ def audit_database(
                 {"path": str(exclusion_file)},
             )
         )
+    elif exclusion_file.exists():
+        registry = load_registry(workspace_root=workspace_root, required=True)
+        cross_checks["retired_permanent_exclusions"] = {
+            "status": "retired_not_applied",
+            "registry": registry_consistency(registry),
+            "path": str(exclusion_file),
+        }
 
     latest = audit_latest_keys(workspace_root=workspace_root)
     if latest.get("status") == "needs_attention":
@@ -883,22 +905,111 @@ def _ordered_intraday_primary_key_check(
                 item["shard"] = str(path)
             examples.extend(rows)
 
-    ranges = sorted(
-        (str(entry.start_date), str(entry.end_date))
-        for entry in entries
+    ranged = [
+        (index, str(entry.start_date), str(entry.end_date), path)
+        for index, (path, entry) in enumerate(zip(paths, entries, strict=True))
         if str(entry.start_date) and str(entry.end_date)
-    )
-    range_overlap_count = sum(
-        int(left[1] >= right[0]) for left, right in zip(ranges, ranges[1:])
-    )
-    duplicate_rows = invalid_count + range_overlap_count
+    ]
+    overlapping_pairs = [
+        (left, right)
+        for position, left in enumerate(ranged)
+        for right in ranged[position + 1 :]
+        if left[1] <= right[2] and right[1] <= left[2]
+    ]
+    symbol_sets: dict[int, set[str]] = {}
+    for item in {part[0]: part for pair in overlapping_pairs for part in pair}.values():
+        symbol_sets[item[0]] = {
+            str(row[0])
+            for row in con.execute(
+                "SELECT DISTINCT cast(symbol AS VARCHAR) "
+                "FROM read_parquet(?, union_by_name=true)",
+                [[str(item[3])]],
+            ).fetchall()
+        }
+    cross_shard_duplicates = 0
+    verified_pair_count = 0
+    for left, right in overlapping_pairs:
+        common_symbols = sorted(symbol_sets[left[0]].intersection(symbol_sets[right[0]]))
+        if not common_symbols:
+            continue
+        verified_pair_count += 1
+        overlap_start = max(left[1], right[1])
+        overlap_end = min(left[2], right[2])
+        con.register(
+            "qdp_intraday_overlap_symbols",
+            pd.DataFrame({"symbol": common_symbols}),
+        )
+        try:
+            duplicate_count = int(
+                con.execute(
+                    """
+                    SELECT count(*)
+                    FROM read_parquet(?, union_by_name=true) l
+                    JOIN qdp_intraday_overlap_symbols s
+                      ON cast(l.symbol AS VARCHAR)=s.symbol
+                    JOIN read_parquet(?, union_by_name=true) r
+                      ON cast(l.symbol AS VARCHAR)=cast(r.symbol AS VARCHAR)
+                     AND cast(l.trade_date AS VARCHAR)=cast(r.trade_date AS VARCHAR)
+                     AND cast(l.bar_time AS VARCHAR)=cast(r.bar_time AS VARCHAR)
+                    WHERE cast(l.trade_date AS VARCHAR) BETWEEN ? AND ?
+                      AND cast(r.trade_date AS VARCHAR) BETWEEN ? AND ?
+                    """,
+                    [
+                        [str(left[3])],
+                        [str(right[3])],
+                        overlap_start,
+                        overlap_end,
+                        overlap_start,
+                        overlap_end,
+                    ],
+                ).fetchone()[0]
+            )
+            cross_shard_duplicates += duplicate_count
+            remaining = max(0, int(sample_limit) - len(examples))
+            if duplicate_count and remaining:
+                rows = con.execute(
+                    """
+                    SELECT cast(l.symbol AS VARCHAR) AS symbol,
+                           cast(l.trade_date AS VARCHAR) AS trade_date,
+                           cast(l.bar_time AS VARCHAR) AS bar_time
+                    FROM read_parquet(?, union_by_name=true) l
+                    JOIN qdp_intraday_overlap_symbols s
+                      ON cast(l.symbol AS VARCHAR)=s.symbol
+                    JOIN read_parquet(?, union_by_name=true) r
+                      ON cast(l.symbol AS VARCHAR)=cast(r.symbol AS VARCHAR)
+                     AND cast(l.trade_date AS VARCHAR)=cast(r.trade_date AS VARCHAR)
+                     AND cast(l.bar_time AS VARCHAR)=cast(r.bar_time AS VARCHAR)
+                    WHERE cast(l.trade_date AS VARCHAR) BETWEEN ? AND ?
+                      AND cast(r.trade_date AS VARCHAR) BETWEEN ? AND ?
+                    LIMIT ?
+                    """,
+                    [
+                        [str(left[3])],
+                        [str(right[3])],
+                        overlap_start,
+                        overlap_end,
+                        overlap_start,
+                        overlap_end,
+                        remaining,
+                    ],
+                ).fetchdf().to_dict("records")
+                for row in rows:
+                    row["left_shard"] = str(left[3])
+                    row["right_shard"] = str(right[3])
+                examples.extend(rows)
+        finally:
+            con.unregister("qdp_intraday_overlap_symbols")
+    range_overlap_count = len(overlapping_pairs)
+    duplicate_rows = invalid_count + cross_shard_duplicates
     return {
         "status": "ok" if not null_count and not duplicate_rows else "error",
         "null_key_rows": null_count,
         "duplicate_rows": duplicate_rows,
         "range_overlap_count": range_overlap_count,
+        "verified_overlap_pair_count": verified_pair_count,
+        "cross_shard_duplicate_rows": cross_shard_duplicates,
         "examples": examples,
-        "method": "partitioned_physical_order",
+        "method": "partitioned_physical_order+verified_cross_shard_keys",
     }
 
 
@@ -1868,7 +1979,7 @@ def _auxiliary_semantics_check(
             f"SELECT count(*) FROM {industry} WHERE "
             "coalesce(trim(industry),'')='' OR "
             "coalesce(trim(industry_standard),'')='' OR "
-            "industry_fill_method NOT IN ('direct_snapshot','prior_ffill') OR "
+            "industry_fill_method NOT IN ('direct_snapshot','prior_ffill','unavailable') OR "
             "try_cast(industry_source_date AS DATE)>try_cast(trade_date AS DATE)"
         ).fetchone()[0]
     )

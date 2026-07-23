@@ -31,9 +31,10 @@ from quant_data_platform.qdp_v2.manifest import (
     read_dataset_manifest,
     write_active_manifest,
 )
-from quant_data_platform.qdp_v2.permanent_exclusions import (
-    purge_permanent_exclusions,
-    register_current_exclusions,
+from quant_data_platform.qdp_v2.pit_history import (
+    inventory_pit_history,
+    normalize_symbol_lifecycle_effectivity,
+    run_pit_history_restore,
 )
 from quant_data_platform.qdp_v2.recent_market_repair import (
     run_baostock_intraday_repair,
@@ -100,10 +101,24 @@ def run_update(
     keep_runtime: bool = False,
     core_only: bool = False,
     repair_auxiliary: bool = False,
+    restore_pit_history: bool = False,
+    normalize_symbol_lifecycle: bool = False,
 ) -> dict[str, Any]:
     if int(workers) not in {1, 2, 3, 4}:
         raise ValueError("workers_must_be_between_1_and_4")
     workspace = Path(workspace_root or Path.cwd()).resolve()
+    if normalize_symbol_lifecycle:
+        return normalize_symbol_lifecycle_effectivity(
+            workspace_root=workspace,
+            apply=True,
+        )
+    if restore_pit_history:
+        return run_pit_history_restore(
+            end_date=as_of_date,
+            workspace_root=workspace,
+            workers=min(int(workers), 3),
+            apply=True,
+        )
     if repair_auxiliary:
         return run_auxiliary_repair(
             as_of_date=as_of_date,
@@ -139,18 +154,6 @@ def run_update(
             valuation_cache_path=None if core_only else valuation_cache,
         )
         payload[stage] = _state_summary(core)
-
-        stage = "permanent_exclusions"
-        exclusions = register_current_exclusions(
-            as_of_date=end,
-            workspace_root=workspace,
-        )
-        exclusion_state: dict[str, Any] = dict(exclusions)
-        if int(exclusions.get("new_exclusion_count", 0) or 0) > 0:
-            exclusion_state["purge"] = purge_permanent_exclusions(
-                workspace_root=workspace
-            )
-        payload[stage] = _state_summary(exclusion_state)
 
         stage = "adjust_factor"
         factor = run_factor_tail_update(
@@ -309,21 +312,56 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Repair only the six auxiliary domains; never runs core or 5m history.",
     )
+    parser.add_argument(
+        "--restore-pit-history",
+        action="store_true",
+        help="Restore historical main-board securities with point-in-time lifecycle state.",
+    )
+    parser.add_argument(
+        "--normalize-symbol-lifecycle",
+        action="store_true",
+        help=(
+            "Canonicalize daily research rows to date-effective tickers from "
+            "symbol_history; historical 5m is intentionally unchanged."
+        ),
+    )
     parser.add_argument("--json", action="store_true")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    if args.repair_auxiliary and args.core_only:
-        raise ValueError("repair_auxiliary_and_core_only_are_mutually_exclusive")
+    selected_modes = sum(
+        bool(item)
+        for item in (
+            args.repair_auxiliary,
+            args.core_only,
+            args.restore_pit_history,
+            args.normalize_symbol_lifecycle,
+        )
+    )
+    if selected_modes > 1:
+        raise ValueError(
+            "repair_auxiliary_core_only_restore_pit_history_and_"
+            "normalize_symbol_lifecycle_are_mutually_exclusive"
+        )
     kwargs = {
         "as_of_date": str(args.as_of_date),
         "start_date": str(args.start_date or ""),
         "lookback_days": int(args.lookback_days),
         "workspace_root": str(args.workspace_root or "") or None,
     }
-    if args.dry_run and args.repair_auxiliary:
+    if args.dry_run and args.normalize_symbol_lifecycle:
+        payload = normalize_symbol_lifecycle_effectivity(
+            workspace_root=str(args.workspace_root or "") or None,
+            apply=False,
+        )
+    elif args.dry_run and args.restore_pit_history:
+        payload = inventory_pit_history(
+            end_date=str(args.as_of_date),
+            workspace_root=str(args.workspace_root or "") or None,
+        )
+    elif args.dry_run and args.repair_auxiliary:
         payload = plan_auxiliary_update(
             as_of_date=str(args.as_of_date),
             workspace_root=str(args.workspace_root or "") or None,
@@ -338,6 +376,8 @@ def main(argv: list[str] | None = None) -> int:
             keep_runtime=bool(args.keep_runtime),
             core_only=bool(args.core_only),
             repair_auxiliary=bool(args.repair_auxiliary),
+            restore_pit_history=bool(args.restore_pit_history),
+            normalize_symbol_lifecycle=bool(args.normalize_symbol_lifecycle),
         )
     if args.json:
         print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
@@ -348,6 +388,9 @@ def main(argv: list[str] | None = None) -> int:
         "updated",
         "updated_with_gaps",
         "repaired",
+        "already_complete",
+        "normalized",
+        "already_normalized",
     } else 2
 
 
@@ -357,7 +400,7 @@ def _format(payload: dict[str, Any]) -> str:
         f"range: {payload.get('start_date', '')}..{payload.get('as_of_date', '')}",
         f"workers: {payload.get('workers', '')}",
     ]
-    for name in ("baostock_core", "permanent_exclusions", "adjust_factor", "mootdx_5m", "baostock_5m", "auxiliary", "latest_check"):
+    for name in ("baostock_core", "adjust_factor", "mootdx_5m", "baostock_5m", "auxiliary", "latest_check"):
         if name in payload:
             lines.append(f"{name}: {payload[name]}")
     return "\n".join(lines)

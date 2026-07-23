@@ -16,6 +16,7 @@ from quant_data_platform.qdp_v2.database_audit import (
     _bar_day_check,
     _daily_intraday_consistency_check,
     _factor_semantic_check,
+    _ordered_intraday_primary_key_check,
     _status_daily_partition_check,
     audit_database,
     audit_latest_keys,
@@ -31,6 +32,7 @@ from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
     qdp_v2_root,
+    read_dataset_manifest,
     write_active_manifest,
     write_dataset_manifest,
 )
@@ -166,6 +168,89 @@ def test_status_reads_active_and_dataset_manifests(tmp_path: Path) -> None:
 
     assert payload["status"] == "ok"
     assert payload["datasets"]["market_daily_raw"]["existing_shards"] == 1
+
+
+def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    old_id = _write_domain(
+        root,
+        "market_daily_raw",
+        pd.DataFrame(
+            {
+                "symbol": ["000001.SZ"],
+                "trade_date": ["2026-01-05"],
+                "open": [1.0],
+                "high": [1.0],
+                "low": [1.0],
+                "close": [1.0],
+            }
+        ),
+        contract="qdp_v2_market_daily_raw_v1",
+        primary_key=["trade_date", "symbol"],
+        dataset_id="market_daily_raw__old",
+    )
+    old_manifest = read_dataset_manifest(
+        root / "datasets" / "market_daily_raw" / old_id / "dataset.json"
+    )
+    new_id = "market_daily_raw__composite"
+    new_shard = (
+        root
+        / "datasets"
+        / "market_daily_raw"
+        / new_id
+        / "shards"
+        / "restore.parquet"
+    )
+    _write_parquet(
+        new_shard,
+        pd.DataFrame(
+            {
+                "symbol": ["000002.SZ"],
+                "trade_date": ["2026-01-05"],
+                "open": [2.0],
+                "high": [2.0],
+                "low": [2.0],
+                "close": [2.0],
+            }
+        ),
+    )
+    write_dataset_manifest(
+        root,
+        DatasetManifest(
+            dataset_id=new_id,
+            domain="market_daily_raw",
+            layer="raw",
+            frequency="1d",
+            contract_version="qdp_v2_market_daily_raw_v1",
+            primary_key=["trade_date", "symbol"],
+            start_date="2026-01-05",
+            end_date="2026-01-05",
+            row_count=2,
+            schema_hash="unit",
+            shards=[
+                *old_manifest.shards,
+                ShardManifestEntry(
+                    path=str(new_shard.relative_to(root)).replace("\\", "/"),
+                    row_count=1,
+                    start_date="2026-01-05",
+                    end_date="2026-01-05",
+                ),
+            ],
+            source={"provider": "unit-composite"},
+            quality={"ohlcv_non_null": True},
+        ),
+    )
+    _write_active(root, {"market_daily_raw": new_id})
+
+    status = status_payload(workspace_root=workspace, verify_files=True)
+    audit = audit_active(workspace_root=workspace, write=False)
+    gc = lake_gc(workspace_root=workspace)
+
+    assert status["status"] == "ok"
+    assert status["datasets"]["market_daily_raw"]["existing_shards"] == 2
+    assert not audit["errors"], audit["errors"]
+    assert old_id not in {item["dataset_id"] for item in gc["unreferenced"]}
 
 
 def test_audit_validate_and_gc_use_manifests(tmp_path: Path) -> None:
@@ -467,6 +552,57 @@ def test_full_audit_reports_duplicate_primary_keys(tmp_path: Path) -> None:
     assert any(item["code"] == "primary_key_duplicate_rows" for item in payload["findings"])
     report = next(item for item in payload["datasets"] if item["domain"] == "market_daily_raw")
     assert report["checks"]["primary_key"]["duplicate_rows"] == 1
+
+
+def test_intraday_overlapping_date_shards_verify_actual_keys(tmp_path: Path) -> None:
+    def write(name: str, symbol: str) -> tuple[Path, ShardManifestEntry]:
+        path = tmp_path / f"{name}.parquet"
+        _write_parquet(
+            path,
+            pd.DataFrame(
+                {
+                    "symbol": [symbol],
+                    "trade_date": ["2026-01-05"],
+                    "bar_time": ["09:35:00"],
+                }
+            ),
+        )
+        return path, ShardManifestEntry(
+            path=path.as_posix(),
+            row_count=1,
+            start_date="2026-01-05",
+            end_date="2026-01-05",
+            file_size=path.stat().st_size,
+        )
+
+    left_path, left_entry = write("left", "600000.SH")
+    disjoint_path, disjoint_entry = write("disjoint", "000001.SZ")
+    duplicate_path, duplicate_entry = write("duplicate", "600000.SH")
+    with open_guarded_duckdb(
+        temp_directory=tmp_path / "spill",
+        threads=1,
+        memory_sampler=lambda: 8 * 1024**3,
+    ) as con:
+        disjoint = _ordered_intraday_primary_key_check(
+            con,
+            [left_path, disjoint_path],
+            [left_entry, disjoint_entry],
+            ["trade_date", "symbol", "bar_time"],
+            20,
+        )
+        duplicate = _ordered_intraday_primary_key_check(
+            con,
+            [left_path, duplicate_path],
+            [left_entry, duplicate_entry],
+            ["trade_date", "symbol", "bar_time"],
+            20,
+        )
+
+    assert disjoint["status"] == "ok"
+    assert disjoint["range_overlap_count"] == 1
+    assert disjoint["cross_shard_duplicate_rows"] == 0
+    assert duplicate["status"] == "error"
+    assert duplicate["cross_shard_duplicate_rows"] == 1
 
 
 def test_bar_day_check_aggregates_independent_date_shards(tmp_path: Path) -> None:

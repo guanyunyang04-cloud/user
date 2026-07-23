@@ -1,0 +1,17 @@
+{
+  "completed_at": "2026-07-22T19:58:59+00:00",
+  "row_counts": {
+    "adjust_factor": 2433,
+    "industry_concept": 2433,
+    "market_daily_raw": 2433,
+    "name_change": 0,
+    "security_identity": 1,
+    "security_status": 2589,
+    "share_capital": 2433,
+    "symbol_history": 1,
+    "universe_snapshot": 2589,
+    "valuation": 2433
+  },
+  "semantic_version": "pit_historical_mainboard_daily_v4",
+  "symbol": "600069.SH"
+}

@@ -959,7 +959,11 @@ def mutate_active_shards_from_parquet(
             ).hexdigest()[:8]
             item = _install_prepared_parquet(
                 info,
-                target_dir=old_path.parent,
+                target_dir=(
+                    old_path.parent
+                    if _is_owned_dataset_shard(context, old_path)
+                    else _active_shard_directory(context)
+                ),
                 target_name=lambda digest, token=old_token: (
                     f"repair_mutate_replace_{token}_{digest[:16]}.parquet"
                 ),
@@ -1308,7 +1312,7 @@ def _resolve_mutation_shard_path(
         if candidate.is_absolute()
         else (context.root / candidate).resolve()
     )
-    _assert_deletable_dataset_shard(context, resolved)
+    _assert_dataset_shard_reference(context, resolved)
     return resolved
 
 
@@ -1708,7 +1712,7 @@ def _validate_selected_old_shards(
     hashes: dict[str, str] = {}
     for entry in entries:
         path = resolve_manifest_path(entry.path, root=context.root).resolve()
-        _assert_deletable_dataset_shard(context, path)
+        _assert_dataset_shard_reference(context, path)
         if not path.is_file():
             raise QdpV2RepairError(
                 f"qdp_v2_repair_active_shard_missing:{path}"
@@ -1777,7 +1781,7 @@ def _validate_updated_shard_paths(
     by_key: dict[str, ShardManifestEntry] = {}
     for entry in entries:
         path = resolve_manifest_path(entry.path, root=context.root).resolve()
-        _assert_deletable_dataset_shard(context, path)
+        _assert_dataset_shard_reference(context, path)
         key = _manifest_path_key(path, context.root)
         if key in by_key:
             raise QdpV2RepairError(
@@ -1883,7 +1887,7 @@ def _cleanup_committed_old_shards(
                 continue
             resolved.unlink()
             deleted.append(str(resolved))
-        except OSError:
+        except (OSError, QdpV2RepairError):
             retained.append(str(resolved))
     return {"deleted": deleted, "retained": retained}
 
@@ -2200,12 +2204,11 @@ def _pair_replacement_frames(
 
 
 def _active_shard_directory(context: ActiveDomain) -> Path:
-    if context.manifest.shards:
-        first = resolve_manifest_path(
-            context.manifest.shards[0].path, root=context.root
-        ).resolve()
-        _assert_deletable_dataset_shard(context, first)
-        return first.parent
+    # Active manifests may be content-addressed composites that reference
+    # immutable shards owned by earlier datasets.  New material must always be
+    # installed under the current dataset rather than next to whichever
+    # referenced shard happens to be listed first.  Replacement/removal paths
+    # continue to pass through _assert_deletable_dataset_shard separately.
     shard_dir = context.dataset_dir / "shards"
     shard_dir.mkdir(parents=True, exist_ok=True)
     return shard_dir
@@ -2224,6 +2227,31 @@ def _assert_deletable_dataset_shard(context: ActiveDomain, path: Path) -> None:
         raise QdpV2RepairError(
             f"qdp_v2_repair_invalid_shard_target:{resolved}"
         )
+
+
+def _assert_dataset_shard_reference(context: ActiveDomain, path: Path) -> None:
+    """Validate a manifest shard that may be owned by another QDP dataset."""
+
+    resolved = path.resolve()
+    datasets_root = (context.root / "datasets").resolve()
+    try:
+        resolved.relative_to(datasets_root)
+    except ValueError as exc:
+        raise QdpV2RepairError(
+            f"qdp_v2_repair_external_shard_reference_refused:{resolved}"
+        ) from exc
+    if resolved == context.manifest_path or resolved.suffix.lower() != ".parquet":
+        raise QdpV2RepairError(
+            f"qdp_v2_repair_invalid_shard_target:{resolved}"
+        )
+
+
+def _is_owned_dataset_shard(context: ActiveDomain, path: Path) -> bool:
+    try:
+        path.resolve().relative_to(context.dataset_dir.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _frame_date_range(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +40,9 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
         shard_count = len(manifest.shards)
         existing_shards: int | None = None
         if verify_files:
-            file_index = _dataset_file_index(manifest_path.parent)
-            existing_shards = sum(1 for shard in manifest.shards if _manifest_path_key(shard.path, root) in file_index)
+            existing_shards = sum(
+                1 for shard in manifest.shards if _manifest_path(shard.path, root).is_file()
+            )
             if existing_shards != shard_count:
                 missing_shards.append(
                     {
@@ -100,10 +100,18 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
     )
 
     registry_file = registry_path(workspace_root=workspace_root)
+    exclusion_required = bool(
+        str(dict(active.get("scope", {}) or {}).get("permanent_exclusion_policy", ""))
+    )
     if registry_file.exists():
         registry = load_registry(workspace_root=workspace_root, required=True)
         exclusions = {
             **registry_consistency(registry),
+            "status": (
+                registry_consistency(registry).get("status", "")
+                if exclusion_required
+                else "retired_not_applied"
+            ),
             "policy_id": str(registry.get("policy_id", "")),
             "registry_path": str(registry_file),
         }
@@ -129,18 +137,9 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
     }
 
 
-def _manifest_path_key(path: str | Path, root: Path) -> str:
+def _manifest_path(path: str | Path, root: Path) -> Path:
     candidate = Path(path)
-    absolute = candidate if candidate.is_absolute() else root / candidate
-    return os.path.normcase(os.path.abspath(str(absolute)))
-
-
-def _dataset_file_index(dataset_dir: Path) -> set[str]:
-    files: set[str] = set()
-    for dirpath, _, filenames in os.walk(dataset_dir):
-        for filename in filenames:
-            files.add(os.path.normcase(os.path.abspath(os.path.join(dirpath, filename))))
-    return files
+    return (candidate if candidate.is_absolute() else root / candidate).resolve()
 
 
 def print_status(payload: dict[str, Any], *, as_json: bool) -> None:

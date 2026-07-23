@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -388,6 +389,78 @@ def test_append_is_content_idempotent(tmp_path: Path) -> None:
     assert updated.row_count == 3
     assert len(updated.shards) == 3
     assert len(_log_records(workspace)) == 1
+
+
+def test_append_to_composite_installs_under_current_dataset(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, _, original_paths = _install_active(workspace)
+    root = qdp_v2_root(workspace)
+    composite_id = "market_daily_raw__composite_fixture"
+    original = resolve_active_domain(DOMAIN, workspace_root=workspace).manifest
+    composite = replace(original, dataset_id=composite_id)
+    write_dataset_manifest(root, composite)
+    write_active_manifest(
+        root,
+        {
+            "version": 2,
+            "active_as_of_date": "2026-01-06",
+            "datasets": {DOMAIN: composite_id},
+        },
+    )
+
+    result = append_active_shard(
+        DOMAIN,
+        _frame("2026-01-07", "000003.SZ", close=30.0),
+        "append to composite",
+        workspace_root=workspace,
+    )
+
+    appended = Path(result["shard_path"])
+    assert result["status"] == "appended"
+    assert appended.parent == (
+        root / "datasets" / DOMAIN / composite_id / "shards"
+    ).resolve()
+    assert all(path.exists() for path in original_paths)
+
+
+def test_mutate_composite_replacement_is_copy_on_write(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, _, original_paths = _install_active(workspace)
+    root = qdp_v2_root(workspace)
+    composite_id = "market_daily_raw__composite_mutation_fixture"
+    original = resolve_active_domain(DOMAIN, workspace_root=workspace).manifest
+    write_dataset_manifest(root, replace(original, dataset_id=composite_id))
+    write_active_manifest(
+        root,
+        {
+            "version": 2,
+            "active_as_of_date": "2026-01-06",
+            "datasets": {DOMAIN: composite_id},
+        },
+    )
+    prepared = _prepared(
+        workspace,
+        "composite_replacement",
+        _frame("2026-01-05", "000001.SZ", close=11.0),
+    )
+
+    result = mutate_active_shards_from_parquet(
+        DOMAIN,
+        replacements=[(original_paths[0], prepared)],
+        reason="copy-on-write composite replacement",
+        workspace_root=workspace,
+    )
+
+    replacement_path = Path(result["new_shard_paths"][0])
+    assert result["status"] == "mutated"
+    assert replacement_path.parent == (
+        root / "datasets" / DOMAIN / composite_id / "shards"
+    ).resolve()
+    assert original_paths[0].exists()
+    assert str(original_paths[0].resolve()) in result["retained_old_shard_paths"]
+    current = resolve_active_domain(DOMAIN, workspace_root=workspace)
+    assert original_paths[0].resolve() not in current.shard_paths
+    assert replacement_path.resolve() in current.shard_paths
 
 
 def test_commit_failure_preserves_manifest_and_old_shard(

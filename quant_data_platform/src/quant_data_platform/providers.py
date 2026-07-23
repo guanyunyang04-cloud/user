@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import io
+import ipaddress
 import json
 import math
 import multiprocessing
@@ -97,11 +98,54 @@ QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
 BAOSTOCK_BATCH_VERSION = "0.9.3"
 BAOSTOCK_BATCH_WHEEL_SHA256 = "acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293"
 BAOSTOCK_BULK_PER_PAGE_COUNT = 20_000
+BAOSTOCK_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
+
+def _configure_baostock_endpoint() -> str:
+    """Bypass proxy Fake-IP DNS for BaoStock's native TCP protocol."""
+
+    from baostock.common import contants as baostock_constants  # type: ignore
+
+    override = str(os.environ.get("QDP_BAOSTOCK_SERVER_IP", "") or "").strip()
+    if override:
+        ipaddress.ip_address(override)
+        baostock_constants.BAOSTOCK_SERVER_IP = override
+        return override
+    host = str(baostock_constants.BAOSTOCK_SERVER_IP)
+    try:
+        resolved = socket.gethostbyname(host)
+        address = ipaddress.ip_address(resolved)
+    except (OSError, ValueError):
+        return host
+    if address not in BAOSTOCK_FAKE_IP_NETWORK:
+        return resolved
+    response = requests.get(
+        "https://dns.google/resolve",
+        params={"name": host, "type": "A"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    answers = list(dict(response.json() or {}).get("Answer", []) or [])
+    for answer in answers:
+        candidate = str(dict(answer or {}).get("data", "") or "").strip()
+        try:
+            candidate_ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if candidate_ip.version == 4 and candidate_ip not in BAOSTOCK_FAKE_IP_NETWORK:
+            baostock_constants.BAOSTOCK_SERVER_IP = candidate
+            return candidate
+    raise RuntimeError(f"baostock_fake_ip_dns_unresolved:{host}:{resolved}")
 
 
 def _quiet_baostock_call(operation: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Keep provider banner text out of machine-readable CLI stdout/stderr."""
 
+    if (
+        str(getattr(operation, "__name__", "")) == "login"
+        and str(getattr(operation, "__module__", "")).startswith("baostock")
+    ):
+        _configure_baostock_endpoint()
     with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
         return operation(*args, **kwargs)
 
@@ -1128,6 +1172,7 @@ class BaostockProvider:
         meta = dict(response.get("meta", {}) or {})
         retryable_kinds = {
             "history_symbols",
+            "security_lifecycle_history_symbols",
             "intraday_5m_symbols",
             "financial_quarterly_symbols",
             "performance_symbols",
@@ -1515,6 +1560,43 @@ class BaostockProvider:
         return _fetch_baostock_stock_basic_frame_with_timeout(
             trade_date=str(trade_date),
             timeout_seconds=120,
+        )
+
+    def fetch_security_lifecycle_history(
+        self,
+        *,
+        symbols: Sequence[str],
+        start_date: str,
+        end_date: str,
+    ) -> ProviderResult:
+        """Fetch raw daily prices, turnover, and same-day status together."""
+
+        requested = tuple(
+            dict.fromkeys(
+                str(item).strip().upper()
+                for item in symbols
+                if str(item).strip()
+            )
+        )
+        if not requested:
+            return ProviderResult(provider=self.name, data=pd.DataFrame())
+        frame, errors, meta = self._persistent_frame_request(
+            {
+                "kind": "security_lifecycle_history_symbols",
+                "symbols": requested,
+                "start_date": str(start_date),
+                "end_date": str(end_date),
+                "adjusted_flag": "none",
+            },
+            timeout_seconds=max(180, 60 * len(requested)),
+        )
+        meta["download_strategy"] = "single_login_sequential_symbols"
+        meta["requested_symbol_count"] = len(requested)
+        return ProviderResult(
+            provider=self.name,
+            data=frame,
+            coverage_report=meta,
+            error_report=errors,
         )
 
     def fetch_domain(self, request: DomainFetchRequest) -> ProviderResult:
@@ -2960,6 +3042,51 @@ def _baostock_history_frame(query: Any, *, symbol: str) -> pd.DataFrame:
     return frame[[column for column in expected if column in frame.columns]]
 
 
+def _baostock_security_lifecycle_history_frame(
+    query: Any,
+    *,
+    symbol: str,
+) -> pd.DataFrame:
+    raw = _baostock_query_to_frame(
+        query,
+        "baostock_security_lifecycle_history",
+    )
+    if raw.empty:
+        return pd.DataFrame()
+    frame = raw.rename(
+        columns={"date": "trade_date", "code": "provider_code"}
+    ).copy()
+    frame["symbol"] = str(symbol).strip().upper()
+    expected = [
+        "trade_date",
+        "symbol",
+        "provider_code",
+        "open",
+        "high",
+        "low",
+        "close",
+        "preclose",
+        "volume",
+        "amount",
+        "adjustflag",
+        "turn",
+        "tradestatus",
+        "pctChg",
+        "peTTM",
+        "pbMRQ",
+        "psTTM",
+        "pcfNcfTTM",
+        "isST",
+    ]
+    missing = [item for item in expected if item not in frame.columns]
+    if missing:
+        raise RuntimeError(
+            "baostock_security_lifecycle_history_schema_error:"
+            f"symbol={symbol}:missing={missing}"
+        )
+    return frame.loc[:, expected].reset_index(drop=True)
+
+
 def _baostock_intraday_5m_frame(query: Any, *, symbol: str) -> pd.DataFrame:
     raw = _baostock_query_to_frame(query, "baostock_intraday_5m")
     if raw.empty:
@@ -3180,6 +3307,7 @@ def _baostock_persistent_symbol_frames(
     errors: list[dict[str, Any]] = []
     domain_by_kind = {
         "history_symbols": DataDomain.MARKET_DAILY,
+        "security_lifecycle_history_symbols": DataDomain.SECURITY_STATUS,
         "intraday_5m_symbols": DataDomain.MARKET_INTRADAY_5M,
         "financial_quarterly_symbols": DataDomain.FINANCIAL_QUARTERLY,
         "performance_symbols": str(command.get("domain", "")),
@@ -3199,6 +3327,23 @@ def _baostock_persistent_symbol_frames(
                     adjustflag="2" if adjusted_flag in {"front", "qfq"} else "3",
                 )
                 frame = _baostock_history_frame(query, symbol=symbol)
+            elif kind == "security_lifecycle_history_symbols":
+                query = bs.query_history_k_data_plus(
+                    _to_baostock_code(symbol),
+                    (
+                        "date,code,open,high,low,close,preclose,volume,amount,"
+                        "adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,"
+                        "psTTM,pcfNcfTTM,isST"
+                    ),
+                    start_date=start_date,
+                    end_date=end_date,
+                    frequency="d",
+                    adjustflag="3",
+                )
+                frame = _baostock_security_lifecycle_history_frame(
+                    query,
+                    symbol=symbol,
+                )
             elif kind == "intraday_5m_symbols":
                 query = bs.query_history_k_data_plus(
                     _to_baostock_code(symbol),
@@ -3334,6 +3479,7 @@ def _baostock_persistent_session_worker(command_queue: Any, response_queue: Any)
                     meta = {"error_code": "0", "error_msg": "", "package_version": assert_baostock_batch_runtime()}
                 elif kind in {
                     "history_symbols",
+                    "security_lifecycle_history_symbols",
                     "intraday_5m_symbols",
                     "financial_quarterly_symbols",
                     "performance_symbols",

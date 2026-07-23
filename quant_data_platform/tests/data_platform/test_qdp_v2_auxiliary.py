@@ -14,6 +14,7 @@ from quant_data_platform.qdp_v2.audit import _manifest_contract_findings
 from quant_data_platform.qdp_v2.auxiliary_tail_update import (
     _normalize_cninfo_share_change,
     _only_changed_share_events,
+    _unconfirmed_share_detections,
 )
 from quant_data_platform.qdp_v2.auxiliary_update import (
     _baostock_snapshot_worker,
@@ -258,6 +259,30 @@ def test_mootdx_share_detection_ignores_unchanged_xdxr_rows() -> None:
     result = _only_changed_share_events(frame)
 
     assert result["trade_date"].tolist() == ["2026-01-01", "2026-03-01"]
+
+
+def test_share_tail_treats_unconfirmed_mootdx_dates_as_detector_evidence() -> None:
+    detected = pd.DataFrame(
+        {
+            "symbol": ["600000.SH"],
+            "trade_date": ["2026-07-18"],
+            "total_share": [100.0],
+            "float_share": [90.0],
+        }
+    )
+    confirmed = pd.DataFrame(
+        columns=[
+            "symbol",
+            "variation_date",
+            "source_date",
+            "total_share",
+            "float_share",
+            "source",
+        ]
+    )
+    assert _unconfirmed_share_detections(detected, confirmed) == [
+        ("600000.SH", "2026-07-18")
+    ]
 
 
 def test_cninfo_share_change_uses_jointly_visible_source_date() -> None:

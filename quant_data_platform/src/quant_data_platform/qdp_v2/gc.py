@@ -25,7 +25,10 @@ def lake_gc(
     root = qdp_v2_root(workspace_root)
     pin_ids, pin_records = _pinned_dataset_ids(root)
     active = read_active_manifest(root)
-    referenced = {dataset_id for _, _, dataset_id in _active_dataset_refs(active)} | pin_ids
+    referenced = _referenced_dataset_closure(
+        root,
+        {dataset_id for _, _, dataset_id in _active_dataset_refs(active)} | pin_ids,
+    )
     inventory = _dataset_dir_inventory(root, with_size=with_size or delete)
     unreferenced = [item for item in inventory if item["dataset_id"] not in referenced]
     referenced_items = [item for item in inventory if item["dataset_id"] in referenced]
@@ -101,6 +104,38 @@ def _pinned_dataset_ids(root: Path) -> tuple[set[str], list[dict[str, Any]]]:
         ids.update(values)
         records.append({"path": str(path.resolve()), "pin_name": str(payload.get("pin_name", "") or path.stem), "dataset_count": len(values)})
     return ids, records
+
+
+def _referenced_dataset_closure(root: Path, seed_ids: set[str]) -> set[str]:
+    """Keep datasets whose shards are referenced by another live manifest."""
+
+    manifests: dict[str, Path] = {}
+    for path in iter_dataset_manifests(root):
+        manifest = read_dataset_manifest(path)
+        manifests[str(manifest.dataset_id)] = path
+    referenced = set(str(item) for item in seed_ids if str(item))
+    pending = list(referenced)
+    datasets_root = (root / "datasets").resolve()
+    while pending:
+        dataset_id = pending.pop()
+        manifest_path = manifests.get(dataset_id)
+        if manifest_path is None:
+            continue
+        manifest = read_dataset_manifest(manifest_path)
+        for shard in manifest.shards:
+            candidate = Path(shard.path)
+            absolute = (candidate if candidate.is_absolute() else root / candidate).resolve()
+            try:
+                relative = absolute.relative_to(datasets_root)
+            except ValueError:
+                continue
+            if len(relative.parts) < 2:
+                continue
+            owner_id = str(relative.parts[1])
+            if owner_id in manifests and owner_id not in referenced:
+                referenced.add(owner_id)
+                pending.append(owner_id)
+    return referenced
 
 
 def _dataset_dir_inventory(root: Path, *, with_size: bool) -> list[dict[str, Any]]:

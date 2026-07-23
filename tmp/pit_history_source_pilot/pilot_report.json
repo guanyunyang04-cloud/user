@@ -1,0 +1,86 @@
+{
+  "000033.SZ": {
+    "rows": 1823,
+    "start": "2010-01-04",
+    "end": "2017-07-06",
+    "archive_rows": 1337,
+    "supplement_rows": 1132,
+    "overlap_observed": 656,
+    "max_abs_diff": {
+      "open": 0.0,
+      "high": 0.0,
+      "low": 0.0,
+      "close": 0.0,
+      "amount": 1.9799999967217445
+    },
+    "volume_ratio_median": 1.0,
+    "st_rows_raw": 747,
+    "suspended_rows": 691,
+    "factor_events": 8,
+    "factor_provider": [
+      "sina_via_akshare"
+    ],
+    "sources": {
+      "protected_baostock_archive_2012_2015": 970,
+      "akshare_eastmoney_unadjusted_history": 476,
+      "protected_baostock_archive_2016_2026": 367,
+      "calendar_suspension_inference": 10
+    }
+  },
+  "600069.SH": {
+    "rows": 2589,
+    "start": "2010-01-04",
+    "end": "2020-08-26",
+    "archive_rows": 2103,
+    "supplement_rows": 2433,
+    "overlap_observed": 1955,
+    "max_abs_diff": {
+      "open": 0.0,
+      "high": 0.0,
+      "low": 0.0,
+      "close": 0.009999999999999787,
+      "amount": 8.0
+    },
+    "volume_ratio_median": 1.0,
+    "st_rows_raw": 299,
+    "suspended_rows": 156,
+    "factor_events": 10,
+    "factor_provider": [
+      "sina_via_akshare"
+    ],
+    "sources": {
+      "protected_baostock_archive_2016_2026": 1133,
+      "protected_baostock_archive_2012_2015": 970,
+      "akshare_eastmoney_unadjusted_history": 478,
+      "calendar_suspension_inference": 8
+    }
+  },
+  "600053.SH": {
+    "rows": 4017,
+    "start": "2010-01-04",
+    "end": "2026-07-21",
+    "archive_rows": 3496,
+    "supplement_rows": 3691,
+    "overlap_observed": 3189,
+    "max_abs_diff": {
+      "open": 0.0,
+      "high": 0.0,
+      "low": 0.0,
+      "close": 0.010000000000000675,
+      "amount": 8.290000021457672
+    },
+    "volume_ratio_median": 1.0,
+    "st_rows_raw": 20,
+    "suspended_rows": 326,
+    "factor_events": 14,
+    "factor_provider": [
+      "sina_via_akshare"
+    ],
+    "sources": {
+      "protected_baostock_archive_2016_2026": 2526,
+      "protected_baostock_archive_2012_2015": 970,
+      "akshare_eastmoney_unadjusted_history": 502,
+      "calendar_suspension_inference": 19
+    }
+  }
+}

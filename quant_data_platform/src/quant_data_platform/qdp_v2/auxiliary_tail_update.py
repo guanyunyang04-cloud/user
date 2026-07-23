@@ -69,6 +69,35 @@ def _only_changed_share_events(frame: pd.DataFrame) -> pd.DataFrame:
     return data.loc[changed].reset_index(drop=True)
 
 
+def _unconfirmed_share_detections(
+    detected: pd.DataFrame,
+    confirmed: pd.DataFrame,
+) -> list[tuple[str, str]]:
+    detected_keys = (
+        set(
+            zip(
+                detected["symbol"].astype(str),
+                detected["trade_date"].astype(str),
+                strict=True,
+            )
+        )
+        if not detected.empty
+        else set()
+    )
+    confirmed_keys = (
+        set(
+            zip(
+                confirmed["symbol"].astype(str),
+                confirmed["variation_date"].astype(str),
+                strict=True,
+            )
+        )
+        if not confirmed.empty
+        else set()
+    )
+    return sorted(detected_keys - confirmed_keys)
+
+
 def _missing_daily_keys(ctx: AuxiliaryContext, domain: str) -> pd.DataFrame:
     daily = _scan_sql(_paths(ctx, "market_daily_raw"))
     current = _scan_sql(_paths(ctx, domain))
@@ -431,30 +460,18 @@ def update_share_capital_tail(
         raise AuxiliaryTailUpdateError(
             f"share_tail_cninfo_confirmation_empty:{len(affected)}"
         )
-    if not detected_events.empty:
-        detected_keys = set(
-            zip(
-                detected_events["symbol"].astype(str),
-                detected_events["trade_date"].astype(str),
-                strict=True,
-            )
-        )
-        confirmed_keys = (
-            set(
-                zip(
-                    confirmed["symbol"].astype(str),
-                    confirmed["variation_date"].astype(str),
-                    strict=True,
-                )
-            )
-            if not confirmed.empty
-            else set()
-        )
-        unresolved = sorted(detected_keys - confirmed_keys)
-        if unresolved:
-            raise AuxiliaryTailUpdateError(
-                f"share_tail_unconfirmed_events:{len(unresolved)}:{unresolved[:5]}"
-            )
+    # Mootdx xdxr is a detector, not the PIT authority.  Its dates can be a
+    # weekend publication/update date and the first row returned for a symbol
+    # can simply repeat the already-known share count.  Requiring an exact
+    # (symbol, date) match would therefore block a healthy tail or, worse,
+    # tempt callers to apply an unconfirmed secondary-source value.  Only the
+    # CNInfo rows below are eligible to change the share history; unmatched
+    # detector rows are retained as audit evidence while the last officially
+    # visible value is carried forward.
+    unconfirmed_detections = _unconfirmed_share_detections(
+        detected_events,
+        confirmed,
+    )
     spill = ctx.runtime / "tail_share_build_spill"
     with open_guarded_duckdb(temp_directory=spill, threads=2) as con:
         con.register("tail_missing_keys", missing)
@@ -523,7 +540,23 @@ def update_share_capital_tail(
         )
     result["detected_event_count"] = int(len(detected_events))
     result["confirmed_symbol_count"] = len(affected)
-    result["metadata"] = _mark_checked(ctx, "share_capital", missing_daily_keys=0)
+    result["unconfirmed_detection_count"] = len(unconfirmed_detections)
+    result["unconfirmed_detection_examples"] = [
+        {"symbol": symbol, "detector_date": trade_date}
+        for symbol, trade_date in unconfirmed_detections[:20]
+    ]
+    result["metadata"] = _mark_checked(
+        ctx,
+        "share_capital",
+        missing_daily_keys=0,
+        source_updates={
+            "tail_unconfirmed_detector_event_count": len(unconfirmed_detections),
+            "tail_unconfirmed_detector_event_examples": [
+                {"symbol": symbol, "detector_date": trade_date}
+                for symbol, trade_date in unconfirmed_detections[:20]
+            ],
+        },
+    )
     return result
 
 
