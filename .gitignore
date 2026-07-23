@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 .tmp/
 tmp/*.txt
+tmp/takeover_qdp_*.json
 .qdp_tmp/
 node_modules/
 *.tsbuildinfo
