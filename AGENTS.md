@@ -3,7 +3,12 @@
 <!-- workspace-brain:start -->
 ## Project brain
 
-本项目使用 `brain/` 保存持久项目记忆。处理项目接管、当前状态、记忆写回、受保护对象或结构治理时，使用全局 `workspace-brain` Skill，先读取 `brain/brain_manifest.json`，再按任务激活相关角色。当前事实写入 `state`，稳定知识写入 `knowledge`，可重复方法写入 `operations`，日期化证据写入 `references/`。
+本项目使用 `brain/` 保存持久项目记忆。
+
+- 对代码修改、长任务、项目状态判断或受管对象变更，必须使用全局 `workspace-brain` Skill，运行 `detect`，读取 manifest、identity、working memory 及任务涉及的角色。
+- 上下文压缩、任务恢复、agent 交接、用户改变目标或切换 child brain 后，必须重新执行上述接管；不得依赖压缩或中断前的对话记忆。
+- 最终回答前重新核对当前目标、实际改动、验证结果和必要的 brain 写回。
+- 当前事实写入 `state`，稳定知识写入 `knowledge`，可重复方法写入 `operations`，日期化证据写入 `references/`。
 <!-- workspace-brain:end -->
 
 ## Runtime
