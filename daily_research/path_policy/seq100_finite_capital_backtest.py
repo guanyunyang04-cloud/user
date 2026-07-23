@@ -110,16 +110,28 @@ class ForecastDay:
     score: np.ndarray
     planned_day: np.ndarray
     top3_symbol_idx: tuple[int, ...]
+    ranked_symbol_idx: tuple[int, ...] = ()
 
 
 class ForecastBook:
     """Compact, date-indexed forecasts without a multi-million-key Python dict."""
 
-    def __init__(self, profile: str, *, top_k: int = TOP_K) -> None:
+    def __init__(
+        self,
+        profile: str,
+        *,
+        top_k: int = TOP_K,
+        candidate_scan_k: int | None = None,
+    ) -> None:
         self.profile = str(profile)
         self.top_k = int(top_k)
         if self.top_k <= 0:
             raise ValueError("forecast-book top_k must be positive")
+        self.candidate_scan_k = int(
+            self.top_k if candidate_scan_k is None else candidate_scan_k
+        )
+        if self.candidate_scan_k < self.top_k:
+            raise ValueError("candidate_scan_k must be at least top_k")
         self.days: dict[int, ForecastDay] = {}
 
     def add_day(
@@ -161,14 +173,19 @@ class ForecastBook:
         # Candidate rows are symbol sorted; stable descending score therefore gives
         # symbol order as the deterministic tie-break.
         eligible_positions = np.flatnonzero(eligible)
-        top_local = np.argsort(-scores[eligible_positions], kind="mergesort")[: self.top_k]
-        top_positions = eligible_positions[top_local]
+        ranked_local = np.argsort(-scores[eligible_positions], kind="mergesort")[
+            : self.candidate_scan_k
+        ]
+        ranked_positions = eligible_positions[ranked_local]
+        top_positions = ranked_positions[: self.top_k]
         top3 = tuple(int(value) for value in symbols[top_positions])
+        ranked = tuple(int(value) for value in symbols[ranked_positions])
         self.days[int(date_idx)] = ForecastDay(
             symbol_idx=symbols,
             score=scores,
             planned_day=planned,
             top3_symbol_idx=top3,
+            ranked_symbol_idx=ranked,
         )
 
     def lookup(self, date_idx: int, symbol_idx: int) -> tuple[float, int] | None:
@@ -697,6 +714,8 @@ def _simulation_metric(
     starting_cash: float,
     allow_pyramiding: bool,
     daily_selection_count: int,
+    replace_rejected_from_ranked_candidates: bool,
+    candidate_scan_k: int,
     calendar_years: Sequence[int] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     signal_frame = equity_frame[
@@ -722,7 +741,7 @@ def _simulation_metric(
     full_path = np.r_[float(starting_cash), full_equity]
     full_drawdown = full_path / np.maximum.accumulate(full_path) - 1.0
     annual = _calendar_year_metrics(
-        signal_frame,
+        equity_frame,
         starting_cash=float(starting_cash),
         years=YEARS if calendar_years is None else tuple(int(value) for value in calendar_years),
     )
@@ -733,6 +752,11 @@ def _simulation_metric(
         win_rate = float((trade_frame["net_pnl_cny"].astype(float) > 0.0).mean())
         mean_occupied = float(trade_frame["occupied_sessions"].astype(float).mean())
         median_occupied = float(trade_frame["occupied_sessions"].astype(float).median())
+    replacement_contract = (
+        f"scan_ranked_top{int(candidate_scan_k)}_for_rejected_signals"
+        if replace_rejected_from_ranked_candidates
+        else f"no_top{int(daily_selection_count) + 1}"
+    )
     metric: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "profile": str(profile),
@@ -758,6 +782,8 @@ def _simulation_metric(
             liquidated_equity / float(signal_equity[-1]) - 1.0
         ),
         "full_path_maximum_drawdown": float(full_drawdown.min()),
+        "minimum_cash_cny": float(equity_frame["cash"].min()),
+        "minimum_equity_cny": float(equity_frame["equity"].min()),
         "mean_signal_position_count": float(signal_frame["position_count"].mean()),
         "maximum_position_count": int(equity_frame["position_count"].max()),
         "mean_signal_capital_utilization": float(signal_frame["capital_utilization"].mean()),
@@ -772,10 +798,14 @@ def _simulation_metric(
         "portfolio_contract": (
             f"continuous_1m_daily_top{int(daily_selection_count)}_equal_slot_target_"
             f"{'per_signal_lots' if allow_pyramiding else 'no_pyramiding'}_"
-            f"no_top{int(daily_selection_count) + 1}_"
+            f"{replacement_contract}_"
             "next_open_entry_close_exit_entries_before_same_day_exits"
         ),
         "allow_pyramiding": bool(allow_pyramiding),
+        "replace_rejected_from_ranked_candidates": bool(
+            replace_rejected_from_ranked_candidates
+        ),
+        "candidate_scan_k": int(candidate_scan_k),
         **{str(key): value for key, value in counters.items()},
     }
     return metric, annual
@@ -794,6 +824,7 @@ def simulate_portfolio(
     starting_cash: float = STARTING_CASH_CNY,
     memory_guard: _MemoryGuard | None = None,
     allow_pyramiding: bool = False,
+    replace_rejected_from_ranked_candidates: bool = False,
     calendar_years: Sequence[int] | None = None,
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
     policy.validate()
@@ -848,6 +879,9 @@ def simulate_portfolio(
         "rolling_missing_forecast_count": 0,
         "rolling_acceleration_count": 0,
         "rolling_nonpositive_exit_request_count": 0,
+        "replacement_candidate_scan_count": 0,
+        "replacement_order_count": 0,
+        "replacement_exhausted_signal_count": 0,
         "fees_and_slippage_cny": 0.0,
         "turnover_notional_cny": 0.0,
     }
@@ -1066,10 +1100,23 @@ def simulate_portfolio(
                     if reason == "nonpositive_value":
                         counters["rolling_nonpositive_exit_request_count"] += 1
 
-        # After the close, today's Top3 creates at most three next-open orders.
+        # After the close, today's target Top-K creates next-open orders.  The
+        # opt-in ranked scan can replace only signal-time rejections such as an
+        # already-held symbol; it never looks ahead to next-open fill status.
         forecast_day = book.days.get(date_idx) if date_idx <= int(last_signal_date_idx) else None
         if forecast_day is not None:
-            for symbol_idx in forecast_day.top3_symbol_idx:
+            target_order_count = len(forecast_day.top3_symbol_idx)
+            ranked_candidates = (
+                forecast_day.ranked_symbol_idx or forecast_day.top3_symbol_idx
+                if replace_rejected_from_ranked_candidates
+                else forecast_day.top3_symbol_idx
+            )
+            scheduled_order_count = 0
+            for candidate_rank, symbol_idx in enumerate(ranked_candidates, start=1):
+                if scheduled_order_count >= target_order_count:
+                    break
+                if replace_rejected_from_ranked_candidates:
+                    counters["replacement_candidate_scan_count"] += 1
                 duplicate_active = any(
                     position.symbol_idx == symbol_idx for position in positions.values()
                 )
@@ -1077,6 +1124,11 @@ def simulate_portfolio(
                     counters["skipped_duplicate_signal_count"] += 1
                     continue
                 if len(positions) + len(pending) >= int(slots):
+                    if replace_rejected_from_ranked_candidates:
+                        counters["skipped_no_slot_signal_count"] += int(
+                            target_order_count - scheduled_order_count
+                        )
+                        break
                     counters["skipped_no_slot_signal_count"] += 1
                     continue
                 forecast = book.lookup(date_idx, symbol_idx)
@@ -1092,6 +1144,17 @@ def simulate_portfolio(
                         initial_score=float(score),
                         initial_planned_day=int(planned_day),
                     )
+                )
+                scheduled_order_count += 1
+                if candidate_rank > target_order_count:
+                    counters["replacement_order_count"] += 1
+            if (
+                replace_rejected_from_ranked_candidates
+                and scheduled_order_count < target_order_count
+                and len(positions) + len(pending) < int(slots)
+            ):
+                counters["replacement_exhausted_signal_count"] += int(
+                    target_order_count - scheduled_order_count
                 )
 
     if positions or pending:
@@ -1124,6 +1187,10 @@ def simulate_portfolio(
         starting_cash=float(starting_cash),
         allow_pyramiding=bool(allow_pyramiding),
         daily_selection_count=daily_selection_count,
+        replace_rejected_from_ranked_candidates=bool(
+            replace_rejected_from_ranked_candidates
+        ),
+        candidate_scan_k=int(book.candidate_scan_k),
         calendar_years=calendar_years,
     )
     return metric, equity_frame, trade_frame, annual

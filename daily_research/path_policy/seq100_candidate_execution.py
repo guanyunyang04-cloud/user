@@ -342,7 +342,11 @@ def _cashflow(
     buy_transfer = buy_notional * transfer_rate
     buy_cash = buy_notional + buy_commission + buy_transfer
     sell_notional = shares * sell_price
-    sell_commission = max(contract.minimum_commission_cny, sell_notional * commission_rate)
+    sell_commission = (
+        max(contract.minimum_commission_cny, sell_notional * commission_rate)
+        if sell_notional > 0.0
+        else 0.0
+    )
     sell_transfer = sell_notional * transfer_rate
     stamp_tax = sell_notional * _stamp_tax_bps(contract, plan.exit_date) / 10_000.0
     ending_cash = cash - buy_cash + sell_notional - sell_commission - sell_transfer - stamp_tax

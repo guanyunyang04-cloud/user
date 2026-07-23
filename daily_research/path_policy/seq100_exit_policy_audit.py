@@ -313,22 +313,47 @@ def _buy_terms_batch(
     valid_entry = np.asarray(entry_filled, dtype=bool) & np.isfinite(entries) & (entries > 0.0)
     slippage_rate = contract.slippage_bps * float(slippage_multiplier) / 10_000.0
     buy_price = entries * (1.0 + slippage_rate)
-    shares = np.where(
-        valid_entry,
-        np.floor(cash / (buy_price * contract.lot_size)) * contract.lot_size,
-        0.0,
-    ).astype(np.int64)
     commission_rate = contract.commission_bps / 10_000.0
     transfer_rate = contract.transfer_fee_bps / 10_000.0
-    for _ in range(8):
-        buy_notional = shares * buy_price
-        buy_commission = np.maximum(contract.minimum_commission_cny, buy_notional * commission_rate)
-        buy_transfer = buy_notional * transfer_rate
-        buy_cash = buy_notional + buy_commission + buy_transfer
-        unaffordable = (shares > 0) & (buy_cash > cash + 1.0e-9)
-        if not bool(unaffordable.any()):
-            break
-        shares = np.where(unaffordable, shares - contract.lot_size, shares)
+    proportional_lots = np.zeros(entries.shape, dtype=np.float64)
+    np.divide(
+        cash,
+        buy_price
+        * float(contract.lot_size)
+        * (1.0 + commission_rate + transfer_rate),
+        out=proportional_lots,
+        where=valid_entry,
+    )
+    shares = np.where(
+        valid_entry,
+        np.floor(proportional_lots) * contract.lot_size,
+        0.0,
+    ).astype(np.int64)
+
+    # The proportional-fee estimate is exact unless the minimum commission
+    # binds. In that branch, solve the affordable lot count directly instead
+    # of relying on a fixed number of lot decrements for very low-priced names.
+    buy_notional = shares * buy_price
+    buy_commission = np.maximum(
+        contract.minimum_commission_cny, buy_notional * commission_rate
+    )
+    buy_transfer = buy_notional * transfer_rate
+    buy_cash = buy_notional + buy_commission + buy_transfer
+    unaffordable = (shares > 0) & (buy_cash > cash + 1.0e-9)
+    if bool(unaffordable.any()):
+        minimum_lots = np.zeros(entries.shape, dtype=np.float64)
+        np.divide(
+            max(cash - contract.minimum_commission_cny, 0.0),
+            buy_price * float(contract.lot_size) * (1.0 + transfer_rate),
+            out=minimum_lots,
+            where=unaffordable,
+        )
+        minimum_shares = np.floor(minimum_lots) * contract.lot_size
+        shares = np.where(
+            unaffordable,
+            np.minimum(shares, minimum_shares),
+            shares,
+        )
     shares = np.maximum(shares, 0).astype(np.int64)
     order_filled = valid_entry & (shares > 0)
     buy_notional = shares * buy_price
@@ -339,6 +364,8 @@ def _buy_terms_batch(
     )
     buy_transfer = np.where(order_filled, buy_notional * transfer_rate, 0.0)
     buy_cash = np.where(order_filled, buy_notional + buy_commission + buy_transfer, 0.0)
+    if bool(((shares > 0) & (buy_cash > cash + 1.0e-9)).any()):
+        raise AssertionError("buy sizing exceeded allocated cash")
     return {
         "valid_entry": valid_entry,
         "order_filled": order_filled,
@@ -382,7 +409,7 @@ def cashflow_batch(
         contract=contract,
     )
     sell_commission = np.where(
-        active,
+        active & (sell_notional > 0.0),
         np.maximum(contract.minimum_commission_cny, sell_notional * commission_rate),
         0.0,
     )
@@ -476,7 +503,7 @@ def oracle_executable_outcome_batch(
         contract=contract,
     )
     sell_commission = np.where(
-        active,
+        active & (sell_notional > 0.0),
         np.maximum(contract.minimum_commission_cny, sell_notional * commission_rate),
         0.0,
     )
@@ -818,7 +845,14 @@ def _sell_order(
     slippage_rate = contract.slippage_bps * float(slippage_multiplier) / 10_000.0
     sell_price = float(exit_price) * max(0.0, 1.0 - slippage_rate)
     sell_notional = int(shares) * sell_price
-    commission = max(contract.minimum_commission_cny, sell_notional * contract.commission_bps / 10_000.0)
+    commission = (
+        max(
+            contract.minimum_commission_cny,
+            sell_notional * contract.commission_bps / 10_000.0,
+        )
+        if sell_notional > 0.0
+        else 0.0
+    )
     transfer = sell_notional * contract.transfer_fee_bps / 10_000.0
     stamp_bps = float(
         _stamp_tax_bps_by_date_idx(

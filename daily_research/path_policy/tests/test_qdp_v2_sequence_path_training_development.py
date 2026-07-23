@@ -369,6 +369,8 @@ def test_topk_ranks_finite_score_even_when_future_label_is_unavailable() -> None
             "future_final_return_2d": [np.nan, 0.1, 0.05],
             "future_peak_day_2d": [np.nan, 1.0, 2.0],
             "drawdown_after_peak_2d": [np.nan, -0.1, -0.05],
+            "pred_path_trade_value_2d": [0.7, 0.4, 0.2],
+            "true_path_open_ret_d1": [-0.2, 0.01, 0.02],
         }
     )
 
@@ -388,6 +390,8 @@ def test_topk_ranks_finite_score_even_when_future_label_is_unavailable() -> None
     assert daily["universe_count"] == 3
     assert daily["selected_label_coverage"] == 0.0
     assert candidates[0]["symbol"] == "UNLABELED"
+    assert candidates[0]["pred_path_trade_value_2d"] == 0.7
+    assert candidates[0]["true_path_open_ret_d1"] == -0.2
     assert candidates[0]["label_available"] is False
 
 

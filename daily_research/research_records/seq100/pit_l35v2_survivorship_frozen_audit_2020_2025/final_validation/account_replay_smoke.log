@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "status": "ok",
+  "archive_path": "H:\\quant_project\\daily_research\\research_records\\seq100\\l35v2_sixfold_2020_2025\\capital_metrics.csv",
+  "archive_sha256": "d2126fb1f8301ca58b09e5d9e341b2339b28c853b3d0a4df568d92963f2c2fa4",
+  "strategy": {
+    "top_k": 1,
+    "slot_count": 1,
+    "policy": "fixed_d14",
+    "cost_scenario": "double_slippage"
+  },
+  "compared_fields": [
+    "signal_period_ending_equity_cny",
+    "signal_period_total_return",
+    "signal_period_cagr_trading_days",
+    "signal_period_maximum_drawdown",
+    "closed_trade_count",
+    "winning_trade_rate",
+    "mean_occupied_sessions",
+    "fees_and_slippage_cny",
+    "turnover_notional_cny",
+    "annualized_log_growth"
+  ],
+  "differences": {
+    "signal_period_ending_equity_cny": 0.0,
+    "signal_period_total_return": 0.0,
+    "signal_period_cagr_trading_days": 0.0,
+    "signal_period_maximum_drawdown": 0.0,
+    "closed_trade_count": 0.0,
+    "winning_trade_rate": 0.0,
+    "mean_occupied_sessions": -1.7763568394002505e-15,
+    "fees_and_slippage_cny": 0.0,
+    "turnover_notional_cny": 0.0,
+    "annualized_log_growth": 0.0
+  },
+  "corrected_cash_constraint_differences": {
+    "signal_period_ending_equity_cny": -22197.618825271726,
+    "signal_period_total_return": -0.022197618825259724,
+    "signal_period_cagr_trading_days": -0.0001098171823907812,
+    "signal_period_maximum_drawdown": 0.0,
+    "closed_trade_count": 0.0,
+    "winning_trade_rate": 0.0,
+    "mean_occupied_sessions": -1.7763568394002505e-15,
+    "fees_and_slippage_cny": -2299.278727467172,
+    "turnover_notional_cny": -1169582.4015359879,
+    "annualized_log_growth": -5.2143778947799646e-05
+  },
+  "current": {
+    "signal_period_ending_equity_cny": 73740624.18290801,
+    "signal_period_total_return": 72.74062418290801,
+    "signal_period_cagr_trading_days": 1.1061006273994134,
+    "signal_period_maximum_drawdown": -0.5022101333274129,
+    "closed_trade_count": 104,
+    "winning_trade_rate": 0.5769230769230769,
+    "mean_occupied_sessions": 14.096153846153847,
+    "fees_and_slippage_cny": 5848182.329213672,
+    "turnover_notional_cny": 2942785688.273478,
+    "annualized_log_growth": 0.7448381938615636
+  },
+  "corrected": {
+    "signal_period_ending_equity_cny": 73718426.56408274,
+    "signal_period_total_return": 72.71842656408275,
+    "signal_period_cagr_trading_days": 1.1059908102170226,
+    "signal_period_maximum_drawdown": -0.5022101333274129,
+    "closed_trade_count": 104,
+    "winning_trade_rate": 0.5769230769230769,
+    "mean_occupied_sessions": 14.096153846153847,
+    "fees_and_slippage_cny": 5845883.050486205,
+    "turnover_notional_cny": 2941616105.871942,
+    "annualized_log_growth": 0.7447860500826158
+  },
+  "archived": {
+    "signal_period_ending_equity_cny": 73740624.18290801,
+    "signal_period_total_return": 72.74062418290801,
+    "signal_period_cagr_trading_days": 1.1061006273994134,
+    "signal_period_maximum_drawdown": -0.5022101333274129,
+    "closed_trade_count": 104,
+    "winning_trade_rate": 0.5769230769230769,
+    "mean_occupied_sessions": 14.096153846153848,
+    "fees_and_slippage_cny": 5848182.329213672,
+    "turnover_notional_cny": 2942785688.273478,
+    "annualized_log_growth": 0.7448381938615636
+  },
+  "corrected_cash_invariants": {
+    "minimum_cash_cny": 5.587085641920567,
+    "minimum_equity_cny": 578873.5748512107
+  },
+  "portfolio_contract_matches": true
+}

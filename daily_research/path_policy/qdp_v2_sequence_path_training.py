@@ -108,6 +108,7 @@ RANK_TRAINING_PROFILES = (
     RANK_TRAINING_PROFILE_LOCAL_CHUNK,
     RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
 )
+TOPK_PATH_AUDIT_DAYS = (1, 2, 7, 14, 60)
 ACTIVATION_CHECKPOINT_PROFILE_NONE = "none"
 ACTIVATION_CHECKPOINT_PROFILE_STRUCTURED_GRU = "structured_gru_encoder_decoder_v1"
 ACTIVATION_CHECKPOINT_PROFILES = (
@@ -3705,6 +3706,12 @@ def _topk_candidate_rows(
         "realized_plan_exit_status",
         "execution_cost_contract_sha256",
     }
+    retained_prediction_columns = sorted(
+        column
+        for column in frame.columns
+        if str(column).startswith(("pred_", "true_path_"))
+    )
+    metric_columns = list(dict.fromkeys([*metric_columns, *retained_prediction_columns]))
     rows: list[dict[str, Any]] = []
     for trade_date, raw_group in frame.groupby("trade_date", sort=True):
         group = raw_group.dropna(subset=["score"]).copy()
@@ -5618,6 +5625,17 @@ def _predict_split(
         for idx, col in enumerate(summary_columns):
             rows[f"true_{col}"] = true_summary_np[:, idx]
             rows[f"pred_{col}"] = pred_summary_np[:, idx]
+        path_audit_columns: list[str] = []
+        if not uses_direct_value and int(pred_path_np.shape[1]) > 0:
+            for day in TOPK_PATH_AUDIT_DAYS:
+                if int(day) > int(pred_path_np.shape[1]):
+                    continue
+                for field_idx, field in enumerate(output_path_fields[:4]):
+                    true_column = f"true_path_{field}_ret_d{int(day)}"
+                    pred_column = f"pred_path_{field}_ret_d{int(day)}"
+                    rows[true_column] = true_path_np[:, int(day) - 1, field_idx]
+                    rows[pred_column] = pred_path_np[:, int(day) - 1, field_idx]
+                    path_audit_columns.extend((true_column, pred_column))
         realized_cols: list[str] = []
         if output_path_dim >= 6:
             realized = _realize_predicted_plan_numpy(pred_summary_np, true_path_np, forward_days=dataset.forward_days)
@@ -5666,6 +5684,8 @@ def _predict_split(
             "symbol",
             "score",
             *[f"true_{c}" for c in summary_columns],
+            *[f"pred_{c}" for c in summary_columns],
+            *path_audit_columns,
             *realized_cols,
         ]
         if "executable_capital_speed_v4" in chunk.columns:

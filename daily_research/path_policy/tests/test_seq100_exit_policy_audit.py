@@ -38,7 +38,9 @@ def _manifest() -> dict:
 
 def _fixture() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     entry_filled = np.asarray([True, True, True, False])
-    entry_prices = np.asarray([10.0, 12.0, 8.0, 9.0])
+    # The low-priced third row requires more than eight one-lot affordability
+    # corrections under the minimum/proportional fee boundary.
+    entry_prices = np.asarray([10.0, 12.0, 0.36, 9.0])
     exit_prices = np.asarray(
         [
             [9.0, 11.0, 12.0, 8.0, 7.0, 13.0, 14.0, 15.0],

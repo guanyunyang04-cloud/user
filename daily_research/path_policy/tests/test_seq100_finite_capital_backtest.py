@@ -168,6 +168,74 @@ def test_stateful_portfolio_does_not_replace_top3_or_pyramid() -> None:
     assert int(trades.iloc[0]["occupied_sessions"]) == 2
 
 
+def test_stateful_portfolio_can_scan_ranked_candidates_for_replacement() -> None:
+    book = ForecastBook("replacement", top_k=1, candidate_scan_k=3)
+    for date_idx in (0, 1):
+        book.add_day(
+            date_idx=date_idx,
+            symbol_idx=np.asarray([0, 1, 2]),
+            score=np.asarray([0.3, 0.2, 0.1]),
+            planned_day=np.asarray([3, 3, 3]),
+        )
+    metric, _equity, trades, _annual = simulate_portfolio(
+        market=_market(),
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d3", kind="fixed", fixed_day=3),
+        slots=2,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=1,
+        replace_rejected_from_ranked_candidates=True,
+    )
+    assert metric["buy_count"] == 2
+    assert metric["replacement_order_count"] == 1
+    assert metric["candidate_scan_k"] == 3
+    assert set(trades["symbol"]) == {"S0", "S1"}
+
+
+def test_low_price_terminal_writeoff_never_overdraws_cash() -> None:
+    base = _market(symbol_count=1, date_count=100)
+    market = BacktestMarket(
+        date_values=base.date_values,
+        symbol_values=base.symbol_values,
+        entry_open_raw=np.full((100, 1), 0.36, dtype=np.float32),
+        exit_close_raw=np.full((100, 1), 0.36, dtype=np.float32),
+        exit_sellable=np.zeros((100, 1), dtype=bool),
+        entry_filled=base.entry_filled,
+        contract=base.contract,
+        terminal_recovery_fraction=0.0,
+        forward_days=60,
+        execution_days=80,
+    )
+    book = ForecastBook("terminal_writeoff", top_k=1)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0]),
+        score=np.asarray([1.0]),
+        planned_day=np.asarray([2]),
+    )
+    metric, equity, trades, _annual = simulate_portfolio(
+        market=market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="double_slippage",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+    )
+
+    trade = trades.iloc[0]
+    assert float(trade["buy_cash_cny"]) <= 1_000_000.0
+    assert float(trade["sell_proceeds_cny"]) == 0.0
+    assert trade["exit_reason"] == "terminal_recovery"
+    assert float(equity["cash"].min()) >= 0.0
+    assert metric["minimum_cash_cny"] >= 0.0
+    assert metric["minimum_equity_cny"] >= 0.0
+    assert metric["liquidated_ending_equity_cny"] >= 0.0
+
+
 def test_rolling_portfolio_uses_next_close_after_nonpositive_forecast() -> None:
     metric, _equity, trades, _annual = simulate_portfolio(
         market=_market(),

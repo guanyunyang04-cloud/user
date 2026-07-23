@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "status": "ready_to_share",
+  "delivery_mode": "mcp_app",
+  "artifact_path": "daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/artifact.json",
+  "artifact_sha256": "0c5dc29ea393ce212cab96329edfeffb0f092a6babd5694c1df93333fa8cbe10",
+  "artifact_bytes": 716791,
+  "manifest": {
+    "surface": "report",
+    "dataset_count": 13,
+    "chart_count": 5,
+    "table_count": 10,
+    "block_count": 29,
+    "source_count": 11,
+    "snapshot_status": "ready"
+  },
+  "mcp_validation": {
+    "ok": true,
+    "validation_type": "artifact"
+  },
+  "mcp_render": {
+    "ok": true,
+    "widget_type": "artifact",
+    "surface": "report"
+  },
+  "analysis_validation": {
+    "independent_calculations": "17/17 passed",
+    "path_policy_tests": "157 passed",
+    "qdp_quick": "ok",
+    "qdp_full": "ok with one accepted medium historical-5m coverage finding",
+    "brain_integrity": "ok; 0 errors; 2 existing root-directory warnings",
+    "git_diff_check": "passed"
+  },
+  "contract_sha256": "c9555d39a42737713971b94479572ee4c4b6d1b8b77b5eda10eb94c025feb325"
+}

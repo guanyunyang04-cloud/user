@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "status": "ok",
+  "contract_sha256": "c9555d39a42737713971b94479572ee4c4b6d1b8b77b5eda10eb94c025feb325",
+  "manifest_count": 30,
+  "output_hash_count": 120,
+  "forbidden_2026_rows": 0,
+  "issues": [],
+  "rows": [
+    {
+      "arm": "legacy_exact",
+      "year": 2020,
+      "candidate_count": 623247,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.10327753673256339,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "legacy_exact",
+      "year": 2021,
+      "candidate_count": 659067,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.08382968459746602,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "legacy_exact",
+      "year": 2022,
+      "candidate_count": 684971,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.11042749556389182,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "legacy_exact",
+      "year": 2023,
+      "candidate_count": 703468,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.0964711904735949,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "legacy_exact",
+      "year": 2024,
+      "candidate_count": 715878,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.10876555023084927,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "legacy_exact",
+      "year": 2025,
+      "candidate_count": 724125,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.11363001470770472,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_shared_legacy_norm",
+      "year": 2020,
+      "candidate_count": 616375,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.10240004223320852,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_shared_legacy_norm",
+      "year": 2021,
+      "candidate_count": 645283,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.0838864326671309,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_shared_legacy_norm",
+      "year": 2022,
+      "candidate_count": 678182,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.10986848873814302,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_shared_legacy_norm",
+      "year": 2023,
+      "candidate_count": 696809,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.09635218157277423,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_shared_legacy_norm",
+      "year": 2024,
+      "candidate_count": 712992,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.10858082787218097,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_shared_legacy_norm",
+      "year": 2025,
+      "candidate_count": 721692,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.11295070354427597,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_legacy_norm",
+      "year": 2020,
+      "candidate_count": 672817,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.09824272272303745,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_legacy_norm",
+      "year": 2021,
+      "candidate_count": 696963,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.08705622199804583,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_legacy_norm",
+      "year": 2022,
+      "candidate_count": 728321,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.11341031895156274,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_legacy_norm",
+      "year": 2023,
+      "candidate_count": 742473,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.09621903395769915,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_legacy_norm",
+      "year": 2024,
+      "candidate_count": 749653,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.11076830283082459,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_legacy_norm",
+      "year": 2025,
+      "candidate_count": 747413,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.11290004783759884,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_added_legacy_norm",
+      "year": 2020,
+      "candidate_count": 56442,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.07445234196736059,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_added_legacy_norm",
+      "year": 2021,
+      "candidate_count": 51680,
+      "date_count": 243,
+      "top200_row_count": 48598,
+      "rank_ic_mean": 0.12361986449661844,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_added_legacy_norm",
+      "year": 2022,
+      "candidate_count": 50139,
+      "date_count": 242,
+      "top200_row_count": 48390,
+      "rank_ic_mean": 0.15646714787010105,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_added_legacy_norm",
+      "year": 2023,
+      "candidate_count": 45664,
+      "date_count": 242,
+      "top200_row_count": 45092,
+      "rank_ic_mean": 0.11228357680240417,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_added_legacy_norm",
+      "year": 2024,
+      "candidate_count": 36661,
+      "date_count": 242,
+      "top200_row_count": 36661,
+      "rank_ic_mean": 0.13289435517261083,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_added_legacy_norm",
+      "year": 2025,
+      "candidate_count": 25721,
+      "date_count": 243,
+      "top200_row_count": 25721,
+      "rank_ic_mean": 0.11506046636612495,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_pit_norm",
+      "year": 2020,
+      "candidate_count": 672817,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.0999897574100838,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_pit_norm",
+      "year": 2021,
+      "candidate_count": 696963,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.08466809035267614,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_pit_norm",
+      "year": 2022,
+      "candidate_count": 728321,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.11086582269713466,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_pit_norm",
+      "year": 2023,
+      "candidate_count": 742473,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.09421447318757938,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_pit_norm",
+      "year": 2024,
+      "candidate_count": 749653,
+      "date_count": 242,
+      "top200_row_count": 48400,
+      "rank_ic_mean": 0.11017634658360277,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    },
+    {
+      "arm": "pit_full_pit_norm",
+      "year": 2025,
+      "candidate_count": 747413,
+      "date_count": 243,
+      "top200_row_count": 48600,
+      "rank_ic_mean": 0.1112920798691942,
+      "duplicate_key_count": 0,
+      "bad_daily_top200_count": 0
+    }
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_diagnostic_study",
+  "study_id": "seq100_pit_l35v2_survivorship_frozen_audit_v1",
+  "status": "completed",
+  "contract": {
+    "schema_version": 1,
+    "contract_id": "seq100_pit_l35v2_survivorship_frozen_audit_v1",
+    "objective": "measure_how_much_the_registered_l35v2_results_change_when_the_frozen_models_are_scored_on_the_survivorship_complete_pit_universe",
+    "years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "primary_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "forbidden_years": [
+      2026
+    ],
+    "model": {
+      "model_id": "structured_joint_turnover_180x35_v2",
+      "checkpoint_policy": "registered_checkpoint_sha256_exact",
+      "retraining": false,
+      "lookback_days": 180,
+      "input_dim": 35,
+      "prediction_horizon_days": 60,
+      "path_value_semantic": "path_value_v2"
+    },
+    "sources": {
+      "legacy_view_root": "daily_research/data/research_store/seq100_l35v2_sixfold_v1/views",
+      "pit_view_root": "daily_research/data/research_store/seq100_pit_l35v2_v1/folds/views",
+      "checkpoint_root": "daily_research/models/seq100/structured_joint_turnover_180x35_v2"
+    },
+    "arms": {
+      "legacy_exact": {
+        "panel": "legacy",
+        "candidate_universe": "legacy",
+        "normalization": "legacy_fold"
+      },
+      "pit_shared_legacy_norm": {
+        "panel": "pit",
+        "candidate_universe": "intersection_of_legacy_and_pit_date_symbol_membership",
+        "normalization": "legacy_fold"
+      },
+      "pit_full_legacy_norm": {
+        "panel": "pit",
+        "candidate_universe": "pit_complete",
+        "normalization": "legacy_fold",
+        "role": "primary_survivorship_stress"
+      },
+      "pit_added_legacy_norm": {
+        "panel": "pit",
+        "candidate_universe": "pit_membership_not_present_in_legacy",
+        "normalization": "legacy_fold",
+        "role": "attribution_only"
+      },
+      "pit_full_pit_norm": {
+        "panel": "pit",
+        "candidate_universe": "pit_complete",
+        "normalization": "pit_fold",
+        "role": "normalization_sensitivity_only"
+      }
+    },
+    "inference": {
+      "input_channel_profile": "daily_only_turnover",
+      "batch_size": 512,
+      "amp": true,
+      "daily_top_k_retention": 200,
+      "retained_rank_cutoffs": [
+        1,
+        2,
+        3,
+        5,
+        10,
+        200
+      ],
+      "path_audit_days": [
+        1,
+        2,
+        7,
+        14,
+        60
+      ],
+      "stable_tie_break": "score_desc_symbol_asc"
+    },
+    "evaluation": {
+      "ranking": [
+        "daily_rank_ic",
+        "top_rank_membership_displacement",
+        "top_k_overlap",
+        "score_distribution_by_membership"
+      ],
+      "path_calibration": [
+        "d1_open_denominator_distortion",
+        "d2_d7_d14_d60_ohlc_error",
+        "predicted_exit_day_error",
+        "path_value_calibration"
+      ],
+      "execution": {
+        "cost_scenario": "double_slippage",
+        "starting_cash_cny": 1000000,
+        "top_k": [
+          1,
+          2,
+          3
+        ],
+        "slot_grid": {
+          "1": [
+            1,
+            3,
+            6,
+            12,
+            24,
+            48
+          ],
+          "2": [
+            2,
+            4,
+            6,
+            12,
+            24,
+            48
+          ],
+          "3": [
+            3,
+            6,
+            12,
+            24,
+            48
+          ]
+        },
+        "fixed_exit_domain": "D2_to_D60",
+        "autonomous_policies": [
+          "model_plan",
+          "rolling_path"
+        ],
+        "autonomous_fallback": "own_best_fixed_exit_unless_strictly_better",
+        "cash_is_legal": true,
+        "pyramiding": false,
+        "candidate_replacement": "scan_ranked_top10_for_any_registered_signal_filter_then_cash"
+      },
+      "headline": "paired_change_in_double_slippage_continuous_account_annualized_log_growth_and_ending_equity",
+      "also_report": "daily_independent_cohort_mean_unit_time_utility",
+      "uncertainty": "paired_60_trading_day_block_bootstrap"
+    },
+    "interpretation": {
+      "legacy_to_pit_full_difference": "evaluation_universe_survivorship_effect_for_the_frozen_model",
+      "does_not_identify": "effect_of_retraining_on_survivorship_complete_history",
+      "severity_requires": "agreement_across_account_cohort_rank_path_and_multi_year_evidence"
+    },
+    "protection": {
+      "qdp_mutation": false,
+      "pack_mutation": false,
+      "checkpoint_mutation": false,
+      "training": false,
+      "commit_push_publish": false
+    }
+  },
+  "contract_sha256": "c9555d39a42737713971b94479572ee4c4b6d1b8b77b5eda10eb94c025feb325",
+  "result": {
+    "completed_at": "2026-07-23T23:43:00+08:00",
+    "verdict": "severe_survivorship_bias_in_legacy_evaluation_universe",
+    "frozen_strategy": "Top1/slots1/fixed_d14/double_slippage",
+    "primary_2023_2025": {
+      "legacy_ending_equity_cny": 52175823.49734298,
+      "pit_full_legacy_norm_ending_equity_cny": 13816328.419828257,
+      "pit_vs_legacy_ending_equity_change": -0.7351967349296971,
+      "legacy_annualized_log_growth": 1.3707896114506992,
+      "pit_full_legacy_norm_annualized_log_growth": 0.9101987346739664,
+      "pit_minus_legacy_annualized_log_growth": -0.4605908767767328
+    },
+    "durability_2020_2025": {
+      "pit_full_legacy_norm_ending_equity_cny": 21.4836048114812,
+      "terminal_symbol": "000018.SZ",
+      "terminal_recovery_cny": 0.0
+    },
+    "report_artifact": "daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/artifact.json",
+    "report_artifact_sha256": "0c5dc29ea393ce212cab96329edfeffb0f092a6babd5694c1df93333fa8cbe10",
+    "next_training_purge_days": 60
+  }
+}
