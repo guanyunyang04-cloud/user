@@ -1394,18 +1394,12 @@ def test_joint_student_t_nll_and_calibration_are_finite() -> None:
         assert np.isfinite(float(metrics[key]))
 
 
-def test_v4_temperature_and_gradient_controls_obey_registered_caps() -> None:
+def test_v4_temperature_and_pcgrad_controls_are_finite() -> None:
     diagnostics = sequence_training._v4_temperature_from_targets(
         np.asarray([-1.0, 0.0, 0.01, 0.02, 0.03, np.nan])
     )
     assert diagnostics["positive_count"] == 3
     assert np.isclose(diagnostics["temperature"], 0.001)
-
-    scales = sequence_training._v4_gradient_budget_scales(
-        {"main_norm": 10.0, "utility_norm": 5.0, "rank_norm": 1.0}
-    )
-    assert np.isclose(scales["utility"], 0.4)
-    assert scales["rank"] == 1.0
 
     projected = sequence_training._v4_pcgrad_vector(
         {

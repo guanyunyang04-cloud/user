@@ -242,7 +242,11 @@ def test_v4_close_excursion_training_runs_end_to_end(
         utility_curve_loss_weight=0.05,
         turnover_level_loss_weight=0.02,
         turnover_delta_loss_weight=0.01,
-        v4_gradient_budget=True,
+        rank_gradient_budget_profile=(
+            training.RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO
+            if rank_weight > 0.0
+            else training.RANK_GRADIENT_BUDGET_PROFILE_NONE
+        ),
         top_k=(1, 2, 3),
     )
 
@@ -251,11 +255,21 @@ def test_v4_close_excursion_training_runs_end_to_end(
     assert summary["checkpoint_policy"] == "final_epoch"
     assert summary["signal_close_capital_speed_v4_contract"]["cash_option"] is True
     assert summary["model"]["uses_probabilistic_close"] is probabilistic
-    assert summary["v4_gradient_diagnostics"]["initial"] is not None
-    assert len(summary["v4_gradient_diagnostics"]["snapshots"]) >= 1
+    diagnostics = summary["rank_gradient_budget_diagnostics"]
+    assert diagnostics["enabled"] is bool(rank_weight > 0.0)
+    assert diagnostics["update_count"] == (
+        summary["optimizer_step_count"] if rank_weight > 0.0 else 0
+    )
+    assert diagnostics["cap_breach_count"] == 0
+    if rank_weight > 0.0:
+        assert diagnostics["post_rank_to_main_ratio"]["maximum"] <= 0.200001
+        assert diagnostics["effective_rank_weight"]["minimum"] >= 0.0
+        assert diagnostics["effective_rank_weight"]["maximum"] <= 0.15
+        assert len(diagnostics["snapshots"]) >= 1
     checkpoint = torch.load(summary["best_checkpoint"], map_location="cpu", weights_only=False)
     assert checkpoint["path_value_temperature"] >= training.PATH_VALUE_V4_TEMPERATURE_FLOOR
-    assert checkpoint["v4_gradient_diagnostics"]["initial"] is not None
+    assert checkpoint["initial_model_state_sha256"] == summary["initial_model_state_sha256"]
+    assert checkpoint["rank_gradient_budget_diagnostics"] == diagnostics
 
 
 def test_signal_close_path_value_v2_close_excursion_training_runs_end_to_end(
@@ -277,6 +291,9 @@ def test_signal_close_path_value_v2_close_excursion_training_runs_end_to_end(
         utility_curve_loss_weight=0.05,
         turnover_level_loss_weight=0.02,
         turnover_delta_loss_weight=0.01,
+        rank_gradient_budget_profile=(
+            training.RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO
+        ),
         top_k=(1, 2, 3),
     )
 
@@ -288,6 +305,9 @@ def test_signal_close_path_value_v2_close_excursion_training_runs_end_to_end(
     assert summary["signal_close_path_value_v2_contract"]["tradable_exit_required"] is True
     assert summary["signal_close_capital_speed_v4_contract"] is None
     assert summary["model"]["uses_close_excursion"] is True
+    diagnostics = summary["rank_gradient_budget_diagnostics"]
+    assert diagnostics["update_count"] == summary["optimizer_step_count"]
+    assert diagnostics["post_rank_to_main_ratio"]["maximum"] <= 0.200001
 
 
 def test_v4_direct_rank_probe_has_no_path_or_strategy_head(tmp_path: Path) -> None:
@@ -303,7 +323,7 @@ def test_v4_direct_rank_probe_has_no_path_or_strategy_head(tmp_path: Path) -> No
         summary_loss_weight=0.0,
         value_loss_weight=0.0,
         rank_loss_weight=1.0,
-        v4_gradient_budget=False,
+        rank_gradient_budget_profile=training.RANK_GRADIENT_BUDGET_PROFILE_NONE,
         top_k=(1, 2, 3),
     )
 
@@ -314,6 +334,158 @@ def test_v4_direct_rank_probe_has_no_path_or_strategy_head(tmp_path: Path) -> No
     assert summary["loss_weights"]["path"] == 0.0
     assert summary["loss_weights"]["value"] == 0.0
     assert summary["loss_weights"]["rank"] == 1.0
+
+
+def test_continuous_rank_budget_recomputes_and_enforces_each_step() -> None:
+    parameter = torch.nn.Parameter(torch.tensor([1.0, 2.0], dtype=torch.float64))
+    first_scale, first = training._continuous_rank_gradient_budget_step(
+        (parameter.square()).sum(),
+        0.15 * (10.0 * parameter).sum(),
+        [parameter],
+    )
+    with torch.no_grad():
+        parameter.mul_(0.25)
+    second_scale, second = training._continuous_rank_gradient_budget_step(
+        (parameter.square()).sum(),
+        0.15 * (10.0 * parameter).sum(),
+        [parameter],
+    )
+
+    assert first_scale != second_scale
+    assert first["post_rank_to_main_ratio"] <= 0.200001
+    assert second["post_rank_to_main_ratio"] <= 0.200001
+    assert 0.0 <= first_scale <= 1.0
+    assert 0.0 <= second_scale <= 1.0
+
+
+def test_continuous_rank_budget_handles_zero_and_rejects_invalid_gradients() -> None:
+    parameter = torch.nn.Parameter(torch.tensor([1.0, 2.0]))
+    scale, diagnostics = training._continuous_rank_gradient_budget_step(
+        parameter.square().sum(),
+        parameter.sum() * 0.0,
+        [parameter],
+    )
+    assert scale == 1.0
+    assert diagnostics["rank_norm_at_ceiling"] == 0.0
+    assert diagnostics["post_rank_to_main_ratio"] == 0.0
+
+    with pytest.raises(ValueError, match="main encoder gradient norm"):
+        training._continuous_rank_gradient_budget_step(
+            parameter.sum() * 0.0,
+            parameter.sum(),
+            [parameter],
+        )
+    with pytest.raises(ValueError, match="Main/Rank encoder gradient dot product|Rank encoder"):
+        training._continuous_rank_gradient_budget_step(
+            parameter.square().sum(),
+            parameter.sum() * torch.tensor(float("nan")),
+            [parameter],
+        )
+
+
+def test_p0_explicit_none_preserves_exact_numerical_training(tmp_path: Path) -> None:
+    manifest_path = _make_v4_tiny_pack(tmp_path)
+    base = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        model_type="gru_structured_close_excursion",
+        input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER,
+        path_value_semantic=training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2,
+        path_value_gradient_profile=training.PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+        path_loss_weight=0.35,
+        summary_loss_weight=0.20,
+        value_loss_weight=0.15,
+        rank_loss_weight=0.0,
+        geometry_loss_weight=0.10,
+        utility_curve_loss_weight=0.05,
+        turnover_level_loss_weight=0.02,
+        turnover_delta_loss_weight=0.01,
+        prediction_mode="none",
+    )
+    implicit = training.train_sequence_path_model(replace(base, run_tag="p0_implicit"))
+    explicit = training.train_sequence_path_model(
+        replace(
+            base,
+            run_tag="p0_explicit",
+            rank_gradient_budget_profile=training.RANK_GRADIENT_BUDGET_PROFILE_NONE,
+        )
+    )
+    left = torch.load(implicit["best_checkpoint"], map_location="cpu", weights_only=False)
+    right = torch.load(explicit["best_checkpoint"], map_location="cpu", weights_only=False)
+    assert implicit["initial_model_state_sha256"] == explicit["initial_model_state_sha256"]
+    assert left["model_state_dict"].keys() == right["model_state_dict"].keys()
+    for name in left["model_state_dict"]:
+        assert torch.equal(left["model_state_dict"][name], right["model_state_dict"][name])
+    assert implicit["rank_gradient_budget_diagnostics"]["update_count"] == 0
+    assert explicit["rank_gradient_budget_diagnostics"]["update_count"] == 0
+
+
+def test_signal_close_2x2_tiny_pack_has_shared_initial_state_and_valid_budgets(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _make_v4_tiny_pack(tmp_path)
+    summaries = []
+    for arm, semantic, rank_weight in (
+        ("V2C-P0", training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2, 0.0),
+        ("V2C-P1", training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2, 0.15),
+        ("V4-P0", training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4, 0.0),
+        ("V4-P1", training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4, 0.15),
+    ):
+        config = replace(
+            _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+            run_tag=f"tiny_{arm}",
+            model_type="gru_structured_close_excursion",
+            input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER,
+            path_value_semantic=semantic,
+            path_value_gradient_profile=training.PATH_VALUE_GRADIENT_PROFILE_HARD_ST,
+            path_loss_weight=0.35,
+            summary_loss_weight=0.20,
+            value_loss_weight=0.15,
+            rank_loss_weight=rank_weight,
+            geometry_loss_weight=0.10,
+            utility_curve_loss_weight=0.05,
+            turnover_level_loss_weight=0.02,
+            turnover_delta_loss_weight=0.01,
+            rank_gradient_budget_profile=(
+                training.RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO
+                if rank_weight > 0.0
+                else training.RANK_GRADIENT_BUDGET_PROFILE_NONE
+            ),
+            prediction_mode="none",
+        )
+        summaries.append(training.train_sequence_path_model(config))
+
+    assert len({row["initial_model_state_sha256"] for row in summaries}) == 1
+    for row in summaries:
+        diagnostics = row["rank_gradient_budget_diagnostics"]
+        if row["run_tag"].endswith("P1"):
+            assert diagnostics["update_count"] == row["optimizer_step_count"]
+            assert diagnostics["post_rank_to_main_ratio"]["maximum"] <= 0.200001
+        else:
+            assert diagnostics["update_count"] == 0
+
+
+def test_continuous_rank_budget_rejects_non_close_and_global_tail_configs(
+    tmp_path: Path,
+) -> None:
+    manifest_path = _make_v4_tiny_pack(tmp_path)
+    base = replace(
+        _config(tmp_path, manifest_path, evaluation_mode="fixed_oos"),
+        rank_gradient_budget_profile=(
+            training.RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO
+        ),
+        path_value_semantic=training.PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_PATH_VALUE_V2,
+    )
+    with pytest.raises(ValueError, match="only valid for close/excursion"):
+        training.train_sequence_path_model(replace(base, model_type="gru_path_value"))
+    with pytest.raises(ValueError, match="rank_training_profile=local_chunk"):
+        training.train_sequence_path_model(
+            replace(
+                base,
+                model_type="gru_structured_close_excursion",
+                input_channel_profile=training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER,
+                rank_training_profile=training.RANK_TRAINING_PROFILE_GLOBAL_TAIL_512,
+            )
+        )
 
 
 def _install_fake_evaluation(monkeypatch: pytest.MonkeyPatch) -> list[str]:

@@ -97,7 +97,11 @@ def test_studies_expose_current_semantic_comparison_and_deferred_work() -> None:
         )
     )
     assert comparison["contract"]["arms"]["V2C-P0"]["path_value_semantic"] == "signal_close_path_value_v2"
-    assert comparison["contract"]["p1_implementation_gate"]["status"] == "required_before_p1_training"
+    budget = comparison["contract"]["rank_gradient_budget"]
+    assert budget["profile"] == "continuous_encoder_ratio"
+    assert budget["update_frequency"] == "every_path_optimizer_step"
+    assert budget["rank_weight_ceiling"] == 0.15
+    assert budget["max_rank_to_main_gradient_norm_ratio"] == 0.20
     assert comparison["contract_sha256"] == development._canonical_json_sha256(comparison["contract"])
     oof = json.loads(
         development.ACTIVE_STUDIES["pit-oof-trees"].read_text(encoding="utf-8")

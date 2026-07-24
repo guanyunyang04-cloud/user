@@ -101,7 +101,15 @@ V4_GRADIENT_CONFLICT_PROFILES = (
     V4_GRADIENT_CONFLICT_NONE,
     V4_GRADIENT_CONFLICT_PCGRAD,
 )
-V4_AUXILIARY_GRADIENT_MAX_FRACTION = 0.20
+RANK_GRADIENT_BUDGET_PROFILE_NONE = "none"
+RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO = "continuous_encoder_ratio"
+RANK_GRADIENT_BUDGET_PROFILES = (
+    RANK_GRADIENT_BUDGET_PROFILE_NONE,
+    RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO,
+)
+RANK_GRADIENT_MAX_MAIN_FRACTION = 0.20
+RANK_GRADIENT_NORM_EPSILON = 1.0e-12
+RANK_GRADIENT_RATIO_TOLERANCE = 1.0e-6
 PATH_VALUE_GRADIENT_PROFILE_SMOOTH = "smooth_current"
 PATH_VALUE_GRADIENT_PROFILE_HARD_ST = "hard_st"
 PATH_VALUE_GRADIENT_PROFILES = (
@@ -372,6 +380,17 @@ def _file_sha256(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
     with Path(path).open("rb") as handle:
         while chunk := handle.read(int(chunk_size)):
             digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _model_state_sha256(model: nn.Module) -> str:
+    digest = hashlib.sha256()
+    for name, value in sorted(model.state_dict().items()):
+        array = value.detach().cpu().contiguous().numpy()
+        digest.update(name.encode("utf-8"))
+        digest.update(str(array.dtype).encode("ascii"))
+        digest.update(json.dumps(list(array.shape), separators=(",", ":")).encode("ascii"))
+        digest.update(array.tobytes(order="C"))
     return digest.hexdigest()
 
 
@@ -2240,6 +2259,15 @@ def _normalize_rank_training_profile(value: str) -> str:
     return profile
 
 
+def _normalize_rank_gradient_budget_profile(value: str) -> str:
+    profile = str(value or RANK_GRADIENT_BUDGET_PROFILE_NONE).strip().lower()
+    if profile not in RANK_GRADIENT_BUDGET_PROFILES:
+        raise ValueError(
+            f"rank_gradient_budget_profile must be one of {RANK_GRADIENT_BUDGET_PROFILES}"
+        )
+    return profile
+
+
 def _path_value_with_gradient_profile(
     hard_value: torch.Tensor,
     candidates: torch.Tensor,
@@ -2302,7 +2330,7 @@ def _loss_parts_payload(
     return {key: float(value.detach().cpu().item()) for key, value in tensors.items()}
 
 
-def _v4_shared_encoder_parameters(model: nn.Module) -> list[nn.Parameter]:
+def _shared_encoder_parameters(model: nn.Module) -> list[nn.Parameter]:
     modules = [
         getattr(model, name, None)
         for name in ("input_norm", "proj", "encoder", "attention", "structured_context")
@@ -2317,11 +2345,11 @@ def _v4_shared_encoder_parameters(model: nn.Module) -> list[nn.Parameter]:
                 seen.add(id(parameter))
                 parameters.append(parameter)
     if not parameters:
-        raise ValueError("V4 gradient diagnostics require shared encoder parameters")
+        raise ValueError("encoder gradient controls require shared encoder parameters")
     return parameters
 
 
-def _v4_weighted_objectives(
+def _weighted_encoder_objectives(
     parts: Mapping[str, torch.Tensor],
     *,
     weights: Mapping[str, float],
@@ -2405,20 +2433,195 @@ def _v4_gradient_diagnostics(
     return diagnostics, vectors
 
 
-def _v4_gradient_budget_scales(diagnostics: Mapping[str, float]) -> dict[str, float]:
-    main_norm = float(diagnostics.get("main_norm", 0.0))
-    if not math.isfinite(main_norm) or main_norm <= 0.0:
-        raise ValueError("V4 main path gradient norm must be finite and positive")
-    cap = V4_AUXILIARY_GRADIENT_MAX_FRACTION * main_norm
-    result: dict[str, float] = {}
-    for name in ("utility", "rank"):
-        norm = float(diagnostics.get(f"{name}_norm", 0.0))
-        result[name] = (
-            1.0
-            if not math.isfinite(norm) or norm <= cap or norm <= 0.0
-            else float(cap / norm)
+def _continuous_rank_gradient_budget_step(
+    main_objective: torch.Tensor,
+    rank_objective_at_ceiling: torch.Tensor,
+    parameters: list[nn.Parameter],
+    *,
+    max_fraction: float = RANK_GRADIENT_MAX_MAIN_FRACTION,
+) -> tuple[float, dict[str, float]]:
+    """Return the per-step Rank scale that enforces the encoder gradient cap."""
+
+    if not parameters:
+        raise ValueError("continuous Rank gradient budgeting requires shared encoder parameters")
+    if not math.isfinite(float(max_fraction)) or not 0.0 <= float(max_fraction) <= 1.0:
+        raise ValueError("Rank gradient max fraction must be finite and in [0, 1]")
+    main_gradients = torch.autograd.grad(
+        main_objective,
+        parameters,
+        retain_graph=True,
+        allow_unused=True,
+    )
+    rank_gradients = (
+        torch.autograd.grad(
+            rank_objective_at_ceiling,
+            parameters,
+            retain_graph=True,
+            allow_unused=True,
         )
-    return result
+        if rank_objective_at_ceiling.requires_grad
+        else tuple(None for _ in parameters)
+    )
+    reference = main_objective.detach().float()
+    main_sq = reference.new_zeros(())
+    rank_sq = reference.new_zeros(())
+    dot = reference.new_zeros(())
+    for main_gradient, rank_gradient, parameter in zip(
+        main_gradients, rank_gradients, parameters, strict=True
+    ):
+        main_value = (
+            torch.zeros_like(parameter, dtype=torch.float32)
+            if main_gradient is None
+            else main_gradient.detach().float()
+        )
+        rank_value = (
+            torch.zeros_like(parameter, dtype=torch.float32)
+            if rank_gradient is None
+            else rank_gradient.detach().float()
+        )
+        main_sq = main_sq + torch.sum(main_value * main_value)
+        rank_sq = rank_sq + torch.sum(rank_value * rank_value)
+        dot = dot + torch.sum(main_value * rank_value)
+    main_norm = float(torch.sqrt(main_sq).cpu().item())
+    rank_norm = float(torch.sqrt(rank_sq).cpu().item())
+    if not math.isfinite(main_norm) or main_norm <= RANK_GRADIENT_NORM_EPSILON:
+        raise ValueError("main encoder gradient norm must be finite and above epsilon")
+    if not math.isfinite(rank_norm):
+        raise ValueError("Rank encoder gradient norm must be finite")
+    dot_value = float(dot.cpu().item())
+    if not math.isfinite(dot_value):
+        raise ValueError("Main/Rank encoder gradient dot product must be finite")
+    if rank_norm <= RANK_GRADIENT_NORM_EPSILON:
+        scale = 1.0
+        raw_ratio = 0.0
+        cosine = 0.0
+    else:
+        raw_ratio = float(rank_norm / main_norm)
+        scale = float(
+            min(
+                1.0,
+                float(max_fraction)
+                * main_norm
+                / (rank_norm + RANK_GRADIENT_NORM_EPSILON),
+            )
+        )
+        cosine = float(dot_value / (main_norm * rank_norm))
+        if not math.isfinite(cosine):
+            raise ValueError("Main/Rank encoder gradient cosine must be finite")
+    post_ratio = float(raw_ratio * scale)
+    if post_ratio > float(max_fraction) + RANK_GRADIENT_RATIO_TOLERANCE:
+        raise RuntimeError(
+            f"continuous Rank gradient budget exceeded: {post_ratio:.9f} > {max_fraction:.9f}"
+        )
+    return scale, {
+        "main_norm": main_norm,
+        "rank_norm_at_ceiling": rank_norm,
+        "raw_rank_to_main_ratio": raw_ratio,
+        "applied_scale": scale,
+        "post_rank_to_main_ratio": post_ratio,
+        "main_rank_cosine": cosine,
+    }
+
+
+def _new_rank_gradient_budget_state(
+    *,
+    profile: str,
+    rank_weight_ceiling: float,
+    parameters: list[nn.Parameter],
+) -> dict[str, Any]:
+    enabled = profile == RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO
+    return {
+        "profile": str(profile),
+        "enabled": bool(enabled),
+        "algorithm_version": "continuous_encoder_ratio_v1",
+        "scope": "shared_encoder",
+        "update_frequency": "every_path_optimizer_step" if enabled else "disabled",
+        "max_rank_to_main_fraction": float(RANK_GRADIENT_MAX_MAIN_FRACTION),
+        "ratio_tolerance": float(RANK_GRADIENT_RATIO_TOLERANCE),
+        "norm_epsilon": float(RANK_GRADIENT_NORM_EPSILON),
+        "rank_weight_ceiling": float(rank_weight_ceiling),
+        "effective_rank_weight_allowed_range": [0.0, float(rank_weight_ceiling)],
+        "parameter_tensor_count": int(len(parameters)),
+        "parameter_element_count": int(sum(parameter.numel() for parameter in parameters)),
+        "update_count": 0,
+        "zero_rank_step_count": 0,
+        "negative_cosine_step_count": 0,
+        "cap_breach_count": 0,
+        "snapshots": [],
+        "_snapshot_buckets": set(),
+        "_raw_ratios": [],
+        "_post_ratios": [],
+        "_effective_weights": [],
+        "_scales": [],
+    }
+
+
+def _record_rank_gradient_budget_step(
+    state: dict[str, Any],
+    diagnostics: Mapping[str, float],
+    *,
+    epoch: int,
+    batch: int,
+    total_batches: int,
+) -> None:
+    state["update_count"] = int(state["update_count"]) + 1
+    raw_ratio = float(diagnostics["raw_rank_to_main_ratio"])
+    post_ratio = float(diagnostics["post_rank_to_main_ratio"])
+    scale = float(diagnostics["applied_scale"])
+    effective_weight = float(state["rank_weight_ceiling"]) * scale
+    state["_raw_ratios"].append(raw_ratio)
+    state["_post_ratios"].append(post_ratio)
+    state["_effective_weights"].append(effective_weight)
+    state["_scales"].append(scale)
+    if float(diagnostics["rank_norm_at_ceiling"]) <= RANK_GRADIENT_NORM_EPSILON:
+        state["zero_rank_step_count"] = int(state["zero_rank_step_count"]) + 1
+    if float(diagnostics["main_rank_cosine"]) < 0.0:
+        state["negative_cosine_step_count"] = int(state["negative_cosine_step_count"]) + 1
+    if post_ratio > RANK_GRADIENT_MAX_MAIN_FRACTION + RANK_GRADIENT_RATIO_TOLERANCE:
+        state["cap_breach_count"] = int(state["cap_breach_count"]) + 1
+    bucket = min(10, int(math.floor(10.0 * int(batch) / max(int(total_batches), 1))))
+    bucket_key = (int(epoch), int(bucket))
+    if bucket_key not in state["_snapshot_buckets"]:
+        state["_snapshot_buckets"].add(bucket_key)
+        state["snapshots"].append(
+            {
+                "epoch": int(epoch),
+                "batch": int(batch),
+                "total_batches": int(total_batches),
+                "bucket": int(bucket),
+                **{key: float(value) for key, value in diagnostics.items()},
+                "effective_rank_weight": effective_weight,
+            }
+        )
+
+
+def _rank_gradient_budget_payload(state: Mapping[str, Any]) -> dict[str, Any]:
+    def distribution(values: list[float]) -> dict[str, float | int]:
+        if not values:
+            return {"count": 0}
+        array = np.asarray(values, dtype=np.float64)
+        return {
+            "count": int(array.size),
+            "minimum": float(np.min(array)),
+            "median": float(np.median(array)),
+            "p95": float(np.quantile(array, 0.95)),
+            "maximum": float(np.max(array)),
+            "mean": float(np.mean(array)),
+        }
+
+    updates = int(state.get("update_count", 0) or 0)
+    negative = int(state.get("negative_cosine_step_count", 0) or 0)
+    return {
+        key: value
+        for key, value in state.items()
+        if not str(key).startswith("_")
+    } | {
+        "negative_cosine_rate": float(negative / max(updates, 1)),
+        "raw_rank_to_main_ratio": distribution(list(state.get("_raw_ratios", []))),
+        "post_rank_to_main_ratio": distribution(list(state.get("_post_ratios", []))),
+        "effective_rank_weight": distribution(list(state.get("_effective_weights", []))),
+        "applied_scale": distribution(list(state.get("_scales", []))),
+    }
 
 
 def _v4_pcgrad_vector(vectors: Mapping[str, torch.Tensor]) -> torch.Tensor:
@@ -6161,7 +6364,7 @@ class TrainConfig:
     path_value_gradient_profile: str = PATH_VALUE_GRADIENT_PROFILE_SMOOTH
     path_value_semantic: str = PATH_VALUE_DEFAULT_SEMANTIC
     path_value_temperature: float = 0.0
-    v4_gradient_budget: bool = False
+    rank_gradient_budget_profile: str = RANK_GRADIENT_BUDGET_PROFILE_NONE
     gradient_conflict_profile: str = V4_GRADIENT_CONFLICT_NONE
     rank_training_profile: str = RANK_TRAINING_PROFILE_LOCAL_CHUNK
     rank_batch_size: int = 512
@@ -6211,18 +6414,24 @@ def _validate_evaluation_mode(config: TrainConfig) -> str:
     if mode == EVALUATION_MODE_DEVELOPMENT:
         if int(config.max_samples_per_split) != 0:
             raise ValueError("development requires max_samples_per_split=0 so every fold uses full training data")
-        if int(config.early_stopping_patience) <= 0:
-            raise ValueError("development requires early_stopping_patience > 0")
-        if metric not in {
-            EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
-            EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS,
-        }:
-            raise ValueError(
-                "development requires early_stopping_metric=development_total_loss or "
-                "development_price_total_loss"
-            )
-        if stopping_mode != EARLY_STOPPING_MODE_MIN:
-            raise ValueError("development requires early_stopping_mode=min")
+        if bool(config.development_fixed_final_epoch):
+            if int(config.early_stopping_patience) != 0 or metric or stopping_mode:
+                raise ValueError(
+                    "fixed-final development requires patience=0 and no early-stopping metric or mode"
+                )
+        else:
+            if int(config.early_stopping_patience) <= 0:
+                raise ValueError("development requires early_stopping_patience > 0")
+            if metric not in {
+                EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
+                EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS,
+            }:
+                raise ValueError(
+                    "development requires early_stopping_metric=development_total_loss or "
+                    "development_price_total_loss"
+                )
+            if stopping_mode != EARLY_STOPPING_MODE_MIN:
+                raise ValueError("development requires early_stopping_mode=min")
     elif mode == EVALUATION_MODE_STANDARD:
         if metric and metric != EARLY_STOPPING_METRIC_VALIDATION_RANK_IC:
             raise ValueError("standard early stopping metric must be validation_rank_ic_mean")
@@ -6253,11 +6462,22 @@ def _validated_development_contract(path: Path) -> dict[str, Any]:
     computed = _canonical_json_sha256(semantic_payload)
     if not declared or computed != declared:
         raise ValueError("development contract semantic sha256 does not match contract_sha256")
-    protocol = dict(semantic_payload.get("development_protocol", {}) or {})
+    protocol = dict(
+        semantic_payload.get("development", {})
+        or semantic_payload.get("development_protocol", {})
+        or {}
+    )
     if dict(protocol.get("split_roles", {}) or {}) != {"fit": "train", "evaluation": "development"}:
         raise ValueError("development contract must declare train/development split roles")
     early = dict(semantic_payload.get("early_stopping", {}) or {})
-    if (
+    shared_training = dict(semantic_payload.get("shared_training", {}) or {})
+    legacy_training = dict(semantic_payload.get("training", {}) or {})
+    fixed_final_epoch = bool(
+        str(shared_training.get("checkpoint_policy", ""))
+        == "fixed_final_epoch_without_oos_checkpoint_selection"
+        or legacy_training.get("development_fixed_final_epoch", False)
+    )
+    if not fixed_final_epoch and (
         str(early.get("metric", "")) not in {
             EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
             EARLY_STOPPING_METRIC_DEVELOPMENT_PRICE_TOTAL_LOSS,
@@ -6266,13 +6486,14 @@ def _validated_development_contract(path: Path) -> dict[str, Any]:
         or int(early.get("minimum_complete_epochs", 0)) < 1
         or not bool(early.get("restore_best_checkpoint", False))
     ):
-        raise ValueError("development contract early-stopping semantics are incompatible")
+        raise ValueError("development contract checkpoint semantics are incompatible")
     return {
         "contract_id": str(semantic_payload.get("contract_id", payload.get("contract_id", ""))),
         "path": str(contract_path),
         "contract_sha256": declared,
         "contract_file_sha256": declared if mutable_study else _file_sha256(contract_path),
         "expected_input_dim": int(dict(semantic_payload.get("profile", {}) or {}).get("input_dim", 0) or 0),
+        "fixed_final_epoch": fixed_final_epoch,
     }
 
 
@@ -6636,16 +6857,32 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     path_value_gradient_profile = _normalize_path_value_gradient_profile(config.path_value_gradient_profile)
     path_value_semantic = _normalize_path_value_semantic(config.path_value_semantic)
     rank_training_profile = _normalize_rank_training_profile(config.rank_training_profile)
+    rank_gradient_budget_profile = _normalize_rank_gradient_budget_profile(
+        config.rank_gradient_budget_profile
+    )
     gradient_conflict_profile = str(config.gradient_conflict_profile or V4_GRADIENT_CONFLICT_NONE).strip().lower()
     if gradient_conflict_profile not in V4_GRADIENT_CONFLICT_PROFILES:
         raise ValueError(
             f"gradient_conflict_profile must be one of {V4_GRADIENT_CONFLICT_PROFILES}"
         )
     if (
-        bool(config.v4_gradient_budget)
-        or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
-    ) and path_value_semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4:
-        raise ValueError("V4 gradient controls require signal_close_capital_speed_v4")
+        gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
+        and path_value_semantic != PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
+    ):
+        raise ValueError("V4 gradient conflict controls require signal_close_capital_speed_v4")
+    continuous_rank_budget = bool(
+        rank_gradient_budget_profile
+        == RANK_GRADIENT_BUDGET_PROFILE_CONTINUOUS_ENCODER_RATIO
+    )
+    if continuous_rank_budget:
+        if path_value_semantic not in PATH_VALUE_SIGNAL_CLOSE_SEMANTICS:
+            raise ValueError("continuous Rank budgeting requires a signal-close path semantic")
+        if float(config.rank_loss_weight) <= 0.0:
+            raise ValueError("continuous Rank budgeting requires rank_loss_weight > 0")
+        if rank_training_profile != RANK_TRAINING_PROFILE_LOCAL_CHUNK:
+            raise ValueError("continuous Rank budgeting requires rank_training_profile=local_chunk")
+        if gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE:
+            raise ValueError("continuous Rank budgeting cannot be combined with PCGrad")
     development_selector = str(
         config.early_stopping_metric or EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS
     ).strip().lower()
@@ -6676,6 +6913,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 development_contract_binding[field]
             ):
                 raise ValueError(f"manifest research_contract {field} does not match approved contract")
+        if bool(config.development_fixed_final_epoch) != bool(
+            development_contract_binding.get("fixed_final_epoch", False)
+        ):
+            raise ValueError("development fixed-final mode does not match the approved contract")
         execution_cost_contract = dict(manifest.get("execution_cost_contract", {}) or {})
         if not execution_cost_contract:
             raise ValueError("development requires a manifest-bound execution_cost_contract")
@@ -6835,10 +7076,10 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "or signal_close_capital_speed_v4"
         )
     if (
-        bool(config.v4_gradient_budget)
+        continuous_rank_budget
         or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
     ) and str(config.model_type) not in CLOSE_EXCURSION_MODEL_TYPES:
-        raise ValueError("V4 gradient controls are only valid for close/excursion path models")
+        raise ValueError("encoder gradient controls are only valid for close/excursion path models")
     model = SequencePathModel(
         input_dim=train_ds.input_dim,
         hidden_dim=int(config.hidden_dim),
@@ -6853,6 +7094,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         activation_checkpoint_profile=str(config.activation_checkpoint_profile),
     ).to(device)
     model.residual_weight = float(config.residual_score_weight)
+    initial_model_state_sha256 = _model_state_sha256(model)
     uses_direct_value = bool(getattr(model, "uses_direct_value", False))
     uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
     uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
@@ -6866,21 +7108,17 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     optimizer = torch.optim.AdamW(model.parameters(), lr=float(config.learning_rate), weight_decay=float(config.weight_decay))
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
     effective_value_loss_weight = float(config.value_loss_weight)
-    effective_rank_loss_weight = float(config.rank_loss_weight)
     effective_utility_curve_loss_weight = float(config.utility_curve_loss_weight)
-    gradient_budget_initialized = not bool(config.v4_gradient_budget)
-    gradient_budget_diagnostics: dict[str, Any] = {
-        "enabled": bool(config.v4_gradient_budget),
-        "max_fraction_per_auxiliary": float(V4_AUXILIARY_GRADIENT_MAX_FRACTION),
-        "initial": None,
-        "snapshots": [],
-        "gradient_conflict_profile": gradient_conflict_profile,
-    }
     shared_encoder_parameters = (
-        _v4_shared_encoder_parameters(model)
-        if bool(config.v4_gradient_budget)
+        _shared_encoder_parameters(model)
+        if continuous_rank_budget
         or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
         else []
+    )
+    rank_gradient_budget_state = _new_rank_gradient_budget_state(
+        profile=rank_gradient_budget_profile,
+        rank_weight_ceiling=float(config.rank_loss_weight),
+        parameters=shared_encoder_parameters if continuous_rank_budget else [],
     )
     best_val_ic = -1e9
     best_development_loss = float("inf")
@@ -6987,7 +7225,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     rank_weight=(
                         0.0
                         if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
-                        else float(effective_rank_loss_weight)
+                        else float(config.rank_loss_weight)
                     ),
                     richer_weight=float(config.richer_loss_weight),
                     rank_max_per_side=int(config.rank_max_per_side),
@@ -7027,80 +7265,40 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "rank_loss": (
                     0.0
                     if rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
-                    else float(effective_rank_loss_weight)
+                    else float(config.rank_loss_weight)
                 ),
             }
-            if not gradient_budget_initialized:
-                initial_main, initial_utility, initial_rank = _v4_weighted_objectives(
-                    parts, weights=effective_weights
-                )
-                initial_diagnostics, _initial_vectors = _v4_gradient_diagnostics(
-                    initial_main,
-                    initial_utility,
-                    initial_rank,
-                    shared_encoder_parameters,
-                )
-                budget_scales = _v4_gradient_budget_scales(initial_diagnostics)
-                effective_value_loss_weight *= float(budget_scales["utility"])
-                effective_utility_curve_loss_weight *= float(budget_scales["utility"])
-                effective_rank_loss_weight *= float(budget_scales["rank"])
-                effective_weights["value_loss"] = float(effective_value_loss_weight)
-                effective_weights["utility_curve_loss"] = float(
-                    effective_utility_curve_loss_weight
-                )
-                effective_weights["rank_loss"] = float(effective_rank_loss_weight)
-                gradient_budget_diagnostics["initial"] = {
-                    **initial_diagnostics,
-                    "utility_scale": float(budget_scales["utility"]),
-                    "rank_scale": float(budget_scales["rank"]),
-                    "effective_value_loss_weight": float(effective_value_loss_weight),
-                    "effective_utility_curve_loss_weight": float(
-                        effective_utility_curve_loss_weight
-                    ),
-                    "effective_rank_loss_weight": float(effective_rank_loss_weight),
-                }
-                gradient_budget_initialized = True
-            main_objective, utility_objective, rank_objective = _v4_weighted_objectives(
-                parts, weights=effective_weights
-            )
-            if bool(config.v4_gradient_budget):
-                loss = main_objective + utility_objective + rank_objective
-                parts["loss"] = loss
             current_batch_number = int(batch_count) + 1
-            snapshot_bucket = min(
-                10,
-                int(math.floor(10.0 * current_batch_number / max(total_batches, 1))),
-            )
-            recorded_buckets = {
-                int(row["bucket"])
-                for row in list(gradient_budget_diagnostics["snapshots"])
-            }
-            needs_gradient_vectors = bool(
-                gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE
-                or (
-                    bool(config.v4_gradient_budget)
-                    and snapshot_bucket not in recorded_buckets
-                )
-            )
             pcgrad_vector: torch.Tensor | None = None
-            if needs_gradient_vectors:
-                snapshot, task_vectors = _v4_gradient_diagnostics(
-                    main_objective,
-                    utility_objective,
-                    rank_objective,
-                    shared_encoder_parameters,
+            if continuous_rank_budget or gradient_conflict_profile != V4_GRADIENT_CONFLICT_NONE:
+                main_objective, utility_objective, rank_objective_at_ceiling = (
+                    _weighted_encoder_objectives(parts, weights=effective_weights)
                 )
-                if bool(config.v4_gradient_budget) and snapshot_bucket not in recorded_buckets:
-                    gradient_budget_diagnostics["snapshots"].append(
-                        {
-                            "epoch": int(epoch),
-                            "batch": int(current_batch_number),
-                            "total_batches": int(total_batches),
-                            "bucket": int(snapshot_bucket),
-                            **snapshot,
-                        }
+                if continuous_rank_budget:
+                    rank_scale, rank_budget_step = _continuous_rank_gradient_budget_step(
+                        main_objective,
+                        rank_objective_at_ceiling,
+                        shared_encoder_parameters,
                     )
+                    rank_objective = float(rank_scale) * rank_objective_at_ceiling
+                    loss = main_objective + utility_objective + rank_objective
+                    parts["loss"] = loss
+                    _record_rank_gradient_budget_step(
+                        rank_gradient_budget_state,
+                        rank_budget_step,
+                        epoch=int(epoch),
+                        batch=int(current_batch_number),
+                        total_batches=int(total_batches),
+                    )
+                else:
+                    rank_objective = rank_objective_at_ceiling
                 if gradient_conflict_profile == V4_GRADIENT_CONFLICT_PCGRAD:
+                    _snapshot, task_vectors = _v4_gradient_diagnostics(
+                        main_objective,
+                        utility_objective,
+                        rank_objective,
+                        shared_encoder_parameters,
+                    )
                     pcgrad_vector = _v4_pcgrad_vector(task_vectors)
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
@@ -7210,6 +7408,18 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         training_seconds = float(time.perf_counter() - epoch_started_at)
         epoch_optimizer_step_count = int(batch_count + rank_batch_count)
         optimizer_step_count += epoch_optimizer_step_count
+        rank_gradient_budget_diagnostics = _rank_gradient_budget_payload(
+            rank_gradient_budget_state
+        )
+        if continuous_rank_budget:
+            if int(rank_gradient_budget_diagnostics["update_count"]) != int(
+                optimizer_step_count
+            ):
+                raise RuntimeError(
+                    "continuous Rank budget updates must equal path optimizer steps"
+                )
+            if int(rank_gradient_budget_diagnostics["cap_breach_count"]) != 0:
+                raise RuntimeError("continuous Rank budget recorded a cap breach")
         train_row = {
             "epoch": int(epoch),
             "train_sample_count": int(sample_count),
@@ -7234,6 +7444,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             ) if mining_sample_count else 0.0,
             "working_set_trim_count": int(len(working_set_trim_events)),
             "working_set_trim_events": working_set_trim_events,
+            "rank_gradient_budget_diagnostics": rank_gradient_budget_diagnostics,
             **{key: float(value / max(batch_count, 1)) for key, value in loss_totals.items()},
         }
         if evaluation_mode == EVALUATION_MODE_STANDARD:
@@ -7265,6 +7476,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 torch.save(
                     {
                         "model_state_dict": model.state_dict(),
+                        "initial_model_state_sha256": initial_model_state_sha256,
                         "config": config.__dict__,
                         "input_dim": train_ds.input_dim,
                         "summary_columns": train_ds.path_summary_columns,
@@ -7275,7 +7487,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         "best_validation_rank_ic_mean": best_val_ic,
                         "checkpoint_policy": "best_validation_rank_ic",
                         "path_value_temperature": float(path_value_temperature),
-                        "v4_gradient_diagnostics": gradient_budget_diagnostics,
+                        "rank_gradient_budget_diagnostics": _rank_gradient_budget_payload(
+                            rank_gradient_budget_state
+                        ),
                     },
                     best_path,
                 )
@@ -7312,7 +7526,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 path_value_temperature=path_value_temperature,
                 rank_training_profile=rank_training_profile,
                 value_loss_weight=effective_value_loss_weight,
-                rank_loss_weight=effective_rank_loss_weight,
+                rank_loss_weight=float(config.rank_loss_weight),
                 utility_curve_loss_weight=effective_utility_curve_loss_weight,
             )
             # Older callers and test doubles return only VALIDATION_LOSS_KEYS.  Keep
@@ -7369,7 +7583,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         if fixed_final_epoch else f"best_{development_selector}"
                     ),
                     "path_value_temperature": float(path_value_temperature),
-                    "v4_gradient_diagnostics": gradient_budget_diagnostics,
+                    "rank_gradient_budget_diagnostics": _rank_gradient_budget_payload(
+                        rank_gradient_budget_state
+                    ),
                     "is_best": bool(improved),
                 }
             )
@@ -7380,6 +7596,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 epochs_without_improvement = 0
                 checkpoint_payload = {
                     "model_state_dict": model.state_dict(),
+                    "initial_model_state_sha256": initial_model_state_sha256,
                     "optimizer_state_dict": optimizer.state_dict(),
                     "scaler_state_dict": scaler.state_dict(),
                     "python_random_state": random.getstate(),
@@ -7412,7 +7629,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                         if fixed_final_epoch else f"best_{development_selector}"
                     ),
                     "path_value_temperature": float(path_value_temperature),
-                    "v4_gradient_diagnostics": gradient_budget_diagnostics,
+                    "rank_gradient_budget_diagnostics": _rank_gradient_budget_payload(
+                        rank_gradient_budget_state
+                    ),
                 }
                 checkpoint_payload[f"best_{development_selector}"] = float(
                     best_development_loss
@@ -7443,7 +7662,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "epoch": int(epoch),
                 "checkpoint_policy": "final_epoch",
                 "path_value_temperature": float(path_value_temperature),
-                "v4_gradient_diagnostics": gradient_budget_diagnostics,
+                "rank_gradient_budget_diagnostics": _rank_gradient_budget_payload(
+                    rank_gradient_budget_state
+                ),
                 "oos_evaluated": False,
                 "updated_at": _now(),
             }
@@ -7491,6 +7712,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         torch.save(
             {
                 "model_state_dict": model.state_dict(),
+                "initial_model_state_sha256": initial_model_state_sha256,
                 "config": config.__dict__,
                 "input_dim": train_ds.input_dim,
                 "summary_columns": train_ds.path_summary_columns,
@@ -7500,7 +7722,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 "optimizer_step_count": int(optimizer_step_count),
                 "checkpoint_policy": "final_epoch",
                 "path_value_temperature": float(path_value_temperature),
-                "v4_gradient_diagnostics": gradient_budget_diagnostics,
+                "rank_gradient_budget_diagnostics": _rank_gradient_budget_payload(
+                    rank_gradient_budget_state
+                ),
             },
             best_path,
         )
@@ -7630,6 +7854,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "generated_at": _now(),
         "run_tag": str(config.run_tag),
         "seed": int(config.seed),
+        "initial_model_state_sha256": initial_model_state_sha256,
         "top_k": [int(item) for item in config.top_k],
         "pack_manifest": str(Path(config.pack_manifest).resolve()),
         "output_dir": str(output_dir.resolve()),
@@ -7749,8 +7974,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "requested_value": float(config.value_loss_weight),
             "path_value_gradient_profile": path_value_gradient_profile,
             "path_value_semantic": path_value_semantic,
-            "rank": float(effective_rank_loss_weight),
-            "requested_rank": float(config.rank_loss_weight),
+            "rank": (
+                None if continuous_rank_budget else float(config.rank_loss_weight)
+            ),
+            "rank_ceiling": float(config.rank_loss_weight),
+            "rank_gradient_budget_profile": rank_gradient_budget_profile,
             "rank_training_profile": rank_training_profile,
             "rank_batch_size": int(config.rank_batch_size),
             "rank_interval": int(config.rank_interval),
@@ -7811,7 +8039,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             == PATH_VALUE_SEMANTIC_SIGNAL_CLOSE_CAPITAL_SPEED_V4
             else None
         ),
-        "v4_gradient_diagnostics": gradient_budget_diagnostics,
+        "rank_gradient_budget_diagnostics": _rank_gradient_budget_payload(
+            rank_gradient_budget_state
+        ),
         "ranking_contract": {
             "profile": rank_training_profile,
             "path_and_rank_batches_separate": bool(
@@ -8028,9 +8258,10 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     train.add_argument(
-        "--v4-gradient-budget",
-        action="store_true",
-        help="Cap V4 utility and rank encoder gradients at 20% of the main path gradient.",
+        "--rank-gradient-budget-profile",
+        default=RANK_GRADIENT_BUDGET_PROFILE_NONE,
+        choices=RANK_GRADIENT_BUDGET_PROFILES,
+        help="Optional per-step Rank/shared-encoder gradient budget.",
     )
     train.add_argument(
         "--gradient-conflict-profile",
@@ -8161,7 +8392,7 @@ def main(argv: list[str] | None = None) -> int:
         path_value_gradient_profile=str(args.path_value_gradient_profile),
         path_value_semantic=str(args.path_value_semantic),
         path_value_temperature=float(args.path_value_temperature),
-        v4_gradient_budget=bool(args.v4_gradient_budget),
+        rank_gradient_budget_profile=str(args.rank_gradient_budget_profile),
         gradient_conflict_profile=str(args.gradient_conflict_profile),
         rank_training_profile=str(args.rank_training_profile),
         rank_batch_size=int(args.rank_batch_size),

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -22,6 +23,40 @@ from daily_research.path_policy.tests.test_qdp_v2_sequence_path_training_fixed_o
 APPROVED_CONTRACT = Path(
     "daily_research/brain/references/seq100_candidate_complete_development_walkforward_contract_20260711.json"
 ).resolve()
+CURRENT_FIXED_FINAL_CONTRACT = Path(
+    "daily_research/studies/signal_close_path_value_2x2_v1.json"
+).resolve()
+
+
+def _write_current_study_contract(path: Path, *, valid_digest: bool = True) -> Path:
+    semantic = {
+        "schema_version": 1,
+        "contract_id": "tiny_rebound_study",
+        "profile": {"input_dim": 2},
+        "shared_training": {
+            "checkpoint_policy": "fixed_final_epoch_without_oos_checkpoint_selection"
+        },
+        "development": {
+            "split_roles": {"fit": "train", "evaluation": "development"}
+        },
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            semantic,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    payload = {
+        "schema_version": 1,
+        "artifact_type": "seq100_current_study",
+        "study_id": "tiny_rebound_study",
+        "contract": semantic,
+        "contract_sha256": digest if valid_digest else "0" * 64,
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
 
 
 def _build_development_pack(tmp_path: Path) -> Path:
@@ -261,6 +296,100 @@ def test_build_development_fold_view_keeps_execution_tail_out_of_purge(tmp_path:
     assert view["development_walkforward"]["execution_dependency_days"] == 3
     assert view["development_walkforward"]["purged_signal_date_count"] == 2
     assert view["development_fold_training_contract"]["schema_version"] == 2
+
+
+def test_rebind_development_fold_view_preserves_immutable_indexes(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    manifest_path = _build_development_pack(source_root)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for raw_path in (manifest["sample_index_path"], manifest["candidate_index_path"]):
+        frame = pd.read_parquet(raw_path)
+        frame["year"] = frame["trade_date"].astype(str).str[:4].astype(int)
+        frame["entry_trade_date"] = "2022-01-05"
+        frame.to_parquet(raw_path, index=False)
+    manifest["artifact_type"] = "qdp_v2_sequence_path_pack"
+    manifest["max_label_dependency_days"] = 2
+    manifest["max_execution_dependency_days"] = 3
+    manifest["research_contract"] = _bind_research_contract(APPROVED_CONTRACT)
+    manifest["development_contract"] = dict(manifest["research_contract"])
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    from daily_research.path_policy.seq100_fold_contract import (
+        build_development_fold_view,
+        rebind_development_fold_view,
+        validate_development_fold_training_contract,
+    )
+
+    built = build_development_fold_view(
+        source_manifest=manifest_path,
+        output_root=tmp_path / "folds",
+        development_year=2022,
+    )
+    source_view = json.loads(Path(built["view_path"]).read_text(encoding="utf-8"))
+    sample_path = Path(source_view["sample_index_path"])
+    candidate_path = Path(source_view["candidate_index_path"])
+    hashes_before = {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (sample_path, candidate_path)
+    }
+    contract_path = _write_current_study_contract(tmp_path / "study.json")
+    rebound_path = tmp_path / "rebound" / "view.json"
+
+    result = rebind_development_fold_view(
+        source_view=built["view_path"],
+        research_contract=contract_path,
+        output_path=rebound_path,
+    )
+    rebound = json.loads(rebound_path.read_text(encoding="utf-8"))
+
+    assert rebound["sample_index_path"] == source_view["sample_index_path"]
+    assert rebound["candidate_index_path"] == source_view["candidate_index_path"]
+    assert rebound["research_contract"] == rebound["development_contract"]
+    assert rebound["research_contract"]["contract_id"] == "tiny_rebound_study"
+    assert result["development_fold_training_contract_sha256"] == (
+        validate_development_fold_training_contract(rebound)["sha256"]
+    )
+    assert hashes_before == {
+        path: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in (sample_path, candidate_path)
+    }
+
+
+def test_rebind_development_fold_view_rejects_bad_study_digest(tmp_path: Path) -> None:
+    contract_path = _write_current_study_contract(
+        tmp_path / "bad_study.json", valid_digest=False
+    )
+    source_view = Path(
+        "daily_research/data/research_store/seq100_pit_l35v2_v1/folds/views/"
+        "l35v2_pit_2023.json"
+    )
+    from daily_research.path_policy.seq100_fold_contract import (
+        rebind_development_fold_view,
+    )
+
+    with pytest.raises(ValueError, match="semantic SHA-256"):
+        rebind_development_fold_view(
+            source_view=source_view,
+            research_contract=contract_path,
+            output_path=tmp_path / "bad.json",
+        )
+
+
+def test_fixed_final_development_accepts_patience_zero(tmp_path: Path) -> None:
+    manifest_path = _build_development_pack(tmp_path)
+    config = replace(
+        _config(tmp_path, manifest_path, evaluation_mode=training.EVALUATION_MODE_STANDARD),
+        evaluation_mode=training.EVALUATION_MODE_DEVELOPMENT,
+        development_fixed_final_epoch=True,
+        early_stopping_patience=0,
+        early_stopping_metric="",
+        early_stopping_mode="",
+    )
+
+    assert training._validate_evaluation_mode(config) == training.EVALUATION_MODE_DEVELOPMENT
+    binding = training._validated_development_contract(CURRENT_FIXED_FINAL_CONTRACT)
+    assert binding["fixed_final_epoch"] is True
 
 
 def test_development_early_stops_on_total_loss_and_restores_best_epoch(

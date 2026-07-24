@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
 from daily_research.path_policy.seq100_candidate_execution import (
@@ -10,9 +13,12 @@ from daily_research.path_policy.seq100_finite_capital_backtest import (
     ForecastDay,
     ForecastBook,
     PolicySpec,
+    StudyEvaluationSpec,
     _all_jobs,
+    _study_jobs,
     detect_stop_plan,
     rolling_plan_update,
+    select_study_winner,
     simulate_portfolio,
 )
 
@@ -382,3 +388,208 @@ def test_simulation_accepts_an_explicit_calendar_year_set() -> None:
         calendar_years=(2023,),
     )
     assert [int(row["year"]) for row in annual] == [2023]
+
+
+def test_signal_close_study_grid_has_exactly_4148_jobs() -> None:
+    profiles = ("V2C-P0", "V2C-P1", "V4-P0", "V4-P1")
+    years = (2023, 2024, 2025)
+    policies = tuple(
+        [
+            PolicySpec(name=f"fixed_d{day}", kind="fixed", fixed_day=day)
+            for day in range(2, 61)
+        ]
+        + [
+            PolicySpec(name="model_plan", kind="model_plan"),
+            PolicySpec(name="rolling_path", kind="rolling"),
+        ]
+    )
+    spec = StudyEvaluationSpec(
+        study_id="tiny_signal_close_2x2",
+        profiles=profiles,
+        years=years,
+        fold_views={year: Path(f"view_{year}.json") for year in years},
+        prediction_paths={
+            profile: {year: Path(f"{profile}_{year}.csv") for year in years}
+            for profile in profiles
+        },
+        top_k_slot_grid={
+            1: (1, 3, 6, 12, 24, 48),
+            2: (2, 4, 6, 12, 24, 48),
+            3: (3, 6, 12, 24, 48),
+        },
+        policies=policies,
+        expected_job_count=4148,
+    )
+
+    spec.validate()
+    jobs = _study_jobs(spec)
+    assert len(jobs) == 4148
+    assert {job.cost_scenario for job in jobs} == {"double_slippage"}
+
+
+def test_explicit_top_k_uses_one_name_without_rebuilding_forecast_book() -> None:
+    book = ForecastBook("shared_book", top_k=3, candidate_scan_k=10)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0, 1, 2]),
+        score=np.asarray([0.3, 0.2, 0.1]),
+        planned_day=np.asarray([2, 2, 2]),
+    )
+    metric, _equity, trades, _annual = simulate_portfolio(
+        market=_market(),
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="double_slippage",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+        top_k=1,
+        replace_rejected_from_ranked_candidates=True,
+    )
+
+    assert metric["configured_top_k"] == 1
+    assert metric["buy_count"] == 1
+    assert list(trades["symbol"]) == ["S0"]
+
+
+def test_next_open_failure_does_not_trigger_ranked_replacement() -> None:
+    base = _market()
+    entry_filled = base.entry_filled.copy()
+    entry_filled[0, 0] = False
+    market = BacktestMarket(
+        date_values=base.date_values,
+        symbol_values=base.symbol_values,
+        entry_open_raw=base.entry_open_raw,
+        exit_close_raw=base.exit_close_raw,
+        exit_sellable=base.exit_sellable,
+        entry_filled=entry_filled,
+        contract=base.contract,
+        terminal_recovery_fraction=base.terminal_recovery_fraction,
+        forward_days=base.forward_days,
+        execution_days=base.execution_days,
+    )
+    book = ForecastBook("no_next_open_replacement", top_k=1, candidate_scan_k=3)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0, 1, 2]),
+        score=np.asarray([0.3, 0.2, 0.1]),
+        planned_day=np.asarray([2, 2, 2]),
+    )
+    metric, _equity, trades, _annual = simulate_portfolio(
+        market=market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="double_slippage",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+        top_k=1,
+        replace_rejected_from_ranked_candidates=True,
+    )
+
+    assert metric["failed_entry_count"] == 1
+    assert metric["replacement_order_count"] == 0
+    assert metric["buy_count"] == 0
+    assert trades.empty
+    assert metric["liquidated_ending_equity_cny"] == 1_000_000.0
+    assert metric["annualized_log_growth"] == 0.0
+
+
+def test_winner_selection_applies_strict_autonomous_fallback_and_budget_gate(
+    tmp_path: Path,
+) -> None:
+    profiles = ("V2C-P0", "V2C-P1", "V4-P0", "V4-P1")
+    top_k_slot_grid = {
+        1: (1, 3, 6, 12, 24, 48),
+        2: (2, 4, 6, 12, 24, 48),
+        3: (3, 6, 12, 24, 48),
+    }
+    root = tmp_path / "account"
+    jobs_root = root / "jobs"
+    jobs_root.mkdir(parents=True)
+    contract_sha = "a" * 64
+    (root / "contract.json").write_text(
+        json.dumps({"contract_sha256": contract_sha, "job_count": 4148}),
+        encoding="utf-8",
+    )
+    count = 0
+    for profile in profiles:
+        profile_base = {
+            "V2C-P0": 0.10,
+            "V2C-P1": 0.30,
+            "V4-P0": 0.20,
+            "V4-P1": 0.40,
+        }[profile]
+        for top_k, slot_values in top_k_slot_grid.items():
+            for slots in slot_values:
+                group_bonus = 0.01 if top_k == 1 and slots == 1 else 0.0
+                best_fixed = profile_base + group_bonus
+                policies = [
+                    (f"fixed_d{day}", "fixed", day, best_fixed - abs(day - 10) * 0.001)
+                    for day in range(2, 61)
+                ]
+                model_growth = best_fixed + 0.5e-12
+                if profile == "V2C-P0" and top_k == 1 and slots == 1:
+                    model_growth = best_fixed + 2.0e-12
+                policies.extend(
+                    [
+                        ("model_plan", "model_plan", None, model_growth),
+                        ("rolling_path", "rolling", None, best_fixed - 0.01),
+                    ]
+                )
+                for name, kind, fixed_day, growth in policies:
+                    count += 1
+                    annual = [
+                        {
+                            "year": year,
+                            "log_growth": growth / 3.0,
+                            "net_return": float(np.expm1(growth / 3.0)),
+                        }
+                        for year in (2023, 2024, 2025)
+                    ]
+                    payload = {
+                        "contract_sha256": contract_sha,
+                        "job_id": f"job_{count}",
+                        "resolved_job": {
+                            "profile": profile,
+                            "top_k": top_k,
+                            "slots": slots,
+                            "cost_scenario": "double_slippage",
+                            "policy": {
+                                "name": name,
+                                "kind": kind,
+                                "fixed_day": fixed_day,
+                            },
+                        },
+                        "metric": {
+                            "profile": profile,
+                            "policy": name,
+                            "policy_kind": kind,
+                            "top_k": top_k,
+                            "slot_count": slots,
+                            "liquidated_log_growth": growth,
+                            "annualized_log_growth": growth,
+                            "full_path_maximum_drawdown": -0.20,
+                        },
+                        "annual_metrics": annual,
+                    }
+                    (jobs_root / f"job_{count}.json").write_text(
+                        json.dumps(payload), encoding="utf-8"
+                    )
+    assert count == 4148
+
+    result = select_study_winner(
+        account_output_root=root,
+        profiles=profiles,
+        p1_budget_evidence={"V2C-P1": False, "V4-P1": True},
+        training_complete=True,
+    )
+
+    assert result["winner"]["profile"] == "V4-P1"
+    assert result["winner"]["policy"] == "fixed_d10"
+    arms = {row["profile"]: row for row in result["arms"]}
+    assert arms["V2C-P0"]["policy"] == "model_plan"
+    assert arms["V2C-P1"]["qualified"] is False
+    assert arms["V2C-P1"]["p1_budget_evidence_passed"] is False

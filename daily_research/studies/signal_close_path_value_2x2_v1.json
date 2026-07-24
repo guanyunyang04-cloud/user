@@ -1,38 +1,70 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "artifact_type": "seq100_current_study",
   "study_id": "seq100_signal_close_path_value_2x2_v1",
   "status": "active_implementation",
   "contract": {
-    "schema_version": 1,
+    "schema_version": 2,
     "contract_id": "seq100_signal_close_path_value_2x2_v1",
     "objective": "select_the_signal_close_path_semantic_that_maximizes_2023_2025_double_slippage_continuous_account_log_growth_under_finite_capital_and_slots",
+    "profile": {
+      "input_channel_profile": "daily_only_turnover",
+      "input_dim": 35,
+      "lookback_days": 180,
+      "prediction_horizon_days": 60,
+      "price_anchor": "today_close"
+    },
     "data": {
       "qdp_active_as_of_date": "2026-07-21",
       "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+      "fold_view_pattern": "daily_research/data/research_store/seq100_pit_l35v2_v1/folds/views/l35v2_pit_{year}.json",
       "pack_status": "completed",
       "universe": "shanghai_shenzhen_mainboard_point_in_time_survivorship_complete",
-      "lookback_days": 180,
-      "input_channel_profile": "daily_only_turnover",
-      "input_dim": 35,
-      "prediction_horizon_days": 60,
-      "purge_trading_days": 60,
-      "price_anchor": "today_close",
+      "development_years": [2023, 2024, 2025],
+      "training_label_purge_trading_days": 60,
+      "execution_tail_trading_days": 20,
+      "normalization": "feature_dates_strictly_before_development_start",
+      "candidate_rule": "signal_date_known_eligibility_only",
       "actual_account_entry": "next_trading_day_open",
-      "terminal_failures_retained": true
+      "terminal_failures_retained": true,
+      "fold_material_policy": "reuse_immutable_parquet_indexes_and_normalization_through_lightweight_contract_rebinding"
     },
     "shared_training": {
-      "architecture": "gru_structured_close_excursion_hidden128_layers2_dropout0.1",
+      "model_type": "gru_structured_close_excursion",
+      "hidden_dim": 128,
+      "num_layers": 2,
+      "dropout": 0.1,
+      "symbol_embedding_dim": 16,
       "representation": "deterministic",
       "seed": 7,
       "batch_size": 512,
       "epochs": 1,
+      "amp": true,
+      "full_training_samples": true,
+      "full_development_candidates": true,
       "checkpoint_policy": "fixed_final_epoch_without_oos_checkpoint_selection",
+      "development_top_k_report": [1, 2, 3, 5, 10],
+      "compact_full_candidate_predictions": true,
       "learning_rate": 0.001,
       "weight_decay": 0.0001,
-      "loss_weights_except_rank": {
+      "path_loss_profile": "default",
+      "path_value_gradient_profile": "hard_st",
+      "summary_loss_profile": "multi_horizon_ohlc",
+      "rank_training_profile": "local_chunk",
+      "gradient_conflict_profile": "none",
+      "rank_max_per_side": 64,
+      "prefetch_batches": 1,
+      "activation_checkpoint_profile": "none",
+      "residual_score_weight": 0.25,
+      "residual_penalty_weight": 0.0,
+      "global_gradient_clip_norm": 1.0,
+      "loss_weights": {
         "path": 0.35,
         "summary": 0.2,
+        "richer": 0.0,
+        "price_delta": 0.0,
+        "volume_amount_level": 0.0,
+        "volume_amount_delta": 0.0,
         "geometry": 0.1,
         "value": 0.15,
         "utility_curve": 0.05,
@@ -40,34 +72,60 @@
         "turnover_delta": 0.01
       }
     },
+    "rank_gradient_budget": {
+      "profile": "continuous_encoder_ratio",
+      "algorithm_version": "continuous_encoder_ratio_v1",
+      "scope": "shared_encoder_parameters",
+      "rank_weight_ceiling": 0.15,
+      "max_rank_to_main_gradient_norm_ratio": 0.2,
+      "epsilon": 1e-12,
+      "main_objective": "path_plus_summary_plus_geometry_plus_turnover_excluding_value_utility_and_rank",
+      "rank_objective": "0.15_times_rank_loss",
+      "scale_formula": "min(1,0.20*norm(g_main)/(norm(g_rank)+epsilon))",
+      "total_loss": "L_main+0.15*L_value+0.05*L_utility+scale*0.15*L_rank",
+      "update_frequency": "every_path_optimizer_step",
+      "frozen_ratio": false,
+      "ema": false,
+      "zero_rank_gradient_scale": 1.0,
+      "abort_before_optimizer_step_on_nonfinite_main_or_rank_gradient": true,
+      "abort_before_optimizer_step_when_main_norm_at_or_below_epsilon": true,
+      "pcgrad": false,
+      "diagnostic_snapshot_frequency": "each_10_percent_of_epoch"
+    },
     "arms": {
       "V2C-P0": {
         "path_value_semantic": "signal_close_path_value_v2",
-        "rank_auxiliary": false,
-        "rank_weight": 0.0
+        "rank_loss_weight": 0.0,
+        "rank_gradient_budget_profile": "none"
       },
       "V2C-P1": {
         "path_value_semantic": "signal_close_path_value_v2",
-        "rank_auxiliary": true,
-        "rank_weight_ceiling": 0.15,
-        "rank_control": "continuous_dynamic_gradient_budget"
+        "rank_loss_weight": 0.15,
+        "rank_gradient_budget_profile": "continuous_encoder_ratio"
       },
       "V4-P0": {
         "path_value_semantic": "signal_close_capital_speed_v4",
-        "rank_auxiliary": false,
-        "rank_weight": 0.0
+        "rank_loss_weight": 0.0,
+        "rank_gradient_budget_profile": "none"
       },
       "V4-P1": {
         "path_value_semantic": "signal_close_capital_speed_v4",
-        "rank_auxiliary": true,
-        "rank_weight_ceiling": 0.15,
-        "rank_control": "continuous_dynamic_gradient_budget"
+        "rank_loss_weight": 0.15,
+        "rank_gradient_budget_profile": "continuous_encoder_ratio"
       }
     },
-    "p1_implementation_gate": {
-      "status": "required_before_p1_training",
-      "requirement": "recompute_and_enforce_the_rank_gradient_budget_throughout_training",
-      "forbidden": "calibrate_on_the_first_fixed_batch_then_freeze_the_rank_weight"
+    "task_execution": {
+      "order_within_each_year": ["V2C-P0", "V2C-P1", "V4-P0", "V4-P1"],
+      "year_order": [2023, 2024, 2025],
+      "one_foreground_training_task_per_invocation": true,
+      "outer_minimum_available_memory_gib": 1.0,
+      "trainer_trim_threshold_gib": 2.0,
+      "warm_start": false,
+      "same_initial_parameter_hash_seed_and_batch_order_within_year": true,
+      "resume_key": "contract_sha256_plus_resolved_config_sha256",
+      "interrupted_task_policy": "retain_directory_and_restart_single_epoch_from_initial_state",
+      "resource_failure_retry_limit": 1,
+      "invariant_failure_policy": "stop_entire_study"
     },
     "development": {
       "years": [2023, 2024, 2025],
@@ -76,42 +134,93 @@
         "evaluation": "development"
       },
       "train_window": "expanding_from_2010",
-      "normalization": "feature_dates_strictly_before_development_start",
-      "candidate_rule": "signal_date_known_eligibility_only",
-      "minimum_qualifying_folds": 2
+      "checkpoint_selection": "none_fixed_final_epoch",
+      "development_loss_and_top_k": "report_only"
+    },
+    "account_evaluation": {
+      "continuous_capital_path": "combined_2023_through_2025",
+      "starting_cash_cny": 1000000.0,
+      "cost_profile": "manifest_bound_double_slippage",
+      "signal_filter": "score_strictly_greater_than_zero_else_cash",
+      "no_pyramiding": true,
+      "slot_allocation": "equal_fraction_of_total_slot_count",
+      "top_k_slot_grid": {
+        "1": [1, 3, 6, 12, 24, 48],
+        "2": [2, 4, 6, 12, 24, 48],
+        "3": [3, 6, 12, 24, 48]
+      },
+      "candidate_scan_top_k": 10,
+      "signal_day_replacement": "scan_ranked_top10_only_when_higher_ranked_security_is_illegal_or_already_held",
+      "next_open_failure_replacement": false,
+      "cash_when_next_open_fails": true,
+      "fixed_exit_days_inclusive": [2, 60],
+      "autonomous_exit_policies": ["model_plan", "rolling_path"],
+      "strategy_count_per_top_k_slot_pair": 61,
+      "top_k_slot_pair_count": 17,
+      "arm_strategy_combination_count": 4148,
+      "autonomous_fallback_tolerance": 1e-12,
+      "autonomous_fallback": "use_own_best_fixed_day_unless_combined_annualized_log_growth_is_strictly_higher_by_more_than_tolerance",
+      "sell_constraints": ["T_plus_1", "down_limit_or_suspension_delays", "20_trading_day_execution_tail"],
+      "terminal_unrecoverable_position_value": 0.0,
+      "primary_metrics": {
+        "annualized_log_growth": "log(liquidated_ending_equity/starting_cash)*252/signal_trading_day_count",
+        "liquidated_ending_equity": true
+      },
+      "also_report": [
+        "maximum_drawdown",
+        "annual_log_growth",
+        "trade_coverage",
+        "terminal_failures",
+        "daily_independent_cohort_net_return",
+        "daily_independent_cohort_unit_capital_day_log_efficiency"
+      ]
     },
     "selection": {
-      "headline": "double_slippage_continuous_account_annualized_log_growth_and_liquidated_ending_equity",
-      "also_report": "daily_independent_cohort_unit_capital_day_efficiency",
-      "top_k": [1, 2, 3],
-      "include_all_legal_slot_counts": true,
-      "candidate_replacement": "scan_ranked_top10_for_signal_day_legal_candidates_then_cash",
-      "next_day_buy_failure_replacement": false,
-      "cash_is_legal": true,
-      "fixed_exit_domain": "D2_to_D60",
-      "autonomous_exit_fallback": "own_best_fixed_exit_unless_strictly_better",
-      "cross_model_rank_exit_hybrid": false
+      "per_arm_strategy": "best_frozen_top_k_slot_and_exit_rule_on_combined_period_after_autonomous_fallback",
+      "qualification": {
+        "combined_annualized_log_growth_strictly_positive": true,
+        "same_frozen_strategy_positive_annual_log_growth_minimum_years": 2,
+        "p1_budget_evidence_required": true,
+        "all_twelve_training_tasks_required": true
+      },
+      "winner_metric": "combined_account_log_growth",
+      "tie_break_order": [
+        "lower_maximum_drawdown",
+        "higher_worst_annual_growth",
+        "fewer_slots",
+        "smaller_top_k",
+        "fixed_exit_before_autonomous",
+        "earlier_fixed_day",
+        "arm_id"
+      ],
+      "no_qualified_arm": "winner_null"
     },
-    "probability_gate": {
-      "train_probability_model_before_deterministic_winner": false,
-      "required": "one_deterministic_semantic_qualifies_in_at_least_2_of_3_folds",
-      "action": "train_only_the_matching_single_probability_variant"
+    "p1_acceptance": {
+      "budget_update_count_equals_path_optimizer_step_count": true,
+      "cap_breach_count": 0,
+      "maximum_post_ratio": 0.200001,
+      "effective_rank_weight_range": [0.0, 0.15],
+      "complete_diagnostics_required": true
     },
-    "oos_2026": {
-      "selection_authority": false,
-      "all_model_ranking_exit_and_account_rules_frozen_from_2023_2025": true
+    "stage_boundary": {
+      "probability_model": "not_started",
+      "strict_oof_trees": "not_started",
+      "oos_2026_confirmation": "not_started",
+      "batch_1024": "not_started",
+      "next_contract_only_after_qualified_winner": true
     },
     "evidence": {
       "frozen_survivorship_audit": "daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/artifact.json",
       "legacy_v4_contract": "daily_research/studies/signal_close_capital_speed_v4.json"
     },
     "protection": {
+      "process_material_under_ignored_study_output": true,
       "overwrite_existing_pack": false,
       "overwrite_registered_checkpoints": false,
       "qdp_mutation": false,
-      "commit_push_publish": false,
-      "one_foreground_training_task_per_invocation": true
+      "registered_model_mutation": false,
+      "commit_push_publish": false
     }
   },
-  "contract_sha256": "0a1a9b8d146f6d3a464e4b81255216a5cf251ee4710d0551b79dda6e971c8d0b"
+  "contract_sha256": "5aad9253450b12e571961482809ea711bff3d2339cc0aec23f3153261de449ae"
 }

@@ -230,6 +230,73 @@ class PolicySpec:
 
 
 @dataclass(frozen=True)
+class StudyEvaluationSpec:
+    study_id: str
+    profiles: tuple[str, ...]
+    years: tuple[int, ...]
+    fold_views: Mapping[int, Path]
+    prediction_paths: Mapping[str, Mapping[int, Path]]
+    top_k_slot_grid: Mapping[int, tuple[int, ...]]
+    policies: tuple[PolicySpec, ...]
+    starting_cash_cny: float = STARTING_CASH_CNY
+    cost_scenarios: tuple[str, ...] = ("double_slippage",)
+    candidate_scan_k: int = 10
+    score_strictly_positive: bool = True
+    replace_rejected_from_ranked_candidates: bool = True
+    allow_pyramiding: bool = False
+    input_channel_profile: str = training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER
+    source_contract_sha256: str = ""
+    expected_job_count: int = 0
+
+    def validate(self) -> None:
+        if not self.study_id or not self.profiles or not self.years:
+            raise ValueError("study evaluation spec requires an id, profiles, and years")
+        if len(set(self.profiles)) != len(self.profiles):
+            raise ValueError("study evaluation profiles must be unique")
+        if len(set(self.years)) != len(self.years):
+            raise ValueError("study evaluation years must be unique")
+        if set(self.fold_views) != set(self.years):
+            raise ValueError("fold view years do not match the evaluation years")
+        if set(self.prediction_paths) != set(self.profiles):
+            raise ValueError("prediction profiles do not match the evaluation profiles")
+        for profile in self.profiles:
+            if set(self.prediction_paths[profile]) != set(self.years):
+                raise ValueError(f"prediction years do not match for {profile}")
+        if not self.top_k_slot_grid:
+            raise ValueError("top_k_slot_grid must not be empty")
+        for top_k, slots in self.top_k_slot_grid.items():
+            if int(top_k) <= 0 or not slots:
+                raise ValueError("Top-K and slot grids must be positive and non-empty")
+            if any(int(value) < int(top_k) for value in slots):
+                raise ValueError("slot counts must be at least their Top-K")
+        if int(self.candidate_scan_k) < max(int(value) for value in self.top_k_slot_grid):
+            raise ValueError("candidate_scan_k must cover every configured Top-K")
+        if not math.isfinite(float(self.starting_cash_cny)) or float(self.starting_cash_cny) <= 0.0:
+            raise ValueError("starting_cash_cny must be finite and positive")
+        if not self.policies:
+            raise ValueError("study evaluation requires at least one policy")
+        for policy in self.policies:
+            policy.validate()
+        if set(self.cost_scenarios).difference({"base", "double_slippage"}):
+            raise ValueError("study evaluation has an unknown cost scenario")
+        if self.allow_pyramiding:
+            raise ValueError("the study evaluator does not permit pyramiding")
+        if int(self.expected_job_count) > 0 and len(_study_jobs(self)) != int(
+            self.expected_job_count
+        ):
+            raise ValueError("resolved study job count does not match expected_job_count")
+
+
+@dataclass(frozen=True)
+class StudyEvaluationJob:
+    profile: str
+    policy: PolicySpec
+    top_k: int
+    slots: int
+    cost_scenario: str
+
+
+@dataclass(frozen=True)
 class StopPlan:
     requested_date_idx: int
     trigger_date_idx: int | None
@@ -618,6 +685,183 @@ def _load_material(
     )
 
 
+def _read_compact_prediction_frame(path: Path) -> pd.DataFrame:
+    columns = ["trade_date", "symbol", "score", "predicted_exit_day"]
+    if path.suffix.lower() == ".parquet":
+        return pd.read_parquet(path, columns=columns)
+    return pd.read_csv(
+        path,
+        usecols=columns,
+        dtype={
+            "trade_date": str,
+            "symbol": str,
+            "score": np.float64,
+            "predicted_exit_day": np.float64,
+        },
+    )
+
+
+def load_study_evaluation_material(
+    spec: StudyEvaluationSpec,
+    *,
+    include_raw_selected_paths: bool = False,
+    memory_guard: _MemoryGuard | None = None,
+) -> LoadedMaterial:
+    """Load fold-bound forecasts using only paths declared by the study spec."""
+
+    spec.validate()
+    guard = memory_guard or _MemoryGuard()
+    first_manifest = Path(spec.fold_views[int(spec.years[0])]).resolve()
+    audit_pack = CandidateCompleteAuditPack(first_manifest)
+    market = BacktestMarket(
+        date_values=np.asarray(audit_pack.date_values, dtype=object),
+        symbol_values=np.asarray(audit_pack.symbol_values, dtype=object),
+        entry_open_raw=audit_pack.entry_open_raw,
+        exit_close_raw=audit_pack.exit_close_raw,
+        exit_sellable=audit_pack.exit_sellable,
+        entry_filled=audit_pack.entry_filled,
+        contract=audit_pack.contract,
+        terminal_recovery_fraction=float(audit_pack.terminal_recovery_fraction),
+        forward_days=int(audit_pack.forward_days),
+        execution_days=int(audit_pack.execution_days),
+    )
+    configured_top_k = max(int(value) for value in spec.top_k_slot_grid)
+    books = {
+        profile: ForecastBook(
+            profile,
+            top_k=configured_top_k,
+            candidate_scan_k=int(spec.candidate_scan_k),
+        )
+        for profile in spec.profiles
+    }
+    raw_paths: dict[tuple[int, int], np.ndarray] = {}
+    source_hashes: dict[str, str] = {}
+
+    for year in spec.years:
+        guard.check()
+        view_path = Path(spec.fold_views[int(year)]).resolve()
+        manifest = _read_json(view_path)
+        binding = dict(manifest.get("research_contract", {}) or {})
+        if spec.source_contract_sha256 and str(binding.get("contract_sha256", "")) != str(
+            spec.source_contract_sha256
+        ):
+            raise ValueError(f"fold contract mismatch for {year}")
+        source_hashes[f"fold_view:{year}"] = _sha256_file(view_path)
+        dataset = training.SequencePathPackDataset(
+            manifest,
+            split="development",
+            max_samples=0,
+            input_channel_profile=str(spec.input_channel_profile),
+            index_role="candidate",
+        )
+        candidates = dataset.sample_index
+        expected_dates = candidates["trade_date"].astype(str).to_numpy()
+        expected_symbols = candidates["symbol"].astype(str).to_numpy()
+        date_indices = candidates["date_idx"].to_numpy(dtype=np.int64, copy=False)
+        symbol_indices = candidates["symbol_idx"].to_numpy(dtype=np.int64, copy=False)
+        groups = candidates.groupby("date_idx", sort=True).indices
+        selected_by_profile: list[np.ndarray] = []
+
+        for profile in spec.profiles:
+            prediction_path = Path(spec.prediction_paths[profile][int(year)]).resolve()
+            if not prediction_path.is_file():
+                raise FileNotFoundError(prediction_path)
+            source_hashes[f"prediction:{profile}:{year}"] = _sha256_file(prediction_path)
+            frame = _read_compact_prediction_frame(prediction_path)
+            if len(frame) != len(candidates):
+                raise RuntimeError(f"prediction/sample count mismatch: {profile}:{year}")
+            if not np.array_equal(frame["trade_date"].astype(str).to_numpy(), expected_dates):
+                raise RuntimeError(f"prediction date order mismatch: {profile}:{year}")
+            if not np.array_equal(frame["symbol"].astype(str).to_numpy(), expected_symbols):
+                raise RuntimeError(f"prediction symbol order mismatch: {profile}:{year}")
+            scores = frame["score"].to_numpy(dtype=np.float64, copy=True)
+            planned_values = frame["predicted_exit_day"].to_numpy(
+                dtype=np.float64, copy=True
+            )
+            if not bool(np.isfinite(scores).all()) or not bool(
+                np.isfinite(planned_values).all()
+            ):
+                raise RuntimeError(f"non-finite forecast: {profile}:{year}")
+            planned = np.clip(np.rint(planned_values), 2, 60).astype(np.int16)
+            selection_mask = scores > 0.0 if spec.score_strictly_positive else None
+            selected_positions: list[int] = []
+            for date_idx_raw, positions_raw in groups.items():
+                positions = np.asarray(positions_raw, dtype=np.int64)
+                local_mask = (
+                    None if selection_mask is None else selection_mask[positions]
+                )
+                books[profile].add_day(
+                    date_idx=int(date_idx_raw),
+                    symbol_idx=symbol_indices[positions],
+                    score=scores[positions],
+                    planned_day=planned[positions],
+                    selection_mask=local_mask,
+                )
+                if include_raw_selected_paths:
+                    eligible_positions = (
+                        positions
+                        if local_mask is None
+                        else positions[np.flatnonzero(local_mask)]
+                    )
+                    local_top = np.argsort(
+                        -scores[eligible_positions], kind="mergesort"
+                    )[:configured_top_k]
+                    selected_positions.extend(
+                        int(value) for value in eligible_positions[local_top]
+                    )
+            selected_by_profile.append(np.asarray(selected_positions, dtype=np.int64))
+            del frame, scores, planned, planned_values
+
+        if include_raw_selected_paths:
+            nonempty = [value for value in selected_by_profile if value.size]
+            union_positions = (
+                np.unique(np.concatenate(nonempty))
+                if nonempty
+                else np.asarray([], dtype=np.int64)
+            )
+            selected_dates = date_indices[union_positions]
+            selected_symbols = symbol_indices[union_positions]
+            adjusted = _take_price_path(dataset, selected_dates, selected_symbols)
+            raw_close = dataset._future_float_panel_batch(
+                dataset.exit_close_raw_panel,
+                selected_dates,
+                selected_symbols,
+                days=dataset.forward_days,
+            )
+            if raw_close is None:
+                raise RuntimeError("raw close execution panel is unavailable")
+            raw_ohlc = _reconstruct_raw_ohlc(adjusted, np.asarray(raw_close, dtype=np.float64))
+            for date_idx, symbol_idx, path in zip(
+                selected_dates, selected_symbols, raw_ohlc, strict=True
+            ):
+                key = (int(date_idx), int(symbol_idx))
+                if key in raw_paths and not bool(
+                    np.allclose(
+                        raw_paths[key], path, equal_nan=True, atol=1.0e-7, rtol=1.0e-7
+                    )
+                ):
+                    raise RuntimeError(f"raw selected path drift for key={key}")
+                raw_paths[key] = np.asarray(path, dtype=np.float32).copy()
+        del dataset
+
+    signal_sets = [set(book.signal_date_indices) for book in books.values()]
+    if not signal_sets or any(values != signal_sets[0] for values in signal_sets[1:]):
+        raise RuntimeError("profile signal-date coverage differs")
+    signal_indices = sorted(signal_sets[0])
+    if not signal_indices:
+        raise RuntimeError("no signal dates were loaded")
+    return LoadedMaterial(
+        study={"study_id": spec.study_id},
+        manifest_path=first_manifest,
+        market=market,
+        books=books,
+        raw_top3_paths=raw_paths,
+        first_signal_date_idx=int(signal_indices[0]),
+        last_signal_date_idx=int(signal_indices[-1]),
+        source_hashes=source_hashes,
+    )
+
+
 def _initial_requested_exit(
     *,
     order: _PendingOrder,
@@ -688,6 +932,12 @@ def _calendar_year_metrics(
                 "starting_equity_cny": float(previous_equity),
                 "ending_equity_cny": float(year_equity[-1]),
                 "net_return": float(year_equity[-1] / previous_equity - 1.0),
+                "log_growth": (
+                    float(math.log(float(year_equity[-1]) / previous_equity))
+                    if previous_equity > 0.0 and float(year_equity[-1]) > 0.0
+                    else None
+                ),
+                "ruined": bool(previous_equity <= 0.0 or float(year_equity[-1]) <= 0.0),
                 "maximum_drawdown": float(drawdown.min()),
                 "annualized_volatility": volatility,
                 "sharpe_zero_rate": sharpe,
@@ -737,6 +987,15 @@ def _simulation_metric(
     else:
         annualized = float(np.expm1(np.log1p(total_return) * 252.0 / max(sessions, 1)))
     liquidated_equity = float(equity_frame["equity"].iloc[-1])
+    ruined = bool(not math.isfinite(liquidated_equity) or liquidated_equity <= 0.0)
+    liquidated_log_growth = (
+        None if ruined else float(math.log(liquidated_equity / float(starting_cash)))
+    )
+    annualized_log_growth = (
+        None
+        if liquidated_log_growth is None
+        else float(liquidated_log_growth * 252.0 / max(sessions, 1))
+    )
     full_equity = equity_frame["equity"].to_numpy(dtype=np.float64)
     full_path = np.r_[float(starting_cash), full_equity]
     full_drawdown = full_path / np.maximum.accumulate(full_path) - 1.0
@@ -769,6 +1028,9 @@ def _simulation_metric(
         "signal_period_ending_equity_cny": float(signal_equity[-1]),
         "signal_period_total_return": total_return,
         "signal_period_cagr_trading_days": annualized,
+        "liquidated_log_growth": liquidated_log_growth,
+        "annualized_log_growth": annualized_log_growth,
+        "ruined": ruined,
         "signal_period_maximum_drawdown": float(signal_drawdown.min()),
         "signal_period_annualized_volatility": float(daily_std * math.sqrt(252.0)),
         "signal_period_sharpe_zero_rate": (
@@ -778,8 +1040,10 @@ def _simulation_metric(
         ),
         "liquidated_ending_equity_cny": liquidated_equity,
         "liquidated_total_return": float(liquidated_equity / float(starting_cash) - 1.0),
-        "liquidation_tail_return_effect": float(
-            liquidated_equity / float(signal_equity[-1]) - 1.0
+        "liquidation_tail_return_effect": (
+            float(liquidated_equity / float(signal_equity[-1]) - 1.0)
+            if float(signal_equity[-1]) > 0.0
+            else None
         ),
         "full_path_maximum_drawdown": float(full_drawdown.min()),
         "minimum_cash_cny": float(equity_frame["cash"].min()),
@@ -793,6 +1057,10 @@ def _simulation_metric(
         "mean_occupied_sessions": mean_occupied,
         "median_occupied_sessions": median_occupied,
         "signal_session_count": sessions,
+        "trade_coverage": float(
+            int(counters.get("buy_count", 0))
+            / max(sessions * int(daily_selection_count), 1)
+        ),
         "daily_selection_count": int(daily_selection_count),
         "equity_path_session_count": int(len(equity_frame)),
         "portfolio_contract": (
@@ -826,6 +1094,8 @@ def simulate_portfolio(
     allow_pyramiding: bool = False,
     replace_rejected_from_ranked_candidates: bool = False,
     calendar_years: Sequence[int] | None = None,
+    top_k: int | None = None,
+    entry_signal_date_indices: Sequence[int] | None = None,
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
     policy.validate()
     if int(slots) <= 0:
@@ -834,17 +1104,28 @@ def simulate_portfolio(
         raise ValueError(f"unknown cost scenario: {cost_scenario}")
     if not book.days:
         raise ValueError("forecast book must contain at least one signal date")
-    selection_sizes = [len(day.top3_symbol_idx) for day in book.days.values()]
+    configured_top_k = int(book.top_k if top_k is None else top_k)
+    if configured_top_k <= 0 or configured_top_k > int(book.candidate_scan_k):
+        raise ValueError("top_k must be positive and no larger than candidate_scan_k")
+
+    def selected_symbols(day: ForecastDay) -> tuple[int, ...]:
+        ranked = day.ranked_symbol_idx or day.top3_symbol_idx
+        return tuple(int(value) for value in ranked[:configured_top_k])
+
+    selection_sizes = [len(selected_symbols(day)) for day in book.days.values()]
     selection_counts = set(selection_sizes)
-    if any(count < 0 or count > int(book.top_k) for count in selection_counts):
+    if any(count < 0 or count > configured_top_k for count in selection_counts):
         raise ValueError(f"forecast book contains an invalid daily selection count: {selection_counts}")
     # Preserve the established explicitly-truncated Top-K contract when every
     # day has the same positive width.  V4 cash filtering may vary by day (and
     # may select nobody), in which case book.top_k remains the configured cap.
-    daily_selection_count = (
-        int(next(iter(selection_counts)))
-        if len(selection_counts) == 1 and int(next(iter(selection_counts))) > 0
-        else int(book.top_k)
+    daily_selection_count = configured_top_k
+    if top_k is None and len(selection_counts) == 1 and int(next(iter(selection_counts))) > 0:
+        daily_selection_count = int(next(iter(selection_counts)))
+    entry_signal_dates = (
+        None
+        if entry_signal_date_indices is None
+        else frozenset(int(value) for value in entry_signal_date_indices)
     )
     guard = memory_guard or _MemoryGuard()
     multiplier = (
@@ -1103,13 +1384,19 @@ def simulate_portfolio(
         # After the close, today's target Top-K creates next-open orders.  The
         # opt-in ranked scan can replace only signal-time rejections such as an
         # already-held symbol; it never looks ahead to next-open fill status.
-        forecast_day = book.days.get(date_idx) if date_idx <= int(last_signal_date_idx) else None
+        forecast_day = (
+            book.days.get(date_idx)
+            if date_idx <= int(last_signal_date_idx)
+            and (entry_signal_dates is None or date_idx in entry_signal_dates)
+            else None
+        )
         if forecast_day is not None:
-            target_order_count = len(forecast_day.top3_symbol_idx)
+            target_symbols = selected_symbols(forecast_day)
+            target_order_count = len(target_symbols)
             ranked_candidates = (
-                forecast_day.ranked_symbol_idx or forecast_day.top3_symbol_idx
+                forecast_day.ranked_symbol_idx or target_symbols
                 if replace_rejected_from_ranked_candidates
-                else forecast_day.top3_symbol_idx
+                else target_symbols
             )
             scheduled_order_count = 0
             for candidate_rank, symbol_idx in enumerate(ranked_candidates, start=1):
@@ -1166,9 +1453,9 @@ def simulate_portfolio(
         counters["turnover_notional_cny"] / float(starting_cash)
     )
     counters["cash_filtered_signal_days"] = int(
-        sum(len(day.top3_symbol_idx) < int(book.top_k) for day in book.days.values())
+        sum(len(selected_symbols(day)) < daily_selection_count for day in book.days.values())
     )
-    counters["configured_top_k"] = int(book.top_k)
+    counters["configured_top_k"] = int(daily_selection_count)
     counters["selected_name_count_min"] = int(min(selection_sizes))
     counters["selected_name_count_max"] = int(max(selection_sizes))
     counters["selected_name_count_mean"] = float(np.mean(selection_sizes))
@@ -1209,6 +1496,91 @@ def _all_jobs() -> list[tuple[str, PolicySpec, int, str]]:
                 if _stress_selected(profile, policy):
                     jobs.append((profile, policy, int(slots), "double_slippage"))
     return jobs
+
+
+def _study_jobs(spec: StudyEvaluationSpec) -> list[StudyEvaluationJob]:
+    jobs: list[StudyEvaluationJob] = []
+    for profile in spec.profiles:
+        for top_k in sorted(int(value) for value in spec.top_k_slot_grid):
+            for slots in spec.top_k_slot_grid[top_k]:
+                for policy in spec.policies:
+                    for cost_scenario in spec.cost_scenarios:
+                        jobs.append(
+                            StudyEvaluationJob(
+                                profile=str(profile),
+                                policy=policy,
+                                top_k=int(top_k),
+                                slots=int(slots),
+                                cost_scenario=str(cost_scenario),
+                            )
+                        )
+    return jobs
+
+
+def _study_job_id(job: StudyEvaluationJob) -> str:
+    return (
+        f"{job.profile}__top{job.top_k}__slots{job.slots:02d}__"
+        f"{job.policy.name}__{job.cost_scenario}"
+    )
+
+
+def study_evaluation_contract_payload(
+    spec: StudyEvaluationSpec,
+    material: LoadedMaterial,
+) -> dict[str, Any]:
+    spec.validate()
+    return {
+        "schema_version": 1,
+        "artifact_type": "seq100_study_evaluation_contract",
+        "study_id": spec.study_id,
+        "source_contract_sha256": spec.source_contract_sha256,
+        "profiles": list(spec.profiles),
+        "years": [int(value) for value in spec.years],
+        "fold_views": {
+            str(year): str(Path(path).resolve())
+            for year, path in sorted(spec.fold_views.items())
+        },
+        "prediction_paths": {
+            profile: {
+                str(year): str(Path(path).resolve())
+                for year, path in sorted(paths.items())
+            }
+            for profile, paths in sorted(spec.prediction_paths.items())
+        },
+        "source_file_sha256": dict(sorted(material.source_hashes.items())),
+        "source_pack_manifest": str(material.manifest_path),
+        "execution_cost_contract": asdict(material.market.contract),
+        "terminal_recovery_fraction": float(
+            material.market.terminal_recovery_fraction
+        ),
+        "starting_cash_cny": float(spec.starting_cash_cny),
+        "top_k_slot_grid": {
+            str(top_k): [int(value) for value in slots]
+            for top_k, slots in sorted(spec.top_k_slot_grid.items())
+        },
+        "candidate_scan_k": int(spec.candidate_scan_k),
+        "score_strictly_positive": bool(spec.score_strictly_positive),
+        "replace_rejected_from_ranked_candidates": bool(
+            spec.replace_rejected_from_ranked_candidates
+        ),
+        "next_open_failure_replacement": False,
+        "allow_pyramiding": bool(spec.allow_pyramiding),
+        "policies": [asdict(policy) for policy in spec.policies],
+        "cost_scenarios": list(spec.cost_scenarios),
+        "job_count": len(_study_jobs(spec)),
+        "position_contract": {
+            "entry": "next_trading_day_raw_open",
+            "exit": "requested_raw_close_with_sellability_deferral",
+            "allocation": "equal_total_slot_fraction",
+            "cash_when_unfilled": True,
+            "terminal_tail_days": int(
+                material.market.execution_days - material.market.forward_days
+            ),
+            "terminal_unrecoverable_value": float(
+                material.market.terminal_recovery_fraction
+            ),
+        },
+    }
 
 
 def _selected_detail_policy(profile: str, policy: PolicySpec, cost_scenario: str) -> bool:
@@ -1395,6 +1767,426 @@ def run_backtests(
     }
     _atomic_write_json(output_root / "run_state.json", final_state)
     return final_state
+
+
+def run_study_evaluation(
+    *,
+    spec: StudyEvaluationSpec,
+    output_root: Path,
+    material: LoadedMaterial | None = None,
+) -> dict[str, Any]:
+    """Run a resumable, spec-bound account grid through the shared kernel."""
+
+    spec.validate()
+    resolved_output = Path(output_root).resolve()
+    resolved_output.mkdir(parents=True, exist_ok=True)
+    jobs_dir = resolved_output / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    guard = _MemoryGuard()
+    loaded = material or load_study_evaluation_material(
+        spec,
+        include_raw_selected_paths=any(policy.kind == "stop" for policy in spec.policies),
+        memory_guard=guard,
+    )
+    contract = study_evaluation_contract_payload(spec, loaded)
+    contract_sha256 = _sha256_json(contract)
+    contract_document = {**contract, "contract_sha256": contract_sha256}
+    contract_path = resolved_output / "contract.json"
+    if contract_path.is_file():
+        existing_contract = _read_json(contract_path)
+        if str(existing_contract.get("contract_sha256", "")) != contract_sha256:
+            raise RuntimeError("account output root contains a different resolved contract")
+    else:
+        _atomic_write_json(contract_path, contract_document)
+
+    jobs = _study_jobs(spec)
+    completed = 0
+    resumed = 0
+    started_at = time.monotonic()
+    for number, job in enumerate(jobs, start=1):
+        guard.check()
+        identifier = _study_job_id(job)
+        job_path = jobs_dir / f"{identifier}.json"
+        existing = _load_completed_job(job_path, contract_sha256)
+        if existing is not None:
+            completed += 1
+            resumed += 1
+            continue
+        metric, _equity, _trades, annual = simulate_portfolio(
+            market=loaded.market,
+            book=loaded.books[job.profile],
+            raw_top3_paths=loaded.raw_top3_paths,
+            policy=job.policy,
+            slots=int(job.slots),
+            cost_scenario=job.cost_scenario,
+            first_signal_date_idx=loaded.first_signal_date_idx,
+            last_signal_date_idx=loaded.last_signal_date_idx,
+            starting_cash=float(spec.starting_cash_cny),
+            memory_guard=guard,
+            allow_pyramiding=bool(spec.allow_pyramiding),
+            replace_rejected_from_ranked_candidates=bool(
+                spec.replace_rejected_from_ranked_candidates
+            ),
+            calendar_years=spec.years,
+            top_k=int(job.top_k),
+        )
+        metric["top_k"] = int(job.top_k)
+        payload = {
+            "schema_version": 1,
+            "artifact_type": "seq100_study_evaluation_job",
+            "contract_sha256": contract_sha256,
+            "job_id": identifier,
+            "resolved_job": {
+                "profile": job.profile,
+                "policy": asdict(job.policy),
+                "top_k": int(job.top_k),
+                "slots": int(job.slots),
+                "cost_scenario": job.cost_scenario,
+            },
+            "metric": metric,
+            "annual_metrics": annual,
+        }
+        _atomic_write_json(job_path, payload)
+        completed += 1
+        if number == 1 or number % 25 == 0 or number == len(jobs):
+            state = {
+                "schema_version": 1,
+                "status": "running" if completed < len(jobs) else "completed",
+                "contract_sha256": contract_sha256,
+                "completed_job_count": int(completed),
+                "total_job_count": int(len(jobs)),
+                "resumed_job_count": int(resumed),
+                "last_job_id": identifier,
+                "elapsed_seconds_this_run": float(time.monotonic() - started_at),
+                "available_memory_gib": float(psutil.virtual_memory().available / 1024**3),
+            }
+            _atomic_write_json(resolved_output / "run_state.json", state)
+            print(
+                f"study-account: {completed}/{len(jobs)}; last={identifier}; "
+                f"available={state['available_memory_gib']:.2f} GiB",
+                flush=True,
+            )
+    final_state = {
+        "schema_version": 1,
+        "status": "completed",
+        "contract_sha256": contract_sha256,
+        "completed_job_count": int(completed),
+        "total_job_count": int(len(jobs)),
+        "resumed_job_count": int(resumed),
+        "elapsed_seconds_this_run": float(time.monotonic() - started_at),
+        "available_memory_gib": float(psutil.virtual_memory().available / 1024**3),
+    }
+    _atomic_write_json(resolved_output / "run_state.json", final_state)
+    return final_state
+
+
+def evaluate_daily_independent_cohorts(
+    *,
+    material: LoadedMaterial,
+    profile: str,
+    policy: PolicySpec,
+    top_k: int,
+    cost_scenario: str = "double_slippage",
+    starting_cash: float = STARTING_CASH_CNY,
+    replace_rejected_from_ranked_candidates: bool = True,
+) -> tuple[dict[str, Any], pd.DataFrame]:
+    """Replay each signal date as an independent cohort through the same kernel."""
+
+    book = material.books[str(profile)]
+    guard = _MemoryGuard()
+    rows: list[dict[str, Any]] = []
+    for signal_date_idx in book.signal_date_indices:
+        if not (
+            int(material.first_signal_date_idx)
+            <= int(signal_date_idx)
+            <= int(material.last_signal_date_idx)
+        ):
+            continue
+        metric, _equity, trades, _annual = simulate_portfolio(
+            market=material.market,
+            book=book,
+            raw_top3_paths=material.raw_top3_paths,
+            policy=policy,
+            slots=int(top_k),
+            cost_scenario=str(cost_scenario),
+            first_signal_date_idx=int(signal_date_idx),
+            last_signal_date_idx=int(signal_date_idx),
+            starting_cash=float(starting_cash),
+            memory_guard=guard,
+            allow_pyramiding=False,
+            replace_rejected_from_ranked_candidates=bool(
+                replace_rejected_from_ranked_candidates
+            ),
+            top_k=int(top_k),
+            entry_signal_date_indices=(int(signal_date_idx),),
+        )
+        ending = float(metric["liquidated_ending_equity_cny"])
+        log_growth = (
+            float(math.log(ending / float(starting_cash))) if ending > 0.0 else None
+        )
+        capital_days = (
+            float(
+                (
+                    trades["buy_cash_cny"].astype(float)
+                    * trades["occupied_sessions"].astype(float)
+                ).sum()
+                / float(starting_cash)
+            )
+            if not trades.empty
+            else 0.0
+        )
+        rows.append(
+            {
+                "signal_date": str(material.market.date_values[int(signal_date_idx)]),
+                "signal_date_idx": int(signal_date_idx),
+                "net_return": float(ending / float(starting_cash) - 1.0),
+                "log_growth": log_growth,
+                "unit_capital_days": capital_days,
+                "unit_capital_day_log_efficiency": (
+                    float(log_growth / capital_days)
+                    if log_growth is not None and capital_days > 0.0
+                    else 0.0 if log_growth == 0.0 else None
+                ),
+                "filled_trade_count": int(metric["buy_count"]),
+                "failed_entry_count": int(metric["failed_entry_count"]),
+                "terminal_failure_count": int(metric["terminal_recovery_count"]),
+                "ruined": bool(metric["ruined"]),
+            }
+        )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        raise RuntimeError("independent cohort evaluation has no signal dates")
+    finite_logs = frame["log_growth"].dropna().astype(float)
+    capital_days_total = float(frame["unit_capital_days"].astype(float).sum())
+    ruined_count = int(frame["ruined"].astype(bool).sum())
+    summary = {
+        "schema_version": 1,
+        "profile": str(profile),
+        "policy": str(policy.name),
+        "top_k": int(top_k),
+        "cost_scenario": str(cost_scenario),
+        "daily_cohort_count": int(len(frame)),
+        "mean_net_return": float(frame["net_return"].astype(float).mean()),
+        "median_net_return": float(frame["net_return"].astype(float).median()),
+        "positive_net_return_rate": float(
+            (frame["net_return"].astype(float) > 0.0).mean()
+        ),
+        "unit_capital_days": capital_days_total,
+        "aggregate_log_growth": (
+            float(finite_logs.sum()) if ruined_count == 0 else None
+        ),
+        "unit_capital_day_log_efficiency": (
+            float(finite_logs.sum() / capital_days_total)
+            if ruined_count == 0 and capital_days_total > 0.0
+            else None
+        ),
+        "trade_coverage": float(
+            frame["filled_trade_count"].astype(int).sum()
+            / max(int(len(frame)) * int(top_k), 1)
+        ),
+        "terminal_failure_count": int(
+            frame["terminal_failure_count"].astype(int).sum()
+        ),
+        "ruined_cohort_count": ruined_count,
+    }
+    return summary, frame
+
+
+def select_study_winner(
+    *,
+    account_output_root: Path,
+    profiles: Sequence[str],
+    p1_budget_evidence: Mapping[str, bool],
+    training_complete: bool,
+    fallback_tolerance: float = 1.0e-12,
+    report_output_root: Path | None = None,
+) -> dict[str, Any]:
+    """Apply the frozen fixed/autonomous fallback and arm qualification rules."""
+
+    if not training_complete:
+        raise RuntimeError("all training arms must be complete before winner selection")
+    root = Path(account_output_root).resolve()
+    contract = _read_json(root / "contract.json")
+    contract_sha256 = str(contract["contract_sha256"])
+    payloads = [
+        payload
+        for path in sorted((root / "jobs").glob("*.json"))
+        if (payload := _load_completed_job(path, contract_sha256)) is not None
+    ]
+    expected = int(contract.get("job_count", 0) or 0)
+    if expected <= 0 or len(payloads) != expected:
+        raise RuntimeError(f"account grid is incomplete: {len(payloads)}/{expected}")
+    rows: list[dict[str, Any]] = []
+    annual_rows: list[dict[str, Any]] = []
+    for payload in payloads:
+        metric = dict(payload["metric"])
+        resolved = dict(payload.get("resolved_job", {}) or {})
+        policy_spec = dict(resolved.get("policy", metric.get("policy_spec", {})) or {})
+        row = {
+            **metric,
+            "profile": str(resolved.get("profile", metric.get("profile", ""))),
+            "top_k": int(resolved.get("top_k", metric.get("top_k", 0)) or 0),
+            "slot_count": int(
+                resolved.get("slots", metric.get("slot_count", 0)) or 0
+            ),
+            "policy": str(policy_spec.get("name", metric.get("policy", ""))),
+            "policy_kind": str(policy_spec.get("kind", metric.get("policy_kind", ""))),
+            "fixed_day": (
+                int(policy_spec["fixed_day"])
+                if policy_spec.get("fixed_day") is not None
+                else None
+            ),
+            "job_id": str(payload.get("job_id", "")),
+        }
+        row["annual_log_growth"] = {
+            str(int(value["year"])): value.get("log_growth")
+            for value in payload["annual_metrics"]
+        }
+        rows.append(row)
+        for value in payload["annual_metrics"]:
+            annual_rows.append(
+                {
+                    "job_id": row["job_id"],
+                    "profile": row["profile"],
+                    "top_k": row["top_k"],
+                    "slot_count": row["slot_count"],
+                    "policy": row["policy"],
+                    **dict(value),
+                }
+            )
+    if set(str(value) for value in profiles) != {row["profile"] for row in rows}:
+        raise RuntimeError("account grid profile set does not match the frozen arms")
+
+    def growth(row: Mapping[str, Any]) -> float:
+        value = row.get("liquidated_log_growth")
+        return float(value) if value is not None and math.isfinite(float(value)) else -math.inf
+
+    def worst_year(row: Mapping[str, Any]) -> float:
+        values = [
+            float(value)
+            for value in dict(row.get("annual_log_growth", {}) or {}).values()
+            if value is not None and math.isfinite(float(value))
+        ]
+        return min(values) if values else -math.inf
+
+    def deterministic_key(row: Mapping[str, Any]) -> tuple[Any, ...]:
+        drawdown = float(row.get("full_path_maximum_drawdown", -math.inf))
+        return (
+            -growth(row),
+            -drawdown,
+            -worst_year(row),
+            int(row.get("slot_count", 0) or 0),
+            int(row.get("top_k", 0) or 0),
+            0 if str(row.get("policy_kind", "")) == "fixed" else 1,
+            int(row.get("fixed_day") or 10_000),
+            str(row.get("profile", "")),
+            str(row.get("policy", "")),
+        )
+
+    fallback_rows: list[dict[str, Any]] = []
+    by_group: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (row["profile"], int(row["top_k"]), int(row["slot_count"]))
+        by_group.setdefault(key, []).append(row)
+    for (profile, top_k, slots), group in sorted(by_group.items()):
+        fixed = [row for row in group if row["policy_kind"] == "fixed"]
+        autonomous = [
+            row for row in group if row["policy_kind"] in {"model_plan", "rolling"}
+        ]
+        if len(fixed) != 59 or len(autonomous) != 2:
+            raise RuntimeError(
+                f"strategy grid is incomplete for {profile}/Top{top_k}/slots{slots}"
+            )
+        best_fixed = sorted(fixed, key=deterministic_key)[0]
+        best_autonomous = sorted(autonomous, key=deterministic_key)[0]
+        autonomous_wins = bool(
+            growth(best_autonomous)
+            > growth(best_fixed) + float(fallback_tolerance)
+        )
+        selected = best_autonomous if autonomous_wins else best_fixed
+        fallback_rows.append(
+            {
+                **selected,
+                "best_fixed_policy": best_fixed["policy"],
+                "best_fixed_log_growth": growth(best_fixed),
+                "best_autonomous_policy": best_autonomous["policy"],
+                "best_autonomous_log_growth": growth(best_autonomous),
+                "autonomous_selected": autonomous_wins,
+                "fallback_tolerance": float(fallback_tolerance),
+            }
+        )
+
+    arm_rows: list[dict[str, Any]] = []
+    for profile in profiles:
+        candidates = [row for row in fallback_rows if row["profile"] == str(profile)]
+        if len(candidates) != 17:
+            raise RuntimeError(f"Top-K/slot grid is incomplete for {profile}")
+        selected = dict(sorted(candidates, key=deterministic_key)[0])
+        annual_values = [
+            float(value)
+            for value in dict(selected.get("annual_log_growth", {}) or {}).values()
+            if value is not None and math.isfinite(float(value))
+        ]
+        combined_positive = bool(
+            selected.get("annualized_log_growth") is not None
+            and float(selected["annualized_log_growth"]) > 0.0
+        )
+        positive_year_count = int(sum(value > 0.0 for value in annual_values))
+        budget_passed = bool(
+            p1_budget_evidence.get(str(profile), False)
+            if str(profile).endswith("-P1")
+            else True
+        )
+        selected.update(
+            {
+                "combined_growth_positive": combined_positive,
+                "positive_year_count": positive_year_count,
+                "p1_budget_evidence_passed": budget_passed,
+                "qualified": bool(
+                    combined_positive and positive_year_count >= 2 and budget_passed
+                ),
+                "worst_annual_log_growth": worst_year(selected),
+            }
+        )
+        arm_rows.append(selected)
+    qualified = [row for row in arm_rows if bool(row["qualified"])]
+    winner = dict(sorted(qualified, key=deterministic_key)[0]) if qualified else None
+    result = {
+        "schema_version": 1,
+        "artifact_type": "seq100_signal_close_2x2_selection",
+        "account_contract_sha256": contract_sha256,
+        "fallback_tolerance": float(fallback_tolerance),
+        "account_job_count": int(len(rows)),
+        "group_selection_count": int(len(fallback_rows)),
+        "qualified_arm_count": int(len(qualified)),
+        "winner": winner,
+        "arms": arm_rows,
+    }
+    if report_output_root is not None:
+        report_root = Path(report_output_root).resolve()
+        report_root.mkdir(parents=True, exist_ok=True)
+        metric_frame = pd.DataFrame(
+            [{key: value for key, value in row.items() if key != "annual_log_growth"} for row in rows]
+        )
+        annual_frame = pd.DataFrame(annual_rows)
+        group_frame = pd.DataFrame(
+            [
+                {key: value for key, value in row.items() if key != "annual_log_growth"}
+                for row in fallback_rows
+            ]
+        )
+        arm_frame = pd.DataFrame(
+            [
+                {key: value for key, value in row.items() if key != "annual_log_growth"}
+                for row in arm_rows
+            ]
+        )
+        metric_frame.to_csv(report_root / "account_metrics.csv", index=False)
+        annual_frame.to_csv(report_root / "annual_metrics.csv", index=False)
+        group_frame.to_csv(report_root / "fixed_autonomous_fallback.csv", index=False)
+        arm_frame.to_csv(report_root / "arm_selection.csv", index=False)
+        _atomic_write_json(report_root / "selection.json", result)
+    return result
 
 
 def _markdown_percent(value: Any) -> str:

@@ -689,6 +689,119 @@ def validate_development_fold_training_contract(manifest: Mapping[str, Any]) -> 
     return stored
 
 
+def _bind_current_study_contract(path: str | Path) -> tuple[dict[str, str], str]:
+    contract_path = _workspace_path(path).resolve()
+    raw = contract_path.read_bytes()
+    payload = json.loads(raw.decode("utf-8-sig"))
+    if str(payload.get("artifact_type", "")) != "seq100_current_study":
+        raise ValueError("rebound research contract must be a seq100_current_study")
+    semantic = dict(payload.get("contract", {}) or {})
+    if not semantic:
+        raise ValueError("current study has no semantic contract")
+    declared = str(payload.get("contract_sha256", "") or "").lower()
+    computed = _canonical_sha256(semantic)
+    if not declared or declared != computed:
+        raise ValueError("current study semantic SHA-256 does not match contract_sha256")
+    contract_id = str(semantic.get("contract_id", "") or "")
+    if not contract_id:
+        raise ValueError("current study contract_id is missing")
+    return (
+        {
+            "path": str(contract_path),
+            "contract_id": contract_id,
+            "contract_sha256": computed,
+            # Mutable study contracts bind their semantic digest here.  The
+            # immutable freshness attachment below binds the actual file bytes.
+            "contract_file_sha256": computed,
+        },
+        hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def rebind_development_fold_view(
+    *,
+    source_view: str | Path,
+    research_contract: str | Path,
+    output_path: str | Path,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Bind an immutable fold view to a new study without copying its indexes."""
+
+    source_path = _workspace_path(source_view).resolve()
+    target_path = _workspace_path(output_path).resolve()
+    protected_root = (WORKSPACE_ROOT / "daily_research/data/research_store").resolve()
+    if target_path == protected_root or protected_root in target_path.parents:
+        raise ValueError("rebound fold views must be written outside research_store")
+    if target_path.exists() and not bool(overwrite):
+        raise FileExistsError(target_path)
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    if str(source.get("artifact_type", "")) != "qdp_v2_sequence_path_pack":
+        raise ValueError("source view is not a sequence path pack")
+
+    validate_source_view_provenance(source)
+    validate_development_fold_training_contract(source)
+    from daily_research.path_policy.qdp_v2_sequence_path_pack import (
+        assert_qdp_source_fresh,
+    )
+
+    binding, contract_actual_sha = _bind_current_study_contract(research_contract)
+    sample_path = _workspace_path(str(source.get("sample_index_path", "") or "")).resolve()
+    candidate_path = _workspace_path(
+        str(source.get("candidate_index_path", "") or "")
+    ).resolve()
+    if not sample_path.is_file() or not candidate_path.is_file():
+        raise FileNotFoundError("source fold sample or candidate index is missing")
+    index_hashes_before = {
+        "sample_index_sha256": _sha256_file(sample_path),
+        "candidate_index_sha256": _sha256_file(candidate_path),
+    }
+
+    view = dict(source)
+    view["research_contract"] = dict(binding)
+    view["development_contract"] = dict(binding)
+    view["qdp_source_freshness_policy"] = {
+        "mode": "immutable_research_pack_v1",
+        "attachments": [
+            {
+                "path": str(_workspace_path(binding["path"]).resolve()),
+                "sha256": contract_actual_sha,
+            }
+        ],
+    }
+    view["contract_rebinding"] = {
+        "schema_version": 1,
+        "method": "immutable_indexes_lightweight_contract_view",
+        "source_view_path": str(source_path),
+        "source_view_sha256": _sha256_file(source_path),
+        "source_research_contract": dict(source.get("research_contract", {}) or {}),
+        **index_hashes_before,
+    }
+    view["development_fold_training_contract"] = compute_development_fold_training_contract(
+        view
+    )
+    _atomic_write_json(target_path, view)
+
+    written = json.loads(target_path.read_text(encoding="utf-8"))
+    validate_source_view_provenance(written)
+    validate_development_fold_training_contract(written)
+    assert_qdp_source_fresh(written)
+    index_hashes_after = {
+        "sample_index_sha256": _sha256_file(sample_path),
+        "candidate_index_sha256": _sha256_file(candidate_path),
+    }
+    if index_hashes_after != index_hashes_before:
+        raise RuntimeError("source fold parquet identity changed during contract rebinding")
+    return {
+        "view_path": str(target_path),
+        "source_view_path": str(source_path),
+        "research_contract": binding,
+        "development_fold_training_contract_sha256": str(
+            written["development_fold_training_contract"]["sha256"]
+        ),
+        **index_hashes_after,
+    }
+
+
 def _fit_feature_normalization_before(
     meta: Mapping[str, Any],
     *,
