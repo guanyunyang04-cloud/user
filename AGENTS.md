@@ -5,10 +5,11 @@
 
 本项目使用 `brain/` 保存持久项目记忆。
 
-- 对代码修改、长任务、项目状态判断或受管对象变更，必须使用全局 `workspace-brain` Skill，运行 `detect`，读取 manifest、identity、working memory 及任务涉及的角色。
-- 上下文压缩、任务恢复、agent 交接、用户改变目标或切换 child brain 后，必须重新执行上述接管；不得依赖压缩或中断前的对话记忆。
+- 在项目接管、任务恢复、跨域状态判断、Brain 写回或受保护对象变更时使用全局 `workspace-brain` Skill。普通问答和同一逻辑任务内的局部代码编辑不重复执行接管。
+- 一个逻辑任务通常只运行一次 `detect`。仅在上下文压缩、agent 交接、用户改变目标或切换 child brain 后重新接管；不得依赖中断前的对话记忆。
 - 最终回答前重新核对当前目标、实际改动、验证结果和必要的 brain 写回。
 - 当前事实写入 `state`，稳定知识写入 `knowledge`，可重复方法写入 `operations`，日期化证据写入 `references/`。
+- 已有权威 research record 时，Brain 只保存当前状态或简短指针，不重复复制整份实验结果。
 <!-- workspace-brain:end -->
 
 ## Runtime
@@ -29,14 +30,27 @@ there is a verified replacement or recovery path. The canonical list is
 - One concept has one current name, path, contract, and CLI. Backward
   compatibility is opt-in, not the default.
 - An experiment starts as one contract in `daily_research/studies/` and writes
-  process material only under ignored output. When it ends, retain the compact
-  conclusion, key metrics, contract, and selected checkpoint; remove the runner,
-  logs, predictions, failed directories, and experiment-only tests.
+  process material only under ignored output. When it ends, always retain an
+  indexed compact conclusion. Preserve successful checkpoints, predictions,
+  account jobs, runners, and logs when the user or study marks them useful for
+  reproduction; delete only material explicitly classified as disposable.
 - Tests protect data integrity, PIT/no-future semantics, training/evaluation
   meaning, recovery, and key numerical behavior. Do not test retired wrappers or
   file layouts.
 - Brain documents describe current objects and state. Historical detail belongs
   in references and must not re-enter the hot path.
+
+## Validation scope
+
+- Run the smallest tests that cover the changed behavior. Run the full
+  path-policy suite only for shared path-policy behavior or an explicit gate.
+- QDP checks are not a universal downstream research gate. Run quick checks when
+  QDP code, active manifests, or data changed; run full checks only after a data
+  rewrite, a deep data audit, or an explicit user request.
+- Scope data validation to consumed domains. Daily-only research does not require
+  historical intraday coverage validation.
+- Do not repeat successful expensive checks during evidence-only closeout unless
+  the closeout changes code or data covered by those checks.
 
 ## Long tasks
 

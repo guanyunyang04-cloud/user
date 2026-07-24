@@ -2,7 +2,22 @@
   "schema_version": 2,
   "artifact_type": "seq100_current_study",
   "study_id": "seq100_signal_close_path_value_2x2_v1",
-  "status": "active_implementation",
+  "status": "completed",
+  "completion": {
+    "completed_at": "2026-07-24",
+    "record": "daily_research/research_records/seq100/signal_close_path_value_2x2_2023_2025/artifact.json",
+    "retained_output_root": "daily_research/output/path_policy/studies/seq100_signal_close_path_value_2x2_v1",
+    "retention_policy": "retain_all_successful_checkpoints_predictions_account_jobs_logs_and_runners_for_reproduction",
+    "winner": {
+      "profile": "V2C-P0",
+      "top_k": 1,
+      "slot_count": 1,
+      "policy": "fixed_d44"
+    },
+    "qualified_arm_count": 3,
+    "registered_model_registry_changed": false,
+    "active_execution_changed": false
+  },
   "contract": {
     "schema_version": 2,
     "contract_id": "seq100_signal_close_path_value_2x2_v1",

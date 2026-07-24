@@ -16,20 +16,21 @@ Updated: `2026-07-24`
   8,531,565 samples over 3,419 securities and six development fold views. The
   training purge is 60 trading days; execution-tail observations are not model
   targets.
-- The only active route is
-  `daily_research/studies/signal_close_path_value_2x2_v1.json`: deterministic
-  V2C-P0/P1 versus V4-P0/P1 on the same pack, architecture, seed, folds, and
-  account contract. V2C keeps V2 penalties and legal exits while anchoring the
-  proxy path to signal-day close.
-- P1 training is gated on a continuous dynamic rank-gradient budget. The old
-  first-batch calibration followed by a frozen rank weight is forbidden.
-- Probability variants and strict OOF tree reranking are deferred until one
-  deterministic semantic qualifies in at least two of three 2023-2025 folds.
-  The true-batch-1024 study remains paused and resumes only on explicit request.
+- The deterministic signal-close 2x2 study is complete. `V2C-P0` won with
+  `Top1 / 1 slot / fixed D44`; CNY 1m became CNY 9.10m after liquidation,
+  annualized log growth was 0.76563, maximum drawdown was -48.53%, and all three
+  annual log-growth values were positive. Three of four arms qualified.
+- All six P1 folds passed the per-step Rank-gradient budget evidence. All 12
+  successful checkpoints, predictions, account jobs, reports, and runners are
+  retained under the ignored study output for reproduction.
+- Probability variants, strict OOF tree reranking, and 2026 confirmation have
+  not started and require separate contracts. The true-batch-1024 study remains
+  paused and resumes only on explicit request.
 - The old V4 pilot is diagnostic evidence only. It fixed the fictitious low-open
   path but selected pre-signal overheated names whose next-open execution often
   preceded mean reversion; it must not be resumed under its old contract.
 - 2026 remains frozen confirmation only. No 2026 result may select a model,
   ranking rule, exit rule, Top-K, slot count, or account behavior.
-- Protected packs and registered checkpoints remain unchanged. No training was
-  started during the 2026-07-24 takeover.
+- Protected packs and the 15 registered model bundles remain unchanged. The
+  retained study checkpoints are research evidence and are not registered or
+  active for execution.

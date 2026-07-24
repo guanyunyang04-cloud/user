@@ -81,34 +81,6 @@ def test_compact_status_and_verify_use_only_stable_surfaces(tmp_path: Path, monk
     assert result["research_record_count"] == 1
 
 
-def test_studies_expose_current_semantic_comparison_and_deferred_work() -> None:
-    assert set(development.ACTIVE_STUDIES) == {
-        "l35v2-batch1024",
-        "pit-oof-trees",
-        "signal-close-path-value-2x2",
-    }
-    batch = json.loads(development.ACTIVE_STUDIES["l35v2-batch1024"].read_text(encoding="utf-8"))
-    assert batch["status"] == "paused_ready"
-    assert "l35v2_sixfold_2020_2025" in batch["sixfold_evidence"]
-    assert "gradient_accumulation_as_fake_1024" in batch["forbidden_shortcuts"]
-    comparison = json.loads(
-        development.ACTIVE_STUDIES["signal-close-path-value-2x2"].read_text(
-            encoding="utf-8"
-        )
-    )
-    assert comparison["contract"]["arms"]["V2C-P0"]["path_value_semantic"] == "signal_close_path_value_v2"
-    budget = comparison["contract"]["rank_gradient_budget"]
-    assert budget["profile"] == "continuous_encoder_ratio"
-    assert budget["update_frequency"] == "every_path_optimizer_step"
-    assert budget["rank_weight_ceiling"] == 0.15
-    assert budget["max_rank_to_main_gradient_norm_ratio"] == 0.20
-    assert comparison["contract_sha256"] == development._canonical_json_sha256(comparison["contract"])
-    oof = json.loads(
-        development.ACTIVE_STUDIES["pit-oof-trees"].read_text(encoding="utf-8")
-    )
-    assert oof["status"] == "deferred_until_signal_close_semantic_winner"
-
-
 def test_verify_rejects_active_study_contract_drift(
     tmp_path: Path, monkeypatch
 ) -> None:

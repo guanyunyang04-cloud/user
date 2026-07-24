@@ -11,9 +11,12 @@ execution client.
 - Unfinished work: `daily_research/studies/`
 - Core code: `daily_research/path_policy/`
 
-Generated output is disposable. A completed experiment must move only its final
-evidence and selected checkpoint into the stable surfaces, then remove its
-experiment-only code, logs, predictions, and tests.
+Generated output is not a stable truth source by default. A completed experiment
+must add an indexed compact conclusion. Successful checkpoints, predictions,
+account jobs, runners, and logs may remain under ignored output when the study or
+user retains them for reproduction; they are deleted only by an explicit cleanup
+decision. Retained research checkpoints do not enter the formal model registry or
+active execution merely because they remain on disk.
 
 Data and evaluation semantics remain strict: PIT/as-of features, no future-based
 candidate filtering, purged folds, explicit normalization cutoffs, identical
