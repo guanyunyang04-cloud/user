@@ -1,6 +1,6 @@
 # Current workspace state
 
-Updated: `2026-07-24`
+Updated: `2026-07-25`
 
 - QDP is usable with `active_as_of_date=2026-07-21`. PIT main-board daily history
   includes historical ST, long suspensions, and delisted securities.
@@ -23,6 +23,15 @@ Updated: `2026-07-24`
   and have not started.
 - The complete PIT 180x35 pack and six 2020-2025 fold views are built with a
   60-trading-day purge. No long training task is currently running.
+- The active `seq100_pit_signal_quality_v1` study has frozen
+  `pareto_ordinal_v1` and the F1 snapshot profile. Model screening is paused:
+  LightGBM and TabM prescreens are complete, PatchTST has no completed
+  checkpoint, and no formal model matrix or formal fold training exists yet.
+  The resumable process evidence is under the ignored study output. Neural
+  runtime v2 is now implemented and hardware-qualified, but screening has not
+  resumed: the old TabM prescreen is intentionally invalid under exact-batch
+  semantics, while LightGBM remains reusable. The concise evidence pointer is
+  `daily_research/brain/references/seq100_signal_quality_runtime_optimization_20260725.md`.
 - The true-batch-1024 comparison remains paused and may resume only on explicit
   request. There is no active frontend or execution system.
 - Repository simplification evidence remains

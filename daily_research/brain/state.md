@@ -1,6 +1,6 @@
 # Daily Research state
 
-Updated: `2026-07-24`
+Updated: `2026-07-25`
 
 - The registered frozen baseline remains `structured_joint_turnover_180x35_v2`
   (`L35V2`), but it is no longer valid selection evidence for deployment. The
@@ -26,6 +26,22 @@ Updated: `2026-07-24`
 - Probability variants, strict OOF tree reranking, and 2026 confirmation have
   not started and require separate contracts. The true-batch-1024 study remains
   paused and resumes only on explicit request.
+- `seq100_pit_signal_quality_v1` is active. Its externally frozen review contains
+  38 primary sources and six differentiated model families; target screening
+  froze `pareto_ordinal_v1`, and the 2010-2020/2021/2022 feature screen froze F1.
+  Model screening is paused in `model_screen/attempt_001`: LightGBM remains
+  complete and hash-valid, the legacy TabM artifact is complete only under the
+  retired batch semantics, and PatchTST was interrupted before producing a
+  checkpoint. No formal matrix, formal fold training, evaluation, winner, or
+  2026 confirmation exists.
+- Neural runtime v2 is implemented and qualified before screening resumes. It
+  adds exact effective-batch loss semantics, per-adapter execution versions,
+  real-hardware autotune, 30-second progress/ETA/resource heartbeats, 10-minute
+  and epoch checkpoints, and safe `pause.request` resume. PatchTST passed a
+  100k real-pack gate at 2,188.86/s last and 2,348.90/s median throughput; all
+  five neural adapters passed real preflight and tiny-fit gates. Old TabM is no
+  longer reusable under v2, while LightGBM remains reusable. Evidence:
+  `daily_research/brain/references/seq100_signal_quality_runtime_optimization_20260725.md`.
 - The old V4 pilot is diagnostic evidence only. It fixed the fictitious low-open
   path but selected pre-signal overheated names whose next-open execution often
   preceded mean reversion; it must not be resumed under its old contract.
