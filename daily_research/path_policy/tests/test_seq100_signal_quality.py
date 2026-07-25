@@ -42,6 +42,24 @@ def _model_configs() -> dict[str, dict[str, object]]:
     }
 
 
+def _budget_amendment_payload() -> dict[str, object]:
+    study = quality.load_study()
+    payload: dict[str, object] = {
+        "schema": quality.TRAINING_BUDGET_AMENDMENT_VERSION,
+        "study_id": quality.STUDY_ID,
+        "status": "frozen",
+        "base_study_contract_sha256": study["contract_sha256"],
+        "model_ids": list(quality.NEURAL_MODEL_IDS),
+        "config_changes": {
+            "max_epochs": {"from": 3, "to": 10},
+            "patience": {"from": 1, "to": 2},
+        },
+        "reason": "development_loss_budget_censoring",
+    }
+    payload["amendment_sha256"] = quality._canonical_json_sha256(payload)
+    return payload
+
+
 def test_contract_research_freeze_and_source_bindings_are_valid() -> None:
     study = quality.load_study()
     assert study["contract_sha256"] == quality._canonical_json_sha256(
@@ -90,6 +108,24 @@ def test_contract_hash_mismatch_is_rejected(tmp_path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="contract SHA-256 mismatch"):
         quality.load_study(path)
+
+
+def test_training_budget_amendment_is_exact_and_hash_bound(tmp_path: Path) -> None:
+    study = quality.load_study()
+    path = quality._training_budget_amendment_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    payload = _budget_amendment_payload()
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded = quality._load_training_budget_amendment(study, tmp_path)
+    assert loaded == payload
+
+    payload["config_changes"]["learning_rate"] = {"from": 0.001, "to": 0.002}
+    payload["amendment_sha256"] = quality._canonical_json_sha256(
+        {key: value for key, value in payload.items() if key != "amendment_sha256"}
+    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="unsupported fields"):
+        quality._load_training_budget_amendment(study, tmp_path)
 
 
 def test_next_open_reanchor_uses_executed_open_denominator() -> None:
@@ -367,6 +403,132 @@ def test_screen_retry_paths_preserve_interrupted_outputs(tmp_path: Path) -> None
     )
 
 
+def test_budget_extension_accepts_only_the_frozen_budget_delta() -> None:
+    amendment = _budget_amendment_payload()
+    source = {
+        "model_id": "patchtst_student_t_path",
+        "fold_id": "screen",
+        "seed": 7,
+        "feature_sha256": "feature",
+        "execution_semantics_version": "exact_effective_batch_global_loss_v2",
+        "micro_batch": 128,
+        "frozen_model_config": {
+            "learning_rate": 0.0005,
+            "max_epochs": 3,
+            "patience": 1,
+        },
+        "resolved_config_sha256": "old-resolved",
+        "resume_key_sha256": "old-resume",
+    }
+    expected = {
+        **source,
+        "frozen_model_config": {
+            "learning_rate": 0.0005,
+            "max_epochs": 10,
+            "patience": 2,
+        },
+        "training_budget_amendment_sha256": amendment["amendment_sha256"],
+        "training_budget_amended_fields": ["max_epochs", "patience"],
+        "resolved_config_sha256": "new-resolved",
+        "resume_key_sha256": "new-resume",
+    }
+    compatibility = quality._budget_extension_compatibility(
+        source,
+        expected,
+        amendment,
+    )
+    assert compatibility is not None
+    assert compatibility["config_changes"] == amendment["config_changes"]
+
+    changed_learning_rate = json.loads(json.dumps(expected))
+    changed_learning_rate["frozen_model_config"]["learning_rate"] = 0.001
+    assert quality._budget_extension_compatibility(
+        source,
+        changed_learning_rate,
+        amendment,
+    ) is None
+    changed_fold = dict(expected)
+    changed_fold["fold_id"] = "2023"
+    assert quality._budget_extension_compatibility(
+        source,
+        changed_fold,
+        amendment,
+    ) is None
+
+
+def test_budget_extension_migrates_checkpoint_without_mutating_source(
+    tmp_path: Path,
+) -> None:
+    amendment = _budget_amendment_payload()
+    source_dir = tmp_path / "attempt_001" / "model" / "prescreen"
+    source_dir.mkdir(parents=True)
+    source_checkpoint = {
+        "schema": quality.TRAINING_CHECKPOINT_VERSION,
+        "saved_at": "before",
+        "resume_key_sha256": "old-resume",
+        "execution_semantics_version": "exact_effective_batch_global_loss_v2",
+        "model_state_dict": {"weight": torch.tensor([1.0, 2.0])},
+        "optimizer_state_dict": {"state": {0: {"step": torch.tensor(3.0)}}},
+        "scaler_state_dict": {"scale": 1.0},
+        "epoch": 4,
+        "next_step_index": 0,
+        "best_epoch": 3,
+        "best_development_loss": -1.25,
+        "best_state": {"weight": torch.tensor([0.5, 1.5])},
+        "epochs_without_improvement": 0,
+        "training_log": [{"epoch": 3, "development_loss": -1.25}],
+        "epoch_loss_sum": 0.0,
+        "epoch_sample_count": 0,
+        "rng_state": {"python": (3, (), None)},
+    }
+    quality._atomic_torch_save(source_dir / "last_checkpoint.pt", source_checkpoint)
+    preprocessor = b'{"preprocessor_sha256":"same"}\n'
+    (source_dir / "snapshot_preprocessor.json").write_bytes(preprocessor)
+    source_hash = quality._file_sha256(source_dir / "last_checkpoint.pt")
+    expected = {
+        "resume_key_sha256": "new-resume",
+        "training_budget_amendment_sha256": amendment["amendment_sha256"],
+    }
+    destination = tmp_path / "attempt_002" / "model" / "prescreen"
+    provenance = quality._prepare_budget_extension_directory(
+        output_dir=destination,
+        source={
+            "source_dir": source_dir,
+            "source_config": {
+                "resolved_config_sha256": "old-resolved",
+                "resume_key_sha256": "old-resume",
+            },
+            "source_checkpoint": source_checkpoint,
+            "compatibility": {
+                "model_id": "patchtst_student_t_path",
+                "fold_id": "screen",
+                "seed": 7,
+                "config_changes": amendment["config_changes"],
+            },
+        },
+        expected_config=expected,
+        amendment=amendment,
+    )
+    migrated = torch.load(
+        destination / "last_checkpoint.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    assert migrated["resume_key_sha256"] == "new-resume"
+    torch.testing.assert_close(
+        migrated["model_state_dict"]["weight"],
+        source_checkpoint["model_state_dict"]["weight"],
+    )
+    assert migrated["optimizer_state_dict"]["state"][0]["step"].item() == 3.0
+    assert migrated["rng_state"] == source_checkpoint["rng_state"]
+    assert (destination / "snapshot_preprocessor.json").read_bytes() == preprocessor
+    assert quality._file_sha256(source_dir / "last_checkpoint.pt") == source_hash
+    assert provenance["source_checkpoint_sha256"] == source_hash
+    check = dict(provenance)
+    declared = check.pop("provenance_sha256")
+    assert declared == quality._canonical_json_sha256(check)
+
+
 def test_only_complete_publish_failure_is_recoverable(tmp_path: Path) -> None:
     attempt = tmp_path / "feature_view" / "attempt_001"
     partial = attempt / "partial"
@@ -619,6 +781,17 @@ def test_last_checkpoint_roundtrip_and_pause_sentinel(tmp_path: Path) -> None:
     assert payload["next_step_index"] == 3
     for name, value in model.state_dict().items():
         torch.testing.assert_close(value, expected[name])
+    with pytest.raises(ValueError, match="resume key mismatch"):
+        quality._load_last_training_checkpoint(
+            output_dir=tmp_path,
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            resolved_config={
+                "resume_key_sha256": "different",
+                "execution_semantics_version": "test-v1",
+            },
+        )
 
     monitor_dir = tmp_path / "monitor"
     monitor = quality._TrainingMonitor(

@@ -9,6 +9,7 @@ import math
 import os
 import platform
 import random
+import shutil
 import subprocess
 import threading
 import time
@@ -137,6 +138,9 @@ MODEL_EXECUTION_SEMANTICS = {
 RUNTIME_AUTOTUNE_VERSION = "seq100_cuda_runtime_autotune_v1"
 TRAINING_CHECKPOINT_VERSION = "seq100_resumable_training_v1"
 TRAINING_PROGRESS_VERSION = "seq100_training_progress_v1"
+TRAINING_BUDGET_AMENDMENT_VERSION = "seq100_training_budget_amendment_v1"
+TRAINING_BUDGET_AMENDMENT_FILENAME = "training_budget_amendment.json"
+TRAINING_BUDGET_MUTABLE_FIELDS = ("max_epochs", "patience")
 PROGRESS_HEARTBEAT_SECONDS = 30.0
 CONSOLE_EVENT_SECONDS = 300.0
 CHECKPOINT_INTERVAL_SECONDS = 600.0
@@ -465,6 +469,66 @@ def load_research_freeze(study: Mapping[str, Any]) -> dict[str, Any]:
     )
     if 2026 not in forbidden_years:
         raise ValueError("research freeze must explicitly forbid 2026")
+    return payload
+
+
+def _training_budget_amendment_path(output_root: Path) -> Path:
+    return output_root / "model_screen" / TRAINING_BUDGET_AMENDMENT_FILENAME
+
+
+def _load_training_budget_amendment(
+    study: Mapping[str, Any],
+    output_root: Path,
+    *,
+    research_freeze: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    path = _training_budget_amendment_path(output_root)
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if str(payload.get("schema", "")) != TRAINING_BUDGET_AMENDMENT_VERSION:
+        raise ValueError("training budget amendment schema mismatch")
+    if str(payload.get("study_id", "")) != STUDY_ID:
+        raise ValueError("training budget amendment study_id mismatch")
+    if str(payload.get("status", "")) != "frozen":
+        raise ValueError("training budget amendment is not frozen")
+    if str(payload.get("base_study_contract_sha256", "")) != str(
+        study["contract_sha256"]
+    ):
+        raise ValueError("training budget amendment belongs to a different contract")
+    declared = str(payload.get("amendment_sha256", ""))
+    check = dict(payload)
+    check.pop("amendment_sha256", None)
+    if declared != _canonical_json_sha256(check):
+        raise ValueError("training budget amendment hash mismatch")
+    model_ids = tuple(str(item) for item in payload.get("model_ids", []))
+    if model_ids != NEURAL_MODEL_IDS:
+        raise ValueError("training budget amendment must apply to every neural model")
+    changes = dict(payload.get("config_changes", {}) or {})
+    if set(changes) != set(TRAINING_BUDGET_MUTABLE_FIELDS):
+        raise ValueError("training budget amendment changes unsupported fields")
+    expected_changes = {
+        "max_epochs": {"from": 3, "to": 10},
+        "patience": {"from": 1, "to": 2},
+    }
+    if changes != expected_changes:
+        raise ValueError("training budget amendment values do not match the decision")
+    freeze = dict(
+        research_freeze
+        if research_freeze is not None
+        else load_research_freeze(study)["freeze"]
+    )
+    specs = {
+        str(item["model_id"]): dict(item)
+        for item in list(freeze.get("model_candidates", []) or [])
+    }
+    for model_id in model_ids:
+        config = dict(specs[model_id].get("config", {}) or {})
+        for field, change in changes.items():
+            if config.get(field) != change["from"]:
+                raise ValueError(
+                    f"training budget amendment base mismatch for {model_id}.{field}"
+                )
     return payload
 
 
@@ -6154,6 +6218,7 @@ class ModelDataContext:
     grades: np.memmap
     flags: np.memmap
     candidate_index_path: Path
+    training_budget_amendment: dict[str, Any] | None = None
 
 
 def _load_feature_freeze(
@@ -6209,6 +6274,11 @@ def _resolve_model_data(
 ) -> ModelDataContext:
     study = load_study(study_path)
     freeze_payload = load_research_freeze(study)
+    training_budget_amendment = _load_training_budget_amendment(
+        study,
+        output_root,
+        research_freeze=freeze_payload["freeze"],
+    )
     _pack_path, pack_manifest = _validate_source_bindings(study)
     _feature_path, feature_manifest = _load_feature_view_bundle(output_root, study)
     target_manifest, target, _counts, grades, flags = _load_target_bundle(
@@ -6237,13 +6307,28 @@ def _resolve_model_data(
         grades=grades,
         flags=flags,
         candidate_index_path=candidate_index_path,
+        training_budget_amendment=training_budget_amendment,
     )
 
 
 def _model_spec(context: ModelDataContext, model_id: str) -> dict[str, Any]:
     for item in list(context.research_freeze.get("model_candidates", []) or []):
         if str(item.get("model_id", "")) == str(model_id):
-            return dict(item)
+            spec = dict(item)
+            amendment = context.training_budget_amendment
+            if amendment is not None and str(model_id) in set(amendment["model_ids"]):
+                config = dict(spec.get("config", {}) or {})
+                for field, change in dict(amendment["config_changes"]).items():
+                    if config.get(field) != change["from"]:
+                        raise ValueError(
+                            f"training budget base changed for {model_id}.{field}"
+                        )
+                    config[field] = change["to"]
+                spec["config"] = config
+                spec["training_budget_amendment_sha256"] = amendment[
+                    "amendment_sha256"
+                ]
+            return spec
     raise KeyError(f"model is not in the frozen shortlist: {model_id}")
 
 
@@ -10064,6 +10149,17 @@ def _resolved_model_config(
                 "pinned_memory": bool(profile.get("pinned_memory", False)),
             }
         )
+    if "training_budget_amendment_sha256" in model:
+        payload.update(
+            {
+                "training_budget_amendment_sha256": str(
+                    model["training_budget_amendment_sha256"]
+                ),
+                "training_budget_amended_fields": list(
+                    TRAINING_BUDGET_MUTABLE_FIELDS
+                ),
+            }
+        )
     payload["resolved_config_sha256"] = _canonical_json_sha256(payload)
     payload["resume_key_sha256"] = _canonical_json_sha256(
         {
@@ -10464,6 +10560,23 @@ def _run_model_task(
         runtime_profile=runtime_profile,
     )
     _atomic_write_json(output_dir / "resolved_config.json", resolved_config)
+    budget_extension: dict[str, Any] | None = None
+    budget_extension_path = output_dir / "budget_extension_provenance.json"
+    if budget_extension_path.exists():
+        budget_extension = json.loads(budget_extension_path.read_text(encoding="utf-8"))
+        declared = str(budget_extension.get("provenance_sha256", ""))
+        check = dict(budget_extension)
+        check.pop("provenance_sha256", None)
+        if declared != _canonical_json_sha256(check):
+            raise ValueError("budget extension provenance hash mismatch")
+        if str(budget_extension.get("destination_resume_key_sha256", "")) != str(
+            resolved_config["resume_key_sha256"]
+        ):
+            raise ValueError("budget extension destination resume key mismatch")
+        if str(budget_extension.get("amendment_sha256", "")) != str(
+            resolved_config.get("training_budget_amendment_sha256", "")
+        ):
+            raise ValueError("budget extension amendment mismatch")
     monitor = _TrainingMonitor(
         output_dir=output_dir,
         base={
@@ -10479,6 +10592,11 @@ def _run_model_task(
             "train_candidate_count": int(len(train_rows)),
             "development_candidate_count": int(len(development_rows)),
             "test_candidate_count": int(len(test_rows)),
+            "budget_extension_provenance_sha256": (
+                budget_extension.get("provenance_sha256")
+                if budget_extension is not None
+                else None
+            ),
         },
     )
     monitor.report(
@@ -10486,7 +10604,11 @@ def _run_model_task(
         phase="training",
         samples_completed=0,
         samples_total=len(train_rows),
-        epoch=1,
+        epoch=(
+            int(budget_extension["start_epoch"])
+            if budget_extension is not None
+            else 1
+        ),
         max_epochs=int(
             dict(_model_spec(context, model_id)["config"]).get("max_epochs", 1)
         ),
@@ -10499,6 +10621,9 @@ def _run_model_task(
         ),
         force=True,
         event="training_started",
+        extra={
+            "continued_from_checkpoint": bool(budget_extension is not None),
+        },
     )
     adapter = get_model_adapter(model_id)
     if torch.cuda.is_available():
@@ -10593,6 +10718,8 @@ def _run_model_task(
         "protection_before": protection_before,
         "protection_after": protection_after,
     }
+    if budget_extension is not None:
+        summary["budget_extension"] = budget_extension
     _atomic_write_json(output_dir / "task_summary.json", summary)
     monitor.report(
         status="completed",
@@ -11579,6 +11706,198 @@ def _next_screen_retry_dir(model_dir: Path, stage: str) -> Path:
     return model_dir / f"{stage}_retry_{max(existing, default=0) + 1:03d}"
 
 
+def _prior_screen_model_directories(
+    output_root: Path,
+    *,
+    current_attempt: Path,
+    model_id: str,
+) -> list[Path]:
+    task_root = output_root / "model_screen"
+    return [
+        attempt / str(model_id)
+        for attempt in sorted(task_root.glob("attempt_*"), reverse=True)
+        if attempt.resolve() != current_attempt.resolve()
+        and (attempt / str(model_id)).is_dir()
+    ]
+
+
+def _budget_extension_compatibility(
+    source_config: Mapping[str, Any],
+    expected_config: Mapping[str, Any],
+    amendment: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if amendment is None:
+        return None
+    model_id = str(expected_config.get("model_id", ""))
+    if (
+        model_id not in set(str(item) for item in amendment.get("model_ids", []))
+        or str(source_config.get("model_id", "")) != model_id
+        or str(source_config.get("fold_id", "")) != "screen"
+        or str(expected_config.get("fold_id", "")) != "screen"
+        or int(source_config.get("seed", -1)) != 7
+        or int(expected_config.get("seed", -1)) != 7
+        or str(expected_config.get("training_budget_amendment_sha256", ""))
+        != str(amendment.get("amendment_sha256", ""))
+    ):
+        return None
+    source_model_config = dict(source_config.get("frozen_model_config", {}) or {})
+    expected_model_config = dict(expected_config.get("frozen_model_config", {}) or {})
+    if set(source_model_config) != set(expected_model_config):
+        return None
+    changes = dict(amendment.get("config_changes", {}) or {})
+    changed_fields = {
+        key
+        for key in source_model_config
+        if source_model_config[key] != expected_model_config[key]
+    }
+    if changed_fields != set(TRAINING_BUDGET_MUTABLE_FIELDS):
+        return None
+    for field in TRAINING_BUDGET_MUTABLE_FIELDS:
+        change = dict(changes.get(field, {}) or {})
+        if (
+            source_model_config.get(field) != change.get("from")
+            or expected_model_config.get(field) != change.get("to")
+        ):
+            return None
+    source_core = dict(source_config)
+    expected_core = dict(expected_config)
+    for payload in (source_core, expected_core):
+        payload.pop("frozen_model_config", None)
+        payload.pop("resolved_config_sha256", None)
+        payload.pop("resume_key_sha256", None)
+        payload.pop("training_budget_amendment_sha256", None)
+        payload.pop("training_budget_amended_fields", None)
+    if source_core != expected_core:
+        return None
+    return {
+        "model_id": model_id,
+        "fold_id": "screen",
+        "seed": 7,
+        "config_changes": {
+            field: {
+                "from": source_model_config[field],
+                "to": expected_model_config[field],
+            }
+            for field in TRAINING_BUDGET_MUTABLE_FIELDS
+        },
+    }
+
+
+def _find_budget_extension_source(
+    model_directories: Sequence[Path],
+    *,
+    model_id: str,
+    expected_config: Mapping[str, Any],
+    amendment: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    for model_dir in model_directories:
+        for output_dir in reversed(_screen_stage_directories(model_dir, "prescreen")):
+            config_path = output_dir / "resolved_config.json"
+            checkpoint_path = output_dir / "last_checkpoint.pt"
+            summary_path = output_dir / "task_summary.json"
+            if not (config_path.exists() and checkpoint_path.exists() and summary_path.exists()):
+                continue
+            try:
+                source_config = json.loads(config_path.read_text(encoding="utf-8"))
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                checkpoint = torch.load(
+                    checkpoint_path,
+                    map_location="cpu",
+                    weights_only=False,
+                )
+            except (OSError, RuntimeError, ValueError, json.JSONDecodeError):
+                continue
+            compatibility = _budget_extension_compatibility(
+                source_config,
+                expected_config,
+                amendment,
+            )
+            if compatibility is None:
+                continue
+            if (
+                str(summary.get("status", "")) != "completed"
+                or str(summary.get("model_id", "")) != str(model_id)
+                or str(summary.get("fold_id", "")) != "screen"
+                or int(summary.get("seed", -1)) != 7
+                or str(summary.get("resolved_config_sha256", ""))
+                != str(source_config.get("resolved_config_sha256", ""))
+                or str(summary.get("resume_key_sha256", ""))
+                != str(source_config.get("resume_key_sha256", ""))
+                or summary.get("protection_before") != summary.get("protection_after")
+                or not _artifact_hashes_match(summary)
+                or str(checkpoint.get("schema", "")) != TRAINING_CHECKPOINT_VERSION
+                or str(checkpoint.get("resume_key_sha256", ""))
+                != str(source_config.get("resume_key_sha256", ""))
+                or checkpoint.get("execution_semantics_version")
+                != expected_config.get("execution_semantics_version")
+                or int(checkpoint.get("next_step_index", -1)) != 0
+                or int(checkpoint.get("epoch", 0))
+                > int(dict(expected_config["frozen_model_config"])["max_epochs"])
+                or int(checkpoint.get("epochs_without_improvement", 0))
+                >= int(dict(expected_config["frozen_model_config"])["patience"])
+            ):
+                continue
+            return {
+                "source_dir": output_dir,
+                "source_config": source_config,
+                "source_checkpoint": checkpoint,
+                "compatibility": compatibility,
+            }
+    return None
+
+
+def _prepare_budget_extension_directory(
+    *,
+    output_dir: Path,
+    source: Mapping[str, Any],
+    expected_config: Mapping[str, Any],
+    amendment: Mapping[str, Any],
+) -> dict[str, Any]:
+    source_dir = Path(source["source_dir"]).resolve()
+    source_checkpoint_path = source_dir / "last_checkpoint.pt"
+    output_dir.mkdir(parents=True, exist_ok=False)
+    migrated = dict(source["source_checkpoint"])
+    migrated["resume_key_sha256"] = str(expected_config["resume_key_sha256"])
+    migrated["budget_extension_amendment_sha256"] = str(
+        amendment["amendment_sha256"]
+    )
+    migrated["budget_extension_source_checkpoint_sha256"] = _file_sha256(
+        source_checkpoint_path
+    )
+    migrated["budget_extension_migrated_at"] = _now()
+    _atomic_torch_save(output_dir / "last_checkpoint.pt", migrated)
+    for name in ("snapshot_preprocessor.json", "f0_preprocessor.json"):
+        source_path = source_dir / name
+        if source_path.exists():
+            temporary = (output_dir / name).with_name(name + ".tmp")
+            shutil.copyfile(source_path, temporary)
+            os.replace(temporary, output_dir / name)
+    provenance = {
+        "schema": TRAINING_BUDGET_AMENDMENT_VERSION,
+        "created_at": _now(),
+        "amendment_sha256": str(amendment["amendment_sha256"]),
+        "source_dir": str(source_dir),
+        "source_checkpoint": str(source_checkpoint_path),
+        "source_checkpoint_sha256": _file_sha256(source_checkpoint_path),
+        "source_resolved_config_sha256": str(
+            dict(source["source_config"])["resolved_config_sha256"]
+        ),
+        "source_resume_key_sha256": str(
+            dict(source["source_config"])["resume_key_sha256"]
+        ),
+        "destination_resume_key_sha256": str(expected_config["resume_key_sha256"]),
+        "start_epoch": int(migrated["epoch"]),
+        "best_epoch": int(migrated["best_epoch"]),
+        "epochs_without_improvement": int(
+            migrated["epochs_without_improvement"]
+        ),
+        **dict(source["compatibility"]),
+    }
+    provenance["provenance_sha256"] = _canonical_json_sha256(provenance)
+    _atomic_write_json(output_dir / "budget_extension_provenance.json", provenance)
+    return provenance
+
+
 def _find_resumable_task_directory(
     directories: Sequence[Path],
     *,
@@ -11708,6 +12027,11 @@ def _model_screen_binding(
         ),
         "feature_freeze_sha256": str(feature_freeze["feature_freeze_sha256"]),
         "research_audit_sha256": _canonical_json_sha256(audit),
+        "training_budget_amendment_sha256": str(
+            dict(context.training_budget_amendment or {}).get(
+                "amendment_sha256", ""
+            )
+        ),
     }
 
 
@@ -11781,22 +12105,27 @@ def screen_models(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> dict[str, Any]:
     study = load_study(study_path)
+    amendment = _load_training_budget_amendment(study, output_root)
+    amendment_sha256 = str(dict(amendment or {}).get("amendment_sha256", ""))
     existing = output_root / "model_screen/current.json"
     if existing.exists():
         current = json.loads(existing.read_text(encoding="utf-8"))
         if str(current.get("status", "")) == "research_design_insufficient":
-            result_path = Path(str(current["result"])).resolve()
-            if _file_sha256(result_path) != str(current["result_sha256"]):
-                raise ValueError("model-screen failure record changed")
-            return json.loads(result_path.read_text(encoding="utf-8"))
-        _path, matrix = _load_formal_matrix(output_root, study)
-        return {
-            "status": "formal_matrix_frozen",
-            "output_dir": str(Path(matrix["output_dir"]).resolve()),
-            "formal_matrix": str(_path.resolve()),
-            "formal_matrix_sha256": matrix["formal_matrix_sha256"],
-            "model_ids": list(matrix["model_ids"]),
-        }
+            if str(current.get("training_budget_amendment_sha256", "")) == amendment_sha256:
+                result_path = Path(str(current["result"])).resolve()
+                if _file_sha256(result_path) != str(current["result_sha256"]):
+                    raise ValueError("model-screen failure record changed")
+                return json.loads(result_path.read_text(encoding="utf-8"))
+        else:
+            _path, matrix = _load_formal_matrix(output_root, study)
+            if str(matrix.get("training_budget_amendment_sha256", "")) == amendment_sha256:
+                return {
+                    "status": "formal_matrix_frozen",
+                    "output_dir": str(Path(matrix["output_dir"]).resolve()),
+                    "formal_matrix": str(_path.resolve()),
+                    "formal_matrix_sha256": matrix["formal_matrix_sha256"],
+                    "model_ids": list(matrix["model_ids"]),
+                }
     try:
         _feature_path, feature_freeze = _load_feature_freeze(output_root, study)
     except FileNotFoundError:
@@ -11830,13 +12159,29 @@ def screen_models(
     prescreens: dict[str, Any] = {}
     passed: list[str] = []
     reused: list[str] = []
+    continued: list[str] = []
+    reused_preflights: list[str] = []
     for model_id in MODEL_IDS:
         model_dir = attempt_dir / model_id
         model_dir.mkdir(parents=True, exist_ok=True)
+        prior_model_dirs = _prior_screen_model_directories(
+            output_root,
+            current_attempt=attempt_dir,
+            model_id=model_id,
+        )
         existing_preflight = _load_passed_screen_preflight(
             model_dir,
             model_id=model_id,
         )
+        if existing_preflight is None:
+            for prior_model_dir in prior_model_dirs:
+                existing_preflight = _load_passed_screen_preflight(
+                    prior_model_dir,
+                    model_id=model_id,
+                )
+                if existing_preflight is not None:
+                    reused_preflights.append(model_id)
+                    break
         _atomic_write_json(
             progress_path,
             {
@@ -11846,6 +12191,8 @@ def screen_models(
                 "resumed_attempt": resumed_attempt is not None,
                 "completed_model_ids": list(passed),
                 "reused_model_ids": list(reused),
+                "continued_model_ids": list(continued),
+                "reused_preflight_model_ids": list(reused_preflights),
                 "current_model_id": model_id,
             },
         )
@@ -11879,10 +12226,37 @@ def screen_models(
                 expected_candidate_count=expected_candidate_count,
             )
             if completed is None:
+                for prior_model_dir in prior_model_dirs:
+                    completed = _load_completed_screen_task(
+                        prior_model_dir,
+                        model_id=model_id,
+                        expected_config=expected_config,
+                        expected_test_year=expected_test_year,
+                        expected_candidate_count=expected_candidate_count,
+                    )
+                    if completed is not None:
+                        break
+            if completed is None:
                 task_output_dir = _find_resumable_task_directory(
                     _screen_stage_directories(model_dir, "prescreen"),
                     expected_config=expected_config,
-                ) or _next_screen_retry_dir(model_dir, "prescreen")
+                )
+                if task_output_dir is None:
+                    task_output_dir = _next_screen_retry_dir(model_dir, "prescreen")
+                    extension_source = _find_budget_extension_source(
+                        prior_model_dirs,
+                        model_id=model_id,
+                        expected_config=expected_config,
+                        amendment=context.training_budget_amendment,
+                    )
+                    if extension_source is not None:
+                        _prepare_budget_extension_directory(
+                            output_dir=task_output_dir,
+                            source=extension_source,
+                            expected_config=expected_config,
+                            amendment=dict(context.training_budget_amendment or {}),
+                        )
+                        continued.append(model_id)
                 _atomic_write_json(
                     progress_path,
                     {
@@ -11892,6 +12266,8 @@ def screen_models(
                         "resumed_attempt": resumed_attempt is not None,
                         "completed_model_ids": list(passed),
                         "reused_model_ids": list(reused),
+                        "continued_model_ids": list(continued),
+                        "reused_preflight_model_ids": list(reused_preflights),
                         "current_model_id": model_id,
                         "current_task_progress": str(
                             (task_output_dir / "progress.json").resolve()
@@ -11920,6 +12296,8 @@ def screen_models(
                 "current_model_id": model_id,
                 "completed_model_ids": list(passed),
                 "reused_model_ids": list(reused),
+                "continued_model_ids": list(continued),
+                "reused_preflight_model_ids": list(reused_preflights),
                 "reason": str(exc),
             }
             _atomic_write_json(progress_path, paused)
@@ -11955,6 +12333,8 @@ def screen_models(
                         "resumed_attempt": resumed_attempt is not None,
                         "completed_model_ids": list(passed),
                         "reused_model_ids": list(reused),
+                        "continued_model_ids": list(continued),
+                        "reused_preflight_model_ids": list(reused_preflights),
                         "current_model_id": None,
                     },
                 )
@@ -11992,6 +12372,9 @@ def screen_models(
                 "result": str(result_path.resolve()),
                 "result_sha256": _file_sha256(result_path),
                 "study_contract_sha256": study["contract_sha256"],
+                "training_budget_amendment_sha256": binding[
+                    "training_budget_amendment_sha256"
+                ],
                 "updated_at": _now(),
             },
         )
@@ -12006,6 +12389,11 @@ def screen_models(
             },
         )
         return result
+    continued_final = [
+        model_id
+        for model_id in passed
+        if isinstance(prescreens[model_id].get("budget_extension"), Mapping)
+    ]
     matrix = {
         "artifact_type": "seq100_signal_quality_formal_model_matrix",
         "status": "formal_matrix_frozen",
@@ -12028,6 +12416,9 @@ def screen_models(
                 "slot": _model_spec(context, model_id)["slot"],
                 "capabilities": _model_spec(context, model_id)["capabilities"],
                 "prescreen_metrics": prescreens[model_id]["metrics"],
+                "prescreen_resolved_config_sha256": prescreens[model_id][
+                    "resolved_config_sha256"
+                ],
                 "preflight": preflights[model_id],
             }
             for model_id in passed
@@ -12037,7 +12428,29 @@ def screen_models(
         "formal_fold_years": list(FORMAL_FOLD_YEARS),
         "protection_before": protection_before,
         "protection_after": protection_after,
+        "training_budget_amendment_sha256": str(
+            dict(context.training_budget_amendment or {}).get(
+                "amendment_sha256", ""
+            )
+        ),
+        "resource_reuse": {
+            "reused_preflight_model_ids": list(dict.fromkeys(reused_preflights)),
+            "reused_completed_model_ids": list(dict.fromkeys(reused)),
+            "continued_checkpoint_model_ids": continued_final,
+        },
     }
+    if context.training_budget_amendment is not None:
+        amendment_path = _training_budget_amendment_path(output_root)
+        matrix["training_budget_amendment"] = {
+            "path": str(amendment_path.resolve()),
+            "sha256": _file_sha256(amendment_path),
+            "amendment_sha256": context.training_budget_amendment[
+                "amendment_sha256"
+            ],
+            "config_changes": context.training_budget_amendment[
+                "config_changes"
+            ],
+        }
     matrix["formal_matrix_sha256"] = _canonical_json_sha256(matrix)
     matrix_path = attempt_dir / "formal_matrix.json"
     _atomic_write_json(matrix_path, matrix)
@@ -12048,6 +12461,9 @@ def screen_models(
             "formal_matrix": str(matrix_path.resolve()),
             "formal_matrix_sha256": matrix["formal_matrix_sha256"],
             "study_contract_sha256": study["contract_sha256"],
+            "training_budget_amendment_sha256": matrix[
+                "training_budget_amendment_sha256"
+            ],
             "updated_at": _now(),
         },
     )
@@ -12057,6 +12473,7 @@ def screen_models(
         "formal_matrix": str(matrix_path.resolve()),
         "formal_matrix_sha256": matrix["formal_matrix_sha256"],
         "model_ids": passed,
+        "resource_reuse": matrix["resource_reuse"],
     }
     _atomic_write_json(attempt_dir / "screen_models_summary.json", summary)
     _atomic_write_json(
@@ -12067,6 +12484,8 @@ def screen_models(
             **binding,
             "completed_model_ids": list(passed),
             "reused_model_ids": list(reused),
+            "continued_model_ids": continued_final,
+            "reused_preflight_model_ids": list(dict.fromkeys(reused_preflights)),
             "formal_matrix": str(matrix_path.resolve()),
             "formal_matrix_sha256": matrix["formal_matrix_sha256"],
         },
