@@ -62,6 +62,11 @@ there is a verified replacement or recovery path. The canonical list is
 
 ## Git
 
-- Do not commit or push unless the user explicitly asks.
-- Preserve unrelated dirty paths. Run focused tests and `git diff --check` before
-  completion.
+- Committing is allowed without asking once focused tests and `git diff --check`
+  pass. Stage only the paths the current task changed, and write the commit
+  message in English matching repo style.
+- Do not push unless the user explicitly asks.
+- Preserve unrelated dirty paths. Never stage or commit paths another task owns,
+  and never commit files that may carry secrets.
+- Amending, force-push, reset --hard, and other destructive git operations still
+  require an explicit user request.
