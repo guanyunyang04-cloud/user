@@ -81,6 +81,35 @@ Updated: `2026-07-26`
   the recorded successor requirement is a new study contract; no successor
   contract, target, or metric has been written yet. Any successor must treat
   2023-2025 as burned discovery years.
+- PRE-2023 FUTURE-PATH ATLAS COMPLETE. The read-only discovery cohort contains
+  6,096,195 full-universe candidates from `2010-09-29` through `2022-09-30`, with
+  every D60 outcome ending by `2022-12-30`. Of these, 5,929,931 (97.27%) have a
+  legal next-open entry and complete entry-relative D1-D60 path. The output keeps
+  all rows, 52 path/execution descriptors, explicit missingness status, and the
+  full 60-value close path. 2023-2026 supplied no row to the atlas.
+- Expanding 2018/2020/2021/2022 autonomous fits all select eight PCA dimensions
+  and K=3: declining 2,270,431 (38.29%, median D60 -12.33%), strong advancing
+  777,402 (13.11%, +30.88%), and mild advance/oscillation 2,882,098 (48.60%,
+  +3.22%). Pairwise expanding-window assignment ARI is 0.734652 minimum and
+  0.845183 mean; matched-centroid correlation is at least 0.977011.
+- Endpoint-detrended clustering selects two shapes inside each macro state. The
+  strong-advance split is stable: progressively accelerating advance 355,284
+  (D20 +11.64%, D60 +43.20%, median peak D55) versus fast advance then fade
+  422,118 (D20 +21.23%, D60 +20.18%, peak D35). Deep-decline/continued-decline
+  and early-rise-failure/late-start splits are tentative because temporal or
+  prefix ARI falls below 0.60.
+- This proves only that one terminal scalar collapses distinct realized path
+  shapes. It does not prove that a vector label is more predictable or should be
+  the successor output. No signal-day predictability test, training, target,
+  horizon, slot count, or exit rule was selected. The requested path-map work
+  stops here; a later separately authorized audit may use 2023/2024/2025 as
+  three burned out-of-sample folds, while 2026 remains untouched.
+- The path-map audit now distinguishes exchange-level entry from reference-order
+  affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
+  one 100-share lot with the CNY 100,000 diagnostic order; they remain clustered
+  and carry `reference_order_unaffordable`, with zero unexplained missing return
+  cells. Authoritative evidence:
+  `daily_research/brain/references/seq100_future_path_atlas_20260726.md`.
 - The full-history structure probe has now been independently audited. Its
   preliminary claims that one slot is structurally impossible, that slot count
   has a measured +0.29 annual-log first-step effect, and that
