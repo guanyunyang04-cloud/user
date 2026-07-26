@@ -87,23 +87,44 @@ Updated: `2026-07-26`
   legal next-open entry and complete entry-relative D1-D60 path. The output keeps
   all rows, 52 path/execution descriptors, explicit missingness status, and the
   full 60-value close path. 2023-2026 supplied no row to the atlas.
-- Expanding 2018/2020/2021/2022 autonomous fits all select eight PCA dimensions
-  and K=3: declining 2,270,431 (38.29%, median D60 -12.33%), strong advancing
+- The original macro atlas searched K=3 through K=10. Within that declared
+  range, expanding 2018/2020/2021/2022 fits all select eight PCA dimensions and
+  K=3: declining 2,270,431 (38.29%, median D60 -12.33%), strong advancing
   777,402 (13.11%, +30.88%), and mild advance/oscillation 2,882,098 (48.60%,
   +3.22%). Pairwise expanding-window assignment ARI is 0.734652 minimum and
   0.845183 mean; matched-centroid correlation is at least 0.977011.
+- PRE-2023 HORIZON SENSITIVITY COMPLETE. A full-universe follow-up independently
+  clusters D1-D5, D1-D10, D1-D20, D1-D40, and D1-D60 with K=2 through K=10.
+  Selected K over expanding 2018/2020/2021/2022 is D5 `3/3/2/3`, D10
+  `2/3/2/2`, and D20/D40/D60 `2/2/2/2`. The statistical criterion therefore
+  favors a stable coarse low/high split from D20 onward. The source K3 remains a
+  useful middle-state analysis layer, not evidence of exactly three natural
+  outcome classes.
+- Fixed-K3 agreement with the source D60 macro rises sharply with observed
+  prefix: ARI is 0.071/0.118/0.271/0.622/0.812 and purity is
+  57.1%/60.6%/69.9%/86.8%/93.9% at D5/D10/D20/D40/D60. Only 33.13% of D5-high
+  rows and 37.44% of D10-high rows become source M1 strong advance, versus
+  54.60% at D20 and 80.19% at D40. Short-term strength is not long-term
+  strength; outcome identity becomes materially locked only around D40.
+- Cluster membership is taxonomy, not within-cluster quality. Centroid distance
+  measures typicality, while quality remains the conditional distribution of
+  amplitude, later-state transition, adversity, persistence, and execution.
+  The D5-high D60 q10/median/q90 is -16.77%/+5.17%/+42.91%, so no cluster ID may
+  be treated as a complete ordinal target. Authoritative evidence:
+  `daily_research/brain/references/seq100_future_horizon_atlas_20260726.md`.
 - Endpoint-detrended clustering selects two shapes inside each macro state. The
   strong-advance split is stable: progressively accelerating advance 355,284
   (D20 +11.64%, D60 +43.20%, median peak D55) versus fast advance then fade
   422,118 (D20 +21.23%, D60 +20.18%, peak D35). Deep-decline/continued-decline
   and early-rise-failure/late-start splits are tentative because temporal or
   prefix ARI falls below 0.60.
-- This proves only that one terminal scalar collapses distinct realized path
-  shapes. It does not prove that a vector label is more predictable or should be
-  the successor output. No signal-day predictability test, training, target,
-  horizon, slot count, or exit rule was selected. The requested path-map work
-  stops here; a later separately authorized audit may use 2023/2024/2025 as
-  three burned out-of-sample folds, while 2026 remains untouched.
+- These atlases prove only that one terminal scalar or one horizon-cluster ID
+  collapses distinct realized path shapes. They do not prove that a vector label
+  is more predictable or should be the successor output. No signal-day
+  predictability test, training, target, horizon, slot count, or exit rule was
+  selected. The requested path-map work stops here; a later separately
+  authorized audit may use 2023/2024/2025 as three burned out-of-sample folds,
+  while 2026 remains untouched.
 - The path-map audit now distinguishes exchange-level entry from reference-order
   affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
   one 100-share lot with the CNY 100,000 diagnostic order; they remain clustered
