@@ -11,6 +11,26 @@ import torch
 from daily_research.path_policy import seq100_signal_quality as quality
 
 
+def _closed_study_contract_path() -> Path | None:
+    """Return the archived contract once the active study has been closed out."""
+    if quality.DEFAULT_STUDY_PATH.exists():
+        return quality.DEFAULT_STUDY_PATH
+    archived_path = (
+        quality.WORKSPACE_ROOT
+        / "daily_research/research_records/seq100/seq100_pit_signal_quality_v1/contract.json"
+    )
+    if archived_path.exists():
+        return archived_path
+    return None
+
+
+def _study() -> dict:
+    path = _closed_study_contract_path()
+    if path is None:
+        pytest.skip("no seq100 study contract on disk")
+    return quality.load_study(path)
+
+
 def _flat_path(rows: int = 1, *, close_return: float = 0.0) -> np.ndarray:
     path = np.zeros((rows, 20, 4), dtype=np.float32)
     path[:, :, :] = close_return
@@ -35,7 +55,7 @@ def _descriptor_fixture(values: np.ndarray) -> dict[str, np.ndarray]:
 
 
 def _model_configs() -> dict[str, dict[str, object]]:
-    freeze = quality.load_research_freeze(quality.load_study())["freeze"]
+    freeze = quality.load_research_freeze(_study())["freeze"]
     return {
         str(item["model_id"]): dict(item["config"])
         for item in freeze["model_candidates"]
@@ -43,7 +63,7 @@ def _model_configs() -> dict[str, dict[str, object]]:
 
 
 def _budget_amendment_payload() -> dict[str, object]:
-    study = quality.load_study()
+    study = _study()
     payload: dict[str, object] = {
         "schema": quality.TRAINING_BUDGET_AMENDMENT_VERSION,
         "study_id": quality.STUDY_ID,
@@ -120,7 +140,7 @@ def _design_invalidation_fixture(
 
 
 def test_contract_research_freeze_and_source_bindings_are_valid() -> None:
-    study = quality.load_study()
+    study = _study()
     assert study["contract_sha256"] == quality._canonical_json_sha256(
         study["contract"]
     )
@@ -133,6 +153,21 @@ def test_contract_research_freeze_and_source_bindings_are_valid() -> None:
     assert int(manifest["lookback_days"]) == 180
     assert int(manifest["forward_days"]) >= 60
     assert len(study["contract"]["data"]["qdp_datasets"]) == 14
+
+
+def test_closed_study_archive_matches_compact_record() -> None:
+    path = _closed_study_contract_path()
+    if path is None:
+        pytest.skip("no seq100 study contract on disk")
+    if path == quality.DEFAULT_STUDY_PATH:
+        assert path.exists()
+        return
+
+    assert path.exists()
+    study = quality.load_study(path)
+    artifact_path = path.with_name("artifact.json")
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    assert study["contract_sha256"] == artifact["contract"]["contract_sha256"]
 
 
 def test_cli_has_only_the_frozen_public_commands() -> None:
@@ -377,7 +412,7 @@ def test_target_field_names_are_unique() -> None:
 
 
 def test_contract_hash_mismatch_is_rejected(tmp_path: Path) -> None:
-    payload = quality.load_study()
+    payload = _study()
     payload["contract"]["objective"] = "tampered"
     path = tmp_path / "study.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -386,7 +421,7 @@ def test_contract_hash_mismatch_is_rejected(tmp_path: Path) -> None:
 
 
 def test_training_budget_amendment_is_exact_and_hash_bound(tmp_path: Path) -> None:
-    study = quality.load_study()
+    study = _study()
     path = quality._training_budget_amendment_path(tmp_path)
     path.parent.mkdir(parents=True)
     payload = _budget_amendment_payload()

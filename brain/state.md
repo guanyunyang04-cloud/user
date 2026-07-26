@@ -23,22 +23,27 @@ Updated: `2026-07-26`
   and have not started.
 - The complete PIT 180x35 pack and six 2020-2025 fold views are built with a
   60-trading-day purge. No long training task is currently running.
-- The active `seq100_pit_signal_quality_v1` study has frozen `pareto_ordinal_v1`
-  and the F1 profile, and model screening is COMPLETE:
-  `model_screen/attempt_001/formal_matrix.json` is frozen with
-  `replacement_allowed: false`. Formal fold training is 3 of 18 cells done
-  (LightGBM, all three folds, seed 7); one TabM cell is interrupted and
-  resumable; there is no `evaluate` and no winner. Neural runtime v2 is
-  implemented and hardware-qualified. See
-  `daily_research/brain/references/seq100_signal_quality_runtime_optimization_20260725.md`.
-- Formal training is HELD because the frozen target is under review. A read-only
-  diagnosis over the completed LightGBM folds showed the frozen design ranks path
-  robustness rather than growth, and its perfect-foresight ceiling is about 23%
-  of the return-only ceiling. An Oracle review accepted the diagnosis but ruled
-  the current evidence insufficient to unfreeze, and ruled that any retarget
-  needs a new study contract rather than an `attempt_002`. The owner has not
-  chosen a path. Authoritative detail lives in `daily_research/brain/state.md`
-  and `daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md`.
+- `seq100_pit_signal_quality_v1` is CLOSED as `research_design_insufficient` on
+  2026-07-26. The active contract
+  `daily_research/studies/seq100_pit_signal_quality_v1.json` was deleted by
+  closeout; the archived byte-identical copy is
+  `daily_research/research_records/seq100/seq100_pit_signal_quality_v1/contract.json`
+  with compact record `artifact.json` beside it
+  (`artifact_sha256=7a0ff473...4636e7`). The terminal record is
+  `design_invalidation/attempt_001/design_invalidation.json`
+  (`design_invalidation_sha256=26a92e69...b461`), defect class
+  `objective_cannot_answer_stated_question`, six bound evidence files, ten
+  recorded inspected alternatives, `burned_fold_years=[2023,2024,2025]`, four
+  trained cells with three completed, `retained_as=architecture_exploration_evidence`,
+  and `successor.must_be_new_study_contract=true`. All four frozen artifact
+  hashes are preserved unchanged inside it. All closeout gates passed.
+  Formal fold training was 3 of 18 cells done (LightGBM, all three folds, seed 7);
+  one TabM cell was interrupted and resumable; there was no `evaluate` and no
+  winner. Neural runtime v2 was implemented and hardware-qualified. No successor
+  study contract, target, or metric is designed yet, and any successor must treat
+  2023-2025 as burned discovery years. Authoritative detail lives in
+  `daily_research/brain/state.md` and
+  `daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md`.
 - The true-batch-1024 comparison remains paused and may resume only on explicit
   request. There is no active frontend or execution system.
 - Repository simplification evidence remains
@@ -63,9 +68,10 @@ Updated: `2026-07-26`
   through `canonical_manifest_schema()` and untyped declarations degrade to a
   name-and-order check plus a `legacy_untyped_manifest_schema` warning. Current
   result: status ok, 0 errors, 2 warnings, 14 datasets.
-- Backfilling those legacy declarations is blocked by sequencing, not by design.
-  `seq100_pit_signal_quality_v1` binds `manifest_sha256` and `schema_hash` for all
-  14 domains and `seq100_signal_quality.py:554/559` raises on any change, with
+- Backfilling those legacy declarations was blocked by the closed study binding
+  them, and is now unblocked. `seq100_pit_signal_quality_v1` bound
+  `manifest_sha256` and `schema_hash` for all 14 domains and
+  `seq100_signal_quality.py:554/559` raised on any change, with
   `protection.failure: stop_immediately_on_any_hash_change`. All 14 schema hashes
   currently match. Normalization becomes legal only after the rebind channel
   exists.
@@ -88,3 +94,9 @@ Updated: `2026-07-26`
   `source_view_provenance.schema_version = 2`, with a narrow v1 reader so the six
   recorded `l35v2_sixfold_2020_2025` contracts and protected training summaries
   keep their registered hashes.
+
+<!-- seq100-signal-quality:start -->
+- `seq100_pit_signal_quality_v1` 已以 `research_design_insufficient` 收口；selector winner 为 `null`。
+- 权威 compact record：`daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json`。
+- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 仍只允许新合同确认。
+<!-- seq100-signal-quality:end -->

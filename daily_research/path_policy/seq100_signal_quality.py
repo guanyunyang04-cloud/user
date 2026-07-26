@@ -14263,9 +14263,10 @@ def closeout_study(
     ]
     records.append(record_entry)
     index["records"] = records
+    # Active studies are recorded as contract paths, so match on the file stem.
     index["active_studies"] = [
         item for item in list(index.get("active_studies", []) or [])
-        if str(item) != STUDY_ID
+        if Path(str(item)).stem != STUDY_ID
     ]
     index["updated_at"] = datetime.now().astimezone().strftime("%Y-%m-%d")
     _atomic_write_json(index_path, index)

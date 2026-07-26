@@ -53,8 +53,25 @@ Updated: `2026-07-26`
   strongest; treat that split as an `evaluate`-stage bootstrap question, not a
   conclusion. LightGBM's null `execution_semantics_version` is correct because it
   is not in `NEURAL_MODEL_IDS` and takes the non-accumulating branch.
-- Formal training is HELD, not merely interrupted. The frozen target itself is
-  under review, so no remaining formal cell may be started. Details below.
+- CLOSED. `seq100_pit_signal_quality_v1` terminated as `research_design_insufficient`
+  on 2026-07-26 through the new audited design-invalidation channel. The active
+  contract `daily_research/studies/seq100_pit_signal_quality_v1.json` is deleted;
+  the byte-identical archive is
+  `daily_research/research_records/seq100/seq100_pit_signal_quality_v1/contract.json`
+  and the compact record is `artifact.json` beside it
+  (`artifact_sha256=7a0ff473...4636e7`). No remaining formal cell may be started
+  and no winner exists. Everything below this line describes the closed study.
+- The terminal record is
+  `design_invalidation/attempt_001/design_invalidation.json`
+  (`design_invalidation_sha256=26a92e69...b461`),
+  `defect.class=objective_cannot_answer_stated_question`, six bound evidence
+  files, ten recorded inspected alternatives, `burned_fold_years=[2023,2024,2025]`,
+  four trained cells with three completed, `retained_as=architecture_exploration_evidence`,
+  and `successor.must_be_new_study_contract=true`. Every frozen artifact hash is
+  preserved unchanged inside it: research freeze `c7853c5a...`, target manifest
+  `00baa1d4...`, feature freeze `4cb21c30...`, formal matrix `189928c9...`.
+  All four closeout gates passed and protected-object hashes were identical
+  before and after.
 - `training/tabm_multioutput/fold_2023/seed_7` has an interrupted `attempt_001`.
   Its `active.json` says `status=training` and `progress.json` says
   `phase=validation, epoch=1/10`, last written `2026-07-26T09:45:36+08:00`, but
@@ -79,15 +96,27 @@ Updated: `2026-07-26`
   achievable growth near 23% of the return-only ceiling. Evidence:
   `daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md`.
 - An independent Oracle review accepted that diagnosis as design evidence and
-  rejected it as sufficient grounds to unfreeze. Only the `g20` ceiling row is a
-  true upper bound; the `IC(objective, model score)` column is circular because
-  the score is predicted pareto times predicted fill; and the ceiling script
-  filtered on `entry_filled`, which is future information. Retargeting cannot be
-  an `attempt_002`: the contract (`:229`), `research_freeze.json:267`, and
-  `formal_matrix.json:736` all forbid formal replacement. A retarget requires
-  closing this study as research-design-insufficient without altering its
-  artifacts and opening a new versioned contract that records 2023-2025 as burned
-  discovery years. The owner has not chosen a path yet.
+  rejected it as sufficient grounds to unfreeze a target inside a live study.
+  Only the `g20` ceiling row is a true upper bound; the
+  `IC(objective, model score)` column is circular because the score is predicted
+  pareto times predicted fill; and the ceiling script filtered on `entry_filled`,
+  which is future information. That review is why the study was closed rather
+  than retargeted in place: the contract (`:229`), `research_freeze.json:267`,
+  and `formal_matrix.json:736` all forbid formal replacement.
+- A follow-up read-only IC-to-growth transfer estimate used formal-evaluator
+  eligibility instead, ranking the full daily universe with unfilled entries
+  realizing cash. Blending the true `g20` rank with independent noise to hit a
+  target per-day rank IC gives daily Top-1% annualized log growth of 0.37/0.59/0.80
+  at IC 0.02, 0.77/1.07/1.25 at IC 0.05, and 1.06/1.44/1.67 at IC 0.10 across
+  2023/2024/2025. The trained model reaches IC 0.125/0.101/0.068 against `g20`
+  but returns only 0.014/0.172/0.037, because its extreme tail is selected on low
+  amplitude rather than on growth. Cash share inside the selected Top-1% is
+  0.03-0.7%, so unfilled and limit-up candidates are not what caps the result.
+  Evidence script: `tmp/seq100_ic_growth_transfer.py` (ignored output).
+- SUCCESSOR NOT YET DESIGNED. The owner has accepted growth as the objective and
+  the recorded successor requirement is a new study contract; no successor
+  contract, target, or metric has been written yet. Any successor must treat
+  2023-2025 as burned discovery years.
 - Training now pauses instead of dying under memory exhaustion.
   `_TrainingMonitor.relieve_memory_pressure()` trims the working set on a fixed
   cadence and `memory_exhausted()` raises `TrainingPaused` after a durable
@@ -117,3 +146,9 @@ Updated: `2026-07-26`
 - Protected packs and the 15 registered model bundles remain unchanged. The
   retained study checkpoints are research evidence and are not registered or
   active for execution.
+
+<!-- seq100-signal-quality:start -->
+- `seq100_pit_signal_quality_v1` 已以 `research_design_insufficient` 收口；selector winner 为 `null`。
+- 权威 compact record：`daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json`。
+- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 仍只允许新合同确认。
+<!-- seq100-signal-quality:end -->
