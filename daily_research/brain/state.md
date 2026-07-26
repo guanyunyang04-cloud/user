@@ -117,6 +117,31 @@ Updated: `2026-07-26`
   the recorded successor requirement is a new study contract; no successor
   contract, target, or metric has been written yet. Any successor must treat
   2023-2025 as burned discovery years.
+- EXIT-RULE QUESTION IS ANSWERED for label-definition purposes. A read-only
+  comparison of 22 exit rules over the same daily Top-1% picks, using the
+  persisted back-adjusted forward panel and the audited execution and cost path,
+  found that no adaptive rule beats the best fixed horizon on the worst fold.
+  Worst-fold annualized log growth: `fixed_60d` 0.0391, `barrier_+10/-10_v60`
+  0.0371, `trail_15pct` 0.0364, `trail_8pct` 0.0175, `fixed_20d` -0.0194,
+  `ma10_break` -0.0341, `ma5_break` -0.1049, `fixed_5d` -0.1282. Tighter stops
+  are monotonically worse and 20-day verticals are uniformly worse than 60-day
+  ones. The MA-5 break, the owner's core discretionary rule, ranks last or next
+  to last and is -0.6987 on a random-pick control, because a 6-day mean holding
+  pays roughly ten times the per-day round-trip cost drag of a 60-day holding.
+  Therefore the successor's entry label may be defined against a fixed terminal
+  exit, which resolves the label-versus-exit circularity. Evidence:
+  `daily_research/brain/references/seq100_exit_rule_comparison_20260726.md`.
+- Exit timing headroom is nevertheless large and uncaptured. Perfect-foresight
+  best-close exit reaches 0.4592 worst-fold on model picks and 0.9141 on random
+  picks, so with no selection skill at all perfect timing would outcompound any
+  measured selection-plus-fixed-exit combination. Adaptive exit stays an open
+  research lane that must earn its own evidence.
+- The exit comparison reconfirmed the defensive character of the retired model.
+  Under `fixed_20d`, model picks return -0.0194/0.1474/0.0142 against random
+  picks -0.1855/-0.1260/0.2092: value added in the two weak years, destroyed in
+  the strong year. Absolute levels come from a model trained on the retired
+  target, so only the ordering of exit rules under a common selection is claimed,
+  and every rule parameter was inspected on burned years.
 - Training now pauses instead of dying under memory exhaustion.
   `_TrainingMonitor.relieve_memory_pressure()` trims the working set on a fixed
   cadence and `memory_exhausted()` raises `TrainingPaused` after a durable
