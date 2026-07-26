@@ -900,6 +900,73 @@ class LightGBMDatasets:
     category_vocabularies: list[np.ndarray]
 
 
+def _memory_trimmed_sequence(sequence: Any, study: Mapping[str, Any]) -> Any:
+    import lightgbm as lgb
+
+    trim_config = dict(study["contract"]["model"]["working_set_trim"])
+    if not bool(trim_config["enabled"]):
+        return sequence
+    interval = int(trim_config["check_interval_batches"])
+    trigger_gb = float(trim_config["trigger_available_gb"])
+
+    class MemoryTrimmedSequence(lgb.Sequence):
+        def __init__(self) -> None:
+            self.batch_size = int(sequence.batch_size)
+            self.batch_count = 0
+            self.trim_events: list[dict[str, Any]] = []
+
+        def __len__(self) -> int:
+            return int(len(sequence))
+
+        def __getitem__(self, index: Any) -> np.ndarray:
+            is_batch = isinstance(index, slice) or (
+                isinstance(index, (list, tuple, np.ndarray))
+                and len(index) >= self.batch_size
+            )
+            if is_batch:
+                self.batch_count += 1
+                available_before = (
+                    signal_quality.sequence_training._available_physical_memory_gb()
+                )
+                should_check = self.batch_count == 1 or self.batch_count % interval == 0
+                should_trim = bool(
+                    should_check
+                    and (
+                        self.batch_count == 1
+                        or available_before is None
+                        or available_before < trigger_gb
+                    )
+                )
+                if should_trim:
+                    process_before = (
+                        signal_quality.sequence_training._current_process_memory_gb()
+                    )
+                    trim_succeeded = bool(
+                        signal_quality.sequence_training._trim_working_set()
+                    )
+                    available_after = (
+                        signal_quality.sequence_training._available_physical_memory_gb()
+                    )
+                    process_after = (
+                        signal_quality.sequence_training._current_process_memory_gb()
+                    )
+                    self.trim_events.append(
+                        {
+                            "batch": self.batch_count,
+                            "trim_succeeded": trim_succeeded,
+                            "available_before_gb": available_before,
+                            "available_after_gb": available_after,
+                            "working_set_before_gb": process_before["working_set_gb"],
+                            "working_set_after_gb": process_after["working_set_gb"],
+                            "private_before_gb": process_before["private_gb"],
+                            "private_after_gb": process_after["private_gb"],
+                        }
+                    )
+            return sequence[index]
+
+    return MemoryTrimmedSequence()
+
+
 def _model_parameters(
     study: Mapping[str, Any],
     *,
@@ -1024,6 +1091,7 @@ def build_lgb_datasets(
         category_vocabularies=category_vocabularies,
         batch_size=batch_size,
     )
+    train_sequence = _memory_trimmed_sequence(train_sequence, study)
     evaluation_sequence = signal_quality._make_lgb_sequence(
         continuous=inputs.continuous,
         categorical=inputs.categorical,
@@ -1033,6 +1101,7 @@ def build_lgb_datasets(
         category_vocabularies=category_vocabularies,
         batch_size=batch_size,
     )
+    evaluation_sequence = _memory_trimmed_sequence(evaluation_sequence, study)
     feature_names, categorical_count = _dataset_feature_names(inputs)
     continuous_count = len(feature_names) - categorical_count
     categorical_positions = list(range(continuous_count, len(feature_names)))
@@ -1062,7 +1131,9 @@ def build_lgb_datasets(
         params=construction,
     )
     train_set.construct()
+    signal_quality.sequence_training._trim_working_set()
     evaluation_set.construct()
+    signal_quality.sequence_training._trim_working_set()
     return LightGBMDatasets(
         train_rows=np.asarray(train_rows, dtype=np.int64),
         evaluation_rows=np.asarray(evaluation_rows, dtype=np.int64),
@@ -1097,6 +1168,10 @@ def _predict_model(model: Any, sequence: Any, *, chunk_size: int = 250_000) -> n
 def _training_callback(events_path: Path, task_id: str) -> Any:
     def callback(environment: Any) -> None:
         iteration = int(environment.iteration) + 1
+        if iteration == 1 or iteration % 10 == 0:
+            available = signal_quality.sequence_training._available_physical_memory_gb()
+            if available is None or available < 2.0:
+                signal_quality.sequence_training._trim_working_set()
         if iteration == 1 or iteration % 50 == 0:
             metrics = {
                 f"{dataset}.{metric}": float(value)
@@ -1260,6 +1335,14 @@ def train_one_model(
                 "sha256": _file_sha256(daily_path),
                 "size": int(daily_path.stat().st_size),
             },
+        },
+        "working_set_trim": {
+            "train_sequence": list(
+                getattr(datasets.train_sequence, "trim_events", [])
+            ),
+            "evaluation_sequence": list(
+                getattr(datasets.evaluation_sequence, "trim_events", [])
+            ),
         },
     }
     _atomic_write_json(output_dir / "task_result.json", result)

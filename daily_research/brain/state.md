@@ -141,7 +141,11 @@ Updated: `2026-07-27`
   statistics, and a mechanical step-4 decision gate. The three years are
   burned discovery/evaluation folds, not pristine holdouts; 2026 remains
   forbidden. No prediction or target decision existed when this contract was
-  registered.
+  registered. The first capacity attempt was killed by the 1.0 GiB guard during
+  LightGBM bin construction at 0 completed boosters and 0.732 GiB minimum
+  availability. Before any result existed, the contract was rebound to
+  32,768-row transfer blocks plus Windows working-set trimming; all scientific
+  rows, features, bins, labels, tree parameters, and decision gates are unchanged.
 - The 2025-12-31 outcome firewall passed: all 156,376 post-2025 rows are fully
   missing, 4,112 source recomputations had zero error, and an independent
   five-horizon cross-check over 5,929,931 pre-2023 paths had zero K3 or endpoint

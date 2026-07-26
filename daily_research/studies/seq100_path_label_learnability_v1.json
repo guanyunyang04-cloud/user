@@ -90,7 +90,13 @@
       "force_col_wise": true,
       "num_threads": 8,
       "histogram_pool_size_mb": 1024,
-      "sequence_batch_size": 65536,
+      "sequence_batch_size": 32768,
+      "working_set_trim": {
+        "enabled": true,
+        "check_interval_batches": 4,
+        "trigger_available_gb": 5.0,
+        "semantics": "release already-consumed Windows memmap and LightGBM construction pages without changing rows, features, bins, labels, or model parameters"
+      },
       "seed": 7,
       "target_scaling": "none",
       "hyperparameter_search": false,
@@ -209,5 +215,5 @@
       "study_incomplete"
     ]
   },
-  "contract_sha256": "3bf3f867736a4ba7acdd4335b93c5062189fd559d5217b9849c78d4c520e377d"
+  "contract_sha256": "7d542696c8b2e1c15650049740db675555d1633bc43ce92307da4739224ee7ac"
 }
