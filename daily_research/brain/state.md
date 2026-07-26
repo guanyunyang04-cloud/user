@@ -26,33 +26,6 @@ Updated: `2026-07-26`
 - Probability variants, strict OOF tree reranking, and 2026 confirmation have
   not started and require separate contracts. The true-batch-1024 study remains
   paused and resumes only on explicit request.
-- `seq100_pit_signal_quality_v1` is active. Its externally frozen review contains
-  38 primary sources and six differentiated model families; target screening
-  froze `pareto_ordinal_v1`, and the 2010-2020/2021/2022 feature screen froze F1.
-  The frozen decision rule and feature profile live in `seq100_signal_quality.py`
-  constants (`PATH_TARGET_PROFILE`, `FORMAL_FOLD_YEARS`) and in the per-attempt
-  freeze JSON, not in the study contract; the contract JSON is a data-binding
-  spec.
-- Model screening is COMPLETE, not paused. `model_screen/attempt_001/formal_matrix.json`
-  is `formal_matrix_frozen` at `2026-07-25T23:25:02+08:00` with
-  `replacement_allowed: false`, `selected_feature_profile: F1`, `formal_seed: 7`,
-  and `formal_matrix_sha256: 189928c9...e26f03` bound to the current
-  `contract_sha256: f15d1af2...561b2`. All six families carry frozen prescreen
-  metrics. Verified `adapter.execution_semantics_version` per family: TabM
-  `prescreen_retry_001`, PatchTST `prescreen_retry_002`, Deep Sets, DeepHit, and
-  NeuralNDCG all completed under their v2 semantics; only the superseded
-  `tabm_multioutput/prescreen` carries no version and is retained as history.
-  Prescreen `daily_ndcg_at_1pct`: TabM 0.2271, Deep Sets 0.2256, DeepHit 0.2232,
-  NeuralNDCG 0.2184, PatchTST 0.2174, LightGBM 0.2026.
-- Formal fold training is IN PROGRESS. The matrix is 6 families x 3 folds
-  (2023/2024/2025) x first seed 7 = 18 cells; robustness seeds are `[17, 29]`.
-  LightGBM is complete for all three folds at seed 7: 2023
-  `ndcg@1%=0.2145 / IC=0.3735` in 668.83s over 5,374,206 train / 545,843
-  development / 742,473 test candidates, 2024 `0.2439 / 0.3475`, 2025
-  `0.1732 / 0.4336`. The 2025 head precision is the weakest while its IC is the
-  strongest; treat that split as an `evaluate`-stage bootstrap question, not a
-  conclusion. LightGBM's null `execution_semantics_version` is correct because it
-  is not in `NEURAL_MODEL_IDS` and takes the non-accumulating branch.
 - CLOSED. `seq100_pit_signal_quality_v1` terminated as `research_design_insufficient`
   on 2026-07-26 through the new audited design-invalidation channel. The active
   contract `daily_research/studies/seq100_pit_signal_quality_v1.json` is deleted;
@@ -60,7 +33,8 @@ Updated: `2026-07-26`
   `daily_research/research_records/seq100/seq100_pit_signal_quality_v1/contract.json`
   and the compact record is `artifact.json` beside it
   (`artifact_sha256=7a0ff473...4636e7`). No remaining formal cell may be started
-  and no winner exists. Everything below this line describes the closed study.
+  and no winner exists. Its frozen process artifacts are architecture evidence
+  only.
 - The terminal record is
   `design_invalidation/attempt_001/design_invalidation.json`
   (`design_invalidation_sha256=26a92e69...b461`),
@@ -72,20 +46,10 @@ Updated: `2026-07-26`
   `00baa1d4...`, feature freeze `4cb21c30...`, formal matrix `189928c9...`.
   All four closeout gates passed and protected-object hashes were identical
   before and after.
-- `training/tabm_multioutput/fold_2023/seed_7` has an interrupted `attempt_001`.
-  Its `active.json` says `status=training` and `progress.json` says
-  `phase=validation, epoch=1/10`, last written `2026-07-26T09:45:36+08:00`, but
-  no training process is alive; it died when system memory reached 96.3% with
-  RSS 8.79 GB. It holds `last_checkpoint.pt` (2.13 MB) and
-  `resume_key_sha256=abf71ce4c3b33c264c5c14675b815a180bab57343a3d9d7937cd904ef7ef8354`
-  under `execution_semantics_version=exact_effective_batch_global_loss_v2`, so it
-  is resumable. Do not read `status=training` as a live run. Nothing else in the
-  matrix has started: no `evaluate`, winner, or 2026 confirmation exists.
-- `model_screen/training_budget_amendment.json` (`max_epochs` 3 to 10, `patience`
-  1 to 2, `amendment_sha256=4dd61a1d...13c67`) is consumed by exactly one cell:
-  that TabM `fold_2023/seed_7` resolved config. All three LightGBM folds carry
-  `training_budget_amendment_sha256: null` and are unaffected.
-- TARGET UNDER REVIEW. A read-only diagnosis over the three completed LightGBM
+- The interrupted TabM attempt and its durable checkpoint remain preserved, but
+  the closed-study contract forbids resuming it. No training process is alive;
+  there was no `evaluate`, winner, or 2026 confirmation.
+- The closed-study target diagnosis over the three completed LightGBM
   folds (2,178,290 prediction rows) found that the frozen design ranks path
   robustness, not growth. `U = min(log1p(d5)/5, log1p(d10)/10, log1p(d20)/20)` is
   positive for only 21.7%/25.7%/30.9% of filled candidates, so six negative-`U`
@@ -117,6 +81,27 @@ Updated: `2026-07-26`
   the recorded successor requirement is a new study contract; no successor
   contract, target, or metric has been written yet. Any successor must treat
   2023-2025 as burned discovery years.
+- The full-history structure probe has now been independently audited. Its
+  preliminary claims that one slot is structurally impossible, that slot count
+  has a measured +0.29 annual-log first-step effect, and that
+  `turn_low30 & ret20_mid` is a +0.032 baseline are withdrawn as decisions.
+  The authoritative verdict is
+  `daily_research/brain/references/seq100_full_history_structure_20260726.md`.
+- The strict pre-2026 terminal audit covers 3,678 signal dates through
+  `2025-09-02` and 8,236,774 fixed-20-day entries. Of 21,227 D80 zero marks,
+  96.86% are long suspensions, none is a security entity that ended by D80 or by
+  the observed endpoint, and 93.90% become legally sellable during D81-D324.
+  Median recovery is D113. Two registered code changes account for 38 rows.
+- Changing only the terminal convention moves annualized log growth from
+  `-0.3084` to a conservative `-0.0835`; on the uncensored D324-complete cohort it
+  moves from `-0.3732` to `-0.1260`. Variance drag remains real, but the prior
+  3%-annual-wipeout narrative and structural-impossibility claim are rejected.
+  Diversification, low-turnover/low-volatility shapes, and the mid-momentum
+  basket remain hypotheses, not frozen requirements or baselines.
+- Before successor target design, the evaluation path must support terminal
+  holding and registered code-change continuity, then use
+  `seq100_finite_capital_backtest.py` for a real cash-constrained slot test. No
+  slot count, horizon, leverage, stop, or successor target is selected yet.
 - EXIT-RULE QUESTION IS ANSWERED for label-definition purposes. A read-only
   comparison of 22 exit rules over the same daily Top-1% picks, using the
   persisted back-adjusted forward panel and the audited execution and cost path,
@@ -155,7 +140,7 @@ Updated: `2026-07-26`
   `seq100_pit_l35v2_v1/folds/views/l35v2_pit_20*.json` views are still
   `schema_version: 1` with 90 backing files each and all six revalidate under it,
   so no registered hash changed.
-- Neural runtime v2 is implemented and qualified before screening resumes. It
+- Neural runtime v2 was implemented and qualified before the study closed. It
   adds exact effective-batch loss semantics, per-adapter execution versions,
   real-hardware autotune, 30-second progress/ETA/resource heartbeats, 10-minute
   and epoch checkpoints, and safe `pause.request` resume. PatchTST passed a
@@ -167,7 +152,8 @@ Updated: `2026-07-26`
   path but selected pre-signal overheated names whose next-open execution often
   preceded mean reversion; it must not be resumed under its old contract.
 - 2026 remains frozen confirmation only. No 2026 result may select a model,
-  ranking rule, exit rule, Top-K, slot count, or account behavior.
+  ranking rule, exit rule, Top-K, slot count, or account behavior. The audited
+  full-history terminal result hard-cuts every price observation at 2025-12-31.
 - Protected packs and the 15 registered model bundles remain unchanged. The
   retained study checkpoints are research evidence and are not registered or
   active for execution.
