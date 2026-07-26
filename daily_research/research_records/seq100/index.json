@@ -93,6 +93,7 @@
   ],
   "active_studies": [
     "daily_research/studies/pit_l35v2_oof_trees_v1.json",
-    "daily_research/studies/l35v2_batch1024.json"
+    "daily_research/studies/l35v2_batch1024.json",
+    "daily_research/studies/seq100_path_label_learnability_v1.json"
   ]
 }

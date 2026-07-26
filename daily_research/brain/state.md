@@ -134,6 +134,14 @@ Updated: `2026-07-27`
   and five categorical causal F1-F5 features. It consumes neither the closed
   study target nor its D60-purged folds; future training must build new
   horizon-aware folds. No new technical-indicator family was added in this step.
+- LEARNABILITY STEP 3 ACTIVE. The pre-result contract
+  `daily_research/studies/seq100_path_label_learnability_v1.json` freezes one
+  CPU LightGBM per label-horizon-fold, horizon-specific dependency purges,
+  date-equal weights, separate 2023/2024/2025 reporting, overlap-robust HAC
+  statistics, and a mechanical step-4 decision gate. The three years are
+  burned discovery/evaluation folds, not pristine holdouts; 2026 remains
+  forbidden. No prediction or target decision existed when this contract was
+  registered.
 - The 2025-12-31 outcome firewall passed: all 156,376 post-2025 rows are fully
   missing, 4,112 source recomputations had zero error, and an independent
   five-horizon cross-check over 5,929,931 pre-2023 paths had zero K3 or endpoint
