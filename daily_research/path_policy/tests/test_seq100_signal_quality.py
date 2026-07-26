@@ -60,6 +60,65 @@ def _budget_amendment_payload() -> dict[str, object]:
     return payload
 
 
+DESIGN_STATEMENT = (
+    "The frozen objective measures a construct that cannot identify the causal "
+    "quantity stated in the study question under the available observations."
+)
+DESIGN_ARGUMENT = (
+    "Every admissible model and metric receives the same insufficient label "
+    "information, so additional fitting cannot repair the structural mismatch."
+)
+
+
+def _design_invalidation_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, Path]:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    freeze = {
+        "target_candidates": [
+            {"target_id": target_id} for target_id in quality.TARGET_CANDIDATE_IDS
+        ],
+        "model_candidates": [
+            {"model_id": model_id} for model_id in quality.MODEL_IDS
+        ],
+        "scientific_firewall": {"forbidden_years": [2026]},
+    }
+    freeze_payload = {
+        "study_id": quality.STUDY_ID,
+        "freeze": freeze,
+        "freeze_sha256": quality._canonical_json_sha256(freeze),
+    }
+    freeze_path = workspace / "research_freeze.json"
+    freeze_path.write_text(json.dumps(freeze_payload), encoding="utf-8")
+    contract = {
+        "contract_id": quality.STUDY_ID,
+        "research_freeze": {
+            "path": str(freeze_path.resolve()),
+            "file_sha256": quality._file_sha256(freeze_path),
+            "freeze_sha256": freeze_payload["freeze_sha256"],
+        },
+    }
+    study = {
+        "study_id": quality.STUDY_ID,
+        "contract": contract,
+        "contract_sha256": quality._canonical_json_sha256(contract),
+    }
+    study_path = workspace / "study.json"
+    study_path.write_text(json.dumps(study), encoding="utf-8")
+    monkeypatch.setattr(quality, "WORKSPACE_ROOT", workspace)
+    monkeypatch.setattr(
+        quality,
+        "_verify_protected_bindings",
+        lambda _study: {
+            "qdp_active_manifest_sha256": "qdp-hash",
+            "registered_model_registry_sha256": "registry-hash",
+        },
+    )
+    return study_path, workspace / "output", workspace
+
+
 def test_contract_research_freeze_and_source_bindings_are_valid() -> None:
     study = quality.load_study()
     assert study["contract_sha256"] == quality._canonical_json_sha256(
@@ -91,10 +150,226 @@ def test_cli_has_only_the_frozen_public_commands() -> None:
         "screen-models",
         "train",
         "evaluate",
+        "invalidate-design",
         "closeout",
     }
     assert "build-atlas" not in subparsers.choices
     assert "feature-screen" not in subparsers.choices
+
+
+def test_invalidate_study_design_writes_hashed_terminal_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    study_path, output_root, workspace = _design_invalidation_fixture(
+        tmp_path, monkeypatch
+    )
+    evidence_path = workspace / "evidence" / "design_analysis.txt"
+    evidence_path.parent.mkdir()
+    evidence_path.write_text("structural evidence", encoding="utf-8")
+    first_attempt = (
+        output_root
+        / "training/model_a/fold_2023/seed_7/attempts/attempt_001"
+    )
+    first_attempt.mkdir(parents=True)
+    (first_attempt / "predictions.parquet").write_bytes(b"predictions")
+    second_attempt = first_attempt.with_name("attempt_002")
+    second_attempt.mkdir()
+    (
+        output_root / "training/model_a/fold_2024/seed_7/attempts"
+    ).mkdir(parents=True)
+
+    summary = quality.invalidate_study_design(
+        study_path=study_path,
+        output_root=output_root,
+        defect_class="objective_cannot_answer_stated_question",
+        statement=DESIGN_STATEMENT,
+        structural_argument=DESIGN_ARGUMENT,
+        evidence_paths=[evidence_path],
+        inspected_alternatives=["direct utility target", "survival evaluator"],
+    )
+
+    record_path = Path(summary["record"])
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    declared_hash = record.pop("design_invalidation_sha256")
+    assert declared_hash == quality._canonical_json_sha256(record)
+    assert summary["design_invalidation_sha256"] == declared_hash
+    assert summary["burned_fold_years"] == [2023]
+    assert summary["trained_cell_count"] == 2
+    assert summary["completed_cell_count"] == 1
+    assert record["burned_fold_years"] == [2023]
+    assert record["trained_cells"] == [
+        "model_a/fold_2023/seed_7/attempt_001",
+        "model_a/fold_2023/seed_7/attempt_002",
+    ]
+    assert record["completed_cells"] == [
+        "model_a/fold_2023/seed_7/attempt_001"
+    ]
+    assert record["evidence"] == [
+        {
+            "path": "evidence/design_analysis.txt",
+            "sha256": quality._file_sha256(evidence_path),
+        }
+    ]
+    pointer_path = output_root / "design_invalidation/current.json"
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    assert pointer["record"] == str(record_path.resolve())
+    assert pointer["record_sha256"] == quality._file_sha256(record_path)
+
+
+def test_invalidate_study_design_rejects_unknown_defect_class(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    study_path, output_root, _workspace = _design_invalidation_fixture(
+        tmp_path, monkeypatch
+    )
+    with pytest.raises(ValueError, match="defect_class must be one of"):
+        quality.invalidate_study_design(
+            study_path=study_path,
+            output_root=output_root,
+            defect_class="replace_the_target",
+            statement=DESIGN_STATEMENT,
+            structural_argument=DESIGN_ARGUMENT,
+            evidence_paths=[study_path],
+            inspected_alternatives=["alternative"],
+        )
+
+
+def test_invalidate_study_design_rejects_short_written_arguments(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    study_path, output_root, _workspace = _design_invalidation_fixture(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "study_path": study_path,
+        "output_root": output_root,
+        "defect_class": "primary_metric_misspecified",
+        "evidence_paths": [study_path],
+        "inspected_alternatives": ["alternative"],
+    }
+    with pytest.raises(ValueError, match="statement must contain at least 80"):
+        quality.invalidate_study_design(
+            **common,
+            statement="too short",
+            structural_argument=DESIGN_ARGUMENT,
+        )
+    with pytest.raises(
+        ValueError, match="structural_argument must contain at least 80"
+    ):
+        quality.invalidate_study_design(
+            **common,
+            statement=DESIGN_STATEMENT,
+            structural_argument="too short",
+        )
+
+
+def test_invalidate_study_design_rejects_missing_evidence_or_alternatives(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    study_path, output_root, workspace = _design_invalidation_fixture(
+        tmp_path, monkeypatch
+    )
+    common = {
+        "study_path": study_path,
+        "output_root": output_root,
+        "defect_class": "evidence_power_insufficient",
+        "statement": DESIGN_STATEMENT,
+        "structural_argument": DESIGN_ARGUMENT,
+    }
+    with pytest.raises(ValueError, match="evidence_paths must contain"):
+        quality.invalidate_study_design(
+            **common,
+            evidence_paths=[],
+            inspected_alternatives=["alternative"],
+        )
+    with pytest.raises(ValueError, match="evidence path must exist and be a file"):
+        quality.invalidate_study_design(
+            **common,
+            evidence_paths=[workspace / "missing.txt"],
+            inspected_alternatives=["alternative"],
+        )
+    with pytest.raises(ValueError, match="inspected_alternatives must contain"):
+        quality.invalidate_study_design(
+            **common,
+            evidence_paths=[study_path],
+            inspected_alternatives=[],
+        )
+
+
+def test_invalidate_study_design_rejects_completed_evaluation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    study_path, output_root, _workspace = _design_invalidation_fixture(
+        tmp_path, monkeypatch
+    )
+    report_path = output_root / "evaluation/attempt_001/evaluation_report.json"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
+    pointer_path = output_root / "evaluation/current.json"
+    pointer_path.write_text(
+        json.dumps(
+            {
+                "evaluation_report": str(report_path.resolve()),
+                "evaluation_report_sha256": quality._file_sha256(report_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ValueError, match="illegal once a formal evaluation verdict exists"
+    ):
+        quality.invalidate_study_design(
+            study_path=study_path,
+            output_root=output_root,
+            defect_class="evaluator_semantics_inconsistent",
+            statement=DESIGN_STATEMENT,
+            structural_argument=DESIGN_ARGUMENT,
+            evidence_paths=[study_path],
+            inspected_alternatives=["alternative"],
+        )
+
+
+def test_terminal_study_evidence_prefers_and_verifies_design_invalidation(
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "output"
+    record_path = (
+        output_root
+        / "design_invalidation/attempt_001/design_invalidation.json"
+    )
+    record_path.parent.mkdir(parents=True)
+    record = {
+        "artifact_type": "seq100_signal_quality_design_invalidation",
+        "status": "research_design_insufficient",
+    }
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+    pointer_path = output_root / "design_invalidation/current.json"
+    pointer_path.parent.mkdir(parents=True, exist_ok=True)
+    pointer_path.write_text(
+        json.dumps(
+            {
+                "record": str(record_path.resolve()),
+                "record_sha256": quality._file_sha256(record_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status, evidence_path, evidence = quality._terminal_study_evidence(
+        study={}, output_root=output_root
+    )
+    assert status == "research_design_insufficient"
+    assert evidence_path == record_path.resolve()
+    assert evidence == record
+
+    record_path.write_text(json.dumps({**record, "mutated": True}), encoding="utf-8")
+    with pytest.raises(ValueError, match="design invalidation record changed"):
+        quality._terminal_study_evidence(study={}, output_root=output_root)
 
 
 def test_target_field_names_are_unique() -> None:

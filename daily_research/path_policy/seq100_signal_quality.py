@@ -45,6 +45,12 @@ DEFAULT_OUTPUT_ROOT = (
 )
 
 STUDY_ID = "seq100_pit_signal_quality_v1"
+DESIGN_DEFECT_CLASSES = (
+    "objective_cannot_answer_stated_question",
+    "evaluator_semantics_inconsistent",
+    "primary_metric_misspecified",
+    "evidence_power_insufficient",
+)
 TARGET_CANDIDATE_IDS = (
     "raw_path_distribution_v1",
     "pareto_ordinal_v1",
@@ -13829,11 +13835,197 @@ def evaluate_study(
     )
 
 
+def invalidate_study_design(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    defect_class: str,
+    statement: str,
+    structural_argument: str,
+    evidence_paths: Sequence[Path],
+    inspected_alternatives: Sequence[str],
+) -> dict[str, Any]:
+    """Close a frozen study whose design cannot answer its stated question."""
+    if defect_class not in DESIGN_DEFECT_CLASSES:
+        raise ValueError(
+            f"defect_class must be one of {DESIGN_DEFECT_CLASSES}: {defect_class!r}"
+        )
+    statement = statement.strip()
+    if len(statement) < 80:
+        raise ValueError("statement must contain at least 80 non-whitespace characters")
+    structural_argument = structural_argument.strip()
+    if len(structural_argument) < 80:
+        raise ValueError(
+            "structural_argument must contain at least 80 non-whitespace characters"
+        )
+    if not evidence_paths:
+        raise ValueError("evidence_paths must contain at least one evidence file")
+    if not inspected_alternatives:
+        raise ValueError("inspected_alternatives must contain at least one alternative")
+
+    study = load_study(study_path)
+    freeze_payload = load_research_freeze(study)
+    protection_before = _verify_protected_bindings(study)
+
+    evidence: list[dict[str, str]] = []
+    workspace_root = WORKSPACE_ROOT.resolve()
+    for value in evidence_paths:
+        path = Path(value).resolve()
+        if not path.is_file():
+            raise ValueError(f"evidence path must exist and be a file: {path}")
+        try:
+            recorded_path = path.relative_to(workspace_root).as_posix()
+        except ValueError:
+            recorded_path = str(path)
+        evidence.append({"path": recorded_path, "sha256": _file_sha256(path)})
+
+    evaluation_pointer = output_root / "evaluation/current.json"
+    if evaluation_pointer.exists():
+        pointer = json.loads(evaluation_pointer.read_text(encoding="utf-8"))
+        report_path = Path(str(pointer["evaluation_report"])).resolve()
+        if _file_sha256(report_path) != str(pointer["evaluation_report_sha256"]):
+            raise ValueError("evaluation report changed before design invalidation")
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        if str(report.get("status", "")) in {"completed", "winner_null"}:
+            raise ValueError(
+                "design invalidation is illegal once a formal evaluation verdict exists, "
+                "because that would be result-driven target selection"
+            )
+
+    record_root = (
+        WORKSPACE_ROOT
+        / "daily_research/research_records/seq100/seq100_pit_signal_quality_v1"
+    )
+    if record_root.exists():
+        raise ValueError(f"study research record already exists: {record_root}")
+    record_path = (
+        output_root
+        / "design_invalidation/attempt_001/design_invalidation.json"
+    )
+    design_pointer = output_root / "design_invalidation/current.json"
+    if record_path.exists() or design_pointer.exists():
+        raise ValueError("design invalidation record already exists")
+
+    target_manifest_sha256: str | None = None
+    if (output_root / "targets/current.json").exists():
+        target_path, _target = _load_current_artifact(
+            output_root, task="targets", pointer_name="target_manifest"
+        )
+        target_manifest_sha256 = _file_sha256(target_path)
+    feature_freeze_sha256: str | None = None
+    if (output_root / "feature_screen/current.json").exists():
+        _feature_path, feature = _load_feature_freeze(output_root, study)
+        feature_freeze_sha256 = str(feature["feature_freeze_sha256"])
+    formal_matrix_sha256: str | None = None
+    model_pointer = output_root / "model_screen/current.json"
+    if model_pointer.exists():
+        pointer = json.loads(model_pointer.read_text(encoding="utf-8"))
+        if "formal_matrix" in pointer:
+            _matrix_path, matrix = _load_formal_matrix(output_root, study)
+            formal_matrix_sha256 = str(matrix["formal_matrix_sha256"])
+
+    trained_cells: list[str] = []
+    completed_cells: list[str] = []
+    burned_fold_years: set[int] = set()
+    training_root = output_root / "training"
+    for attempt_path in training_root.glob(
+        "*/fold_*/seed_*/attempts/attempt_*"
+    ):
+        if not attempt_path.is_dir():
+            continue
+        model_path = attempt_path.parents[3]
+        fold_path = attempt_path.parents[2]
+        seed_path = attempt_path.parents[1]
+        try:
+            fold_year = int(fold_path.name.removeprefix("fold_"))
+        except ValueError:
+            continue
+        cell = (
+            f"{model_path.name}/fold_{fold_year}/"
+            f"{seed_path.name}/{attempt_path.name}"
+        )
+        burned_fold_years.add(fold_year)
+        trained_cells.append(cell)
+        if (attempt_path / "predictions.parquet").is_file():
+            completed_cells.append(cell)
+    trained_cells.sort()
+    completed_cells.sort()
+
+    protection_after = _verify_protected_bindings(study)
+    if protection_after != protection_before:
+        raise RuntimeError("protected-object hashes changed during design invalidation")
+    record: dict[str, Any] = {
+        "schema_version": 1,
+        "artifact_type": "seq100_signal_quality_design_invalidation",
+        "study_id": STUDY_ID,
+        "status": "research_design_insufficient",
+        "created_at": _now(),
+        "study_contract_sha256": study["contract_sha256"],
+        "research_freeze_sha256": freeze_payload["freeze_sha256"],
+        "defect": {
+            "class": defect_class,
+            "statement": statement,
+            "structural_argument": structural_argument,
+        },
+        "evidence": evidence,
+        "inspected_alternatives": [str(item) for item in inspected_alternatives],
+        "burned_fold_years": sorted(burned_fold_years),
+        "trained_cells": trained_cells,
+        "completed_cells": completed_cells,
+        "frozen_artifacts_preserved": {
+            "research_freeze_sha256": freeze_payload["freeze_sha256"],
+            "target_manifest_sha256": target_manifest_sha256,
+            "feature_freeze_sha256": feature_freeze_sha256,
+            "formal_matrix_sha256": formal_matrix_sha256,
+        },
+        "retained_as": "architecture_exploration_evidence",
+        "successor": {
+            "required": True,
+            "must_be_new_study_contract": True,
+            "formal_replacement_in_this_study": False,
+            "burned_fold_years_are_discovery_only": True,
+        },
+        "protection_before": protection_before,
+        "protection_after": protection_after,
+    }
+    record["design_invalidation_sha256"] = _canonical_json_sha256(record)
+    _atomic_write_json(record_path, record)
+    _atomic_write_json(
+        design_pointer,
+        {
+            "status": "research_design_insufficient",
+            "record": str(record_path.resolve()),
+            "record_sha256": _file_sha256(record_path),
+            "study_contract_sha256": study["contract_sha256"],
+            "updated_at": _now(),
+        },
+    )
+    return {
+        "status": "research_design_insufficient",
+        "record": str(record_path.resolve()),
+        "design_invalidation_sha256": record["design_invalidation_sha256"],
+        "burned_fold_years": sorted(burned_fold_years),
+        "trained_cell_count": len(trained_cells),
+        "completed_cell_count": len(completed_cells),
+    }
+
+
 def _terminal_study_evidence(
     *,
     study: Mapping[str, Any],
     output_root: Path,
 ) -> tuple[str, Path, dict[str, Any]]:
+    design_pointer = output_root / "design_invalidation/current.json"
+    if design_pointer.exists():
+        pointer = json.loads(design_pointer.read_text(encoding="utf-8"))
+        record_path = Path(str(pointer["record"])).resolve()
+        if _file_sha256(record_path) != str(pointer["record_sha256"]):
+            raise ValueError("design invalidation record changed")
+        return (
+            "research_design_insufficient",
+            record_path,
+            json.loads(record_path.read_text(encoding="utf-8")),
+        )
     evaluation_pointer = output_root / "evaluation/current.json"
     if evaluation_pointer.exists():
         pointer = json.loads(evaluation_pointer.read_text(encoding="utf-8"))
@@ -14037,6 +14229,24 @@ def closeout_study(
         },
         "protection_before": protection_before,
     }
+    if (
+        terminal_status == "research_design_insufficient"
+        and evidence.get("artifact_type")
+        == "seq100_signal_quality_design_invalidation"
+    ):
+        defect = dict(evidence["defect"])
+        artifact["design_invalidation"] = {
+            "class": defect["class"],
+            "statement": defect["statement"],
+            "structural_argument": defect["structural_argument"],
+            "evidence": evidence["evidence"],
+            "inspected_alternatives": evidence["inspected_alternatives"],
+            "burned_fold_years": evidence["burned_fold_years"],
+            "design_invalidation_sha256": evidence[
+                "design_invalidation_sha256"
+            ],
+            "successor": evidence["successor"],
+        }
     artifact_path = record_root / "artifact.json"
     _atomic_write_json(artifact_path, artifact)
 
@@ -14160,6 +14370,16 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--fold-year", type=int, choices=FORMAL_FOLD_YEARS, required=True)
     train.add_argument("--seed", type=int, default=7)
     sub.add_parser("evaluate")
+    invalidate = sub.add_parser("invalidate-design")
+    invalidate.add_argument(
+        "--defect-class", choices=DESIGN_DEFECT_CLASSES, required=True
+    )
+    invalidate.add_argument("--statement", required=True)
+    invalidate.add_argument("--structural-argument", required=True)
+    invalidate.add_argument(
+        "--evidence", type=Path, action="append", required=True
+    )
+    invalidate.add_argument("--alternative", action="append", required=True)
     sub.add_parser("closeout")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -14205,6 +14425,16 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         result = evaluate_study(
             study_path=args.study_contract,
             output_root=args.output_root,
+        )
+    elif args.command == "invalidate-design":
+        result = invalidate_study_design(
+            study_path=args.study_contract,
+            output_root=args.output_root,
+            defect_class=str(args.defect_class),
+            statement=str(args.statement),
+            structural_argument=str(args.structural_argument),
+            evidence_paths=args.evidence,
+            inspected_alternatives=args.alternative,
         )
     elif args.command == "closeout":
         result = closeout_study(
