@@ -32,6 +32,7 @@ from quant_data_platform.qdp_v2.manifest import (
     utc_now,
 )
 from quant_data_platform.qdp_v2.repair import (
+    _sql_literal,
     replace_active_table_from_parquet,
     update_active_manifest_metadata,
 )
@@ -218,10 +219,6 @@ def _scan_sql(paths: Sequence[Path]) -> str:
         raise AuxiliaryUpdateError("parquet_paths_empty")
     values = ",".join(_sql_literal(str(Path(item).resolve())) for item in paths)
     return f"read_parquet([{values}], union_by_name=true)"
-
-
-def _sql_literal(value: str) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def _date_text(value: Any) -> str:

@@ -19,6 +19,7 @@ commands:
   check --quick|--full    Validate manifests and data structure.
   update                  Add recent market data in place.
   compact                 Merge the 5-minute table into yearly files.
+  repair                  Repair active shards with explicit CAS protection.
   gc                      Remove unreferenced files.
 
 There is one active table per domain. Updates retain point-in-time lifecycle facts;
@@ -34,6 +35,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("gc",): "quant_data_platform.qdp_v2.gc",
     ("update",): "quant_data_platform.qdp_v2.update",
     ("compact",): "quant_data_platform.qdp_v2.compact",
+    ("repair",): "quant_data_platform.qdp_v2.repair",
 }
 
 ARG_ALIASES: dict[tuple[str, ...], list[str]] = {
@@ -83,6 +85,8 @@ def _split_workspace_option(args: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _requires_yolos(prefix: tuple[str, ...], args: list[str]) -> bool:
+    if prefix == ("repair",):
+        return True
     if prefix == ("check",):
         return True
     if prefix == ("update",):

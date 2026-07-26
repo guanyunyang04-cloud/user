@@ -40,6 +40,7 @@ from quant_data_platform.qdp_v2.duckdb_resources import (
     open_guarded_duckdb,
 )
 from quant_data_platform.qdp_v2.manifest import (
+    EXPECTED_BAR_TIMES,
     atomic_write_json,
     dataset_manifest_for_id,
     qdp_v2_root,
@@ -48,7 +49,7 @@ from quant_data_platform.qdp_v2.manifest import (
     resolve_manifest_path,
     stable_hash,
 )
-from quant_data_platform.qdp_v2.repair import bulk_append_active_shards_from_parquet
+from quant_data_platform.qdp_v2.repair import _sha256_file, bulk_append_active_shards_from_parquet
 
 
 REPAIR_VERSION = 1
@@ -88,17 +89,6 @@ INTRADAY_COLUMNS = (
     "adjusted_flag",
 )
 NUMERIC_COLUMNS = ("open", "high", "low", "close", "volume", "amount")
-EXPECTED_BAR_TIMES = tuple(
-    f"{hour:02d}{minute:02d}00000"
-    for hour, minute in (
-        *[(9, minute) for minute in range(35, 60, 5)],
-        *[(10, minute) for minute in range(0, 60, 5)],
-        *[(11, minute) for minute in range(0, 31, 5)],
-        *[(13, minute) for minute in range(5, 60, 5)],
-        *[(14, minute) for minute in range(0, 60, 5)],
-        (15, 0),
-    )
-)
 assert len(EXPECTED_BAR_TIMES) == 48
 
 DAILY_SCHEMA = pa.schema(
@@ -1462,14 +1452,6 @@ def _configure_workspace_runtime(workspace: Path) -> None:
 
 def _date_text(value: str) -> str:
     return pd.Timestamp(str(value)).strftime("%Y-%m-%d")
-
-
-def _sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _utc_now() -> str:

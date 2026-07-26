@@ -18,11 +18,12 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from quant_data_platform.core.json_io import json_safe
-from quant_data_platform.qdp_v2.audit import audit_active
+from quant_data_platform.qdp_v2.audit import VALUATION_REQUIRED_COLUMNS, audit_active
 from quant_data_platform.qdp_v2.auxiliary_update import AUXILIARY_DOMAINS
 from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
+    EXPECTED_BAR_TIMES,
     ShardManifestEntry,
     atomic_write_json,
     dataset_manifest_for_id,
@@ -32,18 +33,12 @@ from quant_data_platform.qdp_v2.manifest import (
     resolve_manifest_path,
     utc_now,
 )
-from quant_data_platform.qdp_v2.permanent_exclusions import (
-    POLICY_ID,
-    audit_exclusion_residuals,
-    load_registry,
-    registry_consistency,
-    registry_path,
-)
 from quant_data_platform.qdp_v2.pit_history import (
     LIFECYCLE_NORMALIZE_DOMAINS,
     PitHistoryError,
     audit_symbol_lifecycle_effectivity,
 )
+from quant_data_platform.qdp_v2.repair import _sql_literal
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
@@ -145,16 +140,7 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
         "share_fill_method",
         "source",
     ),
-    "valuation": (
-        "symbol",
-        "trade_date",
-        "total_mv",
-        "circ_mv",
-        "pe",
-        "pb",
-        "turnover_rate",
-        "source",
-    ),
+    "valuation": tuple(sorted(VALUATION_REQUIRED_COLUMNS)),
     "name_change": (
         "symbol",
         "trade_date",
@@ -185,19 +171,6 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
         "source_snapshot_date",
     ),
 }
-
-EXPECTED_BAR_TIMES = tuple(
-    f"{hour:02d}{minute:02d}00000"
-    for hour, minute in (
-        *[(9, minute) for minute in range(35, 60, 5)],
-        *[(10, minute) for minute in range(0, 60, 5)],
-        *[(11, minute) for minute in range(0, 31, 5)],
-        *[(13, minute) for minute in range(5, 60, 5)],
-        *[(14, minute) for minute in range(0, 60, 5)],
-        (15, 0),
-    )
-)
-
 
 def audit_latest_keys(
     *, workspace_root: str | Path | None = None
@@ -625,51 +598,6 @@ def audit_database(
                 )
             )
 
-    exclusion_file = registry_path(workspace_root=workspace_root)
-    exclusion_required = (
-        str(dict(active.get("scope", {}) or {}).get("permanent_exclusion_policy", ""))
-        == POLICY_ID
-    )
-    if exclusion_file.exists() and exclusion_required:
-        registry = load_registry(workspace_root=workspace_root, required=True)
-        registry_check = registry_consistency(registry)
-        residuals = audit_exclusion_residuals(
-            workspace_root=workspace_root,
-            registry=registry,
-        )
-        exclusion_check = {
-            "registry": registry_check,
-            "residuals": residuals,
-        }
-        cross_checks["permanent_exclusions"] = exclusion_check
-        if registry_check["status"] != "ok" or residuals["status"] != "ok":
-            findings.append(
-                _finding(
-                    "high",
-                    "scope",
-                    "permanent_exclusions",
-                    "permanent_exclusion_registry_or_residual_error",
-                    exclusion_check,
-                )
-            )
-    elif exclusion_required:
-        findings.append(
-            _finding(
-                "high",
-                "scope",
-                "permanent_exclusions",
-                "permanent_exclusion_registry_missing",
-                {"path": str(exclusion_file)},
-            )
-        )
-    elif exclusion_file.exists():
-        registry = load_registry(workspace_root=workspace_root, required=True)
-        cross_checks["retired_permanent_exclusions"] = {
-            "status": "retired_not_applied",
-            "registry": registry_consistency(registry),
-            "path": str(exclusion_file),
-        }
-
     latest = audit_latest_keys(workspace_root=workspace_root)
     if latest.get("status") == "needs_attention":
         findings.extend(
@@ -693,7 +621,7 @@ def audit_database(
             )
         )
 
-    blocking = [item for item in findings if item["severity"] in {"high", "critical"}]
+    blocking = [item for item in findings if item["severity"] == "high"]
     payload: dict[str, Any] = {
         "status": "needs_attention" if blocking else "ok",
         "mode": "full",
@@ -2277,10 +2205,6 @@ def _path_texts(paths: Iterable[Path]) -> list[str]:
 
 def _q(value: str) -> str:
     return '"' + str(value).replace('"', '""') + '"'
-
-
-def _sql_literal(value: str) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def _finding(

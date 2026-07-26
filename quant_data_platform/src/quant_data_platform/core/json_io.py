@@ -14,13 +14,6 @@ def read_json(path: str | Path) -> dict[str, Any]:
     return dict(payload) if isinstance(payload, dict) else {}
 
 
-def write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
-    resolved = Path(path)
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    resolved.write_text(json.dumps(json_safe(dict(payload)), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return resolved
-
-
 def json_safe(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {str(key): json_safe(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}

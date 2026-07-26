@@ -92,37 +92,6 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
                 manifest.source or {}
             ).get("secondary_material_mismatch_count"),
         }
-    # Imported lazily because the in-place repair module depends on this file.
-    from quant_data_platform.qdp_v2.permanent_exclusions import (
-        load_registry,
-        registry_consistency,
-        registry_path,
-    )
-
-    registry_file = registry_path(workspace_root=workspace_root)
-    exclusion_required = bool(
-        str(dict(active.get("scope", {}) or {}).get("permanent_exclusion_policy", ""))
-    )
-    if registry_file.exists():
-        registry = load_registry(workspace_root=workspace_root, required=True)
-        exclusions = {
-            **registry_consistency(registry),
-            "status": (
-                registry_consistency(registry).get("status", "")
-                if exclusion_required
-                else "retired_not_applied"
-            ),
-            "policy_id": str(registry.get("policy_id", "")),
-            "registry_path": str(registry_file),
-        }
-    else:
-        exclusions = {
-            "status": "not_configured",
-            "policy_id": "",
-            "registry_path": str(registry_file),
-            "exclusion_count": 0,
-            "errors": [],
-        }
     return {
         "status": "missing_dataset_manifest" if missing else ("missing_shards" if missing_shards else "ok"),
         "qdp_v2_root": str(root.resolve()),
@@ -133,7 +102,6 @@ def status_payload(*, workspace_root: str | Path | None = None, verify_files: bo
         "missing": missing,
         "missing_shards": missing_shards,
         "datasets": datasets,
-        "permanent_exclusions": exclusions,
     }
 
 
@@ -151,12 +119,6 @@ def print_status(payload: dict[str, Any], *, as_json: bool) -> None:
     if payload.get("active_as_of_date"):
         print(f"active_as_of_date: {payload.get('active_as_of_date')}")
     print(f"dataset_count: {payload.get('dataset_count', 0)}")
-    exclusions = dict(payload.get("permanent_exclusions", {}) or {})
-    if exclusions:
-        print(
-            "permanent_exclusions: "
-            f"{exclusions.get('status', '')} count={exclusions.get('exclusion_count', 0)}"
-        )
     for key, item in dict(payload.get("datasets", {}) or {}).items():
         print(
             f"{key}: {item.get('dataset_id')} "
@@ -187,16 +149,7 @@ def _active_dataset_refs(active: dict[str, Any]) -> list[tuple[str, str, str]]:
 
 def active_dataset_map(active: dict[str, Any] | Any) -> dict[str, str]:
     payload = dict(active or {})
-    if isinstance(payload.get("datasets"), dict):
-        return {str(domain): str(dataset_id) for domain, dataset_id in dict(payload.get("datasets", {}) or {}).items() if str(dataset_id or "").strip()}
-    refs: list[tuple[str, str, str]] = []
-    for section in ("raw", "derived", "research_panels"):
-        mapping = dict(payload.get(section, {}) or {})
-        for domain, dataset_id in sorted(mapping.items()):
-            text = str(dataset_id or "").strip()
-            if text:
-                refs.append((section, str(domain), text))
-    return {domain: dataset_id for _, domain, dataset_id in refs}
+    return {str(domain): str(dataset_id) for domain, dataset_id in dict(payload.get("datasets", {}) or {}).items() if str(dataset_id or "").strip()}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

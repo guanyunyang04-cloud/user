@@ -22,7 +22,6 @@ from quant_data_platform.qdp_v2.database_audit import (
     audit_latest_keys,
 )
 from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
-from quant_data_platform.qdp_v2.dataset import validate_dataset
 from quant_data_platform.qdp_v2.environment import (
     assert_yolos_environment,
     runtime_environment,
@@ -31,8 +30,10 @@ from quant_data_platform.qdp_v2.gc import lake_gc
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
+    _manifest_schema_from_arrow,
     qdp_v2_root,
     read_dataset_manifest,
+    schema_hash,
     write_active_manifest,
     write_dataset_manifest,
 )
@@ -75,6 +76,10 @@ def _write_domain(
     resolved_id = dataset_id or f"{domain}__unit"
     shard = root / "datasets" / domain / resolved_id / "shards" / "part.parquet"
     _write_parquet(shard, frame)
+    import pyarrow.parquet as pq
+
+    schema = _manifest_schema_from_arrow(pq.read_schema(shard))
+    declared_schema_hash = schema_hash(schema)
     date_column = "trade_date" if "trade_date" in frame else ""
     start = str(frame[date_column].min()) if date_column and len(frame) else ""
     end = str(frame[date_column].max()) if date_column and len(frame) else ""
@@ -90,17 +95,19 @@ def _write_domain(
             start_date=start,
             end_date=end,
             row_count=len(frame),
-            schema_hash="unit",
+            schema_hash=declared_schema_hash,
             shards=[
                 ShardManifestEntry(
                     path=str(shard.relative_to(root)).replace("\\", "/"),
                     row_count=len(frame),
                     start_date=start,
                     end_date=end,
+                    schema_hash=declared_schema_hash,
                 )
             ],
             source={"provider": "unit"},
             quality=quality or {},
+            schema=schema,
         ),
     )
     return resolved_id
@@ -227,7 +234,7 @@ def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path)
             start_date="2026-01-05",
             end_date="2026-01-05",
             row_count=2,
-            schema_hash="unit",
+            schema_hash=old_manifest.schema_hash,
             shards=[
                 *old_manifest.shards,
                 ShardManifestEntry(
@@ -235,10 +242,12 @@ def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path)
                     row_count=1,
                     start_date="2026-01-05",
                     end_date="2026-01-05",
+                    schema_hash=old_manifest.schema_hash,
                 ),
             ],
             source={"provider": "unit-composite"},
             quality={"ohlcv_non_null": True},
+            schema=old_manifest.schema,
         ),
     )
     _write_active(root, {"market_daily_raw": new_id})
@@ -253,7 +262,7 @@ def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path)
     assert old_id not in {item["dataset_id"] for item in gc["unreferenced"]}
 
 
-def test_audit_validate_and_gc_use_manifests(tmp_path: Path) -> None:
+def test_audit_and_gc_use_manifests(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
     active_id = _write_domain(
@@ -278,7 +287,6 @@ def test_audit_validate_and_gc_use_manifests(tmp_path: Path) -> None:
     )
     _write_active(root, {"trading_calendar": active_id})
 
-    assert validate_dataset(active_id, workspace_root=workspace)["status"] == "ok"
     assert audit_active(workspace_root=workspace, write=False)["status"] == "ok"
     dry = lake_gc(workspace_root=workspace, with_size=True)
     deleted = lake_gc(workspace_root=workspace, delete=True, yes=True)
@@ -309,7 +317,7 @@ def test_gc_can_explicitly_remove_workspace_local_runtime(tmp_path: Path) -> Non
     assert not runtime_file.parent.exists()
 
 
-def test_quick_check_does_not_scan_every_footer(tmp_path: Path) -> None:
+def test_quick_check_reads_schema_without_comparing_footer_row_counts(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
     dataset_id = _write_domain(

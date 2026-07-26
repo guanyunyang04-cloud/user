@@ -2,7 +2,7 @@
   "schema_version": 1,
   "artifact_type": "seq100_current_study",
   "study_id": "seq100_pit_signal_quality_v1",
-  "status": "planned",
+  "status": "active",
   "contract": {
     "schema_version": 1,
     "contract_id": "seq100_pit_signal_quality_v1",

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from quant_data_platform.qdp_v2 import baostock_update, compact, factor_update, update
-from quant_data_platform.qdp_v2.repair import _InstalledParquet, _shard_mutation_id
+from quant_data_platform.qdp_v2 import baostock_update, factor_update, update
+from quant_data_platform.qdp_v2.repair import _InstalledParquet, shard_mutation_id
 
 
 class _FakeBaostock:
@@ -209,20 +209,15 @@ def test_compact_prevalidated_mutation_id_matches_repair(tmp_path: Path) -> None
         created=False,
     )
 
-    expected = _shard_mutation_id(
+    mutation_id = shard_mutation_id(
         context,
         replacement_old_paths=[],
         replacement_items=[],
         removal_paths=[old],
         append_items=[item],
     )
-    actual = compact._expected_mutation_id(
-        context=context,
-        removals=[old],
-        append_sha256=[digest],
-    )
-
-    assert actual == expected
+    assert mutation_id.startswith("shard-mutation-v1:")
+    assert len(mutation_id) == len("shard-mutation-v1:") + 64
 
 
 def test_qdp_update_reports_failed_stage_and_keeps_runtime(

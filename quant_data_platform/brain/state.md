@@ -23,4 +23,4 @@ Updated: `2026-07-23`
 - Legacy lake, ingest, memmap, event-pack builder, provider-evaluation, and v3
   bootstrap code were removed. Protected `data/qdp_v2` and `data/event_packs`
   remain unchanged; the current CLI exposes only status/list/describe/check,
-  update, exclude, compact, and gc.
+  update, compact, and gc.

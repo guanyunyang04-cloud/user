@@ -36,6 +36,7 @@ from quant_data_platform.qdp_v2.manifest import (
     write_dataset_manifest,
 )
 from quant_data_platform.qdp_v2.repair import (
+    _sql_literal,
     mutate_active_shards_from_parquet,
     resolve_active_domain,
     update_active_manifest_metadata,
@@ -1660,7 +1661,6 @@ def _create_composite_dataset(
     )
     payload["source"] = source
     quality = dict(payload.get("quality", {}) or {})
-    quality.pop("permanent_exclusions", None)
     quality.update(
         {
             "scope": "point_in_time_historical_mainboard",
@@ -1919,10 +1919,6 @@ def _validate_prepared(
         "restored_daily_symbol_count": restored_daily_symbols,
         "errors": errors,
     }
-
-
-def _sql_literal(value: object) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def _quoted_identifier(value: object) -> str:

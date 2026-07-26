@@ -5,10 +5,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 import pyarrow.parquet as pq
 
@@ -16,8 +15,11 @@ from quant_data_platform.core.json_io import json_safe, read_json
 from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quant_data_platform.qdp_v2.manifest import atomic_write_json
 from quant_data_platform.qdp_v2.repair import (
+    _sha256_file,
+    _sql_literal,
     mutate_active_shards_from_parquet,
     resolve_active_domain,
+    shard_mutation_id,
 )
 
 
@@ -114,9 +116,9 @@ def run_compact(
         raise QdpCompactError(
             f"compact_source_row_count_mismatch:{expected_rows}!={context.manifest.row_count}"
         )
-    mutation_id = _expected_mutation_id(
-        context=context,
-        removals=context.shard_paths,
+    mutation_id = shard_mutation_id(
+        context,
+        removal_paths=context.shard_paths,
         append_sha256=prepared_sha256.values(),
     )
     mutation = mutate_active_shards_from_parquet(
@@ -286,35 +288,6 @@ def _load_prepared_state(
     return prepared, digests, fingerprint
 
 
-def _expected_mutation_id(
-    *,
-    context: Any,
-    removals: Sequence[Path],
-    append_sha256: Iterable[str],
-) -> str:
-    root = context.root.resolve()
-    payload = {
-        "version": 1,
-        "domain": context.domain,
-        "dataset_id": context.dataset_id,
-        "replacements": [],
-        "removals": sorted(_manifest_path_key(path, root) for path in removals),
-        "appends": sorted(str(item) for item in append_sha256),
-    }
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return f"shard-mutation-v1:{hashlib.sha256(encoded).hexdigest()}"
-
-
-def _manifest_path_key(path: Path, root: Path) -> str:
-    resolved = path.resolve() if path.is_absolute() else (root / path).resolve()
-    return os.path.normcase(os.path.abspath(str(resolved)))
-
-
 def _runtime_dir(workspace: Path, dataset_id: str, manifest_sha256: str) -> Path:
     token = hashlib.sha256(
         f"{dataset_id}:{manifest_sha256}".encode("utf-8")
@@ -350,18 +323,6 @@ def _manifest_years(start_date: str, end_date: str) -> tuple[str, ...]:
     if start > end:
         raise QdpCompactError("compact_manifest_date_range_invalid")
     return tuple(str(year) for year in range(start, end + 1))
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(8 * 1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _sql_literal(value: str) -> str:
-    return "'" + str(value).replace("'", "''") + "'"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

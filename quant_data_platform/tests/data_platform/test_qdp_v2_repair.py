@@ -6,16 +6,19 @@ from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
+import pyarrow.parquet as pq
 import pytest
 
-from quant_data_platform.core.json_io import read_json
 from quant_data_platform.qdp_v2 import repair as repair_module
+from quant_data_platform.qdp_v2.check import run_check
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
+    _manifest_schema_from_arrow,
     qdp_v2_root,
     read_dataset_manifest,
     resolve_manifest_path,
+    schema_hash,
     write_active_manifest,
     write_dataset_manifest,
 )
@@ -24,10 +27,8 @@ from quant_data_platform.qdp_v2.repair import (
     append_active_shard,
     bulk_append_active_shards_from_parquet,
     mutate_active_shards_from_parquet,
+    replace_active_table_from_parquet,
     repair_log_path,
-    replace_active_shard_from_parquet,
-    replace_active_shards,
-    replace_active_shards_from_parquet,
     resolve_active_domain,
 )
 
@@ -158,6 +159,34 @@ def _prepared(workspace: Path, name: str, frame: pd.DataFrame) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(path, index=False, engine="pyarrow")
     return path
+
+
+def _patch_request(
+    workspace: Path,
+    manifest_sha256: str,
+    changes: list[dict[str, object]],
+) -> Path:
+    path = workspace / "requests" / "patch.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "domain": DOMAIN,
+                "expected_manifest_sha256": manifest_sha256,
+                "changes": changes,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _workspace_snapshot(workspace: Path) -> dict[str, bytes | None]:
+    return {
+        path.relative_to(workspace).as_posix(): path.read_bytes() if path.is_file() else None
+        for path in sorted(workspace.rglob("*"))
+    }
 
 
 def test_mutate_supports_dimension_without_date_column(tmp_path: Path) -> None:
@@ -319,48 +348,6 @@ def test_resolve_active_domain_uses_existing_active_dataset(tmp_path: Path) -> N
     assert resolved.manifest_sha256 == _sha256(manifest_path)
 
 
-def test_replace_updates_only_selected_shard_in_place(tmp_path: Path) -> None:
-    workspace = _workspace(tmp_path)
-    active_path, manifest_path, shard_paths = _install_active(workspace)
-    root = qdp_v2_root(workspace)
-    active_before = active_path.read_bytes()
-    retained_path = shard_paths[1]
-    retained_hash = _sha256(retained_path)
-    old_path = shard_paths[0]
-    replacement = _frame("2026-01-05", "000001.SZ", close=11.0)
-
-    result = replace_active_shards(
-        DOMAIN,
-        {old_path.resolve(): replacement},
-        [old_path.relative_to(root).as_posix()],
-        "correct one known bad close",
-        workspace_root=workspace,
-    )
-
-    assert result["status"] == "replaced"
-    assert result["dataset_id"] == DATASET_ID
-    assert active_path.read_bytes() == active_before
-    assert not old_path.exists()
-    new_path = Path(result["new_shard_paths"][0])
-    assert new_path.exists()
-    assert new_path.parent == old_path.parent
-    assert pd.read_parquet(new_path)["close"].tolist() == [11.0]
-    assert retained_path.exists()
-    assert _sha256(retained_path) == retained_hash
-
-    updated = read_dataset_manifest(manifest_path)
-    assert updated.dataset_id == DATASET_ID
-    assert updated.row_count == 2
-    assert len(updated.shards) == 2
-    assert updated.shards[1].path == shard_paths[1].relative_to(root).as_posix()
-    assert resolve_manifest_path(updated.shards[0].path, root=root) == new_path
-    assert read_json(active_path)["datasets"][DOMAIN] == DATASET_ID
-    records = _log_records(workspace)
-    assert len(records) == 1
-    assert records[0]["action"] == "replace_active_shards"
-    assert records[0]["dataset_id"] == DATASET_ID
-
-
 def test_append_is_content_idempotent(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     active_path, manifest_path, _ = _install_active(workspace)
@@ -463,39 +450,6 @@ def test_mutate_composite_replacement_is_copy_on_write(tmp_path: Path) -> None:
     assert replacement_path.resolve() in current.shard_paths
 
 
-def test_commit_failure_preserves_manifest_and_old_shard(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace = _workspace(tmp_path)
-    active_path, manifest_path, shard_paths = _install_active(workspace)
-    active_before = active_path.read_bytes()
-    manifest_before = manifest_path.read_bytes()
-    old_hash = _sha256(shard_paths[0])
-
-    import quant_data_platform.qdp_v2.repair as repair
-
-    def fail_before_commit(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("unit commit failure")
-
-    monkeypatch.setattr(repair, "_commit_manifest", fail_before_commit)
-    with pytest.raises(RuntimeError, match="unit commit failure"):
-        replace_active_shards(
-            DOMAIN,
-            _frame("2026-01-05", "000001.SZ", close=11.0),
-            [shard_paths[0]],
-            "failure injection",
-            workspace_root=workspace,
-        )
-
-    assert active_path.read_bytes() == active_before
-    assert manifest_path.read_bytes() == manifest_before
-    assert shard_paths[0].exists()
-    assert _sha256(shard_paths[0]) == old_hash
-    assert not list(shard_paths[0].parent.glob("repair_replace_*.parquet"))
-    assert _log_records(workspace) == []
-
-
 @pytest.mark.parametrize("failure", ["schema", "duplicate", "cross_shard"])
 def test_invalid_repairs_are_rejected_without_commit(
     tmp_path: Path,
@@ -532,87 +486,6 @@ def test_invalid_repairs_are_rejected_without_commit(
     assert all(path.exists() for path in shard_paths)
     assert not list(shard_paths[0].parent.glob("repair_append_*.parquet"))
     assert _log_records(workspace) == []
-
-
-def test_single_parquet_path_replace_does_not_load_pandas(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace = _workspace(tmp_path)
-    active_path, manifest_path, shard_paths = _install_active(workspace)
-    active_before = active_path.read_bytes()
-    retained_hash = _sha256(shard_paths[1])
-    prepared = _prepared(
-        workspace,
-        "replacement",
-        _frame("2026-01-05", "000001.SZ", close=12.0),
-    )
-
-    def pandas_read_forbidden(*args: object, **kwargs: object) -> None:
-        raise AssertionError("prepared Parquet must not be loaded into pandas")
-
-    monkeypatch.setattr(pd, "read_parquet", pandas_read_forbidden)
-    result = replace_active_shard_from_parquet(
-        DOMAIN,
-        prepared,
-        shard_paths[0],
-        "replace from prepared parquet",
-        workspace_root=workspace,
-    )
-
-    new_path = Path(result["new_shard_paths"][0])
-    assert result["status"] == "replaced"
-    assert result["dataset_id"] == DATASET_ID
-    assert active_path.read_bytes() == active_before
-    assert manifest_path.exists()
-    assert not shard_paths[0].exists()
-    assert new_path.parent == shard_paths[0].parent
-    assert _sha256(new_path) == _sha256(prepared)
-    assert _sha256(shard_paths[1]) == retained_hash
-    assert prepared.exists()
-    assert repair_log_path(workspace).parent == (
-        workspace / "quant_data_platform" / "data" / "qdp_runtime"
-    ).resolve()
-
-
-def test_batch_parquet_path_replace_commits_all_selected_shards(
-    tmp_path: Path,
-) -> None:
-    workspace = _workspace(tmp_path)
-    active_path, manifest_path, shard_paths = _install_active(workspace)
-    active_before = active_path.read_bytes()
-    first = _prepared(
-        workspace,
-        "replace_first",
-        _frame("2026-01-05", "000001.SZ", close=13.0),
-    )
-    second = _prepared(
-        workspace,
-        "replace_second",
-        _frame("2026-01-06", "000002.SZ", close=23.0),
-    )
-
-    result = replace_active_shards_from_parquet(
-        DOMAIN,
-        [(shard_paths[0], first), (shard_paths[1], second)],
-        "replace two prepared shards",
-        workspace_root=workspace,
-    )
-
-    assert result["status"] == "replaced"
-    assert result["replacement_count"] == 2
-    assert result["row_count"] == 2
-    assert active_path.read_bytes() == active_before
-    assert all(not path.exists() for path in shard_paths)
-    new_paths = [Path(item) for item in result["new_shard_paths"]]
-    assert [_sha256(path) for path in new_paths] == [
-        _sha256(first),
-        _sha256(second),
-    ]
-    updated = read_dataset_manifest(manifest_path)
-    assert updated.dataset_id == DATASET_ID
-    assert updated.row_count == 2
-    assert len(updated.shards) == 2
 
 
 def test_bulk_append_validates_primary_keys_once_and_is_idempotent(
@@ -722,44 +595,6 @@ def test_bulk_append_rejects_primary_key_overlap_and_cleans_targets(
     assert all(path.exists() for path in shard_paths)
     assert not list(shard_paths[0].parent.glob("repair_append_*.parquet"))
     assert all(path.exists() for path in paths)
-    assert _log_records(workspace) == []
-
-
-def test_prepared_parquet_commit_failure_rolls_back_new_target(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace = _workspace(tmp_path)
-    active_path, manifest_path, shard_paths = _install_active(workspace)
-    active_before = active_path.read_bytes()
-    manifest_before = manifest_path.read_bytes()
-    old_hash = _sha256(shard_paths[0])
-    prepared = _prepared(
-        workspace,
-        "commit_failure",
-        _frame("2026-01-05", "000001.SZ", close=15.0),
-    )
-    import quant_data_platform.qdp_v2.repair as repair
-
-    def fail_before_commit(*args: object, **kwargs: object) -> None:
-        raise RuntimeError("prepared commit failure")
-
-    monkeypatch.setattr(repair, "_commit_manifest", fail_before_commit)
-    with pytest.raises(RuntimeError, match="prepared commit failure"):
-        replace_active_shard_from_parquet(
-            DOMAIN,
-            prepared,
-            shard_paths[0],
-            "prepared failure injection",
-            workspace_root=workspace,
-        )
-
-    assert active_path.read_bytes() == active_before
-    assert manifest_path.read_bytes() == manifest_before
-    assert shard_paths[0].exists()
-    assert _sha256(shard_paths[0]) == old_hash
-    assert not list(shard_paths[0].parent.glob("repair_replace_*.parquet"))
-    assert prepared.exists()
     assert _log_records(workspace) == []
 
 
@@ -975,3 +810,351 @@ def test_atomic_replace_retries_transient_windows_file_lock(
 
     assert attempts == 2
     assert target.read_bytes() == b"parquet payload"
+
+
+def test_patch_dry_run_does_not_change_workspace(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, _ = _install_active(workspace)
+    digest = _sha256(manifest_path)
+    request = _patch_request(
+        workspace,
+        digest,
+        [
+            {
+                "key": {"trade_date": "2026-01-05", "symbol": "000001.SZ"},
+                "column": "close",
+                "expected": 10.0,
+                "value": 10.5,
+            }
+        ],
+    )
+    before = _workspace_snapshot(workspace)
+
+    result = repair_module.patch_active_cells(
+        request,
+        reason="preview one correction",
+        expected_manifest_sha256=digest,
+        workspace_root=workspace,
+    )
+
+    assert result["status"] == "would_patch"
+    assert result["row_count_touched"] == 1
+    assert result["schema_hash"] == "unit-schema"
+    assert _workspace_snapshot(workspace) == before
+
+
+def test_patch_applies_exact_cell_and_records_receipt(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, _ = _install_active(workspace)
+    digest = _sha256(manifest_path)
+    request = _patch_request(
+        workspace,
+        digest,
+        [
+            {
+                "key": {"trade_date": "2026-01-05", "symbol": "000001.SZ"},
+                "column": "close",
+                "expected": 10.0,
+                "value": 10.5,
+            }
+        ],
+    )
+
+    result = repair_module.patch_active_cells(
+        request,
+        reason="correct one close",
+        expected_manifest_sha256=digest,
+        workspace_root=workspace,
+        apply=True,
+    )
+
+    current = resolve_active_domain(DOMAIN, workspace_root=workspace)
+    combined = pd.concat(
+        [pd.read_parquet(path) for path in current.shard_paths], ignore_index=True
+    )
+    value = combined.loc[combined["symbol"] == "000001.SZ", "close"].item()
+    receipt = current.manifest.source["repair_shard_mutations"][result["mutation_id"]]
+    assert value == 10.5
+    assert receipt == {
+        "reason": "correct one close",
+        "previous_manifest_sha256": digest,
+        "affected_date_range": {"start": "2026-01-05", "end": "2026-01-05"},
+        "changed_columns": ["close"],
+        "old_schema_hash": "unit-schema",
+        "new_schema_hash": "unit-schema",
+        "utc_timestamp": receipt["utc_timestamp"],
+        "old_shard_sha256": receipt["old_shard_sha256"],
+    }
+    assert receipt["utc_timestamp"].endswith("+00:00")
+    assert len(receipt["old_shard_sha256"]) == 1
+
+
+def test_patch_rejects_wrong_expected_value(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, _ = _install_active(workspace)
+    digest = _sha256(manifest_path)
+    request = _patch_request(
+        workspace,
+        digest,
+        [
+            {
+                "key": {"trade_date": "2026-01-05", "symbol": "000001.SZ"},
+                "column": "close",
+                "expected": 99.0,
+                "value": 10.5,
+            }
+        ],
+    )
+
+    with pytest.raises(QdpV2RepairError, match="expected_mismatch.*expected=99.0:actual=10.0"):
+        repair_module.patch_active_cells(
+            request,
+            reason="reject stale expected value",
+            expected_manifest_sha256=digest,
+            workspace_root=workspace,
+        )
+
+
+@pytest.mark.parametrize("match_count", [0, 2])
+def test_patch_requires_exactly_one_matching_row(
+    tmp_path: Path,
+    match_count: int,
+) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, shard_paths = _install_active(workspace)
+    if match_count == 2:
+        duplicate = _frame("2026-01-05", "000001.SZ", close=20.0)
+        duplicate.to_parquet(shard_paths[1], index=False, engine="pyarrow")
+        key = {"trade_date": "2026-01-05", "symbol": "000001.SZ"}
+    else:
+        key = {"trade_date": "2026-01-09", "symbol": "999999.SZ"}
+    digest = _sha256(manifest_path)
+    request = _patch_request(
+        workspace,
+        digest,
+        [{"key": key, "column": "close", "expected": 10.0, "value": 10.5}],
+    )
+
+    with pytest.raises(QdpV2RepairError, match=f"matches={match_count}"):
+        repair_module.patch_active_cells(
+            request,
+            reason="enforce unique patch target",
+            expected_manifest_sha256=digest,
+            workspace_root=workspace,
+        )
+
+
+def test_patch_forbids_primary_key_edit(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, _ = _install_active(workspace)
+    digest = _sha256(manifest_path)
+    request = _patch_request(
+        workspace,
+        digest,
+        [
+            {
+                "key": {"trade_date": "2026-01-05", "symbol": "000001.SZ"},
+                "column": "trade_date",
+                "expected": "2026-01-05",
+                "value": "2026-01-06",
+            }
+        ],
+    )
+
+    with pytest.raises(QdpV2RepairError, match="primary_key_edit_forbidden"):
+        repair_module.patch_active_cells(
+            request,
+            reason="reject key edit",
+            expected_manifest_sha256=digest,
+            workspace_root=workspace,
+        )
+
+
+def test_patch_cli_refuses_stale_manifest_cas(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, _ = _install_active(workspace)
+    digest = _sha256(manifest_path)
+    request = _patch_request(workspace, digest, [])
+    payload = json.loads(request.read_text(encoding="utf-8"))
+    payload["changes"] = [
+        {
+            "key": {"trade_date": "2026-01-05", "symbol": "000001.SZ"},
+            "column": "close",
+            "expected": 10.0,
+            "value": 10.5,
+        }
+    ]
+    request.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(repair_module.QdpV2RepairConflictError, match="expected_manifest_sha256_mismatch"):
+        repair_module.main(
+            [
+                "patch",
+                "--request",
+                str(request),
+                "--reason",
+                "reject stale manifest",
+                "--expected-manifest-sha256",
+                "0" * 64,
+                "--workspace-root",
+                str(workspace),
+            ]
+        )
+
+
+def test_mutation_replay_preserves_receipt_bytes(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, shard_paths = _install_active(workspace)
+    replacement = _prepared(
+        workspace,
+        "receipt_replacement",
+        _frame("2026-01-05", "000001.SZ", close=12.0),
+    )
+    first = mutate_active_shards_from_parquet(
+        DOMAIN,
+        replacements=[(shard_paths[0], replacement)],
+        reason="receipt replay",
+        workspace_root=workspace,
+        changed_columns=["close"],
+    )
+    manifest_after = manifest_path.read_bytes()
+    receipt_before = resolve_active_domain(
+        DOMAIN, workspace_root=workspace
+    ).manifest.source["repair_shard_mutations"][first["mutation_id"]]
+
+    current_digest = _sha256(manifest_path)
+    assert repair_module.main(
+        [
+            "mutate",
+            "--domain",
+            DOMAIN,
+            "--replace",
+            f"{shard_paths[0]}={replacement}",
+            "--reason",
+            "different replay reason",
+            "--expected-manifest-sha256",
+            current_digest,
+            "--expected-mutation-id",
+            first["mutation_id"],
+            "--workspace-root",
+            str(workspace),
+            "--apply",
+        ]
+    ) == 0
+    receipt_after = resolve_active_domain(
+        DOMAIN, workspace_root=workspace
+    ).manifest.source["repair_shard_mutations"][first["mutation_id"]]
+
+    assert manifest_path.read_bytes() == manifest_after
+    assert receipt_after == receipt_before
+    assert len(resolve_active_domain(DOMAIN, workspace_root=workspace).manifest.source["repair_shard_mutations"]) == 1
+
+
+def test_replace_table_schema_change_requires_cli_contract_guards(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, _ = _install_active(workspace)
+    digest = _sha256(manifest_path)
+    changed = _frame("2026-01-05", "000001.SZ", close=10.0).assign(extra=["x"])
+    prepared = _prepared(workspace, "schema_change", changed)
+    new_schema = _manifest_schema_from_arrow(pq.read_schema(prepared))
+    new_hash = schema_hash(new_schema)
+    base = [
+        "replace-table",
+        "--domain",
+        DOMAIN,
+        "--input",
+        str(prepared),
+        "--reason",
+        "add one declared field",
+        "--expected-manifest-sha256",
+        digest,
+        "--workspace-root",
+        str(workspace),
+        "--apply",
+    ]
+
+    with pytest.raises(ValueError, match="schema_hash_invalid"):
+        repair_module.main(base)
+    with pytest.raises(ValueError, match="contract_version_required"):
+        repair_module.main([*base, "--expected-new-schema-hash", new_hash])
+    assert repair_module.main(
+        [
+            *base,
+            "--expected-new-schema-hash",
+            new_hash,
+            "--contract-version",
+            "qdp_v2_market_daily_raw_v2",
+        ]
+    ) == 0
+    assert read_dataset_manifest(manifest_path).schema_hash == new_hash
+
+
+@pytest.mark.parametrize("drift", ["type", "order"])
+def test_quick_check_detects_manifest_footer_schema_drift(
+    tmp_path: Path,
+    drift: str,
+) -> None:
+    workspace = _workspace(tmp_path)
+    _, manifest_path, shard_paths = _install_active(workspace)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    declared = _manifest_schema_from_arrow(pq.read_schema(shard_paths[0]))
+    if drift == "type":
+        declared[0]["type"] = "DOUBLE"
+    else:
+        declared = [declared[1], declared[0], *declared[2:]]
+    payload["schema"] = declared
+    payload["schema_hash"] = schema_hash(declared)
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = run_check(workspace_root=workspace, full=False)
+    errors = result["active"]["errors"]
+
+    # One drift yields one diagnostic: a reordered declaration is reported as a
+    # column-order mismatch, and a type-only difference as a footer mismatch.
+    if drift == "order":
+        assert any("schema_column_order_mismatch" in item for item in errors)
+        assert not any("footer_schema_mismatch" in item for item in errors)
+    else:
+        assert any("footer_schema_mismatch" in item for item in errors)
+        assert not any("schema_column_order_mismatch" in item for item in errors)
+
+
+def test_replace_active_table_accepts_single_and_multiple_paths(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    _, _, _ = _install_active(workspace)
+    single = _prepared(
+        workspace,
+        "single_replace",
+        _frame("2026-01-07", "000003.SZ", close=30.0),
+    )
+
+    first = replace_active_table_from_parquet(
+        DOMAIN,
+        single,
+        reason="single path remains valid",
+        workspace_root=workspace,
+    )
+    left = _prepared(
+        workspace,
+        "multi_left",
+        _frame("2026-01-08", "000004.SZ", close=40.0),
+    )
+    right = _prepared(
+        workspace,
+        "multi_right",
+        _frame("2026-01-09", "000005.SZ", close=50.0),
+    )
+    second = replace_active_table_from_parquet(
+        DOMAIN,
+        [left, right],
+        reason="preserve two prepared partitions",
+        workspace_root=workspace,
+    )
+
+    current = resolve_active_domain(DOMAIN, workspace_root=workspace)
+    assert first["status"] == "replaced"
+    assert len(first["new_shard_paths"]) == 1
+    assert second["status"] == "replaced"
+    assert len(second["new_shard_paths"]) == 2
+    assert len(current.manifest.shards) == 2
+    assert current.manifest.row_count == 2

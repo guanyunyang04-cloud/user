@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-24",
+  "updated_at": "2026-07-26",
   "current_model": "structured_joint_turnover_180x35_v2",
   "selection_window": "2023-2025",
   "confirmation_window": "2026",
@@ -22,5 +22,9 @@
     {"id": "global_tail", "status": "retired", "path": "daily_research/research_records/seq100/global_tail_retired/retirement.json"},
     {"id": "l35v3", "status": "retired", "path": "daily_research/research_records/seq100/l35v3_retired/artifact.json"}
   ],
-  "active_studies": []
+  "active_studies": [
+    "daily_research/studies/seq100_pit_signal_quality_v1.json",
+    "daily_research/studies/pit_l35v2_oof_trees_v1.json",
+    "daily_research/studies/l35v2_batch1024.json"
+  ]
 }

@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from quant_data_platform.core.json_io import json_safe, read_json
+from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.manifest import iter_dataset_manifests, qdp_v2_root, read_active_manifest, read_dataset_manifest
 from quant_data_platform.qdp_v2.status import _active_dataset_refs
 
@@ -23,11 +23,10 @@ def lake_gc(
     if delete and not yes:
         raise ValueError("qdp_v2_gc_delete_requires_yes")
     root = qdp_v2_root(workspace_root)
-    pin_ids, pin_records = _pinned_dataset_ids(root)
     active = read_active_manifest(root)
     referenced = _referenced_dataset_closure(
         root,
-        {dataset_id for _, _, dataset_id in _active_dataset_refs(active)} | pin_ids,
+        {dataset_id for _, _, dataset_id in _active_dataset_refs(active)},
     )
     inventory = _dataset_dir_inventory(root, with_size=with_size or delete)
     unreferenced = [item for item in inventory if item["dataset_id"] not in referenced]
@@ -64,8 +63,6 @@ def lake_gc(
         "qdp_v2_root": str(root.resolve()),
         "destructive_actions_performed": bool(delete and (deleted or deleted_runtime)),
         "referenced_dataset_count": len(referenced),
-        "pinned_dataset_count": len(pin_ids),
-        "pin_records": pin_records,
         "dataset_dir_count": len(inventory),
         "unreferenced_dataset_dir_count": len(unreferenced),
         "unreferenced_bytes": sum(int(item["bytes"]) for item in unreferenced),
@@ -85,25 +82,6 @@ def lake_gc(
             "deleted": deleted_runtime[:limit] if limit else deleted_runtime,
         },
     }
-
-
-def _pinned_dataset_ids(root: Path) -> tuple[set[str], list[dict[str, Any]]]:
-    ids: set[str] = set()
-    records: list[dict[str, Any]] = []
-    pins_root = root / "pins"
-    if not pins_root.exists():
-        return ids, records
-    for path in sorted(pins_root.glob("*.json")):
-        payload = read_json(path)
-        raw = payload.get("dataset_ids", [])
-        if isinstance(raw, dict):
-            values = [str(item) for item in raw.values()]
-        else:
-            values = [str(item) for item in list(raw or [])]
-        values = [item for item in values if item]
-        ids.update(values)
-        records.append({"path": str(path.resolve()), "pin_name": str(payload.get("pin_name", "") or path.stem), "dataset_count": len(values)})
-    return ids, records
 
 
 def _referenced_dataset_closure(root: Path, seed_ids: set[str]) -> set[str]:

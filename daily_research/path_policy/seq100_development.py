@@ -21,7 +21,7 @@ STUDY_ROOT = WORKSPACE_ROOT / "daily_research/studies"
 QDP_ACTIVE = WORKSPACE_ROOT / "quant_data_platform/data/qdp_v2/active/active.json"
 BASE_PACK = WORKSPACE_ROOT / "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
 ACTIVE_STUDIES = {
-    "signal-close-path-value-2x2": STUDY_ROOT / "signal_close_path_value_2x2_v1.json",
+    "pit-signal-quality": STUDY_ROOT / "seq100_pit_signal_quality_v1.json",
     "pit-oof-trees": STUDY_ROOT / "pit_l35v2_oof_trees_v1.json",
     "l35v2-batch1024": STUDY_ROOT / "l35v2_batch1024.json",
 }

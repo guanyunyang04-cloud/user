@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+import shutil
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -10,6 +13,7 @@ import torch
 
 import daily_research.path_policy.qdp_v2_sequence_path_pack as sequence_pack
 import daily_research.path_policy.qdp_v2_sequence_path_training as sequence_training
+import daily_research.path_policy.seq100_fold_contract as fold_contract
 from daily_research.path_policy.qdp_v2_raw_rising_path_atlas import (
     RAW_SIGNAL_COLUMNS,
     _add_raw_daily_signals,
@@ -604,7 +608,9 @@ def test_qdp_source_hash_mismatch_is_reported_as_stale(tmp_path) -> None:
         assert_qdp_source_fresh(manifest)
 
 
-def test_immutable_research_pack_survives_active_qdp_manifest_advance(tmp_path) -> None:
+def test_immutable_research_pack_survives_active_qdp_manifest_advance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source = tmp_path / "pack" / "manifest.json"
     source.parent.mkdir(parents=True)
     sample = source.parent / "sample_index.parquet"
@@ -626,18 +632,24 @@ def test_immutable_research_pack_survives_active_qdp_manifest_advance(tmp_path) 
     }
     source.write_text(json.dumps(source_payload), encoding="utf-8")
     stat = panel.stat()
-    inventory = [{"path": str(panel.resolve()), "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}]
+    inventory = [
+        {
+            "path": panel.resolve().relative_to(tmp_path.resolve()).as_posix(),
+            "size": stat.st_size,
+            "sha256": sequence_pack._file_sha256(panel),
+        }
+    ]
     attachment = tmp_path / "overlay.json"
     attachment.write_text('{"version": 1}\n', encoding="utf-8")
     manifest = {
         **source_payload,
         "source_view_provenance": {
-            "schema_version": 1,
-            "manifest_path": str(source),
+            "schema_version": 2,
+            "manifest_path": source.resolve().relative_to(tmp_path.resolve()).as_posix(),
             "manifest_sha256": sequence_pack._file_sha256(source),
-            "sample_index_path": str(sample),
+            "sample_index_path": sample.resolve().relative_to(tmp_path.resolve()).as_posix(),
             "sample_index_sha256": sequence_pack._file_sha256(sample),
-            "candidate_index_path": str(candidate),
+            "candidate_index_path": candidate.resolve().relative_to(tmp_path.resolve()).as_posix(),
             "candidate_index_sha256": sequence_pack._file_sha256(candidate),
             "artifact_type": "qdp_v2_sequence_path_pack",
             "backing_files": inventory,
@@ -658,10 +670,172 @@ def test_immutable_research_pack_survives_active_qdp_manifest_advance(tmp_path) 
             ],
         },
     }
+    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", tmp_path)
     assert_qdp_source_fresh(manifest)
     attachment.write_text('{"version": 2}\n', encoding="utf-8")
     with pytest.raises(ValueError, match="immutable_pack_attachment_hash_mismatch"):
         assert_qdp_source_fresh(manifest)
+
+
+def _write_v2_provenance_fixture(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[dict[str, object], Path]:
+    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", root)
+    fold_contract._SOURCE_BACKING_FILE_SHA256_CACHE.clear()
+    pack = root / "pack"
+    pack.mkdir(parents=True)
+    source = pack / "manifest.json"
+    sample = pack / "sample_index.parquet"
+    candidate = pack / "candidate_index.parquet"
+    panel = pack / "daily.float32.dat"
+    sample.write_bytes(b"sample-index")
+    candidate.write_bytes(b"candidate-index")
+    panel.write_bytes(b"abcd")
+
+    def logical(path: Path) -> str:
+        return path.relative_to(root).as_posix()
+
+    source_payload = {
+        "artifact_type": "qdp_v2_sequence_path_pack",
+        "sample_index_path": logical(sample),
+        "candidate_index_path": logical(candidate),
+        "feature_channels": {"daily_raw": {"path": logical(panel), "shape": [1]}},
+        "label_arrays": {},
+        "execution_arrays": {"daily_raw_alias": {"path": logical(panel), "shape": [1]}},
+        "masks": {},
+    }
+    source.write_text(json.dumps(source_payload), encoding="utf-8")
+    inventory = fold_contract._source_backing_file_inventory(source_payload)
+    provenance = {
+        "schema_version": 2,
+        "manifest_path": logical(source),
+        "manifest_sha256": fold_contract._sha256_file(source),
+        "sample_index_path": logical(sample),
+        "sample_index_sha256": fold_contract._sha256_file(sample),
+        "candidate_index_path": logical(candidate),
+        "candidate_index_sha256": fold_contract._sha256_file(candidate),
+        "artifact_type": "qdp_v2_sequence_path_pack",
+        "backing_files": inventory,
+        "backing_files_sha256": fold_contract._canonical_sha256(inventory),
+    }
+    return {**source_payload, "source_view_provenance": provenance}, panel
+
+
+def test_v2_provenance_ignores_backing_file_mtime_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, panel = _write_v2_provenance_fixture(tmp_path, monkeypatch)
+    original = panel.stat()
+    os.utime(panel, ns=(original.st_atime_ns, original.st_mtime_ns + 1_000_000_000))
+
+    assert fold_contract.validate_source_view_provenance(manifest)["schema_version"] == 2
+
+
+def test_v2_provenance_survives_relocating_the_pack_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_root = tmp_path / "original"
+    manifest, _panel = _write_v2_provenance_fixture(original_root, monkeypatch)
+    view_path = original_root / "pack" / "fold.json"
+    view_path.write_text(json.dumps(manifest), encoding="utf-8")
+    relocated_root = tmp_path / "relocated"
+    shutil.copytree(original_root / "pack", relocated_root / "pack")
+    relocated = json.loads((relocated_root / "pack" / "fold.json").read_text(encoding="utf-8"))
+    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", relocated_root)
+    fold_contract._SOURCE_BACKING_FILE_SHA256_CACHE.clear()
+
+    assert fold_contract.validate_source_view_provenance(relocated)["schema_version"] == 2
+
+
+def test_v2_provenance_rejects_same_size_byte_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, panel = _write_v2_provenance_fixture(tmp_path, monkeypatch)
+    original = panel.stat()
+    panel.write_bytes(b"wxyz")
+    os.utime(panel, ns=(original.st_atime_ns, original.st_mtime_ns))
+    fold_contract._SOURCE_BACKING_FILE_SHA256_CACHE.clear()
+
+    with pytest.raises(ValueError, match="backing-file identity changed"):
+        fold_contract.validate_source_view_provenance(manifest)
+
+
+def test_v2_provenance_rejects_size_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, panel = _write_v2_provenance_fixture(tmp_path, monkeypatch)
+    panel.write_bytes(b"abcde")
+
+    with pytest.raises(ValueError, match="backing-file identity changed"):
+        fold_contract.validate_source_view_provenance(manifest)
+
+
+def test_v1_provenance_remains_valid_with_legacy_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", tmp_path)
+    pack = tmp_path / "legacy"
+    pack.mkdir()
+    source = pack / "manifest.json"
+    sample = pack / "sample.parquet"
+    panel = pack / "panel.dat"
+    sample.write_bytes(b"sample")
+    panel.write_bytes(b"panel")
+    source_payload = {
+        "artifact_type": "qdp_v2_sequence_path_pack",
+        "sample_index_path": str(sample.resolve()),
+        "feature_channels": {"daily_raw": {"path": str(panel.resolve())}},
+        "label_arrays": {},
+        "execution_arrays": {},
+        "masks": {},
+    }
+    source.write_text(json.dumps(source_payload), encoding="utf-8")
+    inventory = fold_contract._source_backing_file_inventory_v1(source_payload)
+    manifest = {
+        **source_payload,
+        "source_view_provenance": {
+            "schema_version": 1,
+            "manifest_path": str(source.resolve()),
+            "manifest_sha256": fold_contract._sha256_file(source),
+            "sample_index_path": str(sample.resolve()),
+            "sample_index_sha256": fold_contract._sha256_file(sample),
+            "artifact_type": "qdp_v2_sequence_path_pack",
+            "backing_files": inventory,
+            "backing_files_sha256": fold_contract._canonical_sha256(inventory),
+        },
+    }
+
+    assert fold_contract.validate_source_view_provenance(manifest)["schema_version"] == 1
+
+
+def test_source_provenance_rejects_unknown_schema_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, _panel = _write_v2_provenance_fixture(tmp_path, monkeypatch)
+    manifest["source_view_provenance"]["schema_version"] = 99  # type: ignore[index]
+
+    with pytest.raises(ValueError, match="unsupported.*schema_version: 99"):
+        fold_contract.validate_source_view_provenance(manifest)
+
+
+def test_v2_backing_file_hash_is_memoized_within_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest, _panel = _write_v2_provenance_fixture(tmp_path, monkeypatch)
+    fold_contract._SOURCE_BACKING_FILE_SHA256_CACHE.clear()
+    calls = 0
+    original_hasher = fold_contract._sha256_file
+
+    def counting_hasher(path: str | Path) -> str:
+        nonlocal calls
+        calls += 1
+        return original_hasher(path)
+
+    monkeypatch.setattr(fold_contract, "_sha256_file", counting_hasher)
+    fold_contract.validate_source_view_provenance(manifest)
+
+    # Manifest and indexes account for three calls; the duplicated panel is hashed once.
+    assert calls == 4
 
 
 def test_ohlcva_volume_amount_targets_use_signal_day_trailing_history() -> None:

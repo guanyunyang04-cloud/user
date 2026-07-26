@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+_SOURCE_BACKING_FILE_SHA256_CACHE: dict[tuple[Path, int], str] = {}
 DEVELOPMENT_CANDIDATE_COLUMNS = {
     "candidate_id",
     "split",
@@ -53,6 +54,25 @@ def _canonical_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _workspace_relative_path(value: str | Path) -> str:
+    path = _workspace_path(value).resolve()
+    try:
+        return path.relative_to(WORKSPACE_ROOT.resolve()).as_posix()
+    except ValueError as exc:
+        raise ValueError(f"fold source path is outside the workspace: {path}") from exc
+
+
+def _memoized_source_backing_file_sha256(path: Path, size: int) -> str:
+    resolved = path.resolve()
+    key = (resolved, int(size))
+    cached = _SOURCE_BACKING_FILE_SHA256_CACHE.get(key)
+    if cached is not None:
+        return cached
+    digest = _sha256_file(resolved)
+    _SOURCE_BACKING_FILE_SHA256_CACHE[key] = digest
+    return digest
+
+
 def _source_backing_file_inventory(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     paths: set[Path] = set()
 
@@ -74,25 +94,85 @@ def _source_backing_file_inventory(manifest: Mapping[str, Any]) -> list[dict[str
         if not path.is_file():
             raise FileNotFoundError(path)
         stat = path.stat()
-        rows.append({"path": str(path), "size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns)})
+        size = int(stat.st_size)
+        rows.append(
+            {
+                "path": _workspace_relative_path(path),
+                "size": size,
+                "sha256": _memoized_source_backing_file_sha256(path, size),
+            }
+        )
     return rows
 
 
-def validate_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, Any]:
-    stored = dict(manifest.get("source_view_provenance", {}) or {})
-    required = {
-        "schema_version",
-        "manifest_path",
-        "manifest_sha256",
-        "sample_index_path",
-        "sample_index_sha256",
-        "artifact_type",
-        "backing_files",
-        "backing_files_sha256",
-    }
-    missing = sorted(required.difference(stored))
-    if missing:
-        raise ValueError(f"fold source_view_provenance is missing fields: {missing}")
+def _source_backing_file_inventory_v1(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
+    paths: set[Path] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, Mapping):
+            raw_path = value.get("path")
+            if isinstance(raw_path, str) and raw_path.strip():
+                paths.add(_workspace_path(raw_path).resolve())
+            for nested in value.values():
+                collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect(nested)
+
+    for section in ("feature_channels", "label_arrays", "execution_arrays", "masks"):
+        collect(dict(manifest.get(section, {}) or {}))
+    rows: list[dict[str, Any]] = []
+    for path in sorted(paths, key=lambda item: str(item).lower()):
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        stat = path.stat()
+        rows.append(
+            {"path": str(path), "size": int(stat.st_size), "mtime_ns": int(stat.st_mtime_ns)}
+        )
+    return rows
+
+
+def _validate_source_view_provenance_v1(
+    manifest: Mapping[str, Any], stored: dict[str, Any]
+) -> dict[str, Any]:
+    # V1 must remain readable: rewriting the six contracts in
+    # daily_research/research_records/seq100/l35v2_sixfold_2020_2025/fold_contracts.json
+    # or daily_research/models/seq100/*/*/training_summary.json would change
+    # registered hashes and falsify historical provenance.
+    source_path = _workspace_path(str(stored["manifest_path"])).resolve()
+    sample_path = _workspace_path(str(stored["sample_index_path"])).resolve()
+    if not source_path.is_file() or _sha256_file(source_path) != str(stored["manifest_sha256"]):
+        raise ValueError("fold source manifest is missing or its SHA-256 changed")
+    if not sample_path.is_file() or _sha256_file(sample_path) != str(stored["sample_index_sha256"]):
+        raise ValueError("fold source sample index is missing or its SHA-256 changed")
+    candidate_value = str(stored.get("candidate_index_path", "") or "")
+    candidate_path = _workspace_path(candidate_value).resolve() if candidate_value else None
+    if candidate_path is not None and (
+        not candidate_path.is_file()
+        or _sha256_file(candidate_path) != str(stored.get("candidate_index_sha256", ""))
+    ):
+        raise ValueError("fold source candidate index is missing or its SHA-256 changed")
+    current = json.loads(source_path.read_text(encoding="utf-8"))
+    if str(current.get("artifact_type", "")) != str(stored["artifact_type"]):
+        raise ValueError("fold source artifact type changed")
+    if _workspace_path(str(current.get("sample_index_path", "") or "")).resolve() != sample_path:
+        raise ValueError("fold source sample-index path changed")
+    current_candidate = str(current.get("candidate_index_path", "") or "")
+    if bool(candidate_value) != bool(current_candidate):
+        raise ValueError("fold source candidate-index declaration changed")
+    if candidate_path is not None and _workspace_path(current_candidate).resolve() != candidate_path:
+        raise ValueError("fold source candidate-index path changed")
+    inventory = _source_backing_file_inventory_v1(current)
+    if inventory != list(stored.get("backing_files", []) or []):
+        raise ValueError("fold source backing-file identity changed")
+    if _canonical_sha256(inventory) != str(stored["backing_files_sha256"]):
+        raise ValueError("fold source backing-file inventory digest changed")
+    return stored
+
+
+def _validate_source_view_provenance_v2(
+    manifest: Mapping[str, Any], stored: dict[str, Any]
+) -> dict[str, Any]:
     source_path = _workspace_path(str(stored["manifest_path"])).resolve()
     sample_path = _workspace_path(str(stored["sample_index_path"])).resolve()
     if not source_path.is_file() or _sha256_file(source_path) != str(stored["manifest_sha256"]):
@@ -122,6 +202,33 @@ def validate_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, An
     if _canonical_sha256(inventory) != str(stored["backing_files_sha256"]):
         raise ValueError("fold source backing-file inventory digest changed")
     return stored
+
+
+def validate_source_view_provenance(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    stored = dict(manifest.get("source_view_provenance", {}) or {})
+    schema_version = stored.get("schema_version")
+    if schema_version is not None and schema_version not in (1, 2):
+        raise ValueError(
+            f"unsupported fold source_view_provenance schema_version: {schema_version!r}"
+        )
+    required = {
+        "schema_version",
+        "manifest_path",
+        "manifest_sha256",
+        "sample_index_path",
+        "sample_index_sha256",
+        "artifact_type",
+        "backing_files",
+        "backing_files_sha256",
+    }
+    missing = sorted(required.difference(stored))
+    if missing:
+        raise ValueError(f"fold source_view_provenance is missing fields: {missing}")
+    if schema_version == 1:
+        return _validate_source_view_provenance_v1(manifest, stored)
+    if schema_version == 2:
+        return _validate_source_view_provenance_v2(manifest, stored)
+    raise AssertionError("source provenance schema dispatch is incomplete")
 
 
 def compute_fold_training_contract(
@@ -1069,12 +1176,12 @@ def build_development_fold_view(
 
     inventory = _source_backing_file_inventory(source)
     provenance = {
-        "schema_version": 1,
-        "manifest_path": str(source_path),
+        "schema_version": 2,
+        "manifest_path": _workspace_relative_path(source_path),
         "manifest_sha256": _sha256_file(source_path),
-        "sample_index_path": str(source_sample_path),
+        "sample_index_path": _workspace_relative_path(source_sample_path),
         "sample_index_sha256": _sha256_file(source_sample_path),
-        "candidate_index_path": str(source_candidate_path),
+        "candidate_index_path": _workspace_relative_path(source_candidate_path),
         "candidate_index_sha256": _sha256_file(source_candidate_path),
         "artifact_type": str(source.get("artifact_type", "")),
         "artifact_view_id": "",

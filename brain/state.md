@@ -1,6 +1,6 @@
 # Current workspace state
 
-Updated: `2026-07-25`
+Updated: `2026-07-26`
 
 - QDP is usable with `active_as_of_date=2026-07-21`. PIT main-board daily history
   includes historical ST, long suspensions, and delisted securities.
@@ -37,3 +37,47 @@ Updated: `2026-07-25`
 - Repository simplification evidence remains
   `brain/references/repository_simplification_20260722.md`; the portable
   `workspace-brain/v1` manifests remain the takeover and protection map.
+- The 2026-07-26 over-engineering retirement is complete, verified, and committed
+  together with the follow-up gap work: 48 files changed, 1,880 insertions,
+  11,121 deletions, plus 114 `tmp/` process artifacts untracked and gitignored
+  with files left on disk. No protected dataset, research pack, or registered
+  checkpoint was modified. Evidence is
+  `brain/references/repository_simplification_20260726.md`.
+- Both designed gaps are now implemented, verified, and committed. QDP has
+  `qdp repair patch|mutate|replace-table` inside the existing `repair.py`,
+  dry-run by default and requiring `--apply`, `--reason`, and
+  `--expected-manifest-sha256`, with append-only in-manifest receipts carrying
+  reason, previous manifest hash, affected date range, changed columns, both
+  schema hashes, and a UTC timestamp. `dataset.json` `schema`/`schema_hash` is now
+  authoritative and `qdp check --quick` verifies footer schema and column order.
+  Three of the 14 active manifests carry legacy declarations
+  (`security_identity` and `symbol_history` have `dtype` but no `type`;
+  `trading_calendar` uses lowercase `string`/`bool`), so comparison is normalized
+  through `canonical_manifest_schema()` and untyped declarations degrade to a
+  name-and-order check plus a `legacy_untyped_manifest_schema` warning. Current
+  result: status ok, 0 errors, 2 warnings, 14 datasets.
+- Backfilling those legacy declarations is blocked by sequencing, not by design.
+  `seq100_pit_signal_quality_v1` binds `manifest_sha256` and `schema_hash` for all
+  14 domains and `seq100_signal_quality.py:554/559` raises on any change, with
+  `protection.failure: stop_immediately_on_any_hash_change`. All 14 schema hashes
+  currently match. Normalization becomes legal only after the rebind channel
+  exists.
+- Step 3 remains unstarted and needs owner sign-off: a study-scoped `rebind-qdp`
+  in `seq100_signal_quality.py` that walks the receipt chain, appends a
+  reason-bearing transition under `qdp_binding_amendments`, has
+  `validate-research` verify every transition, and refuses when a correction
+  intersects the dates a pack consumed. No `--force` escape.
+- That audit left two structural gaps, now designed and scheduled. First, QDP has
+  no supported schema-evolution or one-cell-correction path: `repair.py` is
+  library-only with no CLI, which is what caused dated one-shot migration modules
+  to accumulate. The fix is `qdp repair patch/mutate/replace-table` inside the
+  existing `repair.py`, in-manifest repair receipts, authoritative
+  `dataset.json` `schema`/`schema_hash` with footer drift detection in
+  `qdp check --quick`, and a study-scoped `rebind-qdp` that refuses when a
+  correction intersects the dates a pack consumed. Second,
+  `seq100_fold_contract.py` puts `mtime_ns` and absolute paths in its backing-file
+  provenance digest, so copying or restoring a pack invalidates every fold
+  contract; identity becomes pack-relative path plus size plus content SHA-256 at
+  `source_view_provenance.schema_version = 2`, with a narrow v1 reader so the six
+  recorded `l35v2_sixfold_2020_2025` contracts and protected training summaries
+  keep their registered hashes.

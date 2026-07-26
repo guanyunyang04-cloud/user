@@ -2,8 +2,6 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .tmp/
-tmp/*.txt
-tmp/takeover_qdp_*.json
 .qdp_tmp/
 node_modules/
 *.tsbuildinfo
@@ -15,6 +13,7 @@ node_modules/
 
 brain/output/
 outputs/
+tmp/
 
 quant_data_platform/data/*
 !quant_data_platform/data/.gitkeep

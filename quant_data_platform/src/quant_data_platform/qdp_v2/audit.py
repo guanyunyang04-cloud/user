@@ -8,13 +8,27 @@ from typing import Any
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.manifest import (
     atomic_write_json,
+    canonical_manifest_schema,
     dataset_manifest_for_id,
+    _manifest_schema_from_arrow,
     qdp_v2_root,
     read_active_manifest,
     read_dataset_manifest,
+    schema_hash,
     utc_now,
 )
 from quant_data_platform.qdp_v2.status import _active_dataset_refs, _manifest_path
+
+VALUATION_REQUIRED_COLUMNS = {
+    "symbol",
+    "trade_date",
+    "total_mv",
+    "circ_mv",
+    "pe",
+    "pb",
+    "turnover_rate",
+    "source",
+}
 
 
 def audit_active(*, workspace_root: str | Path | None = None, write: bool = False, verify_footers: bool = True) -> dict[str, Any]:
@@ -34,19 +48,57 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = Fals
         missing_shards: list[str] = []
         footer_errors: list[str] = []
         footer_rows = 0
+        declared_schema = list(manifest.schema)
+        declared_names = [str(item.get("name", "") or "") for item in declared_schema]
+        derived_schema_hash = schema_hash(declared_schema)
+        # A legacy declaration carries no convertible ``type``, so only its
+        # column names and order can be compared against a Parquet footer.
+        # Normalizing a typed declaration keeps equivalent spellings such as
+        # ``string``/``VARCHAR`` from being reported as drift.
+        canonical_schema = canonical_manifest_schema(declared_schema)
+        if not declared_schema:
+            footer_errors.append(f"manifest_schema_missing:{domain}:{dataset_id}")
+        elif derived_schema_hash != manifest.schema_hash:
+            footer_errors.append(
+                f"manifest_schema_hash_mismatch:{domain}:{dataset_id}:"
+                f"manifest={manifest.schema_hash}:derived={derived_schema_hash}"
+            )
+        elif canonical_schema is None:
+            # Backfilling this declaration would change the dataset manifest
+            # hash that downstream study contracts bind, and no rebind command
+            # exists yet.  Surface it as a standing normalization debt.
+            warnings.append(
+                f"legacy_untyped_manifest_schema:{domain}:{dataset_id}:"
+                "normalize_when_rebind_is_available"
+            )
         for shard in manifest.shards:
             shard_path = _manifest_path(shard.path, root)
             if not shard_path.is_file():
                 missing_shards.append(str(shard_path))
                 continue
-            if verify_footers:
-                try:
-                    rows = _parquet_row_count(shard_path)
+            try:
+                parquet = _parquet_footer(shard_path)
+                footer_schema = _manifest_schema_from_arrow(parquet.schema_arrow)
+                footer_names = [item["name"] for item in footer_schema]
+                if footer_names != declared_names and set(footer_names) == set(declared_names):
+                    footer_errors.append(
+                        f"schema_column_order_mismatch:{shard.path}:"
+                        f"manifest={declared_names}:footer={footer_names}"
+                    )
+                elif footer_names != declared_names:
+                    footer_errors.append(
+                        f"schema_column_set_mismatch:{shard.path}:"
+                        f"manifest={declared_names}:footer={footer_names}"
+                    )
+                elif canonical_schema is not None and footer_schema != canonical_schema:
+                    footer_errors.append(f"footer_schema_mismatch:{shard.path}")
+                if verify_footers:
+                    rows = int(parquet.metadata.num_rows)
                     footer_rows += int(rows)
                     if shard.row_count > 0 and rows > 0 and int(rows) != int(shard.row_count):
                         footer_errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
-                except Exception as exc:
-                    footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
+            except Exception as exc:
+                footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
         if missing_shards:
             errors.append(f"missing_shards:{domain}:{len(missing_shards)}")
         if footer_errors:
@@ -99,8 +151,6 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
     dataset_id = str(manifest.get("dataset_id", "") or "")
     quality = dict(manifest.get("quality", {}) or {})
     schema = [str(dict(item).get("name", "") or "") for item in list(manifest.get("schema", []) or []) if isinstance(item, dict)]
-    if "pending_rebuild" in contract or "pending_qdp_v2_normalization" in contract or "pending_qdp_v2_split" in contract:
-        errors.append(f"pending_contract_active:{domain}:{dataset_id}:{contract}")
     expected_contracts = {
         "market_intraday_5m": "qdp_current_intraday_5m_48_v1",
         "market_daily_raw": "qdp_v2_market_daily_raw_v1",
@@ -124,8 +174,7 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
     if domain == "market_daily_raw" and quality.get("ohlcv_non_null") is not True:
         errors.append(f"market_daily_raw_not_marked_ohlcv_non_null:{dataset_id}")
     if domain == "valuation":
-        required = {"symbol", "trade_date", "total_mv", "circ_mv", "pe", "pb", "turnover_rate", "source"}
-        missing = sorted(required.difference(schema))
+        missing = sorted(VALUATION_REQUIRED_COLUMNS.difference(schema))
         if missing:
             errors.append(f"valuation_schema_missing:{dataset_id}:{','.join(missing)}")
     if domain in {
@@ -148,6 +197,12 @@ def _parquet_row_count(path: Path) -> int:
 
         with duckdb.connect(":memory:") as con:
             return int(con.execute("select count(*) as n from read_parquet(?)", [str(path)]).fetchone()[0])
+
+
+def _parquet_footer(path: Path) -> Any:
+    import pyarrow.parquet as pq  # type: ignore
+
+    return pq.ParquetFile(path)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:

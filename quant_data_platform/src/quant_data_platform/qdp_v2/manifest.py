@@ -6,13 +6,26 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
+
+import pyarrow as pa
 
 from quant_data_platform.core.json_io import json_safe, read_json
 from quant_data_platform.core.paths import qdp_paths
 
 
 ACTIVE_MANIFEST_VERSION = 2
+EXPECTED_BAR_TIMES = tuple(
+    f"{hour:02d}{minute:02d}00000"
+    for hour, minute in (
+        *[(9, minute) for minute in range(35, 60, 5)],
+        *[(10, minute) for minute in range(0, 60, 5)],
+        *[(11, minute) for minute in range(0, 31, 5)],
+        *[(13, minute) for minute in range(5, 60, 5)],
+        *[(14, minute) for minute in range(0, 60, 5)],
+        (15, 0),
+    )
+)
 
 
 def utc_now() -> str:
@@ -43,13 +56,107 @@ def canonical_manifest_sha256(payload: Mapping[str, Any]) -> str:
     return stable_hash(payload, length=64)
 
 
-def schema_hash(schema: list[Mapping[str, Any]] | Mapping[str, Any] | None) -> str:
+def schema_hash(schema: Sequence[Mapping[str, Any]] | Mapping[str, Any] | None) -> str:
     if not schema:
         return ""
     payload: Any = schema
-    if isinstance(schema, list):
+    if isinstance(schema, Sequence) and not isinstance(schema, Mapping):
         payload = [{str(k): str(v) for k, v in dict(item).items()} for item in schema]
     return stable_hash({"schema": payload}, length=32)
+
+
+def _manifest_schema_from_arrow(schema: pa.Schema) -> list[dict[str, str]]:
+    def sql_type(value: pa.DataType) -> str:
+        if pa.types.is_boolean(value):
+            return "BOOLEAN"
+        if pa.types.is_integer(value):
+            return "BIGINT"
+        if pa.types.is_floating(value) or pa.types.is_decimal(value):
+            return "DOUBLE"
+        if pa.types.is_date(value) or pa.types.is_timestamp(value):
+            return "TIMESTAMP"
+        return "VARCHAR"
+
+    return [
+        {"name": field.name, "type": sql_type(field.type)}
+        for field in schema
+    ]
+
+
+_SCHEMA_TYPE_ALIASES: dict[str, pa.DataType] = {
+    "BOOLEAN": pa.bool_(),
+    "BOOL": pa.bool_(),
+    "BIGINT": pa.int64(),
+    "INT64": pa.int64(),
+    "INTEGER": pa.int64(),
+    "INT32": pa.int32(),
+    "DOUBLE": pa.float64(),
+    "FLOAT64": pa.float64(),
+    "FLOAT": pa.float64(),
+    "TIMESTAMP": pa.timestamp("ns"),
+    "DATETIME64[NS]": pa.timestamp("ns"),
+    "DATE32[DAY]": pa.date32(),
+    "DATE": pa.date32(),
+    "VARCHAR": pa.string(),
+    "STRING": pa.string(),
+    "OBJECT": pa.string(),
+}
+
+
+def schema_field_is_typed(field: Mapping[str, Any]) -> bool:
+    """Report whether a declared field carries an explicit convertible type.
+
+    Legacy manifests predate the ``type`` key and declare only pandas
+    ``dtype`` hints.  Those declarations cannot be converted to Arrow, so a
+    caller comparing a declaration against a Parquet footer must degrade to a
+    name-and-order comparison instead of treating the difference as drift.
+    """
+
+    return bool(str(field.get("name", "") or "")) and bool(
+        str(field.get("type", "") or "").strip()
+    )
+
+
+def canonical_manifest_schema(
+    schema: Sequence[Mapping[str, Any]],
+) -> list[dict[str, str]] | None:
+    """Normalize a declared schema into the footer-derived canonical form.
+
+    Returns ``None`` when any field lacks an explicit ``type``, which marks a
+    legacy declaration that cannot be compared type-for-type.  Normalizing both
+    sides through this function keeps ``string``/``VARCHAR`` and
+    ``bool``/``BOOLEAN`` from being reported as drift.
+    """
+
+    fields = list(schema)
+    if not fields or not all(schema_field_is_typed(item) for item in fields):
+        return None
+    try:
+        return _manifest_schema_from_arrow(arrow_schema_from_manifest(fields))
+    except ValueError:
+        return None
+
+
+def arrow_schema_from_manifest(schema: Sequence[Mapping[str, Any]]) -> pa.Schema:
+    aliases = _SCHEMA_TYPE_ALIASES
+    fields: list[pa.Field] = []
+    for item in schema:
+        name = str(item.get("name", "") or "")
+        declared = str(item.get("type", "") or "").strip()
+        if not name or not declared:
+            raise ValueError("qdp_v2_manifest_schema_field_invalid")
+        data_type = aliases.get(declared.upper())
+        if data_type is None:
+            try:
+                data_type = pa.type_for_alias(declared.lower())
+            except ValueError as exc:
+                raise ValueError(
+                    f"qdp_v2_manifest_schema_type_unsupported:{name}:{declared}"
+                ) from exc
+        fields.append(pa.field(name, data_type))
+    if not fields:
+        raise ValueError("qdp_v2_manifest_schema_missing")
+    return pa.schema(fields)
 
 
 def atomic_write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
@@ -191,50 +298,3 @@ def iter_dataset_manifests(root: str | Path) -> list[Path]:
     if not datasets_root.exists():
         return []
     return sorted(datasets_root.glob("*/*/dataset.json"))
-
-
-def qdp_snapshot_payload(root: str | Path) -> dict[str, Any]:
-    """Build the canonical identity payload for the current active QDP snapshot.
-
-    Shard content keys and repair compare-and-swap hashes remain internal to the
-    dataset manifests.  Research contracts only need one aggregate identity for
-    the active domain mapping and the canonical content of each active manifest.
-    """
-
-    resolved = Path(root).resolve()
-    active = read_active_manifest(resolved)
-    datasets = active.get("datasets", {})
-    if not isinstance(datasets, Mapping) or not datasets:
-        raise ValueError("QDP active manifest has no dataset mapping")
-
-    active_datasets: dict[str, Any] = {}
-    for raw_domain, raw_dataset_id in sorted(datasets.items(), key=lambda item: str(item[0])):
-        domain = str(raw_domain)
-        dataset_id = str(raw_dataset_id)
-        path = dataset_manifest_path(resolved, domain, dataset_id)
-        if not path.is_file():
-            raise FileNotFoundError(
-                f"active QDP dataset manifest is missing: domain={domain} dataset_id={dataset_id}"
-            )
-        manifest = read_json(path)
-        if str(manifest.get("domain", "") or "") != domain:
-            raise ValueError(f"active QDP manifest domain drift: {path}")
-        if str(manifest.get("dataset_id", "") or "") != dataset_id:
-            raise ValueError(f"active QDP manifest dataset_id drift: {path}")
-        active_datasets[domain] = {
-            "dataset_id": dataset_id,
-            "manifest_sha256": canonical_manifest_sha256(manifest),
-        }
-
-    return {
-        "schema_version": "qdp_active_snapshot_v1",
-        "active_manifest_version": int(active.get("version", 0) or 0),
-        "active_as_of_date": str(active.get("active_as_of_date", "") or ""),
-        "datasets": active_datasets,
-    }
-
-
-def qdp_snapshot_sha256(root: str | Path) -> str:
-    """Return one aggregate digest for the current active QDP snapshot."""
-
-    return canonical_manifest_sha256(qdp_snapshot_payload(root))

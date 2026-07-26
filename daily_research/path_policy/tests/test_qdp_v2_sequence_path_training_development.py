@@ -23,9 +23,6 @@ from daily_research.path_policy.tests.test_qdp_v2_sequence_path_training_fixed_o
 APPROVED_CONTRACT = Path(
     "daily_research/brain/references/seq100_candidate_complete_development_walkforward_contract_20260711.json"
 ).resolve()
-CURRENT_FIXED_FINAL_CONTRACT = Path(
-    "daily_research/studies/signal_close_path_value_2x2_v1.json"
-).resolve()
 
 
 def _write_current_study_contract(path: Path, *, valid_digest: bool = True) -> Path:
@@ -264,7 +261,9 @@ def test_v2_development_contract_purges_only_the_prediction_horizon(tmp_path: Pa
         compute_development_fold_training_contract(manifest)
 
 
-def test_build_development_fold_view_keeps_execution_tail_out_of_purge(tmp_path: Path) -> None:
+def test_build_development_fold_view_keeps_execution_tail_out_of_purge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_root = tmp_path / "source"
     source_root.mkdir()
     manifest_path = _build_development_pack(source_root)
@@ -283,9 +282,11 @@ def test_build_development_fold_view_keeps_execution_tail_out_of_purge(tmp_path:
     manifest["development_contract"] = dict(manifest["research_contract"])
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    from daily_research.path_policy.seq100_fold_contract import build_development_fold_view
+    import daily_research.path_policy.seq100_fold_contract as fold_contract
 
-    result = build_development_fold_view(
+    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", tmp_path)
+
+    result = fold_contract.build_development_fold_view(
         source_manifest=manifest_path,
         output_root=tmp_path / "folds",
         development_year=2022,
@@ -296,9 +297,17 @@ def test_build_development_fold_view_keeps_execution_tail_out_of_purge(tmp_path:
     assert view["development_walkforward"]["execution_dependency_days"] == 3
     assert view["development_walkforward"]["purged_signal_date_count"] == 2
     assert view["development_fold_training_contract"]["schema_version"] == 2
+    provenance = view["source_view_provenance"]
+    assert provenance["schema_version"] == 2
+    assert not Path(provenance["manifest_path"]).is_absolute()
+    assert not Path(provenance["sample_index_path"]).is_absolute()
+    assert not Path(provenance["candidate_index_path"]).is_absolute()
+    assert all(set(item) == {"path", "size", "sha256"} for item in provenance["backing_files"])
 
 
-def test_rebind_development_fold_view_preserves_immutable_indexes(tmp_path: Path) -> None:
+def test_rebind_development_fold_view_preserves_immutable_indexes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     source_root = tmp_path / "source"
     source_root.mkdir()
     manifest_path = _build_development_pack(source_root)
@@ -320,6 +329,9 @@ def test_rebind_development_fold_view_preserves_immutable_indexes(tmp_path: Path
         rebind_development_fold_view,
         validate_development_fold_training_contract,
     )
+    import daily_research.path_policy.seq100_fold_contract as fold_contract
+
+    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", tmp_path)
 
     built = build_development_fold_view(
         source_manifest=manifest_path,
@@ -388,7 +400,8 @@ def test_fixed_final_development_accepts_patience_zero(tmp_path: Path) -> None:
     )
 
     assert training._validate_evaluation_mode(config) == training.EVALUATION_MODE_DEVELOPMENT
-    binding = training._validated_development_contract(CURRENT_FIXED_FINAL_CONTRACT)
+    contract_path = _write_current_study_contract(tmp_path / "current_study.json")
+    binding = training._validated_development_contract(contract_path)
     assert binding["fixed_final_epoch"] is True
 
 

@@ -12,7 +12,6 @@ from quant_data_platform.qdp_v2.manifest import (
     qdp_v2_root,
     read_active_manifest,
     read_dataset_manifest,
-    resolve_manifest_path,
 )
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
@@ -65,56 +64,6 @@ def describe_dataset(dataset_id: str, *, workspace_root: str | Path | None = Non
     return _summarize_manifest(payload)
 
 
-def validate_dataset(dataset_id: str, *, workspace_root: str | Path | None = None, domain: str = "") -> dict[str, Any]:
-    root = qdp_v2_root(workspace_root)
-    path = dataset_manifest_for_id(root, dataset_id, domain)
-    if path is None:
-        return {"status": "error", "dataset_id": dataset_id, "errors": ["dataset_manifest_missing"]}
-    manifest = read_dataset_manifest(path)
-    errors: list[str] = []
-    existing = 0
-    footer_rows = 0
-    for shard in manifest.shards:
-        shard_path = resolve_manifest_path(shard.path, root=root)
-        if not shard_path.exists():
-            errors.append(f"shard_missing:{shard.path}")
-            continue
-        existing += 1
-        try:
-            rows = _parquet_row_count(shard_path)
-            footer_rows += int(rows)
-            if shard.row_count > 0 and rows > 0 and int(rows) != int(shard.row_count):
-                errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
-        except Exception as exc:
-            errors.append(f"footer_unreadable:{shard.path}:{exc}")
-    if manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
-        errors.append(f"dataset_row_count_mismatch:manifest={manifest.row_count}:footer={footer_rows}")
-    return {
-        "status": "ok" if not errors else "error",
-        "dataset_id": manifest.dataset_id,
-        "domain": manifest.domain,
-        "manifest_path": str(path.resolve()),
-        "shard_count": len(manifest.shards),
-        "existing_shards": existing,
-        "row_count": manifest.row_count,
-        "footer_row_count": footer_rows,
-        "errors": errors[:200],
-        "error_count": len(errors),
-    }
-
-
-def _parquet_row_count(path: Path) -> int:
-    try:
-        import pyarrow.parquet as pq  # type: ignore
-
-        return int(pq.ParquetFile(path).metadata.num_rows)
-    except Exception:
-        import duckdb  # type: ignore
-
-        with duckdb.connect(":memory:") as con:
-            return int(con.execute("select count(*) as n from read_parquet(?)", [str(path)]).fetchone()[0])
-
-
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="qdp", description="Inspect qdp_v2 active table manifests.")
     parser.add_argument("--workspace-root", default="")
@@ -126,10 +75,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     describe_cmd.add_argument("--domain", default="")
     describe_cmd.add_argument("--full", action="store_true", help="Print the complete dataset.json manifest.")
     describe_cmd.add_argument("--json", action="store_true")
-    validate_cmd = sub.add_parser("validate")
-    validate_cmd.add_argument("dataset_id")
-    validate_cmd.add_argument("--domain", default="")
-    validate_cmd.add_argument("--json", action="store_true")
     return parser
 
 
@@ -145,8 +90,6 @@ def main(argv: list[str] | None = None) -> int:
             domain=str(args.domain or ""),
             full=bool(getattr(args, "full", False)),
         )
-    elif args.dataset_command == "validate":
-        payload = validate_dataset(str(args.dataset_id), workspace_root=workspace, domain=str(args.domain or ""))
     else:
         raise ValueError(f"unsupported_dataset_command:{args.dataset_command}")
     if bool(getattr(args, "json", False)):
@@ -240,12 +183,7 @@ def _quality_state(value: Any, audit: Any) -> str:
 def _domain_role(domain: str, layer: str) -> str:
     roles = {
         "market_daily_raw": "raw daily OHLCV facts",
-        "market_intraday_1m": "raw 1m OHLCV facts",
         "market_intraday_5m": "canonical complete 48-bar 5m market facts",
-        "market_daily_panel": "daily research panel cache",
-        "intraday_daily_features": "daily features rebuilt from intraday bars",
-        "limit_intraday_features": "limit-board features rebuilt from 1m bars",
-        "limit_status": "daily close-at-limit status",
         "trading_calendar": "trading calendar",
         "universe_snapshot": "PIT universe snapshot",
         "security_status": "PIT listing/ST/suspension status",

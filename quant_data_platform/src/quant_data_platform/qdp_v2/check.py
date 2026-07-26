@@ -63,7 +63,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--quick",
         action="store_true",
-        help="Run manifest/file-presence and latest-key checks without scanning every footer.",
+        help="Run manifest, Parquet-footer schema, file-presence and latest-key checks.",
     )
     mode.add_argument(
         "--full",
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
 def _format(payload: dict[str, Any]) -> str:
     lines = [
         f"status: {payload.get('status')}",
-        f"mode: {payload.get('mode', 'full' if payload.get('deep') else 'quick')}",
+        f"mode: {payload.get('mode', 'quick')}",
     ]
     if "active" in payload:
         active = dict(payload.get("active", {}) or {})
