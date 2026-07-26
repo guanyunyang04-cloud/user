@@ -828,6 +828,174 @@ def test_last_checkpoint_roundtrip_and_pause_sentinel(tmp_path: Path) -> None:
     assert (monitor_dir / "training_events.jsonl").exists()
 
 
+def test_training_monitor_trims_on_shared_cadence_and_records_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trim_calls: list[bool] = []
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_available_physical_memory_gb",
+        lambda: 1.5,
+    )
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_current_process_memory_gb",
+        lambda: {"working_set_gb": 7.0, "private_gb": 4.0},
+    )
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_trim_working_set",
+        lambda: trim_calls.append(True) or True,
+    )
+    monitor = quality._TrainingMonitor(output_dir=tmp_path, base={})
+
+    for _ in range(31):
+        assert monitor.relieve_memory_pressure() is None
+    assert monitor.relieve_memory_pressure() is not None
+    for _ in range(255):
+        assert monitor.relieve_memory_pressure() is None
+    assert monitor.relieve_memory_pressure() is not None
+
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "training_events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert len(trim_calls) == 2
+    assert len(events) == len(trim_calls)
+    assert [event["event"] for event in events] == [
+        "working_set_trim",
+        "working_set_trim",
+    ]
+    assert [event["batch"] for event in events] == [32, 288]
+
+
+def test_checkpoint_pauses_and_reports_persistent_low_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = quality._TrainingMonitor(
+        output_dir=tmp_path,
+        base={"model_id": "test", "fold_id": "screen"},
+        checkpoint_seconds=10_000,
+    )
+    monitor.trim_step = 31
+    trim_calls: list[bool] = []
+    checkpoint_calls: list[Path] = []
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_available_physical_memory_gb",
+        lambda: 0.5,
+    )
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_current_process_memory_gb",
+        lambda: {"working_set_gb": 8.0, "private_gb": 5.0},
+    )
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_trim_working_set",
+        lambda: trim_calls.append(True) or True,
+    )
+
+    def _checkpoint_callback() -> Path:
+        path = tmp_path / "checkpoint.pt"
+        path.write_bytes(b"safe")
+        checkpoint_calls.append(path)
+        return path
+
+    with pytest.raises(quality.TrainingPaused, match="low available memory"):
+        quality._checkpoint_or_pause(
+            monitor=monitor,
+            force_checkpoint=False,
+            checkpoint_callback=_checkpoint_callback,
+            progress={"phase": "training", "samples_completed": 10},
+        )
+
+    assert checkpoint_calls == [tmp_path / "checkpoint.pt"]
+    assert len(trim_calls) == 2
+    progress = json.loads((tmp_path / "progress.json").read_text(encoding="utf-8"))
+    assert progress["status"] == "paused"
+    assert progress["memory_pause"] == {
+        "available_before_gb": 0.5,
+        "available_after_gb": 0.5,
+        "trim_succeeded": True,
+        "working_set_gb": 8.0,
+        "private_gb": 5.0,
+        "pause_threshold_gb": quality.LOW_MEMORY_PAUSE_AVAILABLE_GB,
+    }
+
+
+def test_checkpoint_healthy_memory_and_requested_pause_behavior(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monitor = quality._TrainingMonitor(
+        output_dir=tmp_path,
+        base={"model_id": "test", "fold_id": "screen"},
+        checkpoint_seconds=10_000,
+    )
+    monitor.trim_step = 31
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_available_physical_memory_gb",
+        lambda: 3.0,
+    )
+    checkpoint_calls: list[Path] = []
+
+    def _checkpoint_callback() -> Path:
+        path = tmp_path / "checkpoint.pt"
+        path.write_bytes(b"safe")
+        checkpoint_calls.append(path)
+        return path
+
+    quality._checkpoint_or_pause(
+        monitor=monitor,
+        force_checkpoint=False,
+        checkpoint_callback=_checkpoint_callback,
+        progress={"phase": "training"},
+    )
+    assert checkpoint_calls == []
+
+    monitor.pause_path.parent.mkdir(parents=True, exist_ok=True)
+    monitor.pause_path.write_text("pause", encoding="utf-8")
+    with pytest.raises(quality.TrainingPaused, match="training paused safely"):
+        quality._checkpoint_or_pause(
+            monitor=monitor,
+            force_checkpoint=False,
+            checkpoint_callback=_checkpoint_callback,
+            progress={"phase": "training"},
+        )
+    assert checkpoint_calls == [tmp_path / "checkpoint.pt"]
+    assert not monitor.pause_path.exists()
+    progress = json.loads((tmp_path / "progress.json").read_text(encoding="utf-8"))
+    assert progress["status"] == "paused"
+    assert "memory_pause" not in progress
+
+
+def test_memory_exhaustion_ignores_missing_telemetry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trim_calls: list[bool] = []
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_available_physical_memory_gb",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        quality.sequence_training,
+        "_trim_working_set",
+        lambda: trim_calls.append(True) or True,
+    )
+    monitor = quality._TrainingMonitor(output_dir=tmp_path, base={})
+
+    assert monitor.memory_exhausted() is None
+    assert trim_calls == []
+
+
 def test_deephit_joint_distribution_is_finite_and_normalized() -> None:
     config = _model_configs()["deephit_competing_risk"]
     model = quality._DeepHitCompetingRisk(

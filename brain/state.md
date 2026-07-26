@@ -23,15 +23,22 @@ Updated: `2026-07-26`
   and have not started.
 - The complete PIT 180x35 pack and six 2020-2025 fold views are built with a
   60-trading-day purge. No long training task is currently running.
-- The active `seq100_pit_signal_quality_v1` study has frozen
-  `pareto_ordinal_v1` and the F1 snapshot profile. Model screening is paused:
-  LightGBM and TabM prescreens are complete, PatchTST has no completed
-  checkpoint, and no formal model matrix or formal fold training exists yet.
-  The resumable process evidence is under the ignored study output. Neural
-  runtime v2 is now implemented and hardware-qualified, but screening has not
-  resumed: the old TabM prescreen is intentionally invalid under exact-batch
-  semantics, while LightGBM remains reusable. The concise evidence pointer is
+- The active `seq100_pit_signal_quality_v1` study has frozen `pareto_ordinal_v1`
+  and the F1 profile, and model screening is COMPLETE:
+  `model_screen/attempt_001/formal_matrix.json` is frozen with
+  `replacement_allowed: false`. Formal fold training is 3 of 18 cells done
+  (LightGBM, all three folds, seed 7); one TabM cell is interrupted and
+  resumable; there is no `evaluate` and no winner. Neural runtime v2 is
+  implemented and hardware-qualified. See
   `daily_research/brain/references/seq100_signal_quality_runtime_optimization_20260725.md`.
+- Formal training is HELD because the frozen target is under review. A read-only
+  diagnosis over the completed LightGBM folds showed the frozen design ranks path
+  robustness rather than growth, and its perfect-foresight ceiling is about 23%
+  of the return-only ceiling. An Oracle review accepted the diagnosis but ruled
+  the current evidence insufficient to unfreeze, and ruled that any retarget
+  needs a new study contract rather than an `attempt_002`. The owner has not
+  chosen a path. Authoritative detail lives in `daily_research/brain/state.md`
+  and `daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md`.
 - The true-batch-1024 comparison remains paused and may resume only on explicit
   request. There is no active frontend or execution system.
 - Repository simplification evidence remains

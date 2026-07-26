@@ -53,15 +53,46 @@ Updated: `2026-07-26`
   strongest; treat that split as an `evaluate`-stage bootstrap question, not a
   conclusion. LightGBM's null `execution_semantics_version` is correct because it
   is not in `NEURAL_MODEL_IDS` and takes the non-accumulating branch.
-- STALE STATE TO RECONCILE FIRST: `training/tabm_multioutput/fold_2023/seed_7`
-  has an interrupted `attempt_001`. Its `active.json` says `status=training` and
-  `progress.json` says `phase=validation, epoch=1/10`, last written
-  `2026-07-26T09:45:36+08:00`, but no training process is alive. It holds
-  `last_checkpoint.pt` (2.13 MB) and
+- Formal training is HELD, not merely interrupted. The frozen target itself is
+  under review, so no remaining formal cell may be started. Details below.
+- `training/tabm_multioutput/fold_2023/seed_7` has an interrupted `attempt_001`.
+  Its `active.json` says `status=training` and `progress.json` says
+  `phase=validation, epoch=1/10`, last written `2026-07-26T09:45:36+08:00`, but
+  no training process is alive; it died when system memory reached 96.3% with
+  RSS 8.79 GB. It holds `last_checkpoint.pt` (2.13 MB) and
   `resume_key_sha256=abf71ce4c3b33c264c5c14675b815a180bab57343a3d9d7937cd904ef7ef8354`
   under `execution_semantics_version=exact_effective_batch_global_loss_v2`, so it
   is resumable. Do not read `status=training` as a live run. Nothing else in the
   matrix has started: no `evaluate`, winner, or 2026 confirmation exists.
+- `model_screen/training_budget_amendment.json` (`max_epochs` 3 to 10, `patience`
+  1 to 2, `amendment_sha256=4dd61a1d...13c67`) is consumed by exactly one cell:
+  that TabM `fold_2023/seed_7` resolved config. All three LightGBM folds carry
+  `training_budget_amendment_sha256: null` and are unaffected.
+- TARGET UNDER REVIEW. A read-only diagnosis over the three completed LightGBM
+  folds (2,178,290 prediction rows) found that the frozen design ranks path
+  robustness, not growth. `U = min(log1p(d5)/5, log1p(d10)/10, log1p(d20)/20)` is
+  positive for only 21.7%/25.7%/30.9% of filled candidates, so six negative-`U`
+  families reflect the metric, not absent alpha. Model IC against `d20` is only
+  0.1256/0.1016/0.0675 while IC against `mdd20` is -0.5387/-0.5168/-0.6301.
+  Perfect-foresight daily Top-1% annualized log growth is 1.03/1.72/1.28 for
+  `pareto_ordinal_v1` versus 4.53/5.13/5.99 for `g20`, so the frozen target caps
+  achievable growth near 23% of the return-only ceiling. Evidence:
+  `daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md`.
+- An independent Oracle review accepted that diagnosis as design evidence and
+  rejected it as sufficient grounds to unfreeze. Only the `g20` ceiling row is a
+  true upper bound; the `IC(objective, model score)` column is circular because
+  the score is predicted pareto times predicted fill; and the ceiling script
+  filtered on `entry_filled`, which is future information. Retargeting cannot be
+  an `attempt_002`: the contract (`:229`), `research_freeze.json:267`, and
+  `formal_matrix.json:736` all forbid formal replacement. A retarget requires
+  closing this study as research-design-insufficient without altering its
+  artifacts and opening a new versioned contract that records 2023-2025 as burned
+  discovery years. The owner has not chosen a path yet.
+- Training now pauses instead of dying under memory exhaustion.
+  `_TrainingMonitor.relieve_memory_pressure()` trims the working set on a fixed
+  cadence and `memory_exhausted()` raises `TrainingPaused` after a durable
+  checkpoint when available physical memory stays below
+  `LOW_MEMORY_PAUSE_AVAILABLE_GB = 1.0`.
 - Fold source provenance is now `schema_version: 2` in
   `seq100_fold_contract.py`: backing-file identity is workspace-relative path
   plus byte size plus full SHA-256, with `mtime_ns` and absolute paths removed,

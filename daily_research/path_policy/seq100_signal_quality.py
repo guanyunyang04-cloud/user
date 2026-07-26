@@ -144,6 +144,8 @@ TRAINING_BUDGET_MUTABLE_FIELDS = ("max_epochs", "patience")
 PROGRESS_HEARTBEAT_SECONDS = 30.0
 CONSOLE_EVENT_SECONDS = 300.0
 CHECKPOINT_INTERVAL_SECONDS = 600.0
+# Keep this strictly below the ordinary trim trigger so that trim gets a chance first.
+LOW_MEMORY_PAUSE_AVAILABLE_GB = 1.0
 FORMAL_FOLD_YEARS = (2023, 2024, 2025)
 FEATURE_WINDOWS = (5, 10, 20, 40, 60)
 FEATURE_RETURN_HORIZONS = (1, 2, 5, 10, 20, 40, 60)
@@ -7399,6 +7401,8 @@ class _TrainingMonitor:
         self.last_write = 0.0
         self.last_console = 0.0
         self.last_checkpoint = time.perf_counter()
+        self.last_trim_batch = 0
+        self.trim_step = 0
         self.phase = ""
         self.rate_window: deque[tuple[float, int]] = deque(maxlen=32)
         self.latest: dict[str, Any] = {}
@@ -7418,6 +7422,44 @@ class _TrainingMonitor:
 
     def checkpoint_saved(self) -> None:
         self.last_checkpoint = time.perf_counter()
+
+    def relieve_memory_pressure(self) -> dict[str, Any] | None:
+        """Trim the mapped working set on a fixed cadence and report the event."""
+        self.trim_step += 1
+        self.last_trim_batch, event = (
+            sequence_training._maybe_trim_training_working_set(
+                batch_count=self.trim_step,
+                last_trim_batch=self.last_trim_batch,
+            )
+        )
+        if event is not None:
+            _append_jsonl(self.events_path, {"event": "working_set_trim", **event})
+        return event
+
+    def memory_exhausted(self) -> dict[str, Any] | None:
+        """Return diagnostics when memory stays critically low after a forced trim."""
+        available_before = sequence_training._available_physical_memory_gb()
+        if (
+            available_before is None
+            or available_before >= LOW_MEMORY_PAUSE_AVAILABLE_GB
+        ):
+            return None
+        trim_succeeded = bool(sequence_training._trim_working_set())
+        available_after = sequence_training._available_physical_memory_gb()
+        if (
+            available_after is None
+            or available_after >= LOW_MEMORY_PAUSE_AVAILABLE_GB
+        ):
+            return None
+        process_memory = sequence_training._current_process_memory_gb()
+        return {
+            "available_before_gb": float(available_before),
+            "available_after_gb": float(available_after),
+            "trim_succeeded": trim_succeeded,
+            "working_set_gb": process_memory["working_set_gb"],
+            "private_gb": process_memory["private_gb"],
+            "pause_threshold_gb": float(LOW_MEMORY_PAUSE_AVAILABLE_GB),
+        }
 
     def report(
         self,
@@ -7631,13 +7673,27 @@ def _checkpoint_or_pause(
     checkpoint_callback: Any,
     progress: Mapping[str, Any],
 ) -> None:
-    pause = bool(monitor is not None and monitor.pause_requested())
+    memory_pause = None
+    requested_pause = False
+    if monitor is not None:
+        monitor.relieve_memory_pressure()
+        if (
+            monitor.trim_step
+            % sequence_training.WORKING_SET_MEMORY_CHECK_INTERVAL_BATCHES
+            == 0
+        ):
+            memory_pause = monitor.memory_exhausted()
+        requested_pause = monitor.pause_requested()
+    pause = bool(requested_pause or memory_pause is not None)
     due = bool(monitor is not None and monitor.checkpoint_due())
     if not (force_checkpoint or pause or due):
         return
     checkpoint_path = Path(checkpoint_callback())
     if monitor is not None:
         monitor.checkpoint_saved()
+        extra = {"last_checkpoint": str(checkpoint_path.resolve())}
+        if memory_pause is not None:
+            extra["memory_pause"] = memory_pause
         monitor.report(
             status="paused" if pause else "training",
             phase=str(progress.get("phase", "training")),
@@ -7652,14 +7708,19 @@ def _checkpoint_or_pause(
             patience_used=progress.get("patience_used"),
             force=True,
             event="paused" if pause else "checkpoint",
-            extra={"last_checkpoint": str(checkpoint_path.resolve())},
+            extra=extra,
         )
     if pause:
-        try:
-            assert monitor is not None
-            monitor.pause_path.unlink()
-        except FileNotFoundError:
-            pass
+        if requested_pause:
+            try:
+                assert monitor is not None
+                monitor.pause_path.unlink()
+            except FileNotFoundError:
+                pass
+        if memory_pause is not None:
+            raise TrainingPaused(
+                f"training paused on low available memory at {checkpoint_path.resolve()}"
+            )
         raise TrainingPaused(
             f"training paused safely at {checkpoint_path.resolve()}"
         )
