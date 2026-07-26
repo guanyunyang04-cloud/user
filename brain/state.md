@@ -1,6 +1,6 @@
 # Current workspace state
 
-Updated: `2026-07-26`
+Updated: `2026-07-27`
 
 - QDP is usable with `active_as_of_date=2026-07-21`. PIT main-board daily history
   includes historical ST, long suspensions, and delisted securities.
@@ -98,5 +98,6 @@ Updated: `2026-07-26`
 <!-- seq100-signal-quality:start -->
 - `seq100_pit_signal_quality_v1` 已以 `research_design_insufficient` 收口；selector winner 为 `null`。
 - 权威 compact record：`daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json`。
+- 继任研究仍未设计或训练；D5/D10/D20/D40/D60 候选路径标签与统一 F1-F5 因果输入已完成准备和审计，2026 结果未读取。权威指针：`daily_research/brain/references/seq100_learnability_inputs_20260727.md`。
 - 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 仍只允许新合同确认。
 <!-- seq100-signal-quality:end -->

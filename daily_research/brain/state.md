@@ -1,6 +1,6 @@
 # Daily Research state
 
-Updated: `2026-07-26`
+Updated: `2026-07-27`
 
 - The registered frozen baseline remains `structured_joint_turnover_180x35_v2`
   (`L35V2`), but it is no longer valid selection evidence for deployment. The
@@ -122,9 +122,25 @@ Updated: `2026-07-26`
   collapses distinct realized path shapes. They do not prove that a vector label
   is more predictable or should be the successor output. No signal-day
   predictability test, training, target, horizon, slot count, or exit rule was
-  selected. The requested path-map work stops here; a later separately
-  authorized audit may use 2023/2024/2025 as three burned out-of-sample folds,
-  while 2026 remains untouched.
+  selected.
+- LEARNABILITY INPUT STEPS 1-2 COMPLETE. The full 8,674,588-row candidate index
+  now has independently available D5/D10/D20/D40/D60 `g_H`, legal-close
+  `mfe_H`, close-path `pre_peak_mae_H`, through-2022 frozen fixed-K3
+  low/mid/high `state_H`, and next-open `entry_fill` candidates under ignored
+  `tmp/seq100_learnability_inputs/attempt_001/`. Horizon-valid `g_H`/state counts
+  are 8,326,420/8,311,178/8,280,652/8,219,582/8,158,478. Missing later horizons
+  do not remove available shorter-horizon labels.
+- The uniform base input is a read-only row-aligned reference to 296 continuous
+  and five categorical causal F1-F5 features. It consumes neither the closed
+  study target nor its D60-purged folds; future training must build new
+  horizon-aware folds. No new technical-indicator family was added in this step.
+- The 2025-12-31 outcome firewall passed: all 156,376 post-2025 rows are fully
+  missing, 4,112 source recomputations had zero error, and an independent
+  five-horizon cross-check over 5,929,931 pre-2023 paths had zero K3 or endpoint
+  mismatch. 2023/2024/2025 remain burned future predictability folds and 2026
+  remains untouched. No model was trained and no candidate label or output
+  structure was selected. Evidence:
+  `daily_research/brain/references/seq100_learnability_inputs_20260727.md`.
 - The path-map audit now distinguishes exchange-level entry from reference-order
   affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
   one 100-share lot with the CNY 100,000 diagnostic order; they remain clustered
