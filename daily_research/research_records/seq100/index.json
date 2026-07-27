@@ -108,6 +108,7 @@
   ],
   "active_studies": [
     "daily_research/studies/pit_l35v2_oof_trees_v1.json",
-    "daily_research/studies/l35v2_batch1024.json"
+    "daily_research/studies/l35v2_batch1024.json",
+    "daily_research/studies/seq100_mfe_feature_family_audit_v1.json"
   ]
 }

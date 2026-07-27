@@ -200,11 +200,23 @@ Updated: `2026-07-27`
   long-horizon challenger: 66.5% of 2023 dates have a constant cross-section and
   2023 residual IC after shorter `g` scores is negative. Retain
   `pre_peak_mae_H` at D3/D5/D10/D20/D40 as separate adversity/risk outputs.
-- The next feature-family audit first trains separate `mfe_10` and `mfe_20`
-  scalar heads. Only feature families that improve the core opportunity heads
-  advance to `state_10`, secondary `state_20`, and risk-head checks. D3/D5 state
-  moves to a later post-entry path-update study. This remains a separated output
-  design, not one vector loss or fused entry score.
+- FEATURE-FAMILY AUDIT FROZEN AND ACTIVE. `seq100_mfe_feature_family_audit_v1`
+  compares the common 296+5 baseline against exactly one causal feature family
+  at a time for separate `mfe_10` and `mfe_20` scalar heads. It freezes seven
+  real families (recent K-line sequence, breakout/retest levels, long daily
+  context, previous-completed week/month context, traditional indicators,
+  confirmed swings, and turnover-cost proxy) plus a 32-column deterministic
+  hash-noise negative control. The catalog SHA is `0f91e81c...fc63`.
+- Its contract SHA is `de2d2ea...795e6`; the two directly consumed protected
+  source panels are now bound by content hash as well as the pack manifest.
+  The 2023-2025 reused folds, inner previous-year tree selection, 60-booster
+  matrix, HAC/Stouffer/BH gates, and decision-invalidating noise rule are frozen.
+  Quick preflight and 9 focused tests pass; full large-file hashing remains a
+  hard gate before preparation/training. No feature result or winner exists yet.
+  Only non-omitted families may later advance to `state_10`; D3/D5 state remains
+  reserved for a later post-entry path-update study. This is still a separated
+  output design, not one vector loss or fused entry score. Contract evidence:
+  `daily_research/brain/references/seq100_mfe_feature_family_audit_contract_20260727.md`.
 - The active contract is archived and removed. Authoritative compact record:
   `daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json`;
   interpretation:

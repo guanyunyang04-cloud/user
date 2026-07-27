@@ -106,5 +106,6 @@ Updated: `2026-07-27`
 - 这支持“两阶段”语义：入场前先分别预测 D10/D20 异常上涨机会幅度，入场后再依据实际 D3/D5 路径更新留存/退出判断。标量与状态概率暂时分开输出，不先合并为一个向量损失或入场总分。
 - 权威 compact record：`daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json`；解释：`daily_research/brain/references/seq100_short_horizon_target_reaudit_20260727.md`。用户授权复用 2023-2025 作为本轮确认/决策窗口，但不宣称它们是全新留出集；2026 完全未读取，也不是本轮标签决策的必要确认年。
 - `seq100_target_redundancy_audit_v1` 已以 `completed_nonredundant_head_set` 收口。它复用 24 个 OOS task 和 126 个绑定证据文件，没有训练 booster 或保留诊断模型；最大结果日为 2025-12-31，2026 完全未读取。权威记录：`daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/artifact.json`；解释：`daily_research/brain/references/seq100_target_redundancy_audit_20260727.md`。
-- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改。下一步才冻结分组特征增量合同；尚未选择特征族赢家、退出规则、持有期、槽位、杠杆、止损、分数组合或继任架构。
+- `seq100_mfe_feature_family_audit_v1` 已作为结果前合同冻结并进入活动状态，合同 SHA 为 `de2d2ea...795e6`。它只比较 baseline 与单个新增特征族对 `mfe_10/mfe_20` 的增量，固定 7 个真实家族、1 个 32 列哈希噪声负对照、2023-2025 三折和 60 个 CPU LightGBM booster；quick preflight 与 9 项聚焦测试已通过，完整大文件哈希是特征生成和训练前硬门槛。尚无特征族结果或赢家。
+- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；尚未选择退出规则、持有期、槽位、杠杆、止损、分数组合或继任架构。
 <!-- seq100-signal-quality:end -->

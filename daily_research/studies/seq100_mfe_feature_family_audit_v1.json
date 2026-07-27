@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_current_study",
+  "study_id": "seq100_mfe_feature_family_audit_v1",
+  "status": "active",
+  "contract": {
+    "schema_version": 1,
+    "contract_id": "seq100_mfe_feature_family_audit_v1",
+    "objective": "identify_which_causal_technical_feature_families_add_stable_information_to_the_nonredundant_mfe_d10_and_d20_opportunity_heads",
+    "inputs": {
+      "target_redundancy_artifact": {
+        "path": "daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/artifact.json",
+        "file_sha256": "35f396b036768491bdcd8b8f708d9ed6c7b7a3a75ef77aa5c3d6d737ce9fbd27",
+        "artifact_sha256": "5c8e14c1b7e67dea789e58146599a1c2fa363703353bf8619b5c8195688b7f40"
+      },
+      "source_learnability_contract": {
+        "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/contract.json",
+        "file_sha256": "248040c166f17a2a8bf636cf5c28864cfc70681ab80f9ccb156ed569810dc73e",
+        "contract_sha256": "7d542696c8b2e1c15650049740db675555d1633bc43ce92307da4739224ee7ac"
+      },
+      "source_learnability_artifact": {
+        "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json",
+        "file_sha256": "c76a59e43ec0bf348cff20203d00d7fb7cd4fa33be32145b3b044e2e87f58fdb",
+        "artifact_sha256": "4e5c2edf3cc4c6b1684437d0f30554a7c82d75ef25f216371b30aadf3f09dad4"
+      },
+      "label_manifest": {
+        "path": "tmp/seq100_learnability_inputs/attempt_001/label_manifest.json",
+        "file_sha256": "e1094434d6d8a094e56812718ac31c4a2730ac2a3b04cd257368312555936a54",
+        "resolved_sha256": "9e0a9c8d6a00219881f87a9e78105ec3e9d5dbd7ed39c1b4cfabed09859e5489"
+      },
+      "base_feature_manifest": {
+        "path": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+        "file_sha256": "5edb948d8a94d7e6127888ebe1e7fcf4dc60c7aef534c2978f2c9b71eecad2f3",
+        "resolved_sha256": "3d4e405dc6ee0312fe2a2c71ec046d410cb692542e22546eafd9b6ff7519b1a3"
+      },
+      "source_pack_manifest": {
+        "path": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+        "file_sha256": "4f8417c2c382c12b9a4055596c572d39988a5d47e91e30736e313da84634fafd"
+      },
+      "source_feature_panels": {
+        "daily_raw": {
+          "path": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/daily_raw.float32.dat",
+          "file_sha256": "474918a33a4f5b937299ef35f46c6cdb7b8f8dd3fd6b69a90767bf087ce6091b",
+          "size": 714174396,
+          "shape": [
+            4017,
+            3419,
+            13
+          ],
+          "dtype": "float32"
+        },
+        "turnover": {
+          "path": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/turnover.float32.dat",
+          "file_sha256": "a373c8b2a1264358304b0e07ea908b8662caf8ecfee7396365a7fabd9e08cb60",
+          "size": 109872984,
+          "shape": [
+            4017,
+            3419,
+            2
+          ],
+          "dtype": "float32"
+        }
+      },
+      "implementation": {
+        "path": "daily_research/path_policy/seq100_mfe_feature_family_audit.py",
+        "file_sha256": "ef3a5e66d048bc782a2b178631e0ea12a06796e272bfcaf55a9e6d2e01dbd269"
+      },
+      "row_universe": "all point-in-time main-board candidates from the frozen learnability input; no future fill or label filter",
+      "candidate_count": 8674588,
+      "base_feature_profile": "296 continuous plus 5 train-mapped categorical signal-close-or-earlier features"
+    },
+    "feature_catalog": {
+      "schema": "seq100_mfe_feature_family_catalog/v1",
+      "sha256": "0f91e81c7181e04336b5d43c151859d92ae7d31c40641f3905fe6a157dfbfc63",
+      "layout": "one feature-major float32 candidate-aligned file per family",
+      "candidate_families": {
+        "recent_kline_sequence": 100,
+        "breakout_retest_levels": 40,
+        "long_daily_context": 54,
+        "completed_week_month_context": 48,
+        "traditional_indicators": 27,
+        "confirmed_swing_structure": 24,
+        "turnover_cost_proxy": 5
+      },
+      "negative_control": {
+        "family": "deterministic_hash_noise",
+        "feature_count": 32
+      },
+      "common_rules": {
+        "maximum_information_time": "signal_date close or earlier",
+        "maximum_source_date": "2025-12-31",
+        "post_2025_rows": "all newly generated feature values must remain NaN",
+        "price_scale": "all price-derived features are ratios, log distances, standardized values, or bounded states so a uniform back-adjustment scale cannot carry information",
+        "missingness": "retain causal missing values; LightGBM handles them natively; never backfill from a future bar",
+        "cross_sectional_rank_expansion": false,
+        "reason_no_rank_expansion": "new columns are already scale-free or normalized; avoid doubling family size and silently changing the tested concept"
+      }
+    },
+    "feature_family_semantics": {
+      "recent_kline_sequence": "lags 1 through 9 of eleven normalized OHLC, candle, amount-surprise, and relative-turnover channels plus the signal-day signed body; the signal-day baseline columns are not duplicated",
+      "breakout_retest_levels": "signal close/high/low distances to prior-window high and low, excluding the signal bar, plus level ages and the latest close breakout level, age, pullback distance, and breakout-day relative turnover for 20 and 60 day structures",
+      "long_daily_context": "the existing F1 return and seventeen rolling descriptors repeated only at new 120, 180, and 252 trading-day windows",
+      "completed_week_month_context": "return, moving-average distance, volatility, ATR, trend slope, and range position over 4/13/26/52 completed weeks and 3/6/12/24 completed months; the current partial calendar period is excluded",
+      "traditional_indicators": "KAMA(10,2,30), KAMA(20,2,30), MACD(12,26,9), KDJ(9,3,3), KDJ(21,3,3), and RSI(6/14/24) under deterministic causal recurrences",
+      "confirmed_swing_structure": "strict three-bar and five-bar local pivots exposed only after their right-side bars close, with pivot distance, age, change, density, swing position, and direction; this is a causal swing proxy and not a claim to implement a canonical subjective Chan-theory grammar",
+      "turnover_cost_proxy": "a daily typical-price cohort recursion weighted by recovered float turnover and surviving mass, reporting log cost distance, dispersion, normal-approximation profitable fraction, observed mass, and mean age; it is calculated from daily data and is not an exchange-provided chip distribution",
+      "deterministic_hash_noise": "32 candidate-id keyed pseudo-random columns with the same firewall and missingness boundary; decision-invalidating negative control"
+    },
+    "protocol": {
+      "fold_years": [
+        2023,
+        2024,
+        2025
+      ],
+      "fold_role": "owner-authorized repeatedly reused recent decision folds; not a pristine holdout",
+      "primary_target": "mfe_H highest legal entry-relative close opportunity excluding D1 under T+1",
+      "primary_horizons": [
+        10,
+        20
+      ],
+      "candidate_feature_families": [
+        "recent_kline_sequence",
+        "breakout_retest_levels",
+        "long_daily_context",
+        "completed_week_month_context",
+        "traditional_indicators",
+        "confirmed_swing_structure",
+        "turnover_cost_proxy"
+      ],
+      "negative_control_family": "deterministic_hash_noise",
+      "comparison": "base features versus base plus exactly one family; no cumulative family union in this study",
+      "fold_rule": "expanding history with horizon-specific label purge before each outer year",
+      "iteration_selection": {
+        "source": "baseline features only on the immediately preceding complete calendar year",
+        "mapping": {
+          "2023": 2022,
+          "2024": 2023,
+          "2025": 2024
+        },
+        "purge": "same H-day dependency purge before the inner validation year",
+        "refit": "after selecting the tree count, refit every outer baseline and family variant on all purged history available before the outer year",
+        "shared_capacity": "all variants in the same horizon-year use the baseline-selected fixed tree count; the outer year never selects iterations"
+      },
+      "sample_weight": "each signal date has equal total training weight; MFE-missing rows remain aligned with zero target weight",
+      "task_budget": {
+        "baseline_iteration_tuning": 6,
+        "outer_baseline_and_family_models": 54,
+        "total_boosters": 60
+      }
+    },
+    "model": {
+      "library": "lightgbm_4.6.0",
+      "objective": "huber",
+      "huber_alpha": 0.9,
+      "boosting_type": "gbdt",
+      "device_type": "cpu",
+      "learning_rate": 0.03,
+      "num_boost_round": 1500,
+      "early_stopping_rounds": 100,
+      "early_stopping_metric": "huber",
+      "num_leaves": 63,
+      "max_depth": 7,
+      "min_data_in_leaf": 10000,
+      "feature_fraction": 1.0,
+      "bagging_fraction": 1.0,
+      "bagging_freq": 0,
+      "lambda_l1": 0.0,
+      "lambda_l2": 10.0,
+      "max_bin": 255,
+      "deterministic": true,
+      "force_col_wise": true,
+      "num_threads": 8,
+      "histogram_pool_size_mb": 1024,
+      "sequence_batch_size": 32768,
+      "working_set_trim": {
+        "enabled": true,
+        "check_interval_batches": 4,
+        "trigger_available_gb": 5.0
+      },
+      "seed": 7,
+      "hyperparameter_search": false,
+      "reason_full_feature_and_row_fraction": "remove feature-subsampling and row-subsampling variance so the added family is the only structural difference"
+    },
+    "evaluation": {
+      "report_each_year_and_horizon_separately": true,
+      "paired_daily_metrics": [
+        "delta_daily_cross_sectional_spearman_rank_ic",
+        "delta_daily_top5pct_realized_mfe_mean",
+        "delta_daily_top5pct_realized_mfe_top_quintile_rate"
+      ],
+      "overlap_control": "Newey-West HAC on each paired daily delta with lag H-1",
+      "cross_year_support": "one-sided Stouffer combination of the three per-year HAC rank-IC tests, while year-level effect gates remain mandatory",
+      "multiple_testing": "Benjamini-Hochberg over all 16 family/control by horizon hypotheses at frozen FDR q",
+      "pooled_only_conclusions_forbidden": true,
+      "feature_importance_is_diagnostic_only": true,
+      "top5_is_not_a_slot_or_portfolio_selection": true
+    },
+    "decision": {
+      "head_thresholds": {
+        "maximum_fdr_q_value": 0.1,
+        "minimum_positive_ic_years": 2,
+        "minimum_median_rank_ic_delta": 0.001,
+        "minimum_worst_year_rank_ic_delta": -0.002,
+        "minimum_positive_top5_years": 2,
+        "minimum_worst_year_top5_mean_delta": -0.001,
+        "minimum_positive_tail_years": 2,
+        "minimum_worst_year_tail_rate_delta": -0.01
+      },
+      "family_status": {
+        "core": "both MFE D10 and D20 heads pass",
+        "specialized": "exactly one head passes and the other head has no material IC or Top-5 mean harm",
+        "omit": "no head passes or a nonpassing head has material harm"
+      },
+      "negative_control_rule": "if deterministic_hash_noise passes either horizon, invalidate the entire feature-family decision and retain no winner",
+      "next_step": "only non-omitted families may enter a new state10 incremental audit; state20 remains secondary and D3/D5 state remains reserved for post-entry path updating"
+    },
+    "scientific_firewall": {
+      "forbidden_years": [
+        2026
+      ],
+      "forbidden_uses": [
+        "feature_generation",
+        "row_loading",
+        "iteration_selection",
+        "training",
+        "metric_computation",
+        "threshold_setting",
+        "decision"
+      ],
+      "maximum_feature_source_date": "2025-12-31",
+      "maximum_consumed_outcome_date": "2025-12-31",
+      "owner_directive": "continue using 2023-2025 as recent decision folds",
+      "pristine_holdout_claim": false
+    },
+    "non_selections": [
+      "feature_family_union",
+      "state10_feature_winner",
+      "state20_literal_probability",
+      "risk_head_feature_winner",
+      "joint_loss",
+      "score_fusion",
+      "full_chan_theory",
+      "exit_rule",
+      "holding_period",
+      "slot_count",
+      "leverage",
+      "stop_loss",
+      "successor_architecture"
+    ],
+    "workflow": {
+      "cli_module": "daily_research.path_policy.seq100_mfe_feature_family_audit",
+      "output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+      "commands": [
+        "self-test",
+        "preflight --full-hash",
+        "prepare",
+        "run-primary",
+        "evaluate"
+      ],
+      "one_foreground_training_entry": true,
+      "external_memory_guard": "tools/memory_guard.py --min-available-gb 1.0",
+      "resume_unit": "one completed feature-family-horizon-fold booster",
+      "full_hash_preflight_required": true
+    },
+    "protection": {
+      "qdp_mutation": false,
+      "source_pack_mutation": false,
+      "base_feature_or_label_mutation": false,
+      "model_registry_mutation": false,
+      "registered_checkpoint_mutation": false,
+      "active_execution_mutation": false,
+      "2026_read": false
+    },
+    "retention": {
+      "process_material_location": "ignored study output",
+      "retain_prepared_features_models_predictions_metrics_and_logs_until_compaction": true,
+      "compact_indexed_conclusion_required": true,
+      "active_contract_removal_after_closeout": true
+    },
+    "completion_states": [
+      "completed_feature_family_screen",
+      "invalid_negative_control",
+      "completed_no_incremental_family",
+      "study_incomplete"
+    ]
+  },
+  "contract_sha256": "de2d2ea2269c1f4371cf7b3d5f3ee9d87216ec4ec7845308f28a6c2eeae795e6"
+}
