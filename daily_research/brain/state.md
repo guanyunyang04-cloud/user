@@ -77,10 +77,11 @@ Updated: `2026-07-27`
   amplitude rather than on growth. Cash share inside the selected Top-1% is
   0.03-0.7%, so unfilled and limit-up candidates are not what caps the result.
   Evidence script: `tmp/seq100_ic_growth_transfer.py` (ignored output).
-- SUCCESSOR NOT YET DESIGNED. The owner has accepted growth as the objective and
-  the recorded successor requirement is a new study contract; no successor
-  contract, target, or metric has been written yet. Any successor must treat
-  2023-2025 as burned discovery years.
+- SUCCESSOR IMPLEMENTATION NOT YET DESIGNED. The owner has accepted growth as
+  the objective and the completed learnability audit now supplies a target
+  candidate, but no successor training contract, architecture, score-combination
+  rule, account policy, or 2026 confirmation has been written. Any successor
+  must be a new study and treat 2023-2025 as burned discovery years.
 - PRE-2023 FUTURE-PATH ATLAS COMPLETE. The read-only discovery cohort contains
   6,096,195 full-universe candidates from `2010-09-29` through `2022-09-30`, with
   every D60 outcome ending by `2022-12-30`. Of these, 5,929,931 (97.27%) have a
@@ -119,10 +120,9 @@ Updated: `2026-07-27`
   and early-rise-failure/late-start splits are tentative because temporal or
   prefix ARI falls below 0.60.
 - These atlases prove only that one terminal scalar or one horizon-cluster ID
-  collapses distinct realized path shapes. They do not prove that a vector label
-  is more predictable or should be the successor output. No signal-day
-  predictability test, training, target, horizon, slot count, or exit rule was
-  selected.
+  collapses distinct realized path shapes. They did not by themselves prove that
+  a vector label was more predictable; signal-day predictability is now answered
+  separately by `seq100_path_label_learnability_v1`.
 - LEARNABILITY INPUT STEPS 1-2 COMPLETE. The full 8,674,588-row candidate index
   now has independently available D5/D10/D20/D40/D60 `g_H`, legal-close
   `mfe_H`, close-path `pre_peak_mae_H`, through-2022 frozen fixed-K3
@@ -134,25 +134,31 @@ Updated: `2026-07-27`
   and five categorical causal F1-F5 features. It consumes neither the closed
   study target nor its D60-purged folds; future training must build new
   horizon-aware folds. No new technical-indicator family was added in this step.
-- LEARNABILITY STEP 3 ACTIVE. The pre-result contract
-  `daily_research/studies/seq100_path_label_learnability_v1.json` freezes one
-  CPU LightGBM per label-horizon-fold, horizon-specific dependency purges,
-  date-equal weights, separate 2023/2024/2025 reporting, overlap-robust HAC
-  statistics, and a mechanical step-4 decision gate. The three years are
-  burned discovery/evaluation folds, not pristine holdouts; 2026 remains
-  forbidden. No prediction or target decision existed when this contract was
-  registered. The first capacity attempt was killed by the 1.0 GiB guard during
-  LightGBM bin construction at 0 completed boosters and 0.732 GiB minimum
-  availability. Before any result existed, the contract was rebound to
-  32,768-row transfer blocks plus Windows working-set trimming; all scientific
-  rows, features, bins, labels, tree parameters, and decision gates are unchanged.
-- The 2025-12-31 outcome firewall passed: all 156,376 post-2025 rows are fully
-  missing, 4,112 source recomputations had zero error, and an independent
-  five-horizon cross-check over 5,929,931 pre-2023 paths had zero K3 or endpoint
-  mismatch. 2023/2024/2025 remain burned future predictability folds and 2026
-  remains untouched. No model was trained and no candidate label or output
-  structure was selected. Evidence:
-  `daily_research/brain/references/seq100_learnability_inputs_20260727.md`.
+- LEARNABILITY STEPS 3-4 COMPLETE. All 63 CPU LightGBM boosters completed under
+  the frozen common rule in about 8h40m; the full re-aggregation reverified every
+  bound model, prediction, and daily-metric SHA-256. The mechanical verdict is
+  `state_H` at D5/D10/D20, outputting low/mid/high probabilities, with
+  `pre_peak_mae_H` auxiliary risk at D5/D10/D20/D40. State Rank IC by
+  2023/2024/2025 is D5 `0.0691/0.0300/0.0490`, D10
+  `0.0746/0.0717/0.0708`, and D20 `0.0855/0.0812/0.0607`; Top-5 high-state
+  enrichment and binary/multiclass Brier skill are positive in every retained
+  horizon-year.
+- The verdict is qualified rather than absolute. `mfe_H` has strong stable
+  amplitude ranking through D40 but fails only the frozen positive-event-rate
+  gate; `g_60` has IC `0.2105/0.1314/0.0937` and fails only 2025 decile
+  monotonicity; D40/D60 state rankings are positive but raw probability skill
+  fails. The frozen output says calibrated probabilities, while the run fitted no
+  post-hoc calibrator, so a successor must calibrate strictly inside training
+  folds. `g_10/2024` is a verified per-date constant score after one tree, hence
+  its daily Rank IC is correctly undefined.
+- The entry-unfilled auxiliary is separately predictable: PR-AUC is
+  `0.296/0.369/0.343` and Brier skill is `0.183/0.204/0.219`. It remains an
+  execution probability, not a future filter. The 2025-12-31 firewall still
+  holds, 2023-2025 are burned discovery/evaluation folds, and 2026 was untouched.
+  The active contract is archived and removed. Authoritative record:
+  `daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json`;
+  interpretation:
+  `daily_research/brain/references/seq100_path_label_learnability_20260727.md`.
 - The path-map audit now distinguishes exchange-level entry from reference-order
   affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
   one 100-share lot with the CNY 100,000 diagnostic order; they remain clustered

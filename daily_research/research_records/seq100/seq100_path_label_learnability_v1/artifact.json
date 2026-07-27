@@ -1,0 +1,349 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_path_label_learnability_research_record",
+  "status": "completed_target_candidate",
+  "completed_at": "2026-07-27T10:49:55+08:00",
+  "study_id": "seq100_path_label_learnability_v1",
+  "contract": {
+    "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/contract.json",
+    "contract_sha256": "7d542696c8b2e1c15650049740db675555d1633bc43ce92307da4739224ee7ac",
+    "contract_file_sha256": "248040c166f17a2a8bf636cf5c28864cfc70681ab80f9ccb156ed569810dc73e"
+  },
+  "scope": {
+    "candidate_count": 8674588,
+    "continuous_feature_count": 296,
+    "categorical_feature_count": 5,
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "horizons": [
+      5,
+      10,
+      20,
+      40,
+      60
+    ],
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "forbidden_years_consumed": [],
+    "fold_role": "burned discovery/evaluation folds, not pristine holdouts"
+  },
+  "execution": {
+    "task_count": 63,
+    "path_task_count": 60,
+    "status": "completed",
+    "foreground_wall_seconds": 31175,
+    "summed_training_seconds": 27865.39405470004,
+    "memory_guard_lowest_available_gb": 1.5668563842773438,
+    "best_iteration": {
+      "minimum": 1,
+      "median": 80,
+      "maximum": 1096
+    }
+  },
+  "mechanical_decision": {
+    "decision_rule": "qualified horizon count, then median worst-year Rank IC, then simplicity tie-break g > mfe > state",
+    "verdict": "learn_low_mid_high_path_state_probabilities",
+    "primary_target": "state_H",
+    "retained_horizons": [
+      5,
+      10,
+      20
+    ],
+    "frozen_output_structure": "three calibrated state_H probabilities per retained horizon",
+    "observed_model_output": "raw LightGBM probabilities; no post-hoc probability calibrator was fitted",
+    "pre_peak_mae_auxiliary_horizons": [
+      5,
+      10,
+      20,
+      40
+    ],
+    "g_qualified_horizons": [],
+    "mfe_qualified_horizons": [],
+    "does_not_select": [
+      "exit_rule",
+      "holding_period",
+      "slot_count",
+      "leverage",
+      "stop_loss",
+      "successor_architecture",
+      "2026_confirmation"
+    ]
+  },
+  "primary_evidence": [
+    {
+      "horizon": 5,
+      "rank_ic_2023_2024_2025": [
+        0.0690850072157372,
+        0.03004741429671688,
+        0.048992030553114116
+      ],
+      "top5_high_state_lift_2023_2024_2025": [
+        0.1262301732199186,
+        0.09350993083251508,
+        0.14113645588749718
+      ],
+      "binary_brier_skill_2023_2024_2025": [
+        0.0390717584126935,
+        0.04499746313407116,
+        0.053228605356395065
+      ],
+      "multiclass_brier_skill_2023_2024_2025": [
+        0.041559914542004694,
+        0.024613250621013827,
+        0.051792993204877846
+      ]
+    },
+    {
+      "horizon": 10,
+      "rank_ic_2023_2024_2025": [
+        0.07461503815043737,
+        0.07172496594073945,
+        0.0708281994697119
+      ],
+      "top5_high_state_lift_2023_2024_2025": [
+        0.10025183648726639,
+        0.08637309628353691,
+        0.12084429723193614
+      ],
+      "binary_brier_skill_2023_2024_2025": [
+        0.031250374099201284,
+        0.050466034377761204,
+        0.048874009345300506
+      ],
+      "multiclass_brier_skill_2023_2024_2025": [
+        0.031368364022750894,
+        0.029651982877112903,
+        0.0574576682115423
+      ]
+    },
+    {
+      "horizon": 20,
+      "rank_ic_2023_2024_2025": [
+        0.0854767173528806,
+        0.08124404539416935,
+        0.060713339531604335
+      ],
+      "top5_high_state_lift_2023_2024_2025": [
+        0.07585043217131729,
+        0.08924702165524946,
+        0.10011263795295729
+      ],
+      "binary_brier_skill_2023_2024_2025": [
+        0.0032840906963447214,
+        0.04206173738624219,
+        0.02951376183785359
+      ],
+      "multiclass_brier_skill_2023_2024_2025": [
+        0.017890255633238428,
+        0.012019737488998539,
+        0.00994026083486732
+      ]
+    }
+  ],
+  "qualified_auxiliary_risk": [
+    {
+      "horizon": 5,
+      "rank_ic_2023_2024_2025": [
+        0.19955450295672,
+        0.19663508460983978,
+        0.2265755886879584
+      ]
+    },
+    {
+      "horizon": 10,
+      "rank_ic_2023_2024_2025": [
+        0.2085120531473719,
+        0.19597133132403954,
+        0.2395331798010039
+      ]
+    },
+    {
+      "horizon": 20,
+      "rank_ic_2023_2024_2025": [
+        0.2039812242128537,
+        0.18385300888474554,
+        0.23988446794486332
+      ]
+    },
+    {
+      "horizon": 40,
+      "rank_ic_2023_2024_2025": [
+        0.10886465331620336,
+        0.17967411894206628,
+        0.21968121823377337
+      ]
+    }
+  ],
+  "important_qualifications": {
+    "mfe": {
+      "finding": "MFE amplitude is strongly and stably rank-predictable at D5-D40, but the frozen gate also required a higher frequency of mfe_H > 0 in the Top5 group.",
+      "worst_year_rank_ic_d5_d10_d20_d40": [
+        0.059109436720061165,
+        0.1088261939381684,
+        0.14261752642146786,
+        0.06051548136316375
+      ],
+      "top5_mean_mfe_lift_d20_2023_2024_2025": [
+        0.043288823561490386,
+        0.05226195889906413,
+        0.04901970761860298
+      ],
+      "top5_positive_rate_lift_d20_2023_2024_2025": [
+        -0.03720334598101579,
+        -0.005674665599401481,
+        -0.050857329818190154
+      ],
+      "interpretation": "The model concentrates larger upside tails without increasing the already common event mfe_H > 0. This does not override the frozen decision, but it makes MFE a live target-design hypothesis under a new contract."
+    },
+    "g60": {
+      "rank_ic_2023_2024_2025": [
+        0.21045003238464438,
+        0.13137588509218043,
+        0.0936983142985229
+      ],
+      "top5_lift_2023_2024_2025": [
+        0.008275592545156727,
+        0.0534750715607156,
+        0.032463756802951126
+      ],
+      "decile_spearman_2023_2024_2025": [
+        0.7818181818181817,
+        0.9515151515151514,
+        0.41818181818181815
+      ],
+      "failed_gate": "2025 decile Spearman 0.41818181818181815 was below the frozen 0.5 minimum",
+      "interpretation": "D60 has no priority, but its endpoint-return information is too strong to describe as unlearnable."
+    },
+    "state_d40_d60": {
+      "rank_ic_d40_2023_2024_2025": [
+        0.0589981055997479,
+        0.05109670372520735,
+        0.07908074545541231
+      ],
+      "rank_ic_d60_2023_2024_2025": [
+        0.16022277571839497,
+        0.08653211372260869,
+        0.09767815854642128
+      ],
+      "binary_brier_skill_d40_2023_2024_2025": [
+        -0.11361295615684575,
+        -0.011061618345242552,
+        0.005457554780710083
+      ],
+      "binary_brier_skill_d60_2023_2024_2025": [
+        -0.25230499273927043,
+        -0.01757337292070038,
+        0.0008065621472935769
+      ],
+      "interpretation": "Ranking remains positive, but raw probability skill fails. A later study may test training-fold-only calibration; this study cannot reclassify those horizons post hoc."
+    },
+    "g10_2024": {
+      "best_iteration": 1,
+      "annual_unique_prediction_count": 6,
+      "maximum_within_date_unique_prediction_count": 1,
+      "daily_cross_section_count": 242,
+      "rank_ic": null,
+      "interpretation": "The single tree used only date-common information, so every daily cross-section was constant. The non-finite Rank IC correctly fails the frozen gate."
+    },
+    "probability_wording": "The frozen decision says calibrated probabilities, but this run evaluated uncalibrated LightGBM probabilities. Positive Brier skill supports probabilistic information at D5-D20; an actual successor must fit any calibrator without using its evaluation fold."
+  },
+  "entry_unfilled_audit": [
+    {
+      "year": 2023,
+      "event_count": 1233,
+      "prevalence": 0.0016598198130149148,
+      "pr_auc": 0.29583519984989143,
+      "roc_auc": 0.8912870314312467,
+      "brier_skill": 0.18300800188675947,
+      "expected_calibration_error": 0.00030991232158161255
+    },
+    {
+      "year": 2024,
+      "event_count": 4101,
+      "prevalence": 0.005470318463881545,
+      "pr_auc": 0.36923969482280367,
+      "roc_auc": 0.9438227118740186,
+      "brier_skill": 0.20404381577952713,
+      "expected_calibration_error": 0.0020279713837558803
+    },
+    {
+      "year": 2025,
+      "event_count": 2365,
+      "prevalence": 0.0031757139240689617,
+      "pr_auc": 0.34330691728916995,
+      "roc_auc": 0.9145935560998687,
+      "brier_skill": 0.2192629936147399,
+      "expected_calibration_error": 0.0003345041489720396
+    }
+  ],
+  "evidence": {
+    "output_root": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1",
+    "preflight": {
+      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/preflight.json",
+      "sha256": "9625c966b053d542175f0cc5b3572fa7ea5926e0a4d1a379a97ecd7e1199cfe5"
+    },
+    "summary": {
+      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/summary.json",
+      "sha256": "d17956e58372735a39184070ac52436c9cf5feaf38141c5b52f3b30f6cbaacbc"
+    },
+    "decision": {
+      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/decision.json",
+      "sha256": "a19e1c01e38b76c39fa0d213dca19d839fc62b0d209d0423691f56e3bd86a99e"
+    },
+    "memory_guard": {
+      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/memory_guard.json",
+      "sha256": "fc3acb32be6b0451437005f66dd33cfb95c646f0d0b852e4b7b1ceaae534a920"
+    },
+    "task_result_count": 63,
+    "task_result_set_sha256": "004487f5430e6504a8c95a0dc27aabd12d7db0e11e094491f8b81e356d564fd5",
+    "task_result_set_algorithm": "sha256(canonical_json(sorted[{path,sha256}]))",
+    "retained_models": true,
+    "retained_predictions": true,
+    "retained_daily_metrics": true,
+    "retained_logs": true
+  },
+  "mutations": {
+    "qdp": false,
+    "source_pack": false,
+    "formal_model_registry": false,
+    "registered_checkpoints": false,
+    "active_execution": false,
+    "push_publish": false
+  },
+  "validations": {
+    "focused_tests": {
+      "command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/path_policy/tests/test_seq100_path_label_learnability.py -q",
+      "status": "passed",
+      "passed_test_count": 8,
+      "warning_count": 1,
+      "duration_seconds": 8.54
+    },
+    "record_source_reconciliation": {
+      "status": "passed",
+      "checked_primary_horizons": 3,
+      "checked_auxiliary_horizons": 4,
+      "checked_entry_years": 3,
+      "checked_task_result_count": 63
+    },
+    "brain_doctor": {
+      "status": "ok",
+      "error_count": 0,
+      "warning_count": 0
+    },
+    "brain_integrity": {
+      "status": "known_preexisting_blocked",
+      "error_count": 15,
+      "warning_count": 2,
+      "error_set_sha256": "a5e1a14ba1911d2472b951cb1fbd93197dd302ce920d5184899a65d9ae92839f",
+      "unchanged_from_pre_closeout_baseline": true,
+      "scope": "all 15 errors are pre-existing registered-model training_summary SHA mismatches; none was modified by this study"
+    },
+    "git_diff_check": {
+      "status": "passed"
+    }
+  },
+  "active_contract_removed": true,
+  "artifact_sha256": "4e5c2edf3cc4c6b1684437d0f30554a7c82d75ef25f216371b30aadf3f09dad4"
+}

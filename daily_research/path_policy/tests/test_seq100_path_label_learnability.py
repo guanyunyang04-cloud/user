@@ -9,8 +9,18 @@ from daily_research.path_policy import seq100_path_label_learnability as learnab
 from daily_research.path_policy import seq100_signal_quality as signal_quality
 
 
+ARCHIVED_STUDY_PATH = (
+    learnability.WORKSPACE_ROOT
+    / "daily_research/research_records/seq100/seq100_path_label_learnability_v1/contract.json"
+)
+
+
+def _load_archived_study() -> dict[str, object]:
+    return learnability.load_study(ARCHIVED_STUDY_PATH)
+
+
 def test_load_study_freezes_2026_and_contract_hash() -> None:
-    study = learnability.load_study()
+    study = _load_archived_study()
 
     assert study["study_id"] == learnability.STUDY_ID
     assert study["contract"]["scientific_firewall"]["forbidden_years"] == [2026]
@@ -173,7 +183,7 @@ def test_mechanical_decision_selects_only_predeclared_qualified_family() -> None
         for horizon in learnability.HORIZONS
         for year in learnability.FOLD_YEARS
     ]
-    contract = learnability.load_study()["contract"]["decision"]
+    contract = _load_archived_study()["contract"]["decision"]
 
     decision = learnability.decide_from_results(results, contract)
 
@@ -218,7 +228,7 @@ def test_lgb_bins_can_be_reused_for_regression_and_multiclass() -> None:
     evaluation_rows = np.arange(200, row_count, dtype=np.int64)
     regression = fake_inputs.continuous[:, 0]
     weights = np.ones(row_count, dtype=np.float32)
-    study = learnability.load_study()
+    study = _load_archived_study()
     datasets = learnability.build_lgb_datasets(
         inputs=fake_inputs,
         train_rows=train_rows,

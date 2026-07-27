@@ -39,9 +39,11 @@ Updated: `2026-07-27`
   hashes are preserved unchanged inside it. All closeout gates passed.
   Formal fold training was 3 of 18 cells done (LightGBM, all three folds, seed 7);
   one TabM cell was interrupted and resumable; there was no `evaluate` and no
-  winner. Neural runtime v2 was implemented and hardware-qualified. No successor
-  study contract, target, or metric is designed yet, and any successor must treat
-  2023-2025 as burned discovery years. Authoritative detail lives in
+  winner. Neural runtime v2 was implemented and hardware-qualified. The later
+  independent learnability audit now supplies a target candidate, but no
+  successor implementation contract or account policy is designed, and any
+  successor must treat 2023-2025 as burned discovery years. Authoritative detail
+  lives in
   `daily_research/brain/state.md` and
   `daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md`.
 - The true-batch-1024 comparison remains paused and may resume only on explicit
@@ -98,6 +100,7 @@ Updated: `2026-07-27`
 <!-- seq100-signal-quality:start -->
 - `seq100_pit_signal_quality_v1` 已以 `research_design_insufficient` 收口；selector winner 为 `null`。
 - 权威 compact record：`daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json`。
-- 继任研究仍未设计或训练；D5/D10/D20/D40/D60 候选路径标签与统一 F1-F5 因果输入已完成准备和审计，2026 结果未读取。权威指针：`daily_research/brain/references/seq100_learnability_inputs_20260727.md`。
+- 独立研究 `seq100_path_label_learnability_v1` 已完成 63/63 个 LightGBM 并收口。冻结规则选择 D5/D10/D20 `state_H` low/mid/high 概率作为主目标候选，D5/D10/D20/D40 `pre_peak_mae_H` 作为辅助风险；MFE 幅度可学、`g_60` 接近通过以及长周期概率校准问题均保留为限定证据。
+- 权威 compact record：`daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json`；解释：`daily_research/brain/references/seq100_path_label_learnability_20260727.md`。2023-2025 已烧为发现/评价折，2026 未读取。
 - 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 仍只允许新合同确认。
 <!-- seq100-signal-quality:end -->

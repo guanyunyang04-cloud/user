@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-26",
+  "updated_at": "2026-07-27",
   "current_model": "structured_joint_turnover_180x35_v2",
   "selection_window": "2023-2025",
   "confirmation_window": "2026",
@@ -89,11 +89,15 @@
       "id": "seq100_pit_signal_quality_v1",
       "status": "research_design_insufficient",
       "path": "daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json"
+    },
+    {
+      "id": "seq100_path_label_learnability_v1",
+      "status": "completed_target_candidate",
+      "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json"
     }
   ],
   "active_studies": [
     "daily_research/studies/pit_l35v2_oof_trees_v1.json",
-    "daily_research/studies/l35v2_batch1024.json",
-    "daily_research/studies/seq100_path_label_learnability_v1.json"
+    "daily_research/studies/l35v2_batch1024.json"
   ]
 }
