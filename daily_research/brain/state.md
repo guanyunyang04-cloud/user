@@ -159,6 +159,21 @@ Updated: `2026-07-27`
   `daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json`;
   interpretation:
   `daily_research/brain/references/seq100_path_label_learnability_20260727.md`.
+- SHORT-HORIZON TARGET REAUDIT IS ACTIVE under the frozen contract
+  `seq100_short_horizon_target_reaudit_v1`. The owner explicitly designates
+  2023-2025 as this round's reused confirmation/decision window; the record must
+  still disclose that those years are not a pristine holdout. 2026 remains
+  unread and forbidden for every use.
+- The pre-2023 D1-D3 atlas covers 6,096,195 candidates and 5,929,931 assignable
+  paths. K2-K10 selects `3/2/3/3` over 2018/2020/2021/2022; fixed-K3 minimum
+  calendar ARI is 0.702494. State3 is not merely endpoint tertiles: NMI with
+  daily `g3` tertiles is 0.172274 and ARI is 0.108288.
+- Full-universe D1/D3 inputs are prepared and audited under ignored output.
+  Valid counts are 8,338,623 `g1`, 8,332,519 `g3/state3`, and 8,319,539
+  `mfe3/pre_peak_mae3`; 5,929,931 pre-2023 state assignments have zero mismatch
+  and all 156,376 2026 rows remain missing. The frozen run will train only 15
+  new boosters and reuse the old D5-D60 OOS predictions. Evidence:
+  `daily_research/brain/references/seq100_short_horizon_target_reaudit_inputs_20260727.md`.
 - The path-map audit now distinguishes exchange-level entry from reference-order
   affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
   one 100-share lot with the CNY 100,000 diagnostic order; they remain clustered

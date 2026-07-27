@@ -1221,6 +1221,8 @@ def train_one_model(
     evaluation_weight: np.ndarray,
     output_dir: Path,
     events_path: Path,
+    study_id: str = STUDY_ID,
+    result_schema: str = RESULT_SCHEMA,
 ) -> dict[str, Any]:
     import lightgbm as lgb
 
@@ -1291,10 +1293,10 @@ def train_one_model(
     daily_path = output_dir / "daily_metrics.parquet"
     daily.to_parquet(daily_path, index=False, compression="zstd")
     result = {
-        "schema": RESULT_SCHEMA,
+        "schema": str(result_schema),
         "status": "completed",
         "completed_at": _now(),
-        "study_id": STUDY_ID,
+        "study_id": str(study_id),
         "contract_sha256": str(study["contract_sha256"]),
         "task_id": task_id,
         "fold_year": int(year),
@@ -1370,12 +1372,17 @@ def train_one_model(
     return result
 
 
-def _task_result_complete(path: Path, contract_sha256: str) -> bool:
+def _task_result_complete(
+    path: Path,
+    contract_sha256: str,
+    *,
+    result_schema: str = RESULT_SCHEMA,
+) -> bool:
     if not path.is_file():
         return False
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        if payload.get("schema") != RESULT_SCHEMA or payload.get("status") != "completed":
+        if payload.get("schema") != str(result_schema) or payload.get("status") != "completed":
             return False
         if str(payload.get("contract_sha256")) != str(contract_sha256):
             return False
@@ -1408,15 +1415,17 @@ def _write_group_material(
     inputs: LearnabilityInputs,
     fold: FoldRows,
     datasets: LightGBMDatasets,
+    study_id: str = STUDY_ID,
+    group_schema: str = "seq100_path_label_learnability_group/v1",
 ) -> dict[str, Any]:
     evaluation_rows_path = output_dir / "evaluation_rows.npy"
     vocabulary_path = output_dir / "category_vocabularies.npz"
     _save_npy(evaluation_rows_path, datasets.evaluation_rows)
     _save_npz(vocabulary_path, datasets.category_vocabularies)
     payload = {
-        "schema": "seq100_path_label_learnability_group/v1",
+        "schema": str(group_schema),
         "created_at": _now(),
-        "study_id": STUDY_ID,
+        "study_id": str(study_id),
         "contract_sha256": str(study["contract_sha256"]),
         "fold_year": int(fold.year),
         "dependency_days": int(fold.dependency_days),

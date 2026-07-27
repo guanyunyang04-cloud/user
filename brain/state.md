@@ -102,5 +102,7 @@ Updated: `2026-07-27`
 - 权威 compact record：`daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json`。
 - 独立研究 `seq100_path_label_learnability_v1` 已完成 63/63 个 LightGBM 并收口。冻结规则选择 D5/D10/D20 `state_H` low/mid/high 概率作为主目标候选，D5/D10/D20/D40 `pre_peak_mae_H` 作为辅助风险；MFE 幅度可学、`g_60` 接近通过以及长周期概率校准问题均保留为限定证据。
 - 权威 compact record：`daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json`；解释：`daily_research/brain/references/seq100_path_label_learnability_20260727.md`。2023-2025 已烧为发现/评价折，2026 未读取。
+- 独立合同 `seq100_short_horizon_target_reaudit_v1` 已冻结并进入活动状态。用户指定复用 2023-2025 作为本轮确认/决策窗口，同时明确披露其并非全新留出集；2026 仍完全禁用。
+- D3 pre-2023 全域 K2-K10 画像与 D1/D3 全量标签已完成并审计：D3 state 对逐日 `g3` 三分位 NMI 仅 0.172，不是简单收益离散化；2026 的 156,376 行均保持缺失。下一步只训练 15 个新模型并复用旧 OOS 预测重评 MFE、`g60`、校准和多期限冗余。
 - 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 仍只允许新合同确认。
 <!-- seq100-signal-quality:end -->
