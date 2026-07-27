@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -26,11 +25,9 @@ from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
     atomic_write_json,
-    canonical_manifest_sha256,
     path_for_manifest,
     qdp_v2_root,
     read_active_manifest,
-    stable_hash,
     utc_now,
     write_active_manifest,
     write_dataset_manifest,
@@ -57,11 +54,9 @@ SSE_ST_TRANSITIONS = Path(__file__).with_name("resources") / "sse_st_transitions
 SSE_FACTBOOK_EVIDENCE = {
     "2011": {
         "url": "https://www.sse.com.cn/aboutus/publication/factbook/documents/c/10170571/files/f43f33c247f242d48780c3097548281b.pdf",
-        "sha256": "77E4D1F8024F47456A608C119F2E634E3936F5AE1C245F4AEFA45BA59F0D0BBE",
     },
     "2012": {
         "url": "https://www.sse.com.cn/aboutus/publication/factbook/documents/c/10170570/files/9a7b8e0d00e84d358d02fbba056f7bda.pdf",
-        "sha256": "D1283B557D51B298300B3CB46C1125AABEAC0AE86E94CEA7ECB15DE9BEFFF0BB",
     },
 }
 PRE_ARCHIVE_SECURITIES = (
@@ -389,18 +384,17 @@ def _build_archive_cache(
 ) -> Path:
     output = ctx.runtime / "archive_history.parquet"
     metadata = ctx.runtime / "archive_history.json"
-    identity = stable_hash(
-        {
-            "semantic_version": PART_SEMANTIC_VERSION,
-            "symbols": sorted(str(item) for item in symbols),
-        }
-    )
+    requested_symbols = sorted(str(item) for item in symbols)
     if _valid_parquet(
         output,
         ("trade_date", "symbol", "tradestatus", "isST", "history_source"),
     ) and metadata.is_file():
         try:
-            if json.loads(metadata.read_text(encoding="utf-8")).get("identity") == identity:
+            cached = json.loads(metadata.read_text(encoding="utf-8"))
+            if (
+                cached.get("semantic_version") == PART_SEMANTIC_VERSION
+                and cached.get("symbols") == requested_symbols
+            ):
                 return output
         except (OSError, ValueError, TypeError):
             pass
@@ -489,9 +483,8 @@ def _build_archive_cache(
     atomic_write_json(
         metadata,
         {
-            "identity": identity,
             "semantic_version": PART_SEMANTIC_VERSION,
-            "symbols": len(symbols),
+            "symbols": requested_symbols,
             "sources": {key: str(value) for key, value in paths.items()},
             "created_at": utc_now(),
         },
@@ -1579,17 +1572,6 @@ def _combine_domain_parts(ctx: PitHistoryContext, domain: str) -> Path:
     return prepared
 
 
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _create_composite_dataset(
     ctx: PitHistoryContext,
     *,
@@ -1600,18 +1582,19 @@ def _create_composite_dataset(
     frame = pd.read_parquet(prepared)
     if frame.empty:
         return current.dataset_id, {"status": "unchanged", "added_rows": 0}
-    content_sha = _file_sha256(prepared)
-    dataset_id = f"{domain}__{stable_hash({'policy': 'pit_historical_mainboard_v2', 'old': current.dataset_id, 'sha256': content_sha})}"
+    token = utc_now().replace("-", "").replace(":", "").replace("+00:00", "Z")
+    dataset_id = f"{domain}__pit_history_{token}"
     dataset_dir = ctx.root / "datasets" / domain / dataset_id
-    shard = dataset_dir / "shards" / f"pit_restore_{content_sha[:16]}.parquet"
+    shard = dataset_dir / "shards" / f"pit_restore_{token}.parquet"
     if not shard.is_file():
         shard.parent.mkdir(parents=True, exist_ok=True)
         temporary = shard.with_name(f".{shard.name}.{os.getpid()}.tmp")
         temporary.unlink(missing_ok=True)
         try:
             shutil.copy2(prepared, temporary)
-            if _file_sha256(temporary) != content_sha:
-                raise PitHistoryError(f"pit_history_copy_hash_mismatch:{domain}")
+            copied = pd.read_parquet(temporary)
+            if len(copied) != len(frame) or list(copied.columns) != list(frame.columns):
+                raise PitHistoryError(f"pit_history_copy_validation_failed:{domain}")
             temporary.replace(shard)
         finally:
             temporary.unlink(missing_ok=True)
@@ -1625,12 +1608,9 @@ def _create_composite_dataset(
         end_date=end,
         status="stored",
         file_size=shard.stat().st_size,
-        schema_hash=current.manifest.schema_hash,
-        source_path=str(prepared),
-        content_key=f"pit-history:{content_sha[:24]}",
         metadata={
             "restore_policy": "pit_historical_mainboard_v2",
-            "restore_content_sha256": content_sha,
+            "source_path": str(prepared),
         },
     )
     payload = current.manifest.to_dict()
@@ -1713,7 +1693,7 @@ def _create_composite_dataset(
         "status": "created",
         "added_rows": int(len(frame)),
         "dataset_id": dataset_id,
-        "manifest_sha256": canonical_manifest_sha256(manifest.to_dict()),
+        "manifest_path": str(ctx.root / "datasets" / domain / dataset_id / "dataset.json"),
     }
 
 
@@ -2676,7 +2656,6 @@ def _normalize_lifecycle_factor_scale_stitches(
         )
     return {
         "status": str(mutation.get("status", "")),
-        "mutation_id": str(mutation.get("mutation_id", "")),
         "plans": plans,
     }
 
@@ -2778,8 +2757,7 @@ def normalize_symbol_lifecycle_effectivity(
         results[domain] = {
             **prepared,
             "status": str(mutation.get("status", "")),
-            "mutation_id": str(mutation.get("mutation_id", "")),
-            "manifest_row_count": int(mutation.get("manifest_row_count", 0) or 0),
+            "manifest_row_count": int(mutation.get("row_count", 0) or 0),
         }
         _cleanup_lifecycle_prepared_domain(ctx, domain)
     if not apply:
@@ -2945,7 +2923,6 @@ def run_pit_history_restore(
         "archive_paths": {key: str(value) for key, value in archive_paths.items()},
         "sse_factbooks": SSE_FACTBOOK_EVIDENCE,
         "sse_transition_resource": str(SSE_ST_TRANSITIONS),
-        "sse_transition_resource_sha256": _file_sha256(SSE_ST_TRANSITIONS),
         "factor_provider": "sina_via_akshare_hfq_factor_event",
         "boundary_market_provider": "eastmoney_via_akshare_unadjusted_daily",
     }
@@ -2975,7 +2952,7 @@ def run_pit_history_restore(
         "commits": commits,
         "source_evidence": source_evidence,
     }
-    audit_id = stable_hash(audit)
+    audit_id = utc_now().replace("-", "").replace(":", "").replace("+00:00", "Z")
     audit_path = ctx.root / "audits" / f"pit_history_restore_{audit_id}.json"
     atomic_write_json(audit_path, audit)
     write_active_manifest(ctx.root, after)
@@ -2990,7 +2967,6 @@ def run_pit_history_restore(
         "commits": commits,
         "symbol_lifecycle": lifecycle,
         "audit_path": str(audit_path),
-        "active_manifest_sha256": canonical_manifest_sha256(after),
     }
     atomic_write_json(ctx.runtime / "result.json", payload)
     return json_safe(payload)

@@ -9,7 +9,6 @@ repair API remains the single manifest commit point.
 """
 
 import argparse
-import hashlib
 import io
 import json
 import multiprocessing
@@ -47,9 +46,8 @@ from quant_data_platform.qdp_v2.manifest import (
     read_active_manifest,
     read_dataset_manifest,
     resolve_manifest_path,
-    stable_hash,
 )
-from quant_data_platform.qdp_v2.repair import _sha256_file, bulk_append_active_shards_from_parquet
+from quant_data_platform.qdp_v2.repair import bulk_append_active_shards_from_parquet
 
 
 REPAIR_VERSION = 1
@@ -174,7 +172,6 @@ class _DomainInput:
     domain: str
     dataset_id: str
     manifest_path: Path
-    manifest_sha256: str
     paths: tuple[Path, ...]
 
 
@@ -301,7 +298,6 @@ def run_recent_daily_repair(
         workspace,
         (DAILY_DOMAIN, "universe_snapshot", "security_status", "security_identity"),
     )
-    active_sha = _sha256_file(qdp_v2_root(workspace) / "active" / "active.json")
     pairs = tuple(
         sorted(
             {
@@ -318,24 +314,9 @@ def run_recent_daily_repair(
     wanted: dict[str, tuple[str, ...]] = {}
     for symbol, date in pairs:
         wanted[symbol] = (*wanted.get(symbol, ()), date)
-    fingerprint = stable_hash(
-        {
-            "version": REPAIR_VERSION,
-            "kind": "daily",
-            "start_date": start,
-            "end_date": end,
-            "pairs": pairs,
-            "active_sha256": active_sha,
-            "manifest_sha256": {
-                key: value.manifest_sha256 for key, value in inputs.items()
-            },
-        },
-        length=32,
-    )
-    runtime = _runtime_root(workspace) / f"mootdx_daily__{fingerprint[:24]}"
+    runtime = _runtime_root(workspace) / _run_directory("mootdx_daily", start, end)
     state = _load_or_initialize_state(
         runtime,
-        fingerprint=fingerprint,
         kind="daily",
         start_date=start,
         end_date=end,
@@ -385,7 +366,6 @@ def run_recent_intraday_repair(
     _configure_workspace_runtime(workspace)
     domains = (DAILY_DOMAIN, INTRADAY_DOMAIN)
     inputs = _active_inputs(workspace, domains, start_date=start, end_date=end)
-    active_sha = _sha256_file(qdp_v2_root(workspace) / "active" / "active.json")
     pairs = _missing_intraday_pairs(
         inputs,
         start_date=start,
@@ -396,24 +376,9 @@ def run_recent_intraday_repair(
     for symbol, trade_date in pairs:
         wanted.setdefault(symbol, tuple())
         wanted[symbol] = (*wanted[symbol], trade_date)
-    fingerprint = stable_hash(
-        {
-            "version": REPAIR_VERSION,
-            "kind": "intraday_5m",
-            "start_date": start,
-            "end_date": end,
-            "pairs": pairs,
-            "active_sha256": active_sha,
-            "manifest_sha256": {
-                key: value.manifest_sha256 for key, value in inputs.items()
-            },
-        },
-        length=32,
-    )
-    runtime = _runtime_root(workspace) / f"mootdx_5m__{fingerprint[:24]}"
+    runtime = _runtime_root(workspace) / _run_directory("mootdx_5m", start, end)
     state = _load_or_initialize_state(
         runtime,
-        fingerprint=fingerprint,
         kind="intraday_5m",
         start_date=start,
         end_date=end,
@@ -486,23 +451,9 @@ def run_baostock_intraday_repair(
     wanted: dict[str, tuple[str, ...]] = {}
     for symbol, trade_date in pairs:
         wanted[symbol] = (*wanted.get(symbol, ()), trade_date)
-    fingerprint = stable_hash(
-        {
-            "version": REPAIR_VERSION,
-            "kind": "baostock_intraday_5m",
-            "start_date": start,
-            "end_date": end,
-            "pairs": pairs,
-            "manifest_sha256": {
-                key: value.manifest_sha256 for key, value in inputs.items()
-            },
-        },
-        length=32,
-    )
-    runtime = _runtime_root(workspace) / f"baostock_5m__{fingerprint[:24]}"
+    runtime = _runtime_root(workspace) / _run_directory("baostock_5m", start, end)
     state = _load_or_initialize_state(
         runtime,
-        fingerprint=fingerprint,
         kind="baostock_intraday_5m",
         start_date=start,
         end_date=end,
@@ -557,8 +508,8 @@ def _download_baostock_buckets(
         }
         previous = completed.get(key)
         if isinstance(previous, dict) and previous.get("status") == "completed":
-            _validate_reused_bucket(previous, runtime=runtime)
-            continue
+            if _reused_bucket_is_valid(previous, runtime=runtime, wanted=bucket_wanted):
+                continue
         pending.append(
             (
                 key,
@@ -659,7 +610,8 @@ def _run_baostock_bucket_process(
             "accepted_day_count": int(len(frame) // 48),
             "row_count": int(len(frame)),
             "bundle_path": str(bundle_path) if bundle_path else "",
-            "bundle_sha256": _sha256_file(bundle_path) if bundle_path else "",
+            "file_size": bundle_path.stat().st_size if bundle_path else 0,
+            "requested_pairs": _requested_pairs(wanted),
             "unresolved": [
                 {"symbol": symbol, "trade_date": trade_date, "reason": reason}
                 for (symbol, trade_date), reason in sorted(unresolved.items())
@@ -826,8 +778,8 @@ def _download_buckets(
         }
         previous = completed.get(key)
         if isinstance(previous, dict) and previous.get("status") == "completed":
-            _validate_reused_bucket(previous, runtime=runtime)
-            continue
+            if _reused_bucket_is_valid(previous, runtime=runtime, wanted=bucket_wanted):
+                continue
         frame, unresolved, errors = _fetch_bucket(
             bucket_wanted,
             provider_domain=provider_domain,
@@ -850,7 +802,8 @@ def _download_buckets(
             ),
             "row_count": int(len(frame)),
             "bundle_path": str(bundle_path) if bundle_path else "",
-            "bundle_sha256": _sha256_file(bundle_path) if bundle_path else "",
+            "file_size": bundle_path.stat().st_size if bundle_path else 0,
+            "requested_pairs": _requested_pairs(bucket_wanted),
             "unresolved": [
                 {"symbol": symbol, "trade_date": trade_date, "reason": reason}
                 for (symbol, trade_date), reason in sorted(unresolved.items())
@@ -1300,7 +1253,6 @@ def _active_inputs(
             domain=domain,
             dataset_id=dataset_id,
             manifest_path=manifest_path,
-            manifest_sha256=_sha256_file(manifest_path),
             paths=paths,
         )
     return inputs
@@ -1362,7 +1314,6 @@ def _write_final_parquet(frame: pd.DataFrame, path: Path, *, domain: str) -> Non
 def _load_or_initialize_state(
     runtime: Path,
     *,
-    fingerprint: str,
     kind: str,
     start_date: str,
     end_date: str,
@@ -1375,12 +1326,20 @@ def _load_or_initialize_state(
         if not resume:
             raise RecentMarketRepairError("recent_repair_existing_job_requires_resume")
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        if str(state.get("fingerprint", "")) != fingerprint:
-            raise RecentMarketRepairError("recent_repair_state_fingerprint_mismatch")
+        expected = (kind, start_date, end_date)
+        observed = (
+            str(state.get("kind", "")),
+            str(state.get("start_date", "")),
+            str(state.get("end_date", "")),
+        )
+        if observed != expected:
+            raise RecentMarketRepairError(
+                f"recent_repair_state_parameters_mismatch:{observed!r}!={expected!r}"
+            )
+        state["task_count"] = int(task_count)
         return state
     state = {
-        "contract": "qdp_v2_recent_market_direct_repair_v1",
-        "fingerprint": fingerprint,
+        "format_version": REPAIR_VERSION,
         "kind": kind,
         "status": "pending",
         "start_date": start_date,
@@ -1396,19 +1355,28 @@ def _load_or_initialize_state(
     return state
 
 
-def _validate_reused_bucket(record: Mapping[str, Any], *, runtime: Path) -> None:
+def _reused_bucket_is_valid(
+    record: Mapping[str, Any],
+    *,
+    runtime: Path,
+    wanted: Mapping[str, Sequence[str]],
+) -> bool:
+    if list(record.get("requested_pairs", []) or []) != _requested_pairs(wanted):
+        return False
     text = str(record.get("bundle_path", ""))
     if not text:
-        if int(record.get("row_count", 0)) != 0:
-            raise RecentMarketRepairError("recent_repair_empty_bundle_row_count_mismatch")
-        return
+        return int(record.get("row_count", 0)) == 0
     path = Path(text).resolve()
     if not path.is_file() or runtime.resolve() not in path.parents:
-        raise RecentMarketRepairError(f"recent_repair_reused_bundle_missing:{path}")
-    if _sha256_file(path) != str(record.get("bundle_sha256", "")):
-        raise RecentMarketRepairError(f"recent_repair_reused_bundle_hash_mismatch:{path}")
-    if pq.ParquetFile(path).metadata.num_rows != int(record.get("row_count", 0)):
-        raise RecentMarketRepairError(f"recent_repair_reused_bundle_rows_mismatch:{path}")
+        return False
+    try:
+        parquet = pq.ParquetFile(path)
+    except Exception:
+        return False
+    return (
+        int(parquet.metadata.num_rows) == int(record.get("row_count", 0))
+        and path.stat().st_size == int(record.get("file_size", -1))
+    )
 
 
 def _unresolved_mapping(
@@ -1426,7 +1394,22 @@ def _split_symbols(symbols: Sequence[str], workers: int) -> tuple[tuple[str, ...
 
 
 def _stable_bucket(symbol: str) -> int:
-    return int(hashlib.sha256(str(symbol).encode("utf-8")).hexdigest()[:8], 16) % BUCKET_COUNT
+    code = str(symbol).split(".", 1)[0]
+    if code.isdigit():
+        return int(code) % BUCKET_COUNT
+    return sum((index + 1) * ord(character) for index, character in enumerate(code)) % BUCKET_COUNT
+
+
+def _requested_pairs(wanted: Mapping[str, Sequence[str]]) -> list[list[str]]:
+    return [
+        [str(symbol), str(trade_date)]
+        for symbol, dates in sorted(wanted.items())
+        for trade_date in sorted(set(dates))
+    ]
+
+
+def _run_directory(kind: str, start_date: str, end_date: str) -> str:
+    return f"{kind}__{start_date.replace('-', '')}_{end_date.replace('-', '')}"
 
 
 def _path_texts(value: _DomainInput) -> list[str]:

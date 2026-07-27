@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -16,7 +15,6 @@ from quant_data_platform.qdp_v2.manifest import (
     dataset_manifest_for_id,
     qdp_v2_root,
     read_dataset_manifest,
-    schema_hash,
     write_active_manifest,
     write_dataset_manifest,
 )
@@ -36,12 +34,7 @@ from quant_data_platform.qdp_v2.repair import resolve_active_domain
 
 def _lifecycle_workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
-    brain = workspace / "brain" / "brain_manifest.json"
-    brain.parent.mkdir(parents=True, exist_ok=True)
-    brain.write_text(
-        json.dumps({"schema_version": 1, "brain_type": "main"}),
-        encoding="utf-8",
-    )
+    (workspace / "quant_data_platform").mkdir(parents=True)
     return workspace
 
 
@@ -65,7 +58,6 @@ def _install_lifecycle_domain(
         {"name": str(column), "type": str(frame[column].dtype)}
         for column in frame.columns
     ]
-    digest = hashlib.sha256(shard.read_bytes()).hexdigest()
     write_dataset_manifest(
         root,
         DatasetManifest(
@@ -78,7 +70,6 @@ def _install_lifecycle_domain(
             start_date=start_date,
             end_date=end_date,
             row_count=len(frame),
-            schema_hash=schema_hash(schema),
             shards=[
                 ShardManifestEntry(
                     path=shard.relative_to(root).as_posix(),
@@ -86,8 +77,6 @@ def _install_lifecycle_domain(
                     start_date=start_date,
                     end_date=end_date,
                     file_size=shard.stat().st_size,
-                    schema_hash=schema_hash(schema),
-                    content_key=digest,
                 )
             ],
             source={"provider": "unit"},
@@ -96,10 +85,6 @@ def _install_lifecycle_domain(
         ),
     )
     return dataset_id
-
-
-def _file_sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_factor_rows_are_past_only_and_normalized_to_first_observation() -> None:
@@ -444,10 +429,10 @@ def test_symbol_lifecycle_normalization_is_complete_deterministic_and_idempotent
         domain: resolve_active_domain(domain, workspace_root=workspace)
         for domain in (*domains, "market_intraday_5m")
     }
-    hashes_before = {
+    files_before = {
         domain: {
-            "manifest": _file_sha256(context.manifest_path),
-            "shards": [_file_sha256(path) for path in context.shard_paths],
+            "manifest": context.manifest_path.read_bytes(),
+            "shards": [path.read_bytes() for path in context.shard_paths],
         }
         for domain, context in contexts_before.items()
     }
@@ -472,10 +457,10 @@ def test_symbol_lifecycle_normalization_is_complete_deterministic_and_idempotent
     assert dry_run["domains"]["market_daily_raw"]["canonical_row_count"] == 3
     assert dry_run["domains"]["market_daily_raw"]["deduplicated_row_count"] == 2
     assert dry_run["domains"]["market_daily_raw"]["projected_manifest_row_count"] == 3
-    for domain, before in hashes_before.items():
+    for domain, before in files_before.items():
         context = resolve_active_domain(domain, workspace_root=workspace)
-        assert _file_sha256(context.manifest_path) == before["manifest"]
-        assert [_file_sha256(path) for path in context.shard_paths] == before["shards"]
+        assert context.manifest_path.read_bytes() == before["manifest"]
+        assert [path.read_bytes() for path in context.shard_paths] == before["shards"]
 
     result = normalize_symbol_lifecycle_effectivity(
         workspace_root=workspace,
@@ -531,17 +516,17 @@ def test_symbol_lifecycle_normalization_is_complete_deterministic_and_idempotent
     intraday_context = resolve_active_domain(
         "market_intraday_5m", workspace_root=workspace
     )
-    assert _file_sha256(intraday_context.manifest_path) == hashes_before[
+    assert intraday_context.manifest_path.read_bytes() == files_before[
         "market_intraday_5m"
     ]["manifest"]
-    assert [_file_sha256(path) for path in intraday_context.shard_paths] == hashes_before[
+    assert [path.read_bytes() for path in intraday_context.shard_paths] == files_before[
         "market_intraday_5m"
     ]["shards"]
 
-    normalized_hashes = {
-        domain: _file_sha256(
-            resolve_active_domain(domain, workspace_root=workspace).manifest_path
-        )
+    normalized_manifests = {
+        domain: resolve_active_domain(
+            domain, workspace_root=workspace
+        ).manifest_path.read_bytes()
         for domain in domains
     }
     replay = normalize_symbol_lifecycle_effectivity(
@@ -550,10 +535,10 @@ def test_symbol_lifecycle_normalization_is_complete_deterministic_and_idempotent
         apply=True,
     )
     assert replay["status"] == "already_normalized"
-    assert normalized_hashes == {
-        domain: _file_sha256(
-            resolve_active_domain(domain, workspace_root=workspace).manifest_path
-        )
+    assert normalized_manifests == {
+        domain: resolve_active_domain(
+            domain, workspace_root=workspace
+        ).manifest_path.read_bytes()
         for domain in domains
     }
 
@@ -669,8 +654,6 @@ def test_lifecycle_normalization_projects_heterogeneous_shards_to_manifest_schem
                     start_date="2019-01-03",
                     end_date="2019-01-03",
                     file_size=extra_path.stat().st_size,
-                    schema_hash=manifest.schema_hash,
-                    content_key=_file_sha256(extra_path),
                 ),
             ],
         ),

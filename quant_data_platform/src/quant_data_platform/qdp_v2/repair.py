@@ -1,93 +1,59 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
-import time
-import uuid
-from dataclasses import dataclass
+import shutil
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from quant_data_platform.core.json_io import json_safe, read_json
 from quant_data_platform.core.paths import qdp_paths
-from quant_data_platform.qdp_v2.duckdb_resources import (
-    GuardedDuckDbConnection,
-    open_guarded_duckdb,
-)
 from quant_data_platform.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
+    _manifest_schema_from_arrow,
     active_manifest_path,
-    arrow_schema_from_manifest,
-    atomic_write_json,
     dataset_manifest_path,
+    path_for_manifest,
     qdp_v2_root,
+    read_active_manifest,
     read_dataset_manifest,
     resolve_manifest_path,
-    _manifest_schema_from_arrow,
-    schema_hash,
+    write_dataset_manifest,
 )
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
-_DATE_COLUMNS = ("trade_date", "date", "query_date", "report_date", "ann_date")
+_DATE_COLUMNS = ("trade_date", "date", "datetime")
 
 
 class QdpV2RepairError(RuntimeError):
-    """Raised when an in-place active dataset repair cannot be proven safe."""
-
-
-class QdpV2RepairConflictError(QdpV2RepairError):
-    """Raised when active/manifest bytes change during a repair transaction."""
+    pass
 
 
 @dataclass(frozen=True)
 class ActiveDomain:
     root: Path
     active_path: Path
-    active_sha256: str
+    active: dict[str, Any]
     domain: str
     dataset_id: str
     manifest_path: Path
-    manifest_sha256: str
     manifest: DatasetManifest
 
     @property
-    def dataset_dir(self) -> Path:
-        return self.manifest_path.parent
-
-    @property
-    def shard_paths(self) -> tuple[Path, ...]:
-        return tuple(
-            resolve_manifest_path(item.path, root=self.root).resolve()
+    def shard_paths(self) -> list[Path]:
+        return [
+            resolve_manifest_path(item.path, root=self.root)
             for item in self.manifest.shards
-        )
-
-
-@dataclass(frozen=True)
-class _PreparedParquetInfo:
-    source_path: Path
-    row_count: int
-    start_date: str
-    end_date: str
-
-
-@dataclass(frozen=True)
-class _InstalledParquet:
-    source_path: Path
-    target_path: Path
-    row_count: int
-    start_date: str
-    end_date: str
-    file_sha256: str
-    created: bool
+        ]
 
 
 def resolve_active_domain(
@@ -95,19 +61,16 @@ def resolve_active_domain(
     *,
     workspace_root: str | Path | None = None,
 ) -> ActiveDomain:
-    """Resolve one domain from the current v2 active pointer without scanning data."""
-
     requested = str(domain or "").strip()
     if not requested:
         raise ValueError("qdp_v2_repair_domain_required")
     root = qdp_v2_root(workspace_root).resolve()
     active_path = active_manifest_path(root).resolve()
-    active_sha, active = _stable_json_read(active_path, "active")
+    active = read_active_manifest(root)
     dataset_id = active_dataset_map(active).get(requested, "")
     if not dataset_id:
         raise QdpV2RepairError(f"qdp_v2_repair_active_domain_missing:{requested}")
     manifest_path = dataset_manifest_path(root, requested, dataset_id).resolve()
-    manifest_sha, _ = _stable_json_read(manifest_path, "dataset_manifest")
     manifest = read_dataset_manifest(manifest_path)
     if manifest.domain != requested or manifest.dataset_id != dataset_id:
         raise QdpV2RepairError(
@@ -118,11 +81,10 @@ def resolve_active_domain(
     return ActiveDomain(
         root=root,
         active_path=active_path,
-        active_sha256=active_sha,
+        active=active,
         domain=requested,
         dataset_id=dataset_id,
         manifest_path=manifest_path,
-        manifest_sha256=manifest_sha,
         manifest=manifest,
     )
 
@@ -131,2384 +93,623 @@ def replace_active_table_from_parquet(
     domain: str,
     prepared_parquet_path: str | Path | Sequence[str | Path],
     *,
-    reason: str,
+    reason: str = "replace active table",
     workspace_root: str | Path | None = None,
     primary_key: Sequence[str] | None = None,
     contract_version: str = "",
     source_updates: Mapping[str, Any] | None = None,
     quality_updates: Mapping[str, Any] | None = None,
-    expected_manifest_sha256: str = "",
 ) -> dict[str, Any]:
-    """Replace every shard in one active table, including schema migrations.
-
-    Auxiliary tables are intentionally small single-table domains whose
-    contract can evolve in place.  The dataset manifest remains the commit
-    point and the active dataset id is never changed.  Old shards are removed
-    only after the new manifest is durable.
-    """
-
-    repair_reason = _required_reason(reason)
     context = resolve_active_domain(domain, workspace_root=workspace_root)
-    _assert_expected_manifest(context, expected_manifest_sha256)
-    requested_paths = (
+    requested = (
         [prepared_parquet_path]
         if isinstance(prepared_parquet_path, (str, Path))
         else list(prepared_parquet_path)
     )
-    if not requested_paths:
+    prepared = [_resolve_prepared_path(item, workspace_root) for item in requested]
+    if not prepared:
         raise ValueError("qdp_v2_repair_prepared_parquet_paths_required")
-    prepared_paths = [
-        _resolve_prepared_parquet_path(item, workspace_root=workspace_root)
-        for item in requested_paths
-    ]
-    _assert_unique_prepared_paths(prepared_paths)
-    parquets = [pq.ParquetFile(path) for path in prepared_paths]
-    arrow_schema = parquets[0].schema_arrow
-    for path, parquet in zip(prepared_paths, parquets, strict=True):
-        if not parquet.schema_arrow.equals(arrow_schema, check_metadata=False):
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_parquet_schema_mismatch:{path}"
-            )
-        if int(parquet.metadata.num_rows) <= 0:
-            raise QdpV2RepairError(f"qdp_v2_repair_frame_empty:{path}")
-    row_count = sum(int(item.metadata.num_rows) for item in parquets)
-
+    _ensure_unique_paths(prepared)
+    schema = _common_schema(prepared)
     keys = [str(item) for item in (primary_key or context.manifest.primary_key)]
-    if not keys:
-        raise QdpV2RepairError("qdp_v2_repair_primary_key_missing")
-    missing_keys = sorted(set(keys).difference(arrow_schema.names))
-    if missing_keys:
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_primary_key_columns_missing:{missing_keys}"
-        )
+    _require_columns(schema.names, keys, "primary_key")
+    _validate_primary_keys(prepared, keys)
 
-    date_column = next(
-        (item for item in _DATE_COLUMNS if item in arrow_schema.names),
-        "",
-    )
-    start_date = ""
-    end_date = ""
-    with _open_repair_duckdb(context) as connection:
-        quoted_keys = ",".join(_quote_identifier(item) for item in keys)
-        null_predicate = " OR ".join(
-            f"{_quote_identifier(item)} IS NULL" for item in keys
-        )
-        duplicate = connection.execute(
-            "SELECT 1 FROM read_parquet(?) "
-            f"WHERE NOT ({null_predicate}) GROUP BY {quoted_keys} "
-            "HAVING count(*) > 1 LIMIT 1",
-            [[str(item) for item in prepared_paths]],
-        ).fetchone()
-        null_key = connection.execute(
-            "SELECT 1 FROM read_parquet(?) "
-            f"WHERE {null_predicate} LIMIT 1",
-            [[str(item) for item in prepared_paths]],
-        ).fetchone()
-        if null_key:
-            raise QdpV2RepairError("qdp_v2_repair_primary_key_null")
-        if duplicate:
-            raise QdpV2RepairError("qdp_v2_repair_primary_key_duplicate")
-        if date_column:
-            quoted_date = _quote_identifier(date_column)
-            row = connection.execute(
-                "SELECT count(*) FILTER (WHERE try_cast("
-                f"{quoted_date} AS DATE) IS NULL), "
-                f"strftime(min(try_cast({quoted_date} AS DATE)), '%Y-%m-%d'), "
-                f"strftime(max(try_cast({quoted_date} AS DATE)), '%Y-%m-%d') "
-                "FROM read_parquet(?)",
-                [[str(item) for item in prepared_paths]],
-            ).fetchone()
-            if row is None or int(row[0] or 0) != 0 or not row[1] or not row[2]:
-                raise QdpV2RepairError(
-                    "qdp_v2_repair_date_value_invalid:replace_active_table"
-                )
-            start_date, end_date = str(row[1]), str(row[2])
-
-    infos = [
-        _PreparedParquetInfo(
-            source_path=path,
-            row_count=int(parquet.metadata.num_rows),
-            start_date=_parquet_date_range(path, date_column)[0] if date_column else "",
-            end_date=_parquet_date_range(path, date_column)[1] if date_column else "",
-        )
-        for path, parquet in zip(prepared_paths, parquets, strict=True)
-    ]
-    installed_items: list[_InstalledParquet] = []
-    created_paths: list[Path] = []
-    committed = False
+    installed = _install_prepared_files(context, prepared, kind="replace")
     try:
-        for info in infos:
-            installed = _install_prepared_parquet(
-                info,
-                target_dir=_active_shard_directory(context),
-                target_name=lambda digest: f"auxiliary_replace_{digest[:24]}.parquet",
-            )
-            installed_items.append(installed)
-            if installed.created:
-                created_paths.append(installed.target_path)
-        _assert_unique_installed_targets(installed_items)
-        new_schema = _manifest_schema_from_arrow(arrow_schema)
-        new_schema_hash = schema_hash(new_schema)
         entries = [
-            ShardManifestEntry(
-                path=_path_for_manifest(item.target_path, root=context.root),
-                row_count=item.row_count,
-                start_date=item.start_date,
-                end_date=item.end_date,
-                status="stored",
-                file_size=item.target_path.stat().st_size,
-                schema_hash=new_schema_hash,
-                source_path=str(item.source_path),
-                content_key=f"auxiliary-replace:{item.file_sha256[:24]}",
-                metadata={
-                    "repair_reason": repair_reason,
-                    "repair_file_sha256": item.file_sha256,
-                    "replaces": [old.path for old in context.manifest.shards],
-                },
-            )
-            for item in installed_items
+            _entry_for_parquet(context, path, reason=reason)
+            for path in installed
         ]
-        payload = context.manifest.to_dict()
-        payload.update(
-            {
-                "dataset_id": context.dataset_id,
-                "domain": context.domain,
-                "primary_key": keys,
-                "start_date": start_date,
-                "end_date": end_date,
-                "row_count": row_count,
-                "schema": new_schema,
-                "schema_hash": new_schema_hash,
-                "shards": [entry.to_dict() for entry in entries],
-            }
-        )
-        if contract_version:
-            payload["contract_version"] = str(contract_version)
-        source = dict(payload.get("source", {}) or {})
-        source.update(dict(source_updates or {}))
-        source.update(
-            {
-                "last_repair_action": "replace_active_table_from_parquet",
-                "last_repair_reason": repair_reason,
-                "last_repair_at": _utc_now(),
-            }
-        )
-        payload["source"] = source
-        quality = dict(payload.get("quality", {}) or {})
-        quality.update(dict(quality_updates or {}))
-        payload["quality"] = quality
-        notes = [str(item) for item in list(payload.get("notes", []) or [])]
-        note = f"replace_active_table_from_parquet:{repair_reason}"
-        if note not in notes:
-            notes.append(note)
-        payload["notes"] = notes
-
-        old_paths = [
-            resolve_manifest_path(item.path, root=context.root).resolve()
-            for item in context.manifest.shards
-        ]
-        old_sha256 = {
-            _manifest_path_key(path, context.root): _sha256_file(path)
-            for path in old_paths
-        }
-        mutation_id = shard_mutation_id(
+        source = {**context.manifest.source, **dict(source_updates or {})}
+        quality = {**context.manifest.quality, **dict(quality_updates or {})}
+        manifest = _updated_manifest(
             context,
-            removal_paths=old_paths,
-            append_items=installed_items,
+            entries,
+            schema=schema,
+            primary_key=keys,
+            contract_version=contract_version or context.manifest.contract_version,
+            source=source,
+            quality=quality,
         )
-        _record_shard_mutation(
-            payload,
-            mutation_id,
-            old_sha256=old_sha256,
-            reason=repair_reason,
-            previous_manifest_sha256=context.manifest_sha256,
-            affected_date_range=_affected_date_range(
-                context, [*old_paths, *[item.target_path for item in installed_items]]
-            ),
-            changed_columns=_schema_changed_columns(context.manifest.schema, new_schema),
-            old_schema_hash=context.manifest.schema_hash,
-            new_schema_hash=new_schema_hash,
-        )
-        _assert_context_unchanged(context)
-        _commit_manifest(context, payload)
-        committed = True
-        cleanup = _cleanup_committed_old_shards(
-            context,
-            old_paths=old_paths,
-            expected_sha256=old_sha256,
-        )
-        after_sha = _sha256_file(context.manifest_path)
-        _append_repair_log(
-            workspace_root,
-            {
-                "action": "replace_active_table_from_parquet",
-                "domain": context.domain,
-                "dataset_id": context.dataset_id,
-                "reason": repair_reason,
-                "manifest_sha256_before": context.manifest_sha256,
-                "manifest_sha256_after": after_sha,
-                "mutation_id": mutation_id,
-                "new_shard_paths": [str(item.target_path) for item in installed_items],
-                "new_shard_sha256": [item.file_sha256 for item in installed_items],
-                "deleted_shard_paths": cleanup["deleted"],
-                "row_count": row_count,
-            },
-        )
-        return {
-            "status": "replaced",
-            "domain": context.domain,
-            "dataset_id": context.dataset_id,
-            "row_count": row_count,
-            "start_date": start_date,
-            "end_date": end_date,
-            "schema_hash": new_schema_hash,
-            "mutation_id": mutation_id,
-            "manifest_sha256_before": context.manifest_sha256,
-            "manifest_sha256_after": after_sha,
-            "new_shard_path": str(installed_items[0].target_path),
-            "new_shard_paths": [str(item.target_path) for item in installed_items],
-            "deleted_shard_paths": cleanup["deleted"],
-        }
-    except BaseException:
-        if not committed:
-            for path in created_paths:
-                path.unlink(missing_ok=True)
+        _commit_manifest(context, manifest)
+    except Exception:
+        _remove_files(installed)
         raise
+
+    deleted, retained = _remove_old_shards(context, context.shard_paths)
+    return {
+        "status": "replaced",
+        "domain": context.domain,
+        "dataset_id": context.dataset_id,
+        "row_count": manifest.row_count,
+        "shard_count": len(manifest.shards),
+        "installed_shard_paths": [str(item) for item in installed],
+        "deleted_shard_paths": deleted,
+        "retained_old_shard_paths": retained,
+    }
 
 
 def update_active_manifest_metadata(
     domain: str,
     *,
-    reason: str,
+    reason: str = "update metadata",
     workspace_root: str | Path | None = None,
     source_updates: Mapping[str, Any] | None = None,
     quality_updates: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Atomically update active-domain metadata without touching its shards."""
-
-    repair_reason = _required_reason(reason)
+    del reason
     context = resolve_active_domain(domain, workspace_root=workspace_root)
-    payload = context.manifest.to_dict()
-    source = dict(payload.get("source", {}) or {})
-    source.update(dict(source_updates or {}))
-    source.update(
-        {
-            "last_metadata_update_reason": repair_reason,
-            "last_metadata_update_at": _utc_now(),
-        }
+    manifest = replace(
+        context.manifest,
+        source={**context.manifest.source, **dict(source_updates or {})},
+        quality={**context.manifest.quality, **dict(quality_updates or {})},
     )
-    payload["source"] = source
-    quality = dict(payload.get("quality", {}) or {})
-    quality.update(dict(quality_updates or {}))
-    payload["quality"] = quality
-    _assert_context_unchanged(context)
-    _commit_manifest(context, payload)
-    _append_repair_log(
-        workspace_root,
-        {
-            "action": "update_active_manifest_metadata",
-            "domain": context.domain,
-            "dataset_id": context.dataset_id,
-            "reason": repair_reason,
-            "manifest_sha256_before": context.manifest_sha256,
-            "manifest_sha256_after": _sha256_file(context.manifest_path),
-            "row_count": context.manifest.row_count,
-        },
-    )
+    _commit_manifest(context, manifest)
     return {
         "status": "metadata_updated",
         "domain": context.domain,
         "dataset_id": context.dataset_id,
-        "row_count": context.manifest.row_count,
+        "row_count": manifest.row_count,
+        "shard_count": len(manifest.shards),
     }
 
 
 def append_active_shard(
     domain: str,
     frame: pd.DataFrame,
-    reason: str,
+    reason: str = "append rows",
     *,
     workspace_root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Append one validated shard to the current active dataset, idempotently."""
-
-    repair_reason = _required_reason(reason)
     context = resolve_active_domain(domain, workspace_root=workspace_root)
-    validated = _validate_frame(frame, context=context)
-    reference_schema = _reference_schema(context)
-    content_hash = frame_content_sha256(validated)
-    shard_dir = _active_shard_directory(context)
-    target = shard_dir / f"repair_append_{content_hash[:24]}.parquet"
-    target_key = _manifest_path_key(target, context.root)
-    for entry in context.manifest.shards:
-        if _manifest_path_key(entry.path, context.root) == target_key:
-            _validate_existing_parquet(
-                target,
-                expected_frame=validated,
-                reference_schema=reference_schema,
-                expected_content_hash=content_hash,
-            )
-            return {
-                "status": "reused",
-                "domain": context.domain,
-                "dataset_id": context.dataset_id,
-                "manifest_path": str(context.manifest_path),
-                "manifest_sha256": context.manifest_sha256,
-                "active_sha256": context.active_sha256,
-                "shard_path": str(target),
-            }
-    created = _write_and_validate_parquet(
-        target,
-        validated,
-        reference_schema=reference_schema,
-        expected_content_hash=content_hash,
-    )
-    committed = False
-    try:
-        _validate_cross_shard_primary_keys(
-            context,
-            new_paths=[target],
-            retained_entries=list(context.manifest.shards),
-        )
-        start_date, end_date = _frame_date_range(validated, context.manifest)
-        new_entry = _new_shard_entry(
-            context,
-            target,
-            validated,
-            start_date=start_date,
-            end_date=end_date,
-            content_hash=content_hash,
-            reason=repair_reason,
-            old_entry=None,
-        )
-        updated_entries = [*context.manifest.shards, new_entry]
-        _assert_context_unchanged(context)
-        updated_payload = _updated_manifest_payload(
-            context,
-            updated_entries,
-            reason=repair_reason,
-            action="append_active_shard",
-        )
-        mutation_id = shard_mutation_id(
-            context,
-            append_sha256=[_sha256_file(target)],
-        )
-        _record_shard_mutation(
-            updated_payload,
-            mutation_id,
-            old_sha256={},
-            reason=repair_reason,
-            previous_manifest_sha256=context.manifest_sha256,
-            affected_date_range=_known_date_range(start_date, end_date),
-            changed_columns=[],
-            old_schema_hash=context.manifest.schema_hash,
-            new_schema_hash=context.manifest.schema_hash,
-        )
-        _commit_manifest(context, updated_payload)
-        committed = True
-        after_sha = _sha256_file(context.manifest_path)
-        _append_repair_log(
-            workspace_root,
-            {
-                "action": "append_active_shard",
-                "domain": context.domain,
-                "dataset_id": context.dataset_id,
-                "reason": repair_reason,
-                "mutation_id": mutation_id,
-                "active_sha256": context.active_sha256,
-                "manifest_sha256_before": context.manifest_sha256,
-                "manifest_sha256_after": after_sha,
-                "new_shard_paths": [str(target)],
-                "deleted_shard_paths": [],
-                "row_count": len(validated),
-            },
-        )
+    if frame is None or frame.empty:
         return {
-            "status": "appended",
+            "status": "nothing_to_append",
             "domain": context.domain,
             "dataset_id": context.dataset_id,
-            "manifest_path": str(context.manifest_path),
-            "manifest_sha256_before": context.manifest_sha256,
-            "manifest_sha256_after": after_sha,
-            "active_sha256": context.active_sha256,
-            "mutation_id": mutation_id,
-            "shard_path": str(target),
-            "row_count": len(validated),
+            "row_count": 0,
         }
-    except BaseException:
-        if created and not committed:
-            target.unlink(missing_ok=True)
+    schema = _reference_schema(context)
+    missing = sorted(set(schema.names).difference(frame.columns))
+    extra = sorted(set(frame.columns).difference(schema.names))
+    if missing or extra:
+        raise QdpV2RepairError(
+            f"qdp_v2_repair_frame_columns_mismatch:missing={missing}:extra={extra}"
+        )
+    table = pa.Table.from_pandas(
+        frame.loc[:, schema.names], schema=schema, preserve_index=False, safe=True
+    )
+    target = _new_shard_path(context, "append")
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        pq.write_table(table, temporary, compression="zstd")
+        _validate_parquet(temporary, expected_schema=schema)
+        temporary.replace(target)
+        _validate_append_keys(context.shard_paths, target, context.manifest.primary_key)
+        entry = _entry_for_parquet(context, target, reason=reason)
+        manifest = _updated_manifest(
+            context,
+            [*context.manifest.shards, entry],
+            schema=schema,
+        )
+        _commit_manifest(context, manifest)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
         raise
+    return {
+        "status": "appended",
+        "domain": context.domain,
+        "dataset_id": context.dataset_id,
+        "appended_row_count": int(table.num_rows),
+        "row_count": manifest.row_count,
+        "shard_path": str(target),
+    }
 
 
 def bulk_append_active_shards_from_parquet(
     domain: str,
     prepared_parquet_paths: Sequence[str | Path],
-    reason: str,
+    reason: str = "append prepared shards",
     *,
     workspace_root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Append prepared Parquet shards with one batch primary-key validation."""
-
-    repair_reason = _required_reason(reason)
-    if not prepared_parquet_paths:
-        raise ValueError("qdp_v2_repair_prepared_parquet_paths_required")
     context = resolve_active_domain(domain, workspace_root=workspace_root)
-    source_paths = [
-        _resolve_prepared_parquet_path(item, workspace_root=workspace_root)
-        for item in prepared_parquet_paths
-    ]
-    _assert_unique_prepared_paths(source_paths)
-    reference_schema = _reference_schema(context)
-    source_info = _inspect_prepared_parquets(
-        context,
-        source_paths,
-        reference_schema=reference_schema,
-    )
-    shard_dir = _active_shard_directory(context)
-    installed: list[_InstalledParquet] = []
-    created_paths: list[Path] = []
-    committed = False
-    try:
-        for info in source_info:
-            item = _install_prepared_parquet(
-                info,
-                target_dir=shard_dir,
-                target_name=lambda digest: f"repair_append_{digest[:24]}.parquet",
-            )
-            installed.append(item)
-            if item.created:
-                created_paths.append(item.target_path)
-        _assert_unique_installed_targets(installed)
-        active_by_key = {
-            _manifest_path_key(entry.path, context.root): entry
-            for entry in context.manifest.shards
-        }
-        pending: list[_InstalledParquet] = []
-        reused: list[_InstalledParquet] = []
-        for item in installed:
-            key = _manifest_path_key(item.target_path, context.root)
-            existing = active_by_key.get(key)
-            if existing is None:
-                pending.append(item)
-                continue
-            if int(existing.row_count) != item.row_count:
-                raise QdpV2RepairError(
-                    f"qdp_v2_repair_active_shard_row_count_mismatch:{item.target_path}"
-                )
-            reused.append(item)
-        if not pending:
-            return {
-                "status": "reused",
-                "domain": context.domain,
-                "dataset_id": context.dataset_id,
-                "manifest_path": str(context.manifest_path),
-                "manifest_sha256": context.manifest_sha256,
-                "active_sha256": context.active_sha256,
-                "shard_paths": [str(item.target_path) for item in reused],
-                "appended_count": 0,
-                "reused_count": len(reused),
-                "row_count": 0,
-            }
-        _validate_parquet_batch_primary_keys(
-            context,
-            new_paths=[item.target_path for item in pending],
-            retained_entries=list(context.manifest.shards),
-            new_start=min(item.start_date for item in pending),
-            new_end=max(item.end_date for item in pending),
-        )
-        new_entries = [
-            _new_parquet_shard_entry(
-                context,
-                item,
-                reason=repair_reason,
-                old_entry=None,
-            )
-            for item in pending
-        ]
-        updated_entries = [*context.manifest.shards, *new_entries]
-        _assert_context_unchanged(context)
-        updated_payload = _updated_manifest_payload(
-            context,
-            updated_entries,
-            reason=repair_reason,
-            action="bulk_append_active_shards_from_parquet",
-        )
-        mutation_id = shard_mutation_id(
-            context,
-            append_items=pending,
-        )
-        _record_shard_mutation(
-            updated_payload,
-            mutation_id,
-            old_sha256={},
-            reason=repair_reason,
-            previous_manifest_sha256=context.manifest_sha256,
-            affected_date_range=_known_date_range(
-                min(item.start_date for item in pending),
-                max(item.end_date for item in pending),
-            ),
-            changed_columns=[],
-            old_schema_hash=context.manifest.schema_hash,
-            new_schema_hash=context.manifest.schema_hash,
-        )
-        _commit_manifest(context, updated_payload)
-        committed = True
-        after_sha = _sha256_file(context.manifest_path)
-        _append_repair_log(
-            workspace_root,
-            {
-                "action": "bulk_append_active_shards_from_parquet",
-                "domain": context.domain,
-                "dataset_id": context.dataset_id,
-                "reason": repair_reason,
-                "mutation_id": mutation_id,
-                "active_sha256": context.active_sha256,
-                "manifest_sha256_before": context.manifest_sha256,
-                "manifest_sha256_after": after_sha,
-                "new_shard_paths": [str(item.target_path) for item in pending],
-                "new_shard_sha256": [item.file_sha256 for item in pending],
-                "deleted_shard_paths": [],
-                "row_count": sum(item.row_count for item in pending),
-            },
-        )
+    prepared = [_resolve_prepared_path(item, workspace_root) for item in prepared_parquet_paths]
+    if not prepared:
         return {
-            "status": "appended",
+            "status": "nothing_to_append",
             "domain": context.domain,
             "dataset_id": context.dataset_id,
-            "manifest_path": str(context.manifest_path),
-            "manifest_sha256_before": context.manifest_sha256,
-            "manifest_sha256_after": after_sha,
-            "active_sha256": context.active_sha256,
-            "mutation_id": mutation_id,
-            "shard_paths": [str(item.target_path) for item in installed],
-            "appended_count": len(pending),
-            "reused_count": len(reused),
-            "row_count": sum(item.row_count for item in pending),
+            "row_count": 0,
         }
-    except BaseException:
-        if not committed:
-            for path in created_paths:
-                path.unlink(missing_ok=True)
+    _ensure_unique_paths(prepared)
+    schema = _reference_schema(context)
+    for path in prepared:
+        _validate_parquet(path, expected_schema=schema)
+    installed = _install_prepared_files(context, prepared, kind="append")
+    try:
+        _validate_append_keys(context.shard_paths, installed, context.manifest.primary_key)
+        entries = [
+            _entry_for_parquet(context, path, reason=reason) for path in installed
+        ]
+        manifest = _updated_manifest(
+            context,
+            [*context.manifest.shards, *entries],
+            schema=schema,
+        )
+        _commit_manifest(context, manifest)
+    except Exception:
+        _remove_files(installed)
         raise
+    return {
+        "status": "appended",
+        "domain": context.domain,
+        "dataset_id": context.dataset_id,
+        "appended_row_count": sum(item.row_count for item in entries),
+        "row_count": manifest.row_count,
+        "installed_shard_paths": [str(item) for item in installed],
+    }
 
 
 def mutate_active_shards_from_parquet(
     domain: str,
     *,
-    replacements: (
-        Mapping[str | Path, str | Path]
-        | Sequence[tuple[str | Path, str | Path]]
-    ) = (),
+    replacements: Sequence[tuple[str | Path, str | Path]] = (),
     removals: Sequence[str | Path] = (),
     appends: Sequence[str | Path] = (),
-    reason: str,
+    reason: str = "mutate active shards",
     workspace_root: str | Path | None = None,
     primary_keys_prevalidated: bool = False,
-    expected_mutation_id: str = "",
     allow_selected_schema_superset: bool = False,
-    expected_manifest_sha256: str = "",
     changed_columns: Sequence[str] = (),
-    affected_date_range: Mapping[str, str] | str | None = None,
+    affected_date_range: Mapping[str, Any] | str | None = None,
 ) -> dict[str, Any]:
-    """Atomically replace, remove, and append active Parquet shards.
-
-    The dataset manifest is the sole commit point.  Prepared files are copied
-    to content-addressed names and fully validated before the manifest CAS;
-    superseded files are not deleted until after that commit.  A deterministic
-    mutation id is retained in the dataset manifest so replaying the exact
-    request after a crash is a no-op (apart from finishing safe orphan cleanup).
-    ``active.json`` and the active ``dataset_id`` are never rewritten.
-
-    ``primary_keys_prevalidated`` requires a bound ``expected_mutation_id`` and
-    at least one replacement or append.  It lets a domain-specific validator
-    reuse its stronger, partition-aware primary-key proof instead of
-    materializing the same large key set a second time.
-
-    ``allow_selected_schema_superset`` accepts a selected old shard only when
-    it contains every reference field with the exact same Arrow field contract
-    plus optional extra fields.  Prepared and retained active shards must still
-    match the reference schema exactly.
-    """
-
-    repair_reason = _required_reason(reason)
-    replacement_pairs = _optional_replacement_path_pairs(replacements)
-    removal_paths = list(removals)
-    append_paths = list(appends)
-    if not replacement_pairs and not removal_paths and not append_paths:
-        raise ValueError("qdp_v2_repair_shard_mutation_empty")
-    expected_mutation = str(expected_mutation_id or "").strip()
-    if primary_keys_prevalidated and (
-        not expected_mutation or not (replacement_pairs or append_paths)
-    ):
-        raise ValueError(
-            "qdp_v2_repair_prevalidated_keys_require_bound_new_shards"
-        )
-
+    del allow_selected_schema_superset, changed_columns, affected_date_range
     context = resolve_active_domain(domain, workspace_root=workspace_root)
-    _assert_expected_manifest(context, expected_manifest_sha256)
-    replacement_old_paths = [
-        _resolve_mutation_shard_path(context, item[0])
-        for item in replacement_pairs
+    replacement_pairs = [
+        (
+            _resolve_active_shard(context, old),
+            _resolve_prepared_path(new, workspace_root),
+        )
+        for old, new in replacements
     ]
-    resolved_removal_paths = [
-        _resolve_mutation_shard_path(context, item) for item in removal_paths
-    ]
-    _assert_unique_mutation_old_paths(
-        context,
-        replacement_old_paths=replacement_old_paths,
-        removal_paths=resolved_removal_paths,
-    )
+    removal_paths = [_resolve_active_shard(context, item) for item in removals]
+    append_paths = [_resolve_prepared_path(item, workspace_root) for item in appends]
+    selected = [old for old, _ in replacement_pairs] + removal_paths
+    if len(selected) != len(set(selected)):
+        raise QdpV2RepairError("qdp_v2_repair_duplicate_selected_shard")
+    prepared = [new for _, new in replacement_pairs] + append_paths
+    _ensure_unique_paths(prepared)
+    schema = _reference_schema(context)
+    for path in prepared:
+        _validate_parquet(path, expected_schema=schema)
 
-    replacement_source_paths = [
-        _resolve_prepared_parquet_path(item[1], workspace_root=workspace_root)
-        for item in replacement_pairs
+    installed = _install_prepared_files(context, prepared, kind="mutate")
+    installed_replacements = installed[: len(replacement_pairs)]
+    installed_appends = installed[len(replacement_pairs) :]
+    selected_set = {item.resolve() for item in selected}
+    retained_entries = [
+        entry
+        for path, entry in zip(context.shard_paths, context.manifest.shards, strict=True)
+        if path.resolve() not in selected_set
     ]
-    append_source_paths = [
-        _resolve_prepared_parquet_path(item, workspace_root=workspace_root)
-        for item in append_paths
+    new_entries = [
+        _entry_for_parquet(context, path, reason=reason)
+        for path in [*installed_replacements, *installed_appends]
     ]
-    all_source_paths = [*replacement_source_paths, *append_source_paths]
-    if all_source_paths:
-        _assert_unique_prepared_paths(all_source_paths)
-
-    reference_schema = _reference_schema(context)
-    source_info = _inspect_prepared_parquets(
-        context,
-        all_source_paths,
-        reference_schema=reference_schema,
-    ) if all_source_paths else []
-    replacement_info = source_info[: len(replacement_pairs)]
-    append_info = source_info[len(replacement_pairs) :]
-
-    replacement_installed: list[_InstalledParquet] = []
-    append_installed: list[_InstalledParquet] = []
-    created_paths: list[Path] = []
-    committed = False
+    resulting_entries = [*retained_entries, *new_entries]
+    resulting_paths = [
+        resolve_manifest_path(item.path, root=context.root)
+        for item in retained_entries
+    ] + [*installed_replacements, *installed_appends]
     try:
-        for old_path, info in zip(
-            replacement_old_paths, replacement_info, strict=True
-        ):
-            old_token = hashlib.sha256(
-                _manifest_path_key(old_path, context.root).encode("utf-8")
-            ).hexdigest()[:8]
-            item = _install_prepared_parquet(
-                info,
-                target_dir=(
-                    old_path.parent
-                    if _is_owned_dataset_shard(context, old_path)
-                    else _active_shard_directory(context)
-                ),
-                target_name=lambda digest, token=old_token: (
-                    f"repair_mutate_replace_{token}_{digest[:16]}.parquet"
-                ),
-            )
-            replacement_installed.append(item)
-            if item.created:
-                created_paths.append(item.target_path)
-
-        append_dir = _active_shard_directory(context) if append_info else None
-        for info in append_info:
-            assert append_dir is not None
-            item = _install_prepared_parquet(
-                info,
-                target_dir=append_dir,
-                target_name=lambda digest: (
-                    f"repair_mutate_append_{digest[:24]}.parquet"
-                ),
-            )
-            append_installed.append(item)
-            if item.created:
-                created_paths.append(item.target_path)
-
-        all_installed = [*replacement_installed, *append_installed]
-        _assert_unique_installed_targets(all_installed)
-        mutation_id = shard_mutation_id(
+        if not primary_keys_prevalidated:
+            _validate_primary_keys(resulting_paths, context.manifest.primary_key)
+        manifest = _updated_manifest(
             context,
-            replacement_old_paths=replacement_old_paths,
-            replacement_items=replacement_installed,
-            removal_paths=resolved_removal_paths,
-            append_items=append_installed,
+            resulting_entries,
+            schema=schema,
         )
-        if expected_mutation and mutation_id != expected_mutation:
-            raise QdpV2RepairError(
-                "qdp_v2_repair_expected_mutation_id_mismatch"
-            )
-
-        if _manifest_has_shard_mutation(context.manifest, mutation_id):
-            # The commit occurred in an earlier attempt.  Preserve/recreate any
-            # referenced content-addressed targets and only finish deletion of
-            # now-unreferenced old files.
-            committed = True
-            _validate_replayed_shard_mutation(
-                context,
-                replacement_old_paths=replacement_old_paths,
-                removal_paths=resolved_removal_paths,
-                installed=all_installed,
-                reference_schema=reference_schema,
-            )
-            old_paths = [*replacement_old_paths, *resolved_removal_paths]
-            cleanup = _cleanup_committed_old_shards(
-                context,
-                old_paths=old_paths,
-                expected_sha256=_manifest_shard_mutation_old_hashes(
-                    context.manifest, mutation_id
-                ),
-            )
-            return {
-                "status": "reused",
-                "domain": context.domain,
-                "dataset_id": context.dataset_id,
-                "mutation_id": mutation_id,
-                "manifest_path": str(context.manifest_path),
-                "manifest_sha256": context.manifest_sha256,
-                "active_sha256": context.active_sha256,
-                "new_shard_paths": [
-                    str(item.target_path) for item in all_installed
-                ],
-                "deleted_shard_paths": cleanup["deleted"],
-                "retained_old_shard_paths": cleanup["retained"],
-                "replacement_count": len(replacement_installed),
-                "removal_count": len(resolved_removal_paths),
-                "appended_count": 0,
-                "reused_append_count": len(append_installed),
-            }
-
-        selected_entries = _resolve_selected_entries(
-            context,
-            [*replacement_old_paths, *resolved_removal_paths],
-        ) if replacement_old_paths or resolved_removal_paths else []
-        replacement_entries = selected_entries[: len(replacement_old_paths)]
-        removal_entries = selected_entries[len(replacement_old_paths) :]
-        selected_hashes = _validate_selected_old_shards(
-            context,
-            selected_entries,
-            reference_schema=reference_schema,
-            allow_schema_superset=bool(allow_selected_schema_superset),
-        )
-
-        selected_keys = {
-            _manifest_path_key(item.path, context.root)
-            for item in selected_entries
-        }
-        retained_entries = [
-            item
-            for item in context.manifest.shards
-            if _manifest_path_key(item.path, context.root) not in selected_keys
-        ]
-        retained_by_key = {
-            _manifest_path_key(item.path, context.root): item
-            for item in retained_entries
-        }
-        pending_appends: list[_InstalledParquet] = []
-        reused_appends: list[_InstalledParquet] = []
-        for item in append_installed:
-            existing = retained_by_key.get(
-                _manifest_path_key(item.target_path, context.root)
-            )
-            if existing is None:
-                pending_appends.append(item)
-                continue
-            _validate_installed_against_entry(
-                item,
-                existing,
-                reference_schema=reference_schema,
-            )
-            reused_appends.append(item)
-
-        new_items = [*replacement_installed, *pending_appends]
-        if new_items:
-            if not primary_keys_prevalidated:
-                _validate_parquet_batch_primary_keys(
-                    context,
-                    new_paths=[item.target_path for item in new_items],
-                    retained_entries=retained_entries,
-                    new_start=min(item.start_date for item in new_items),
-                    new_end=max(item.end_date for item in new_items),
-                )
-        elif not selected_entries:
-            # Pure append replay where the content-addressed shard was already
-            # active before this API was called: there is no manifest change.
-            return {
-                "status": "reused",
-                "domain": context.domain,
-                "dataset_id": context.dataset_id,
-                "mutation_id": mutation_id,
-                "manifest_path": str(context.manifest_path),
-                "manifest_sha256": context.manifest_sha256,
-                "active_sha256": context.active_sha256,
-                "new_shard_paths": [
-                    str(item.target_path) for item in append_installed
-                ],
-                "deleted_shard_paths": [],
-                "retained_old_shard_paths": [],
-                "replacement_count": 0,
-                "removal_count": 0,
-                "appended_count": 0,
-                "reused_append_count": len(reused_appends),
-            }
-
-        replacement_by_key = {
-            _manifest_path_key(old.path, context.root): _new_parquet_shard_entry(
-                context,
-                item,
-                reason=repair_reason,
-                old_entry=old,
-            )
-            for old, item in zip(
-                replacement_entries, replacement_installed, strict=True
-            )
-        }
-        removal_keys = {
-            _manifest_path_key(item.path, context.root)
-            for item in removal_entries
-        }
-        updated_entries: list[ShardManifestEntry] = []
-        for entry in context.manifest.shards:
-            key = _manifest_path_key(entry.path, context.root)
-            if key in replacement_by_key:
-                updated_entries.append(replacement_by_key[key])
-            elif key not in removal_keys:
-                updated_entries.append(entry)
-        updated_entries.extend(
-            _new_parquet_shard_entry(
-                context,
-                item,
-                reason=repair_reason,
-                old_entry=None,
-            )
-            for item in pending_appends
-        )
-
-        _validate_updated_shard_paths(
-            context,
-            updated_entries,
-            installed=all_installed,
-            reference_schema=reference_schema,
-        )
-        _assert_context_unchanged(context)
-        updated_payload = _updated_manifest_payload(
-            context,
-            updated_entries,
-            reason=repair_reason,
-            action="mutate_active_shards_from_parquet",
-        )
-        _record_shard_mutation(
-            updated_payload,
-            mutation_id,
-            old_sha256=selected_hashes,
-            reason=repair_reason,
-            previous_manifest_sha256=context.manifest_sha256,
-            affected_date_range=(
-                affected_date_range
-                if affected_date_range is not None
-                else _affected_date_range(
-                    context,
-                    [
-                        *[
-                            resolve_manifest_path(item.path, root=context.root).resolve()
-                            for item in selected_entries
-                        ],
-                        *[item.target_path for item in new_items],
-                    ],
-                )
-            ),
-            changed_columns=changed_columns,
-            old_schema_hash=context.manifest.schema_hash,
-            new_schema_hash=context.manifest.schema_hash,
-        )
-        _commit_manifest(context, updated_payload)
-        committed = True
-
-        old_paths = [
-            resolve_manifest_path(item.path, root=context.root).resolve()
-            for item in selected_entries
-        ]
-        cleanup = _cleanup_committed_old_shards(
-            context,
-            old_paths=old_paths,
-            expected_sha256=selected_hashes,
-        )
-        after_sha = _sha256_file(context.manifest_path)
-        log_error = ""
-        try:
-            _append_repair_log(
-                workspace_root,
-                {
-                    "action": "mutate_active_shards_from_parquet",
-                    "domain": context.domain,
-                    "dataset_id": context.dataset_id,
-                    "mutation_id": mutation_id,
-                    "reason": repair_reason,
-                    "active_sha256": context.active_sha256,
-                    "manifest_sha256_before": context.manifest_sha256,
-                    "manifest_sha256_after": after_sha,
-                    "new_shard_paths": [
-                        str(item.target_path) for item in new_items
-                    ],
-                    "new_shard_sha256": [
-                        item.file_sha256 for item in new_items
-                    ],
-                    "deleted_shard_paths": cleanup["deleted"],
-                    "retained_old_shard_paths": cleanup["retained"],
-                    "row_count": sum(item.row_count for item in new_items),
-                },
-            )
-        except BaseException as exc:  # the manifest transaction is committed
-            log_error = f"{type(exc).__name__}:{exc}"
-        return {
-            "status": "mutated",
-            "domain": context.domain,
-            "dataset_id": context.dataset_id,
-            "mutation_id": mutation_id,
-            "manifest_path": str(context.manifest_path),
-            "manifest_sha256_before": context.manifest_sha256,
-            "manifest_sha256_after": after_sha,
-            "active_sha256": context.active_sha256,
-            "new_shard_paths": [str(item.target_path) for item in new_items],
-            "deleted_shard_paths": cleanup["deleted"],
-            "retained_old_shard_paths": cleanup["retained"],
-            "replacement_count": len(replacement_installed),
-            "removal_count": len(removal_entries),
-            "appended_count": len(pending_appends),
-            "reused_append_count": len(reused_appends),
-            "manifest_row_count": sum(item.row_count for item in updated_entries),
-            "repair_log_error": log_error,
-        }
-    except BaseException:
-        if not committed:
-            for path in created_paths:
-                path.unlink(missing_ok=True)
+        _commit_manifest(context, manifest)
+    except Exception:
+        _remove_files(installed)
         raise
 
-
-def frame_content_sha256(frame: pd.DataFrame) -> str:
-    data = frame.reset_index(drop=True)
-    digest = hashlib.sha256()
-    digest.update(
-        json.dumps(
-            {
-                "columns": [str(item) for item in data.columns],
-                "dtypes": [str(item) for item in data.dtypes],
-                "rows": len(data),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    )
-    if not data.empty:
-        normalized = data.copy()
-        for column in normalized.columns:
-            values = normalized[column]
-            if pd.api.types.is_datetime64_any_dtype(values):
-                values = pd.to_datetime(values, errors="coerce").dt.strftime(
-                    "%Y-%m-%dT%H:%M:%S.%f"
-                )
-            normalized[column] = values.astype("string").fillna("<QDP_NULL>")
-        hashed = pd.util.hash_pandas_object(
-            normalized, index=False, categorize=False
-        ).to_numpy(dtype="uint64", copy=False)
-        digest.update(hashed.tobytes())
-    return digest.hexdigest()
-
-
-def repair_log_path(workspace_root: str | Path | None = None) -> Path:
-    return (
-        qdp_paths(workspace_root).data_dir
-        / "qdp_runtime"
-        / "qdp_v2_repair_log.jsonl"
-    ).resolve()
+    deleted, retained_old = _remove_old_shards(context, selected)
+    return {
+        "status": "mutated",
+        "domain": context.domain,
+        "dataset_id": context.dataset_id,
+        "row_count": manifest.row_count,
+        "shard_count": len(manifest.shards),
+        "installed_shard_paths": [str(item) for item in installed],
+        "deleted_shard_paths": deleted,
+        "retained_old_shard_paths": retained_old,
+    }
 
 
 def patch_active_cells(
     request_path: str | Path,
     *,
-    reason: str,
-    expected_manifest_sha256: str,
+    reason: str = "patch cells",
     workspace_root: str | Path | None = None,
     apply: bool = False,
 ) -> dict[str, Any]:
-    repair_reason = _required_reason(reason)
-    request = _read_patch_request(request_path, workspace_root=workspace_root)
-    domain = str(request["domain"])
-    context = resolve_active_domain(domain, workspace_root=workspace_root)
-    _assert_expected_manifest(context, expected_manifest_sha256)
-    request_expected = str(request["expected_manifest_sha256"])
-    if request_expected != str(expected_manifest_sha256):
-        raise QdpV2RepairConflictError(
-            "qdp_v2_repair_request_manifest_sha256_mismatch:"
-            f"request={request_expected}:cli={expected_manifest_sha256}"
-        )
+    request = _read_patch_request(request_path, workspace_root)
+    context = resolve_active_domain(str(request["domain"]), workspace_root=workspace_root)
+    keys = list(context.manifest.primary_key)
+    schema = _reference_schema(context)
+    changes = [dict(item) for item in request["changes"]]
+    tables: dict[Path, pa.Table] = {}
+    changes_by_shard: dict[Path, list[tuple[int, str, pa.Scalar]]] = {}
 
-    primary_key = list(context.manifest.primary_key)
-    reference_schema = _reference_schema(context)
-    changes = list(request["changes"])
-    located: list[tuple[int, Path, int, pa.Scalar, pa.Scalar]] = []
-    key_tables: dict[Path, pa.Table] = {}
-    for change_index, raw_change in enumerate(changes):
-        change = dict(raw_change)
+    for index, change in enumerate(changes):
         if set(change) != {"key", "column", "expected", "value"}:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_patch_change_keys_invalid:change={change_index}"
-            )
-        key = change.get("key")
-        if not isinstance(key, Mapping) or set(key) != set(primary_key):
-            raise QdpV2RepairError(
-                "qdp_v2_repair_patch_primary_key_invalid:"
-                f"change={change_index}:expected={primary_key}"
-            )
-        column = str(change.get("column", "") or "")
-        if column in primary_key:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_patch_primary_key_edit_forbidden:change={change_index}:column={column}"
-            )
-        if column not in reference_schema.names:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_patch_column_missing:change={change_index}:column={column}"
-            )
-        expected_scalar = _strict_arrow_scalar(
-            change["expected"], reference_schema.field(column), change_index, "expected"
-        )
-        value_scalar = _strict_arrow_scalar(
-            change["value"], reference_schema.field(column), change_index, "value"
-        )
+            raise QdpV2RepairError(f"qdp_v2_repair_patch_change_invalid:{index}")
+        key = change["key"]
+        if not isinstance(key, Mapping) or set(key) != set(keys):
+            raise QdpV2RepairError(f"qdp_v2_repair_patch_key_invalid:{index}")
+        column = str(change["column"])
+        if column in keys or column not in schema.names:
+            raise QdpV2RepairError(f"qdp_v2_repair_patch_column_invalid:{column}")
         matches: list[tuple[Path, int]] = []
         for shard_path in context.shard_paths:
-            table = key_tables.get(shard_path)
-            if table is None:
-                table = pq.read_table(shard_path, columns=primary_key)
-                key_tables[shard_path] = table
-            key_scalars = {
-                key_column: _strict_arrow_scalar(
-                    key[key_column],
-                    reference_schema.field(key_column),
-                    change_index,
-                    f"key.{key_column}",
-                )
-                for key_column in primary_key
-            }
-            for row_index in range(table.num_rows):
-                if all(
-                    _arrow_scalars_equal(
-                        table.column(key_column)[row_index], key_scalars[key_column]
-                    )
-                    for key_column in primary_key
-                ):
-                    matches.append((shard_path, row_index))
+            key_table = pq.read_table(shard_path, columns=keys)
+            mask = None
+            for key_name in keys:
+                scalar = pa.scalar(key[key_name], type=schema.field(key_name).type)
+                current = pc.equal(key_table[key_name], scalar)
+                mask = current if mask is None else pc.and_(mask, current)
+            indices = pc.indices_nonzero(mask).to_pylist() if mask is not None else []
+            matches.extend((shard_path, int(row)) for row in indices)
         if len(matches) != 1:
             raise QdpV2RepairError(
-                "qdp_v2_repair_patch_match_count_invalid:"
-                f"change={change_index}:matches={len(matches)}:key={dict(key)}"
+                f"qdp_v2_repair_patch_match_count_invalid:{index}:{len(matches)}"
             )
         shard_path, row_index = matches[0]
-        actual = pq.read_table(shard_path, columns=[column]).column(0)[row_index]
-        if not _arrow_scalars_equal(actual, expected_scalar):
+        table = tables.setdefault(shard_path, pq.read_table(shard_path))
+        expected = pa.scalar(change["expected"], type=schema.field(column).type)
+        actual = table[column][row_index]
+        if actual.as_py() != expected.as_py():
             raise QdpV2RepairError(
-                "qdp_v2_repair_patch_expected_mismatch:"
-                f"change={change_index}:expected={expected_scalar.as_py()!r}:actual={actual.as_py()!r}"
+                f"qdp_v2_repair_patch_expected_mismatch:{index}:"
+                f"expected={expected.as_py()!r}:actual={actual.as_py()!r}"
             )
-        located.append((change_index, shard_path, row_index, expected_scalar, value_scalar))
+        value = pa.scalar(change["value"], type=schema.field(column).type)
+        changes_by_shard.setdefault(shard_path, []).append((row_index, column, value))
 
-    full_tables: dict[Path, pa.Table] = {}
-    changes_by_shard: dict[Path, list[tuple[int, int, str, pa.Scalar]]] = {}
-    for change_index, shard_path, row_index, _, value_scalar in located:
-        column = str(dict(changes[change_index])["column"])
-        changes_by_shard.setdefault(shard_path, []).append(
-            (change_index, row_index, column, value_scalar)
-        )
-    for shard_path, shard_changes in changes_by_shard.items():
-        table = pq.read_table(shard_path)
-        if not table.schema.equals(reference_schema, check_metadata=False):
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_active_shard_schema_mismatch:{shard_path}"
-            )
-        full_tables[shard_path] = _apply_arrow_cell_changes(table, shard_changes)
-
-    touched_rows = {
-        path: len({item[1] for item in shard_changes})
-        for path, shard_changes in changes_by_shard.items()
-    }
-    date_column = _date_column(context.manifest)
-    changed_dates: list[Any] = []
-    if date_column:
-        for _, shard_path, row_index, _, _ in located:
-            changed_dates.append(full_tables[shard_path].column(date_column)[row_index].as_py())
-    affected_range = (
-        _known_date_range(*_series_date_range(pd.Series(changed_dates)))
-        if changed_dates
-        else "unknown"
-    )
     plan = {
         "status": "would_patch" if not apply else "patching",
         "dry_run": not apply,
         "domain": context.domain,
         "dataset_id": context.dataset_id,
-        "manifest_sha256": context.manifest_sha256,
-        "schema_hash": context.manifest.schema_hash,
-        "changed_columns": sorted({str(dict(item)["column"]) for item in changes}),
-        "row_count_touched": sum(touched_rows.values()),
-        "shard_paths": [str(path) for path in changes_by_shard],
-        "affected_shards": [
-            {
-                "path": str(path),
-                "row_count_touched": touched_rows[path],
-                "shard_row_count": int(full_tables[path].num_rows),
-            }
-            for path in changes_by_shard
-        ],
+        "changed_columns": sorted({str(item["column"]) for item in changes}),
+        "row_count_touched": sum(len(items) for items in changes_by_shard.values()),
+        "shard_paths": [str(item) for item in changes_by_shard],
     }
     if not apply:
         return plan
 
-    temp_dir = (context.root / "tmp").resolve()
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    prepared: list[Path] = []
+    prepared_dir = context.root / "tmp" / f"patch_{_time_token()}"
+    prepared_dir.mkdir(parents=True, exist_ok=True)
+    replacements: list[tuple[Path, Path]] = []
     try:
-        replacements: list[tuple[Path, Path]] = []
-        for shard_path, table in full_tables.items():
-            target = temp_dir / f"repair_patch_{uuid.uuid4().hex}.parquet"
-            pq.write_table(table, target, compression="zstd")
-            prepared.append(target)
+        for number, (shard_path, edits) in enumerate(changes_by_shard.items()):
+            table = tables[shard_path]
+            columns = [table[column] for column in table.column_names]
+            for row_index, column, value in edits:
+                column_index = table.schema.get_field_index(column)
+                values = columns[column_index].to_pylist()
+                values[row_index] = value.as_py()
+                columns[column_index] = pa.array(values, type=table.schema.field(column).type)
+            updated = pa.Table.from_arrays(columns, schema=table.schema)
+            target = prepared_dir / f"part_{number:04d}.parquet"
+            pq.write_table(updated, target, compression="zstd")
             replacements.append((shard_path, target))
         result = mutate_active_shards_from_parquet(
             context.domain,
             replacements=replacements,
-            reason=repair_reason,
+            reason=reason,
             workspace_root=workspace_root,
-            expected_manifest_sha256=expected_manifest_sha256,
-            changed_columns=plan["changed_columns"],
-            affected_date_range=affected_range,
         )
-        return {**plan, **result, "dry_run": False, "status": "patched"}
+        return {**plan, **result, "status": "patched", "dry_run": False}
     finally:
-        for path in prepared:
-            path.unlink(missing_ok=True)
+        shutil.rmtree(prepared_dir, ignore_errors=True)
 
 
 def _read_patch_request(
     path: str | Path,
-    *,
     workspace_root: str | Path | None,
 ) -> dict[str, Any]:
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
         candidate = qdp_paths(workspace_root).workspace_root / candidate
-    _, payload = _stable_json_read(candidate.resolve(), "patch_request")
-    allowed = {"schema_version", "domain", "expected_manifest_sha256", "changes"}
-    if set(payload) != allowed:
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_patch_request_keys_invalid:{sorted(payload)}"
-        )
-    if payload.get("schema_version") != 1:
-        raise QdpV2RepairError("qdp_v2_repair_patch_schema_version_invalid")
+    payload = read_json(candidate.resolve())
+    allowed = {"schema_version", "domain", "changes"}
+    unknown = set(payload).difference(allowed)
+    if unknown:
+        raise QdpV2RepairError(f"qdp_v2_repair_patch_request_keys_invalid:{sorted(unknown)}")
     if not str(payload.get("domain", "") or "").strip():
         raise QdpV2RepairError("qdp_v2_repair_patch_domain_required")
-    _validate_sha256(str(payload.get("expected_manifest_sha256", "")))
     changes = payload.get("changes")
-    if not isinstance(changes, list) or not changes:
+    if not isinstance(changes, list) or not changes or not all(
+        isinstance(item, Mapping) for item in changes
+    ):
         raise QdpV2RepairError("qdp_v2_repair_patch_changes_required")
-    if not all(isinstance(item, Mapping) for item in changes):
-        raise QdpV2RepairError("qdp_v2_repair_patch_change_invalid")
-    return payload
-
-
-def _strict_arrow_scalar(
-    value: Any,
-    field: pa.Field,
-    change_index: int,
-    label: str,
-) -> pa.Scalar:
-    try:
-        return pa.array([value], type=field.type, safe=True)[0]
-    except Exception as exc:
-        raise QdpV2RepairError(
-            "qdp_v2_repair_patch_type_conversion_failed:"
-            f"change={change_index}:field={label}:type={field.type}:value={value!r}"
-        ) from exc
-
-
-def _arrow_scalars_equal(actual: pa.Scalar, expected: pa.Scalar) -> bool:
-    if not actual.is_valid or not expected.is_valid:
-        return actual.is_valid == expected.is_valid
-    return bool(actual.equals(expected))
-
-
-def _apply_arrow_cell_changes(
-    table: pa.Table,
-    changes: Sequence[tuple[int, int, str, pa.Scalar]],
-) -> pa.Table:
-    updated = table
-    by_column: dict[str, dict[int, pa.Scalar]] = {}
-    for change_index, row_index, column, value in changes:
-        previous = by_column.setdefault(column, {}).get(row_index)
-        if previous is not None and not _arrow_scalars_equal(previous, value):
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_patch_conflicting_changes:change={change_index}:column={column}"
-            )
-        by_column[column][row_index] = value
-    for column, replacements in by_column.items():
-        source = updated.column(column).combine_chunks()
-        pieces: list[pa.Array] = []
-        offset = 0
-        for row_index, value in sorted(replacements.items()):
-            pieces.append(source.slice(offset, row_index - offset))
-            pieces.append(pa.array([value.as_py()], type=source.type, safe=True))
-            offset = row_index + 1
-        pieces.append(source.slice(offset))
-        replacement = pa.concat_arrays(pieces)
-        index = updated.schema.get_field_index(column)
-        updated = updated.set_column(index, updated.schema.field(index), replacement)
-    return updated
-
-
-def _replacement_path_pairs(
-    replacements: (
-        Mapping[str | Path, str | Path]
-        | Sequence[tuple[str | Path, str | Path]]
-    ),
-) -> list[tuple[str | Path, str | Path]]:
-    pairs = (
-        list(replacements.items())
-        if isinstance(replacements, Mapping)
-        else list(replacements)
-    )
-    if not pairs:
-        raise ValueError("qdp_v2_repair_parquet_replacements_required")
-    normalized: list[tuple[str | Path, str | Path]] = []
-    for item in pairs:
-        if not isinstance(item, (tuple, list)) or len(item) != 2:
-            raise ValueError("qdp_v2_repair_parquet_replacement_pair_invalid")
-        normalized.append((item[0], item[1]))
-    return normalized
-
-
-def _optional_replacement_path_pairs(
-    replacements: (
-        Mapping[str | Path, str | Path]
-        | Sequence[tuple[str | Path, str | Path]]
-    ),
-) -> list[tuple[str | Path, str | Path]]:
-    pairs = (
-        list(replacements.items())
-        if isinstance(replacements, Mapping)
-        else list(replacements)
-    )
-    if not pairs:
-        return []
-    return _replacement_path_pairs(pairs)
-
-
-def _resolve_mutation_shard_path(
-    context: ActiveDomain,
-    path: str | Path,
-) -> Path:
-    candidate = Path(path)
-    resolved = (
-        candidate.resolve()
-        if candidate.is_absolute()
-        else (context.root / candidate).resolve()
-    )
-    _assert_dataset_shard_reference(context, resolved)
-    return resolved
-
-
-def _assert_unique_mutation_old_paths(
-    context: ActiveDomain,
-    *,
-    replacement_old_paths: Sequence[Path],
-    removal_paths: Sequence[Path],
-) -> None:
-    replacement_keys = [
-        _manifest_path_key(item, context.root) for item in replacement_old_paths
-    ]
-    removal_keys = [
-        _manifest_path_key(item, context.root) for item in removal_paths
-    ]
-    if len(replacement_keys) != len(set(replacement_keys)):
-        raise ValueError("qdp_v2_repair_duplicate_replacement_path")
-    if len(removal_keys) != len(set(removal_keys)):
-        raise ValueError("qdp_v2_repair_duplicate_removal_path")
-    overlap = set(replacement_keys).intersection(removal_keys)
-    if overlap:
-        raise ValueError("qdp_v2_repair_replacement_removal_overlap")
-
-
-def shard_mutation_id(
-    context: Any,
-    *,
-    replacement_old_paths: Sequence[Path] = (),
-    replacement_items: Sequence[_InstalledParquet] = (),
-    removal_paths: Sequence[Path] = (),
-    append_items: Sequence[_InstalledParquet] = (),
-    append_sha256: Iterable[str] = (),
-) -> str:
-    replacements = sorted(
-        (
-            _manifest_path_key(old_path, context.root),
-            item.file_sha256,
-        )
-        for old_path, item in zip(
-            replacement_old_paths, replacement_items, strict=True
-        )
-    )
-    payload = {
-        "version": 1,
-        "domain": context.domain,
-        "dataset_id": context.dataset_id,
-        "replacements": replacements,
-        "removals": sorted(
-            _manifest_path_key(item, context.root) for item in removal_paths
-        ),
-        "appends": sorted(
-            [*(item.file_sha256 for item in append_items), *(str(item) for item in append_sha256)]
-        ),
-    }
-    encoded = json.dumps(
-        payload,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return f"shard-mutation-v1:{hashlib.sha256(encoded).hexdigest()}"
-
-
-def _manifest_has_shard_mutation(
-    manifest: DatasetManifest,
-    mutation_id: str,
-) -> bool:
-    records = dict(manifest.source.get("repair_shard_mutations", {}) or {})
-    return mutation_id in records
-
-
-def _record_shard_mutation(
-    payload: dict[str, Any],
-    mutation_id: str,
-    *,
-    old_sha256: Mapping[str, str],
-    reason: str,
-    previous_manifest_sha256: str,
-    affected_date_range: Mapping[str, str] | str,
-    changed_columns: Sequence[str],
-    old_schema_hash: str,
-    new_schema_hash: str,
-) -> None:
-    source = dict(payload.get("source", {}) or {})
-    records = dict(source.get("repair_shard_mutations", {}) or {})
-    records.setdefault(
-        mutation_id,
-        {
-            "reason": str(reason),
-            "previous_manifest_sha256": str(previous_manifest_sha256),
-            "affected_date_range": (
-                {
-                    "start": str(affected_date_range.get("start", "")),
-                    "end": str(affected_date_range.get("end", "")),
-                }
-                if isinstance(affected_date_range, Mapping)
-                else "unknown"
-            ),
-            "changed_columns": sorted({str(item) for item in changed_columns}),
-            "old_schema_hash": str(old_schema_hash),
-            "new_schema_hash": str(new_schema_hash),
-            "utc_timestamp": _utc_now(),
-            "old_shard_sha256": {
-                str(key): str(value)
-                for key, value in sorted(old_sha256.items())
-            }
-        },
-    )
-    source["repair_shard_mutations"] = records
-    source["last_repair_mutation_id"] = mutation_id
-    payload["source"] = source
-
-
-def _manifest_shard_mutation_old_hashes(
-    manifest: DatasetManifest,
-    mutation_id: str,
-) -> dict[str, str]:
-    records = dict(manifest.source.get("repair_shard_mutations", {}) or {})
-    record = records.get(mutation_id, {})
-    if not isinstance(record, Mapping):
-        return {}
-    values = record.get("old_shard_sha256", {})
-    if not isinstance(values, Mapping):
-        return {}
-    return {str(key): str(value) for key, value in values.items()}
-
-
-def _resolve_prepared_parquet_path(
-    path: str | Path,
-    *,
-    workspace_root: str | Path | None,
-) -> Path:
-    candidate = Path(path).expanduser()
-    if not candidate.is_absolute():
-        candidate = qdp_paths(workspace_root).workspace_root / candidate
-    resolved = candidate.resolve()
-    if not resolved.is_file() or resolved.suffix.lower() != ".parquet":
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_prepared_parquet_missing:{resolved}"
-        )
-    return resolved
-
-
-def _assert_unique_prepared_paths(paths: Sequence[Path]) -> None:
-    keys = [_manifest_path_key(path, Path.cwd()) for path in paths]
-    if len(keys) != len(set(keys)):
-        raise ValueError("qdp_v2_repair_duplicate_prepared_parquet_path")
-
-
-def _inspect_prepared_parquets(
-    context: ActiveDomain,
-    paths: Sequence[Path],
-    *,
-    reference_schema: pa.Schema,
-) -> list[_PreparedParquetInfo]:
-    if not paths:
-        raise ValueError("qdp_v2_repair_prepared_parquet_paths_required")
-    _assert_unique_prepared_paths(paths)
-    date_column = _date_column(context.manifest)
-    expected_columns = [str(item.get("name", "")) for item in context.manifest.schema]
-    expected_columns = [item for item in expected_columns if item]
-    metadata_rows: list[tuple[Path, int]] = []
-    for path in paths:
-        parquet = pq.ParquetFile(path)
-        row_count = int(parquet.metadata.num_rows)
-        if row_count <= 0:
-            raise QdpV2RepairError(f"qdp_v2_repair_frame_empty:{path}")
-        schema = parquet.schema_arrow
-        if not schema.equals(reference_schema, check_metadata=False):
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_parquet_schema_mismatch:{path}"
-            )
-        if expected_columns and schema.names != expected_columns:
-            raise QdpV2RepairError(
-                "qdp_v2_repair_schema_columns_mismatch:"
-                f"expected={expected_columns}:actual={schema.names}"
-            )
-        missing_keys = [
-            item for item in context.manifest.primary_key if item not in schema.names
-        ]
-        if missing_keys:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_primary_key_columns_missing:{missing_keys}"
-            )
-        metadata_rows.append((path, row_count))
-
-    if not date_column:
-        return [
-            _PreparedParquetInfo(
-                source_path=path,
-                row_count=row_count,
-                start_date="",
-                end_date="",
-            )
-            for path, row_count in metadata_rows
-        ]
-
-    results: list[_PreparedParquetInfo] = []
-    quoted_date = _quote_identifier(date_column)
-    parsed_date = f"try_cast({quoted_date} AS DATE)"
-    with _open_repair_duckdb(context) as connection:
-        for path, expected_rows in metadata_rows:
-            row = connection.execute(
-                "SELECT count(*) AS row_count, "
-                f"count(*) FILTER (WHERE {quoted_date} IS NULL "
-                f"OR {parsed_date} IS NULL) AS invalid_dates, "
-                f"strftime(min({parsed_date}), '%Y-%m-%d') AS start_date, "
-                f"strftime(max({parsed_date}), '%Y-%m-%d') AS end_date "
-                f"FROM read_parquet({_sql_literal(str(path))})"
-            ).fetchone()
-            if row is None or int(row[0]) != expected_rows:
-                raise QdpV2RepairError(
-                    f"qdp_v2_repair_row_count_mismatch:{path}"
-                )
-            if int(row[1] or 0) != 0 or not row[2] or not row[3]:
-                raise QdpV2RepairError(
-                    f"qdp_v2_repair_date_value_invalid:{path}"
-                )
-            results.append(
-                _PreparedParquetInfo(
-                    source_path=path,
-                    row_count=expected_rows,
-                    start_date=str(row[2]),
-                    end_date=str(row[3]),
-                )
-            )
-    return results
-
-
-def _open_repair_duckdb(context: ActiveDomain) -> GuardedDuckDbConnection:
-    temp_dir = (context.root / "tmp").resolve()
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    return open_guarded_duckdb(
-        temp_directory=temp_dir,
-        threads=max(1, min(os.cpu_count() or 1, 8)),
-    )
-
-
-def _install_prepared_parquet(
-    info: _PreparedParquetInfo,
-    *,
-    target_dir: Path,
-    target_name: Callable[[str], str],
-) -> _InstalledParquet:
-    target_dir.mkdir(parents=True, exist_ok=True)
-    temporary = target_dir / (
-        f".repair_prepared.{os.getpid()}.{uuid.uuid4().hex}.parquet.tmp"
-    )
-    digest = hashlib.sha256()
-    try:
-        with info.source_path.open("rb") as source, temporary.open("xb") as output:
-            while True:
-                chunk = source.read(8 * 1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-                output.write(chunk)
-            output.flush()
-            os.fsync(output.fileno())
-        file_sha256 = digest.hexdigest()
-        target = target_dir / target_name(file_sha256)
-        if target.suffix.lower() != ".parquet" or target.parent.resolve() != target_dir.resolve():
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_invalid_prepared_target:{target}"
-            )
-        if target.exists():
-            if _sha256_file(target) != file_sha256:
-                raise QdpV2RepairError(
-                    f"qdp_v2_repair_existing_target_hash_mismatch:{target}"
-                )
-            created = False
-        else:
-            temporary.replace(target)
-            created = True
-        parquet = pq.ParquetFile(target)
-        if int(parquet.metadata.num_rows) != info.row_count:
-            if created:
-                target.unlink(missing_ok=True)
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_row_count_mismatch:{target}"
-            )
-        return _InstalledParquet(
-            source_path=info.source_path,
-            target_path=target.resolve(),
-            row_count=info.row_count,
-            start_date=info.start_date,
-            end_date=info.end_date,
-            file_sha256=file_sha256,
-            created=created,
-        )
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _assert_unique_installed_targets(items: Sequence[_InstalledParquet]) -> None:
-    keys = [
-        _manifest_path_key(item.target_path, Path.cwd())
-        for item in items
-    ]
-    if len(keys) != len(set(keys)):
-        raise QdpV2RepairError(
-            "qdp_v2_repair_duplicate_prepared_parquet_content"
-        )
-
-
-def _validate_parquet_batch_primary_keys(
-    context: ActiveDomain,
-    *,
-    new_paths: Sequence[Path],
-    retained_entries: Sequence[ShardManifestEntry],
-    new_start: str,
-    new_end: str,
-) -> None:
-    if not new_paths:
-        raise QdpV2RepairError("qdp_v2_repair_parquet_path_list_empty")
-    primary_key = list(context.manifest.primary_key)
-    if not primary_key:
-        raise QdpV2RepairError("qdp_v2_repair_primary_key_missing")
-    quoted_keys = ",".join(_quote_identifier(item) for item in primary_key)
-    null_predicate = " OR ".join(
-        f"{_quote_identifier(item)} IS NULL" for item in primary_key
-    )
-    retained = [
-        resolve_manifest_path(item.path, root=context.root).resolve()
-        for item in _entries_overlapping_range(
-            context.manifest,
-            retained_entries,
-            new_start=new_start,
-            new_end=new_end,
-        )
-    ]
-    with _open_repair_duckdb(context) as connection:
-        connection.execute(
-            "CREATE TEMP TABLE qdp_repair_new_keys AS "
-            f"SELECT {quoted_keys} FROM "
-            f"read_parquet({_parquet_list_sql(new_paths)}, union_by_name=false)"
-        )
-        null_key = connection.execute(
-            f"SELECT 1 FROM qdp_repair_new_keys WHERE {null_predicate} LIMIT 1"
-        ).fetchone()
-        if null_key:
-            raise QdpV2RepairError("qdp_v2_repair_primary_key_null")
-        duplicate = connection.execute(
-            "SELECT 1 FROM qdp_repair_new_keys "
-            f"GROUP BY {quoted_keys} HAVING count(*) > 1 LIMIT 1"
-        ).fetchone()
-        if duplicate:
-            raise QdpV2RepairError(
-                "qdp_v2_repair_new_shards_primary_key_overlap"
-            )
-        if retained:
-            join = " AND ".join(
-                f"n.{_quote_identifier(item)} = e.{_quote_identifier(item)}"
-                for item in primary_key
-            )
-            overlap = connection.execute(
-                "SELECT 1 FROM qdp_repair_new_keys n "
-                f"JOIN read_parquet({_parquet_list_sql(retained)}, "
-                f"union_by_name=false) e ON {join} LIMIT 1"
-            ).fetchone()
-            if overlap:
-                raise QdpV2RepairError(
-                    "qdp_v2_repair_retained_shard_primary_key_overlap"
-                )
-
-
-def _entries_overlapping_range(
-    manifest: DatasetManifest,
-    entries: Sequence[ShardManifestEntry],
-    *,
-    new_start: str,
-    new_end: str,
-) -> list[ShardManifestEntry]:
-    date_column = _date_column(manifest)
-    if not date_column or date_column not in manifest.primary_key:
-        return list(entries)
-    return [
-        item
-        for item in entries
-        if not item.start_date
-        or not item.end_date
-        or (str(item.start_date) <= new_end and str(item.end_date) >= new_start)
-    ]
-
-
-def _new_parquet_shard_entry(
-    context: ActiveDomain,
-    item: _InstalledParquet,
-    *,
-    reason: str,
-    old_entry: ShardManifestEntry | None,
-) -> ShardManifestEntry:
-    return ShardManifestEntry(
-        path=_path_for_manifest(item.target_path, root=context.root),
-        row_count=item.row_count,
-        start_date=item.start_date,
-        end_date=item.end_date,
-        status="stored",
-        file_size=item.target_path.stat().st_size,
-        schema_hash=(
-            old_entry.schema_hash if old_entry else context.manifest.schema_hash
-        ),
-        source_path=str(item.source_path),
-        content_key=f"repair-file:{item.file_sha256[:24]}",
-        metadata={
-            "repair_reason": reason,
-            "repair_file_sha256": item.file_sha256,
-            "prepared_source_path": str(item.source_path),
-            "replaces": str(old_entry.path) if old_entry else "",
-        },
-    )
-
-
-def _validate_selected_old_shards(
-    context: ActiveDomain,
-    entries: Sequence[ShardManifestEntry],
-    *,
-    reference_schema: pa.Schema,
-    allow_schema_superset: bool = False,
-) -> dict[str, str]:
-    hashes: dict[str, str] = {}
-    for entry in entries:
-        path = resolve_manifest_path(entry.path, root=context.root).resolve()
-        _assert_dataset_shard_reference(context, path)
-        if not path.is_file():
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_active_shard_missing:{path}"
-            )
-        size = path.stat().st_size
-        if int(entry.file_size or 0) > 0 and size != int(entry.file_size):
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_active_shard_file_size_mismatch:{path}"
-            )
-        parquet = pq.ParquetFile(path)
-        if int(parquet.metadata.num_rows) != int(entry.row_count):
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_active_shard_row_count_mismatch:{path}"
-            )
-        actual_schema = parquet.schema_arrow
-        schema_matches = actual_schema.equals(
-            reference_schema,
-            check_metadata=False,
-        )
-        if (
-            not schema_matches
-            and allow_schema_superset
-            and set(reference_schema.names).issubset(actual_schema.names)
-        ):
-            schema_matches = all(
-                actual_schema.field(field.name).equals(
-                    field,
-                    check_metadata=False,
-                )
-                for field in reference_schema
-            )
-        if not schema_matches:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_active_shard_schema_mismatch:{path}"
-            )
-        digest = _sha256_file(path)
-        expected = str(
-            entry.metadata.get("repair_file_sha256", "")
-            or entry.metadata.get("file_sha256", "")
-            or entry.metadata.get("sha256", "")
-        )
-        if expected and digest != expected:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_active_shard_hash_mismatch:{path}"
-            )
-        hashes[_manifest_path_key(path, context.root)] = digest
-    return hashes
-
-
-def _validate_installed_against_entry(
-    item: _InstalledParquet,
-    entry: ShardManifestEntry,
-    *,
-    reference_schema: pa.Schema,
-) -> None:
-    path = item.target_path.resolve()
-    parquet = pq.ParquetFile(path)
-    if int(parquet.metadata.num_rows) != item.row_count:
-        raise QdpV2RepairError(f"qdp_v2_repair_row_count_mismatch:{path}")
-    if int(entry.row_count) != item.row_count:
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_active_shard_row_count_mismatch:{path}"
-        )
-    if not parquet.schema_arrow.equals(reference_schema, check_metadata=False):
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_parquet_schema_mismatch:{path}"
-        )
-    if _sha256_file(path) != item.file_sha256:
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_installed_target_hash_mismatch:{path}"
-        )
-
-
-def _validate_updated_shard_paths(
-    context: ActiveDomain,
-    entries: Sequence[ShardManifestEntry],
-    *,
-    installed: Sequence[_InstalledParquet],
-    reference_schema: pa.Schema,
-) -> None:
-    if not entries:
-        raise QdpV2RepairError("qdp_v2_repair_cannot_remove_all_shards")
-    by_key: dict[str, ShardManifestEntry] = {}
-    for entry in entries:
-        path = resolve_manifest_path(entry.path, root=context.root).resolve()
-        _assert_dataset_shard_reference(context, path)
-        key = _manifest_path_key(path, context.root)
-        if key in by_key:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_duplicate_manifest_shard_path:{path}"
-            )
-        if not path.is_file():
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_updated_shard_missing:{path}"
-            )
-        if int(entry.file_size or 0) > 0 and path.stat().st_size != int(
-            entry.file_size
-        ):
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_updated_shard_file_size_mismatch:{path}"
-            )
-        by_key[key] = entry
-    for item in installed:
-        key = _manifest_path_key(item.target_path, context.root)
-        entry = by_key.get(key)
-        if entry is None:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_installed_target_not_in_manifest:{item.target_path}"
-            )
-        _validate_installed_against_entry(
-            item,
-            entry,
-            reference_schema=reference_schema,
-        )
-
-
-def _validate_replayed_shard_mutation(
-    context: ActiveDomain,
-    *,
-    replacement_old_paths: Sequence[Path],
-    removal_paths: Sequence[Path],
-    installed: Sequence[_InstalledParquet],
-    reference_schema: pa.Schema,
-) -> None:
-    active_by_key = {
-        _manifest_path_key(item.path, context.root): item
-        for item in context.manifest.shards
-    }
-    for old_path in [*replacement_old_paths, *removal_paths]:
-        if _manifest_path_key(old_path, context.root) in active_by_key:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_replayed_old_shard_still_active:{old_path}"
-            )
-    for item in installed:
-        entry = active_by_key.get(
-            _manifest_path_key(item.target_path, context.root)
-        )
-        if entry is None:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_replayed_target_not_active:{item.target_path}"
-            )
-        _validate_installed_against_entry(
-            item,
-            entry,
-            reference_schema=reference_schema,
-        )
-
-
-def _cleanup_committed_old_shards(
-    context: ActiveDomain,
-    *,
-    old_paths: Sequence[Path],
-    expected_sha256: Mapping[str, str],
-) -> dict[str, list[str]]:
-    deleted: list[str] = []
-    retained: list[str] = []
-    try:
-        current = resolve_active_domain(
-            context.domain,
-            workspace_root=context.root.parent.parent.parent,
-        )
-    except BaseException:
-        return {
-            "deleted": deleted,
-            "retained": [str(item) for item in old_paths if item.exists()],
-        }
-    if current.dataset_id != context.dataset_id:
-        return {
-            "deleted": deleted,
-            "retained": [str(item) for item in old_paths if item.exists()],
-        }
-    active_keys = {
-        _manifest_path_key(item.path, current.root)
-        for item in current.manifest.shards
-    }
-    for path in old_paths:
-        resolved = path.resolve()
-        if not resolved.exists():
-            continue
-        key = _manifest_path_key(resolved, context.root)
-        expected = str(expected_sha256.get(key, ""))
-        if key in active_keys or not expected:
-            retained.append(str(resolved))
-            continue
-        try:
-            _assert_deletable_dataset_shard(context, resolved)
-            if _sha256_file(resolved) != expected:
-                retained.append(str(resolved))
-                continue
-            resolved.unlink()
-            deleted.append(str(resolved))
-        except (OSError, QdpV2RepairError):
-            retained.append(str(resolved))
-    return {"deleted": deleted, "retained": retained}
-
-
-def _validate_frame(frame: pd.DataFrame, *, context: ActiveDomain) -> pd.DataFrame:
-    if not isinstance(frame, pd.DataFrame) or frame.empty:
-        raise QdpV2RepairError("qdp_v2_repair_frame_empty")
-    data = frame.copy().reset_index(drop=True)
-    expected_columns = [str(item.get("name", "")) for item in context.manifest.schema]
-    expected_columns = [item for item in expected_columns if item]
-    if expected_columns and list(data.columns) != expected_columns:
-        raise QdpV2RepairError(
-            "qdp_v2_repair_schema_columns_mismatch:"
-            f"expected={expected_columns}:actual={list(data.columns)}"
-        )
-    primary_key = list(context.manifest.primary_key)
-    if not primary_key or any(column not in data.columns for column in primary_key):
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_primary_key_columns_missing:{primary_key}"
-        )
-    if data[primary_key].isna().any().any():
-        raise QdpV2RepairError("qdp_v2_repair_primary_key_null")
-    if data.duplicated(primary_key, keep=False).any():
-        raise QdpV2RepairError("qdp_v2_repair_primary_key_duplicate")
-    _frame_date_range(data, context.manifest)
-    return data
+    return dict(payload)
 
 
 def _reference_schema(context: ActiveDomain) -> pa.Schema:
-    try:
-        return arrow_schema_from_manifest(context.manifest.schema)
-    except ValueError as exc:
-        raise QdpV2RepairError(str(exc)) from exc
+    if not context.shard_paths:
+        raise QdpV2RepairError("qdp_v2_repair_active_shards_missing")
+    return pq.read_schema(context.shard_paths[0])
 
 
-def _write_and_validate_parquet(
-    target: Path,
-    frame: pd.DataFrame,
-    *,
-    reference_schema: pa.Schema,
-    expected_content_hash: str,
-) -> bool:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        _validate_existing_parquet(
-            target,
-            expected_frame=frame,
-            reference_schema=reference_schema,
-            expected_content_hash=expected_content_hash,
-        )
-        return False
-    temporary = target.with_name(
-        f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-    )
-    try:
-        frame.to_parquet(
-            temporary,
-            index=False,
-            engine="pyarrow",
-            compression="zstd",
-        )
-        _validate_existing_parquet(
-            temporary,
-            expected_frame=frame,
-            reference_schema=reference_schema,
-            expected_content_hash=expected_content_hash,
-        )
-        _replace_file_with_retry(temporary, target)
-    finally:
-        _unlink_file_with_retry(temporary)
-    return True
+def _common_schema(paths: Sequence[Path]) -> pa.Schema:
+    schema = pq.read_schema(paths[0])
+    for path in paths:
+        _validate_parquet(path, expected_schema=schema)
+    return schema
 
 
-def _replace_file_with_retry(source: Path, target: Path, *, timeout_seconds: float = 5.0) -> None:
-    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
-    while True:
-        try:
-            source.replace(target)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.05)
+def _validate_parquet(path: Path, *, expected_schema: pa.Schema | None = None) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    parquet = pq.ParquetFile(path)
+    if parquet.metadata is None or int(parquet.metadata.num_rows) <= 0:
+        raise QdpV2RepairError(f"qdp_v2_repair_parquet_empty:{path}")
+    if expected_schema is not None and not parquet.schema_arrow.equals(
+        expected_schema, check_metadata=False
+    ):
+        raise QdpV2RepairError(f"qdp_v2_repair_parquet_schema_mismatch:{path}")
 
 
-def _unlink_file_with_retry(path: Path, *, timeout_seconds: float = 5.0) -> None:
-    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
-    while True:
-        try:
-            path.unlink(missing_ok=True)
-            return
-        except PermissionError:
-            if time.monotonic() >= deadline:
-                raise
-            time.sleep(0.05)
+def _require_columns(columns: Sequence[str], required: Sequence[str], label: str) -> None:
+    missing = sorted(set(required).difference(columns))
+    if missing:
+        raise QdpV2RepairError(f"qdp_v2_repair_{label}_columns_missing:{missing}")
 
 
-def _validate_existing_parquet(
-    path: Path,
-    *,
-    expected_frame: pd.DataFrame,
-    reference_schema: pa.Schema,
-    expected_content_hash: str,
-) -> None:
-    with path.open("rb") as handle:
-        parquet = pq.ParquetFile(handle)
-        if int(parquet.metadata.num_rows) != len(expected_frame):
-            raise QdpV2RepairError(f"qdp_v2_repair_row_count_mismatch:{path}")
-        if not parquet.schema_arrow.equals(reference_schema, check_metadata=False):
-            raise QdpV2RepairError(f"qdp_v2_repair_parquet_schema_mismatch:{path}")
-        persisted = parquet.read().to_pandas()
-    if frame_content_sha256(persisted) != expected_content_hash:
-        raise QdpV2RepairError(f"qdp_v2_repair_content_hash_mismatch:{path}")
-
-
-def _validate_cross_shard_primary_keys(
-    context: ActiveDomain,
-    *,
-    new_paths: Sequence[Path],
-    retained_entries: Sequence[ShardManifestEntry],
-) -> None:
-    primary_key = list(context.manifest.primary_key)
-    if not primary_key:
+def _validate_primary_keys(paths: Sequence[Path], keys: Sequence[str]) -> None:
+    if not paths or not keys:
         raise QdpV2RepairError("qdp_v2_repair_primary_key_missing")
-    new_sql = _parquet_list_sql(new_paths)
-    quoted_keys = ",".join(_quote_identifier(item) for item in primary_key)
-    retained = [
-        resolve_manifest_path(item.path, root=context.root).resolve()
-        for item in _overlapping_entries(context.manifest, retained_entries, new_paths)
-    ]
-    with _open_repair_duckdb(context) as connection:
+    import duckdb
+
+    columns = ",".join(_quote_identifier(item) for item in keys)
+    sql_paths = _parquet_list_sql(paths)
+    with duckdb.connect(":memory:") as connection:
         duplicate = connection.execute(
-            f"SELECT 1 FROM read_parquet({new_sql}, union_by_name=true) "
-            f"GROUP BY {quoted_keys} HAVING count(*) > 1 LIMIT 1"
+            f"SELECT 1 FROM read_parquet({sql_paths}, union_by_name=true) "
+            f"GROUP BY {columns} HAVING count(*) > 1 LIMIT 1"
         ).fetchone()
-        if duplicate:
-            raise QdpV2RepairError("qdp_v2_repair_new_shards_primary_key_overlap")
-        if retained:
-            retained_sql = _parquet_list_sql(retained)
-            join = " AND ".join(
-                f"n.{_quote_identifier(item)} = e.{_quote_identifier(item)}"
-                for item in primary_key
-            )
-            overlap = connection.execute(
-                f"SELECT 1 FROM read_parquet({new_sql}, union_by_name=true) n "
-                f"JOIN read_parquet({retained_sql}, union_by_name=true) e ON {join} LIMIT 1"
-            ).fetchone()
-            if overlap:
-                raise QdpV2RepairError(
-                    "qdp_v2_repair_retained_shard_primary_key_overlap"
-                )
+    if duplicate is not None:
+        raise QdpV2RepairError("qdp_v2_repair_primary_key_duplicate")
 
 
-def _overlapping_entries(
-    manifest: DatasetManifest,
-    entries: Sequence[ShardManifestEntry],
-    new_paths: Sequence[Path],
-) -> list[ShardManifestEntry]:
-    date_column = _date_column(manifest)
-    if not date_column:
-        return list(entries)
-    starts: list[str] = []
-    ends: list[str] = []
-    for path in new_paths:
-        frame = pd.read_parquet(path, columns=[date_column], engine="pyarrow")
-        start, end = _series_date_range(frame[date_column])
-        starts.append(start)
-        ends.append(end)
-    new_start, new_end = min(starts), max(ends)
-    return [
-        item
-        for item in entries
-        if not item.start_date
-        or not item.end_date
-        or (str(item.start_date) <= new_end and str(item.end_date) >= new_start)
-    ]
+def _validate_append_keys(
+    existing: Sequence[Path],
+    additions: Path | Sequence[Path],
+    keys: Sequence[str],
+) -> None:
+    new_paths = [additions] if isinstance(additions, Path) else list(additions)
+    _validate_primary_keys(new_paths, keys)
+    if not existing:
+        return
+    import duckdb
+
+    condition = " AND ".join(
+        f"n.{_quote_identifier(item)} = o.{_quote_identifier(item)}" for item in keys
+    )
+    with duckdb.connect(":memory:") as connection:
+        overlap = connection.execute(
+            f"SELECT 1 FROM read_parquet({_parquet_list_sql(new_paths)}, union_by_name=true) n "
+            f"JOIN read_parquet({_parquet_list_sql(existing)}, union_by_name=true) o "
+            f"ON {condition} LIMIT 1"
+        ).fetchone()
+    if overlap is not None:
+        raise QdpV2RepairError("qdp_v2_repair_primary_key_overlap")
 
 
-def _new_shard_entry(
+def _entry_for_parquet(
     context: ActiveDomain,
     path: Path,
-    frame: pd.DataFrame,
     *,
-    start_date: str,
-    end_date: str,
-    content_hash: str,
     reason: str,
-    old_entry: ShardManifestEntry | None,
 ) -> ShardManifestEntry:
+    parquet = pq.ParquetFile(path)
+    date_column = _date_column(parquet.schema_arrow.names)
+    start_date, end_date = _parquet_date_range(path, date_column)
     return ShardManifestEntry(
-        path=_path_for_manifest(path, root=context.root),
-        row_count=len(frame),
+        path=path_for_manifest(path, root=context.root),
+        row_count=int(parquet.metadata.num_rows),
         start_date=start_date,
         end_date=end_date,
         status="stored",
-        file_size=path.stat().st_size,
-        schema_hash=(old_entry.schema_hash if old_entry else context.manifest.schema_hash),
-        source_path=(str(old_entry.path) if old_entry else ""),
-        content_key=f"repair:{content_hash[:24]}",
-        metadata={
-            "repair_reason": reason,
-            "repair_content_sha256": content_hash,
-            "replaces": str(old_entry.path) if old_entry else "",
-        },
+        file_size=int(path.stat().st_size),
+        metadata={"reason": str(reason), "created_at": _utc_now()},
     )
 
 
-def _updated_manifest_payload(
+def _updated_manifest(
     context: ActiveDomain,
     entries: Sequence[ShardManifestEntry],
     *,
-    reason: str,
-    action: str,
-) -> dict[str, Any]:
-    if not entries:
-        raise QdpV2RepairError("qdp_v2_repair_cannot_remove_all_shards")
-    payload = context.manifest.to_dict()
-    payload["dataset_id"] = context.dataset_id
-    payload["domain"] = context.domain
-    payload["shards"] = [item.to_dict() for item in entries]
-    payload["row_count"] = sum(int(item.row_count) for item in entries)
-    starts = [str(item.start_date) for item in entries if str(item.start_date)]
-    ends = [str(item.end_date) for item in entries if str(item.end_date)]
-    payload["start_date"] = min(starts) if starts else ""
-    payload["end_date"] = max(ends) if ends else ""
-    notes = [str(item) for item in list(payload.get("notes", []) or [])]
-    repair_note = f"{action}:{reason}"
-    if repair_note not in notes:
-        notes.append(repair_note)
-    payload["notes"] = notes
-    source = dict(payload.get("source", {}) or {})
-    source["last_repair_action"] = action
-    source["last_repair_reason"] = reason
-    source["last_repair_at"] = _utc_now()
-    payload["source"] = source
-    validated = DatasetManifest.from_mapping(payload)
-    if validated.dataset_id != context.dataset_id or validated.domain != context.domain:
-        raise QdpV2RepairError("qdp_v2_repair_updated_manifest_identity_changed")
-    if validated.row_count != sum(item.row_count for item in validated.shards):
-        raise QdpV2RepairError("qdp_v2_repair_updated_manifest_row_count_invalid")
-    return payload
-
-
-def _commit_manifest(context: ActiveDomain, payload: Mapping[str, Any]) -> None:
-    _assert_context_unchanged(context)
-    # Validate the exact payload before the atomic replace.  A validation read
-    # after replacement could fail after the new manifest is already live;
-    # callers would then mistake a committed transaction for a pre-commit
-    # failure and remove shards referenced by that manifest.
-    written = DatasetManifest.from_mapping(payload)
-    if written.dataset_id != context.dataset_id or written.domain != context.domain:
-        raise QdpV2RepairError("qdp_v2_repair_committed_manifest_identity_invalid")
-    if written.row_count != sum(int(item.row_count) for item in written.shards):
-        raise QdpV2RepairError("qdp_v2_repair_committed_manifest_row_count_invalid")
-    atomic_write_json(context.manifest_path, payload)
-
-
-def _resolve_selected_entries(
-    context: ActiveDomain,
-    requested_paths: Sequence[str | Path],
-) -> list[ShardManifestEntry]:
-    if not requested_paths:
-        raise ValueError("qdp_v2_repair_replaced_shard_paths_required")
-    by_key = {
-        _manifest_path_key(item.path, context.root): item
-        for item in context.manifest.shards
-    }
-    selected: list[ShardManifestEntry] = []
-    seen: set[str] = set()
-    for requested in requested_paths:
-        key = _manifest_path_key(requested, context.root)
-        if key in seen:
-            raise ValueError(f"qdp_v2_repair_duplicate_replaced_path:{requested}")
-        seen.add(key)
-        entry = by_key.get(key)
-        if entry is None:
-            raise QdpV2RepairError(
-                f"qdp_v2_repair_shard_not_active:{requested}"
-            )
-        selected.append(entry)
-    return selected
-
-
-def _active_shard_directory(context: ActiveDomain) -> Path:
-    # Active manifests may be content-addressed composites that reference
-    # immutable shards owned by earlier datasets.  New material must always be
-    # installed under the current dataset rather than next to whichever
-    # referenced shard happens to be listed first.  Replacement/removal paths
-    # continue to pass through _assert_deletable_dataset_shard separately.
-    shard_dir = context.dataset_dir / "shards"
-    shard_dir.mkdir(parents=True, exist_ok=True)
-    return shard_dir
-
-
-def _assert_deletable_dataset_shard(context: ActiveDomain, path: Path) -> None:
-    resolved = path.resolve()
-    dataset_dir = context.dataset_dir.resolve()
-    try:
-        resolved.relative_to(dataset_dir)
-    except ValueError as exc:
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_external_shard_mutation_refused:{resolved}"
-        ) from exc
-    if resolved == context.manifest_path or resolved.suffix.lower() != ".parquet":
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_invalid_shard_target:{resolved}"
-        )
-
-
-def _assert_dataset_shard_reference(context: ActiveDomain, path: Path) -> None:
-    """Validate a manifest shard that may be owned by another QDP dataset."""
-
-    resolved = path.resolve()
-    datasets_root = (context.root / "datasets").resolve()
-    try:
-        resolved.relative_to(datasets_root)
-    except ValueError as exc:
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_external_shard_reference_refused:{resolved}"
-        ) from exc
-    if resolved == context.manifest_path or resolved.suffix.lower() != ".parquet":
-        raise QdpV2RepairError(
-            f"qdp_v2_repair_invalid_shard_target:{resolved}"
-        )
-
-
-def _is_owned_dataset_shard(context: ActiveDomain, path: Path) -> bool:
-    try:
-        path.resolve().relative_to(context.dataset_dir.resolve())
-    except ValueError:
-        return False
-    return True
-
-
-def _frame_date_range(
-    frame: pd.DataFrame, manifest: DatasetManifest
-) -> tuple[str, str]:
-    column = _date_column(manifest)
-    if not column:
-        return "", ""
-    if column not in frame.columns:
-        raise QdpV2RepairError("qdp_v2_repair_date_column_missing")
-    return _series_date_range(frame[column])
-
-
-def _parquet_date_range(path: Path, date_column: str) -> tuple[str, str]:
-    if not date_column:
-        return "", ""
-    table = pq.read_table(path, columns=[date_column])
-    return _series_date_range(table.column(0).to_pandas())
-
-
-def _known_date_range(start: str, end: str) -> dict[str, str] | str:
-    if start and end:
-        return {"start": str(start), "end": str(end)}
-    return "unknown"
-
-
-def _affected_date_range(
-    context: ActiveDomain,
-    paths: Sequence[Path],
-) -> dict[str, str] | str:
-    date_column = _date_column(context.manifest)
-    if not date_column or not paths:
-        return "unknown"
-    try:
-        values = [
-            pq.read_table(path, columns=[date_column]).column(0).to_pandas()
-            for path in paths
-        ]
-        frame = pd.DataFrame({date_column: pd.concat(values, ignore_index=True)})
-        return _known_date_range(*_frame_date_range(frame, context.manifest))
-    except Exception:
-        return "unknown"
-
-
-def _schema_changed_columns(
-    old_schema: Sequence[Mapping[str, Any]],
-    new_schema: Sequence[Mapping[str, Any]],
-) -> list[str]:
-    old = {str(item.get("name", "")): str(item.get("type", "")) for item in old_schema}
-    new = {str(item.get("name", "")): str(item.get("type", "")) for item in new_schema}
-    return sorted(
-        name
-        for name in set(old).union(new)
-        if old.get(name) != new.get(name)
+    schema: pa.Schema,
+    primary_key: Sequence[str] | None = None,
+    contract_version: str | None = None,
+    source: Mapping[str, Any] | None = None,
+    quality: Mapping[str, Any] | None = None,
+) -> DatasetManifest:
+    ordered = sorted(
+        list(entries), key=lambda item: (item.start_date, item.end_date, item.path)
+    )
+    if not ordered:
+        raise QdpV2RepairError("qdp_v2_repair_resulting_shards_empty")
+    starts = [item.start_date for item in ordered if item.start_date]
+    ends = [item.end_date for item in ordered if item.end_date]
+    return replace(
+        context.manifest,
+        primary_key=list(primary_key or context.manifest.primary_key),
+        contract_version=contract_version or context.manifest.contract_version,
+        start_date=min(starts) if starts else "",
+        end_date=max(ends) if ends else "",
+        row_count=sum(int(item.row_count) for item in ordered),
+        shards=ordered,
+        schema=_manifest_schema_from_arrow(schema),
+        source=dict(source if source is not None else context.manifest.source),
+        quality=dict(quality if quality is not None else context.manifest.quality),
     )
 
 
-def _series_date_range(series: pd.Series) -> tuple[str, str]:
-    parsed = pd.to_datetime(series, errors="coerce")
-    if parsed.isna().any():
-        raise QdpV2RepairError("qdp_v2_repair_date_value_invalid")
-    text = parsed.dt.strftime("%Y-%m-%d")
-    return str(text.min()), str(text.max())
+def _commit_manifest(context: ActiveDomain, manifest: DatasetManifest) -> None:
+    write_dataset_manifest(context.root, manifest)
+    current = read_dataset_manifest(context.manifest_path)
+    if current.dataset_id != manifest.dataset_id or current.row_count != manifest.row_count:
+        raise QdpV2RepairError("qdp_v2_repair_manifest_commit_validation_failed")
+    for entry in current.shards:
+        path = resolve_manifest_path(entry.path, root=context.root)
+        if not path.is_file():
+            raise QdpV2RepairError(f"qdp_v2_repair_committed_shard_missing:{path}")
 
 
-def _date_column(manifest: DatasetManifest) -> str:
-    fields = [str(item.get("name", "")) for item in manifest.schema]
-    fields.extend(manifest.primary_key)
-    return next((item for item in _DATE_COLUMNS if item in fields), "")
-
-
-def _assert_context_unchanged(context: ActiveDomain) -> None:
-    if _sha256_file(context.active_path) != context.active_sha256:
-        raise QdpV2RepairConflictError("qdp_v2_repair_active_changed")
-    if _sha256_file(context.manifest_path) != context.manifest_sha256:
-        raise QdpV2RepairConflictError("qdp_v2_repair_manifest_changed")
-
-
-def _assert_expected_manifest(
+def _install_prepared_files(
     context: ActiveDomain,
-    expected_manifest_sha256: str,
-) -> None:
-    expected = str(expected_manifest_sha256 or "").strip().lower()
-    if not expected:
-        return
-    _validate_sha256(expected)
-    if context.manifest_sha256 != expected:
-        raise QdpV2RepairConflictError(
-            "qdp_v2_repair_expected_manifest_sha256_mismatch:"
-            f"expected={expected}:actual={context.manifest_sha256}"
-        )
+    prepared: Sequence[Path],
+    *,
+    kind: str,
+) -> list[Path]:
+    installed: list[Path] = []
+    for number, source in enumerate(prepared):
+        target = _new_shard_path(context, kind, number=number)
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copy2(source, temporary)
+            _validate_parquet(temporary)
+            temporary.replace(target)
+            installed.append(target)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            _remove_files(installed)
+            raise
+    return installed
 
 
-def _validate_sha256(value: str) -> str:
-    text = str(value or "").strip().lower()
-    if len(text) != 64 or any(item not in "0123456789abcdef" for item in text):
-        raise ValueError("qdp_v2_repair_manifest_sha256_invalid")
-    return text
+def _new_shard_path(context: ActiveDomain, kind: str, *, number: int = 0) -> Path:
+    directory = context.manifest_path.parent / "shards"
+    token = _time_token()
+    candidate = directory / f"repair_{kind}_{token}_{number:04d}.parquet"
+    suffix = 1
+    while candidate.exists():
+        candidate = directory / f"repair_{kind}_{token}_{number:04d}_{suffix}.parquet"
+        suffix += 1
+    return candidate
 
 
-def _validate_schema_hash(value: str) -> str:
-    text = str(value or "").strip().lower()
-    if len(text) != 32 or any(item not in "0123456789abcdef" for item in text):
-        raise ValueError("qdp_v2_repair_schema_hash_invalid")
-    return text
-
-
-def _stable_json_read(path: Path, kind: str) -> tuple[str, dict[str, Any]]:
-    if not path.is_file():
-        raise FileNotFoundError(f"qdp_v2_repair_{kind}_missing:{path}")
-    before = _sha256_file(path)
-    payload = read_json(path)
-    after = _sha256_file(path)
-    if before != after:
-        raise QdpV2RepairConflictError(
-            f"qdp_v2_repair_{kind}_changed_while_reading"
-        )
-    return after, payload
-
-
-def _append_repair_log(
-    workspace_root: str | Path | None,
-    payload: Mapping[str, Any],
-) -> None:
-    path = repair_log_path(workspace_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    record = {"logged_at": _utc_now(), **dict(payload)}
-    line = json.dumps(json_safe(record), ensure_ascii=False, sort_keys=True) + "\n"
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(line)
-        handle.flush()
-        os.fsync(handle.fileno())
-
-
-def _manifest_path_key(path: str | Path, root: Path) -> str:
-    candidate = Path(path)
-    resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-    return os.path.normcase(os.path.abspath(str(resolved)))
-
-
-def _path_for_manifest(path: Path, *, root: Path) -> str:
+def _resolve_active_shard(context: ActiveDomain, value: str | Path) -> Path:
+    path = Path(value)
+    if not path.is_absolute():
+        path = resolve_manifest_path(path, root=context.root)
     resolved = path.resolve()
-    try:
-        return resolved.relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return str(resolved)
+    known = {item.resolve() for item in context.shard_paths}
+    if resolved not in known:
+        raise QdpV2RepairError(f"qdp_v2_repair_shard_not_active:{resolved}")
+    return resolved
+
+
+def _resolve_prepared_path(
+    value: str | Path,
+    workspace_root: str | Path | None,
+) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = qdp_paths(workspace_root).workspace_root / path
+    resolved = path.resolve()
+    _validate_parquet(resolved)
+    return resolved
+
+
+def _ensure_unique_paths(paths: Sequence[Path]) -> None:
+    resolved = [item.resolve() for item in paths]
+    if len(resolved) != len(set(resolved)):
+        raise QdpV2RepairError("qdp_v2_repair_duplicate_prepared_path")
+
+
+def _remove_old_shards(
+    context: ActiveDomain,
+    paths: Sequence[Path],
+) -> tuple[list[str], list[str]]:
+    current = read_dataset_manifest(context.manifest_path)
+    referenced = {
+        resolve_manifest_path(item.path, root=context.root).resolve()
+        for item in current.shards
+    }
+    dataset_root = context.manifest_path.parent.resolve()
+    deleted: list[str] = []
+    retained: list[str] = []
+    for path in paths:
+        resolved = path.resolve()
+        if resolved in referenced:
+            retained.append(str(resolved))
+            continue
+        try:
+            resolved.relative_to(dataset_root)
+        except ValueError:
+            # Composite manifests may reference a shard owned by an older
+            # dataset.  Removing that reference must not delete the owner's file.
+            retained.append(str(resolved))
+            continue
+        try:
+            resolved.unlink(missing_ok=True)
+            deleted.append(str(resolved))
+        except OSError:
+            retained.append(str(resolved))
+    return deleted, retained
+
+
+def _remove_files(paths: Sequence[Path]) -> None:
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
+def _date_column(columns: Sequence[str]) -> str:
+    return next((item for item in _DATE_COLUMNS if item in columns), "")
+
+
+def _parquet_date_range(path: Path, column: str) -> tuple[str, str]:
+    if not column:
+        return "", ""
+    values = pq.read_table(path, columns=[column])[column]
+    if len(values) == 0:
+        return "", ""
+    return str(pc.min(values).as_py()), str(pc.max(values).as_py())
 
 
 def _parquet_list_sql(paths: Sequence[Path]) -> str:
-    if not paths:
-        raise QdpV2RepairError("qdp_v2_repair_parquet_path_list_empty")
-    return "[" + ",".join(_sql_literal(str(path)) for path in paths) + "]"
+    return "[" + ",".join(_sql_literal(str(item)) for item in paths) + "]"
 
 
 def _quote_identifier(value: str) -> str:
@@ -2519,358 +720,105 @@ def _sql_literal(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def _required_reason(reason: str) -> str:
-    text = str(reason or "").strip()
-    if not text:
-        raise ValueError("qdp_v2_repair_reason_required")
-    return text
-
-
-def _sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        while True:
-            chunk = handle.read(8 * 1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-__all__ = [
-    "ActiveDomain",
-    "QdpV2RepairConflictError",
-    "QdpV2RepairError",
-    "append_active_shard",
-    "bulk_append_active_shards_from_parquet",
-    "frame_content_sha256",
-    "mutate_active_shards_from_parquet",
-    "patch_active_cells",
-    "replace_active_table_from_parquet",
-    "repair_log_path",
-    "resolve_active_domain",
-    "shard_mutation_id",
-]
-
-
-def _add_cli_common_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--workspace-root", default=argparse.SUPPRESS)
-    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
-    parser.add_argument("--reason", required=True)
-    parser.add_argument("--expected-manifest-sha256", required=True)
-    parser.add_argument("--apply", action="store_true")
+def _time_token() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%f")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="qdp repair",
-        description="CAS-protected active QDP shard repair (dry-run by default).",
-    )
-    parser.add_argument("--workspace-root", default="")
-    parser.add_argument("--json", action="store_true")
+    parser = argparse.ArgumentParser(description="Repair active QDP data directly.")
+    parser.add_argument("--workspace-root", type=Path)
     subparsers = parser.add_subparsers(dest="repair_command", required=True)
 
-    patch = subparsers.add_parser("patch", help="Apply declarative cell corrections.")
-    _add_cli_common_options(patch)
-    patch.add_argument("--request", required=True)
+    patch = subparsers.add_parser("patch", help="Patch explicitly named cells.")
+    patch.add_argument("--request", type=Path, required=True)
+    patch.add_argument("--reason", default="patch cells")
+    patch.add_argument("--apply", action="store_true")
 
-    mutate = subparsers.add_parser(
-        "mutate", help="Atomically replace, remove, and append active shards."
-    )
-    _add_cli_common_options(mutate)
+    mutate = subparsers.add_parser("mutate", help="Replace, remove, or append shards.")
     mutate.add_argument("--domain", required=True)
-    mutate.add_argument("--replace", action="append", default=[], metavar="OLD=NEW")
-    mutate.add_argument("--remove", action="append", default=[], metavar="PATH")
-    mutate.add_argument("--append", action="append", default=[], metavar="PATH")
-    mutate.add_argument("--expected-mutation-id", default="")
+    mutate.add_argument("--replace", action="append", default=[])
+    mutate.add_argument("--remove", action="append", default=[])
+    mutate.add_argument("--append", action="append", default=[])
+    mutate.add_argument("--reason", default="mutate active shards")
+    mutate.add_argument("--apply", action="store_true")
 
-    replace_table = subparsers.add_parser(
-        "replace-table", help="Atomically replace every active table shard."
-    )
-    _add_cli_common_options(replace_table)
+    replace_table = subparsers.add_parser("replace-table", help="Replace an active table.")
     replace_table.add_argument("--domain", required=True)
-    replace_table.add_argument("--input", action="append", required=True, metavar="PARQUET")
-    replace_table.add_argument("--expected-new-schema-hash", default="")
+    replace_table.add_argument("--prepared", action="append", required=True)
+    replace_table.add_argument("--primary-key", action="append", default=[])
     replace_table.add_argument("--contract-version", default="")
+    replace_table.add_argument("--reason", default="replace active table")
+    replace_table.add_argument("--apply", action="store_true")
     return parser
 
 
-def _parse_cli_replacements(values: Sequence[str]) -> list[tuple[str, str]]:
+def _parse_replacements(values: Sequence[str]) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = []
     for value in values:
-        old, separator, new = str(value).partition("=")
-        if not separator or not old.strip() or not new.strip():
-            raise ValueError(f"qdp_v2_repair_replace_argument_invalid:{value}")
-        pairs.append((old.strip(), new.strip()))
+        if "=" not in value:
+            raise ValueError(f"qdp_v2_repair_replace_invalid:{value}")
+        old, new = value.split("=", 1)
+        pairs.append((old, new))
     return pairs
-
-
-def _inspect_cli_parquets(
-    context: ActiveDomain,
-    paths: Sequence[str | Path],
-    *,
-    require_reference_schema: bool,
-) -> tuple[list[Path], list[_PreparedParquetInfo], pa.Schema]:
-    resolved = [
-        _resolve_prepared_parquet_path(item, workspace_root=context.root.parent.parent.parent)
-        for item in paths
-    ]
-    _assert_unique_prepared_paths(resolved)
-    if not resolved:
-        raise ValueError("qdp_v2_repair_prepared_parquet_paths_required")
-    reference = _reference_schema(context) if require_reference_schema else pq.read_schema(resolved[0])
-    date_column = _date_column(context.manifest)
-    infos: list[_PreparedParquetInfo] = []
-    for path in resolved:
-        parquet = pq.ParquetFile(path)
-        if not parquet.schema_arrow.equals(reference, check_metadata=False):
-            raise QdpV2RepairError(f"qdp_v2_repair_parquet_schema_mismatch:{path}")
-        rows = int(parquet.metadata.num_rows)
-        if rows <= 0:
-            raise QdpV2RepairError(f"qdp_v2_repair_frame_empty:{path}")
-        start, end = _parquet_date_range(path, date_column) if date_column in reference.names else ("", "")
-        infos.append(_PreparedParquetInfo(path, rows, start, end))
-    return resolved, infos, reference
-
-
-def _mutate_cli_plan(
-    domain: str,
-    *,
-    replacements: Sequence[tuple[str, str]],
-    removals: Sequence[str],
-    appends: Sequence[str],
-    expected_manifest_sha256: str,
-    workspace_root: str | Path | None,
-) -> tuple[dict[str, Any], ActiveDomain]:
-    context = resolve_active_domain(domain, workspace_root=workspace_root)
-    _assert_expected_manifest(context, expected_manifest_sha256)
-    old_paths = [
-        _resolve_mutation_shard_path(context, item[0]) for item in replacements
-    ]
-    removal_paths = [_resolve_mutation_shard_path(context, item) for item in removals]
-    _assert_unique_mutation_old_paths(
-        context,
-        replacement_old_paths=old_paths,
-        removal_paths=removal_paths,
-    )
-    selected = (
-        _resolve_selected_entries(context, [*old_paths, *removal_paths])
-        if old_paths or removal_paths
-        else []
-    )
-    new_arguments = [item[1] for item in replacements] + list(appends)
-    new_paths: list[Path] = []
-    infos: list[_PreparedParquetInfo] = []
-    if new_arguments:
-        new_paths, infos, _ = _inspect_cli_parquets(
-            context, new_arguments, require_reference_schema=True
-        )
-    if not selected and not infos:
-        raise ValueError("qdp_v2_repair_shard_mutation_empty")
-    affected: list[dict[str, Any]] = []
-    for index, entry in enumerate(selected):
-        action = "replace" if index < len(replacements) else "remove"
-        item: dict[str, Any] = {
-            "action": action,
-            "path": str(resolve_manifest_path(entry.path, root=context.root).resolve()),
-            "row_count_touched": int(entry.row_count),
-        }
-        if action == "replace":
-            item["replacement_path"] = str(new_paths[index])
-            item["replacement_row_count"] = infos[index].row_count
-        affected.append(item)
-    for index, path in enumerate(new_paths[len(replacements) :], start=len(replacements)):
-        affected.append(
-            {
-                "action": "append",
-                "path": str(path),
-                "row_count_touched": infos[index].row_count,
-            }
-        )
-    return (
-        {
-            "status": "would_mutate",
-            "dry_run": True,
-            "domain": context.domain,
-            "dataset_id": context.dataset_id,
-            "manifest_sha256": context.manifest_sha256,
-            "schema_hash": context.manifest.schema_hash,
-            "row_count_touched": sum(int(item["row_count_touched"]) for item in affected),
-            "shard_paths": [str(item["path"]) for item in affected],
-            "affected_shards": affected,
-        },
-        context,
-    )
-
-
-def _replace_table_cli_plan(
-    domain: str,
-    inputs: Sequence[str],
-    *,
-    expected_manifest_sha256: str,
-    workspace_root: str | Path | None,
-) -> tuple[dict[str, Any], ActiveDomain, list[Path]]:
-    context = resolve_active_domain(domain, workspace_root=workspace_root)
-    _assert_expected_manifest(context, expected_manifest_sha256)
-    paths, infos, arrow_schema = _inspect_cli_parquets(
-        context, inputs, require_reference_schema=False
-    )
-    new_manifest_schema = _manifest_schema_from_arrow(arrow_schema)
-    new_schema_hash = schema_hash(new_manifest_schema)
-    affected = [
-        {
-            "action": "remove",
-            "path": str(path),
-            "row_count_touched": int(entry.row_count),
-        }
-        for path, entry in zip(context.shard_paths, context.manifest.shards, strict=True)
-    ]
-    affected.extend(
-        {
-            "action": "install",
-            "path": str(path),
-            "row_count_touched": info.row_count,
-        }
-        for path, info in zip(paths, infos, strict=True)
-    )
-    return (
-        {
-            "status": "would_replace_table",
-            "dry_run": True,
-            "domain": context.domain,
-            "dataset_id": context.dataset_id,
-            "manifest_sha256": context.manifest_sha256,
-            "schema_hash": new_schema_hash,
-            "old_schema_hash": context.manifest.schema_hash,
-            "schema_changed": new_schema_hash != context.manifest.schema_hash,
-            "row_count_touched": sum(int(item["row_count_touched"]) for item in affected),
-            "shard_paths": [str(item["path"]) for item in affected],
-            "affected_shards": affected,
-        },
-        context,
-        paths,
-    )
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    workspace_root = str(getattr(args, "workspace_root", "") or "") or None
-    expected_manifest = _validate_sha256(str(args.expected_manifest_sha256))
-    command = str(args.repair_command)
-    if command == "patch":
-        payload = patch_active_cells(
+    workspace = str(args.workspace_root or "") or None
+    if args.repair_command == "patch":
+        result = patch_active_cells(
             args.request,
             reason=args.reason,
-            expected_manifest_sha256=expected_manifest,
-            workspace_root=workspace_root,
+            workspace_root=workspace,
             apply=bool(args.apply),
         )
-    elif command == "mutate":
-        replacements = _parse_cli_replacements(args.replace)
-        if args.apply and args.expected_mutation_id:
-            context = resolve_active_domain(args.domain, workspace_root=workspace_root)
-            _assert_expected_manifest(context, expected_manifest)
-            result = mutate_active_shards_from_parquet(
-                args.domain,
-                replacements=replacements,
-                removals=args.remove,
-                appends=args.append,
-                reason=args.reason,
-                workspace_root=workspace_root,
-                expected_mutation_id=args.expected_mutation_id,
-                expected_manifest_sha256=expected_manifest,
-            )
-            payload = {
-                **result,
-                "dry_run": False,
-                "schema_hash": context.manifest.schema_hash,
+    elif args.repair_command == "mutate":
+        if not args.apply:
+            result = {
+                "status": "would_mutate",
+                "dry_run": True,
+                "domain": args.domain,
+                "replacements": _parse_replacements(args.replace),
+                "removals": list(args.remove),
+                "appends": list(args.append),
             }
         else:
-            plan, _ = _mutate_cli_plan(
+            result = mutate_active_shards_from_parquet(
                 args.domain,
-                replacements=replacements,
+                replacements=_parse_replacements(args.replace),
                 removals=args.remove,
                 appends=args.append,
-                expected_manifest_sha256=expected_manifest,
-                workspace_root=workspace_root,
-            )
-            if args.apply:
-                result = mutate_active_shards_from_parquet(
-                    args.domain,
-                    replacements=replacements,
-                    removals=args.remove,
-                    appends=args.append,
-                    reason=args.reason,
-                    workspace_root=workspace_root,
-                    expected_manifest_sha256=expected_manifest,
-                )
-                payload = {**plan, **result, "dry_run": False}
-            else:
-                payload = plan
-    else:
-        plan, context, inputs = _replace_table_cli_plan(
-            args.domain,
-            args.input,
-            expected_manifest_sha256=expected_manifest,
-            workspace_root=workspace_root,
-        )
-        if bool(args.apply) and plan["schema_changed"]:
-            requested_new_hash = _validate_schema_hash(args.expected_new_schema_hash)
-            if requested_new_hash != plan["schema_hash"]:
-                raise QdpV2RepairConflictError(
-                    "qdp_v2_repair_expected_new_schema_hash_mismatch:"
-                    f"expected={requested_new_hash}:actual={plan['schema_hash']}"
-                )
-            if not str(args.contract_version or "").strip():
-                raise ValueError("qdp_v2_repair_contract_version_required")
-        elif args.expected_new_schema_hash:
-            requested_new_hash = _validate_schema_hash(args.expected_new_schema_hash)
-            if requested_new_hash != plan["schema_hash"]:
-                raise QdpV2RepairConflictError(
-                    "qdp_v2_repair_expected_new_schema_hash_mismatch:"
-                    f"expected={requested_new_hash}:actual={plan['schema_hash']}"
-                )
-        if args.apply:
-            result = replace_active_table_from_parquet(
-                context.domain,
-                inputs,
                 reason=args.reason,
-                workspace_root=workspace_root,
-                contract_version=str(args.contract_version or ""),
-                expected_manifest_sha256=expected_manifest,
+                workspace_root=workspace,
             )
-            payload = {**plan, **result, "dry_run": False}
+    else:
+        if not args.apply:
+            schema = _common_schema(
+                [_resolve_prepared_path(item, workspace) for item in args.prepared]
+            )
+            result = {
+                "status": "would_replace_table",
+                "dry_run": True,
+                "domain": args.domain,
+                "prepared": list(args.prepared),
+                "schema": _manifest_schema_from_arrow(schema),
+            }
         else:
-            payload = plan
-    print(
-        json.dumps(json_safe(payload), ensure_ascii=False, indent=2)
-        if bool(getattr(args, "json", False))
-        else _format(payload)
-    )
+            result = replace_active_table_from_parquet(
+                args.domain,
+                args.prepared,
+                reason=args.reason,
+                workspace_root=workspace,
+                primary_key=args.primary_key or None,
+                contract_version=args.contract_version,
+            )
+    print(json.dumps(json_safe(result), ensure_ascii=False, indent=2))
     return 0
 
 
-def _format(payload: Mapping[str, Any]) -> str:
-    lines = [
-        f"status: {payload.get('status', '')}",
-        f"dry_run: {payload.get('dry_run', False)}",
-        f"domain: {payload.get('domain', '')}",
-        f"dataset_id: {payload.get('dataset_id', '')}",
-        f"row_count_touched: {payload.get('row_count_touched', 0)}",
-        f"schema_hash: {payload.get('schema_hash', '')}",
-    ]
-    for item in list(payload.get("affected_shards", []) or []):
-        lines.append(
-            "shard: "
-            f"{item.get('action', 'patch')} rows={item.get('row_count_touched', 0)} "
-            f"{item.get('path', '')}"
-        )
-    return "\n".join(lines)
-
-
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     raise SystemExit(main())

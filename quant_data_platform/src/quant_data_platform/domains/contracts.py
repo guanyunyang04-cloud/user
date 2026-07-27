@@ -593,7 +593,6 @@ class HistoryPageResult:
     min_timestamp: str
     max_timestamp: str
     next_end_at: str
-    response_sha256: str
     is_complete: bool
     request_metadata_without_token: dict[str, Any] = field(default_factory=dict)
 

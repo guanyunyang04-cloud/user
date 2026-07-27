@@ -34,7 +34,6 @@ from quant_data_platform.qdp_v2.manifest import (
     _manifest_schema_from_arrow,
     qdp_v2_root,
     read_dataset_manifest,
-    schema_hash,
     write_active_manifest,
     write_dataset_manifest,
 )
@@ -88,7 +87,6 @@ def _write_domain(
     import pyarrow.parquet as pq
 
     schema = _manifest_schema_from_arrow(pq.read_schema(shard))
-    declared_schema_hash = schema_hash(schema)
     date_column = "trade_date" if "trade_date" in frame else ""
     start = str(frame[date_column].min()) if date_column and len(frame) else ""
     end = str(frame[date_column].max()) if date_column and len(frame) else ""
@@ -104,14 +102,12 @@ def _write_domain(
             start_date=start,
             end_date=end,
             row_count=len(frame),
-            schema_hash=declared_schema_hash,
             shards=[
                 ShardManifestEntry(
                     path=str(shard.relative_to(root)).replace("\\", "/"),
                     row_count=len(frame),
                     start_date=start,
                     end_date=end,
-                    schema_hash=declared_schema_hash,
                 )
             ],
             source={"provider": "unit"},
@@ -243,7 +239,6 @@ def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path)
             start_date="2026-01-05",
             end_date="2026-01-05",
             row_count=2,
-            schema_hash=old_manifest.schema_hash,
             shards=[
                 *old_manifest.shards,
                 ShardManifestEntry(
@@ -251,7 +246,6 @@ def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path)
                     row_count=1,
                     start_date="2026-01-05",
                     end_date="2026-01-05",
-                    schema_hash=old_manifest.schema_hash,
                 ),
             ],
             source={"provider": "unit-composite"},

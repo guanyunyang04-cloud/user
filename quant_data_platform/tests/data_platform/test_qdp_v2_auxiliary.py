@@ -487,7 +487,6 @@ def test_replace_active_table_allows_schema_and_primary_key_migration(
             start_date="2026-01-05",
             end_date="2026-01-05",
             row_count=1,
-            schema_hash="old",
             shards=[
                 ShardManifestEntry(
                     path=str(old.relative_to(root)).replace("\\", "/"),

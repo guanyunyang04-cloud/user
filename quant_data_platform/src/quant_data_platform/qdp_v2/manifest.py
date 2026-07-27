@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from dataclasses import asdict, dataclass, field
@@ -45,26 +44,6 @@ def dataset_manifest_path(root: str | Path, domain: str, dataset_id: str) -> Pat
     return Path(root) / "datasets" / str(domain) / str(dataset_id) / "dataset.json"
 
 
-def stable_hash(payload: Mapping[str, Any], *, length: int = 24) -> str:
-    text = json.dumps(json_safe(dict(payload)), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[: int(length)]
-
-
-def canonical_manifest_sha256(payload: Mapping[str, Any]) -> str:
-    """Return a full canonical digest for a manifest-shaped mapping."""
-
-    return stable_hash(payload, length=64)
-
-
-def schema_hash(schema: Sequence[Mapping[str, Any]] | Mapping[str, Any] | None) -> str:
-    if not schema:
-        return ""
-    payload: Any = schema
-    if isinstance(schema, Sequence) and not isinstance(schema, Mapping):
-        payload = [{str(k): str(v) for k, v in dict(item).items()} for item in schema]
-    return stable_hash({"schema": payload}, length=32)
-
-
 def _manifest_schema_from_arrow(schema: pa.Schema) -> list[dict[str, str]]:
     def sql_type(value: pa.DataType) -> str:
         if pa.types.is_boolean(value):
@@ -77,10 +56,7 @@ def _manifest_schema_from_arrow(schema: pa.Schema) -> list[dict[str, str]]:
             return "TIMESTAMP"
         return "VARCHAR"
 
-    return [
-        {"name": field.name, "type": sql_type(field.type)}
-        for field in schema
-    ]
+    return [{"name": field.name, "type": sql_type(field.type)} for field in schema]
 
 
 _SCHEMA_TYPE_ALIASES: dict[str, pa.DataType] = {
@@ -104,14 +80,6 @@ _SCHEMA_TYPE_ALIASES: dict[str, pa.DataType] = {
 
 
 def schema_field_is_typed(field: Mapping[str, Any]) -> bool:
-    """Report whether a declared field carries an explicit convertible type.
-
-    Legacy manifests predate the ``type`` key and declare only pandas
-    ``dtype`` hints.  Those declarations cannot be converted to Arrow, so a
-    caller comparing a declaration against a Parquet footer must degrade to a
-    name-and-order comparison instead of treating the difference as drift.
-    """
-
     return bool(str(field.get("name", "") or "")) and bool(
         str(field.get("type", "") or "").strip()
     )
@@ -120,14 +88,6 @@ def schema_field_is_typed(field: Mapping[str, Any]) -> bool:
 def canonical_manifest_schema(
     schema: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, str]] | None:
-    """Normalize a declared schema into the footer-derived canonical form.
-
-    Returns ``None`` when any field lacks an explicit ``type``, which marks a
-    legacy declaration that cannot be compared type-for-type.  Normalizing both
-    sides through this function keeps ``string``/``VARCHAR`` and
-    ``bool``/``BOOLEAN`` from being reported as drift.
-    """
-
     fields = list(schema)
     if not fields or not all(schema_field_is_typed(item) for item in fields):
         return None
@@ -138,14 +98,13 @@ def canonical_manifest_schema(
 
 
 def arrow_schema_from_manifest(schema: Sequence[Mapping[str, Any]]) -> pa.Schema:
-    aliases = _SCHEMA_TYPE_ALIASES
     fields: list[pa.Field] = []
     for item in schema:
         name = str(item.get("name", "") or "")
         declared = str(item.get("type", "") or "").strip()
         if not name or not declared:
             raise ValueError("qdp_v2_manifest_schema_field_invalid")
-        data_type = aliases.get(declared.upper())
+        data_type = _SCHEMA_TYPE_ALIASES.get(declared.upper())
         if data_type is None:
             try:
                 data_type = pa.type_for_alias(declared.lower())
@@ -162,9 +121,12 @@ def arrow_schema_from_manifest(schema: Sequence[Mapping[str, Any]]) -> pa.Schema
 def atomic_write_json(path: str | Path, payload: Mapping[str, Any]) -> Path:
     resolved = Path(path)
     resolved.parent.mkdir(parents=True, exist_ok=True)
-    tmp = resolved.with_name(f".{resolved.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(json_safe(dict(payload)), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(resolved)
+    temporary = resolved.with_name(f".{resolved.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(json_safe(dict(payload)), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(resolved)
     return resolved
 
 
@@ -192,9 +154,6 @@ class ShardManifestEntry:
     end_date: str = ""
     status: str = "stored"
     file_size: int = 0
-    schema_hash: str = ""
-    source_path: str = ""
-    content_key: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -206,9 +165,6 @@ class ShardManifestEntry:
             end_date=str(payload.get("end_date", "") or ""),
             status=str(payload.get("status", "") or "stored"),
             file_size=int(payload.get("file_size", 0) or payload.get("bytes", 0) or 0),
-            schema_hash=str(payload.get("schema_hash", "") or ""),
-            source_path=str(payload.get("source_path", "") or ""),
-            content_key=str(payload.get("content_key", "") or ""),
             metadata=dict(payload.get("metadata", {}) or {}),
         )
 
@@ -227,7 +183,6 @@ class DatasetManifest:
     start_date: str
     end_date: str
     row_count: int
-    schema_hash: str
     shards: list[ShardManifestEntry]
     source: dict[str, Any]
     quality: dict[str, Any]
@@ -247,12 +202,19 @@ class DatasetManifest:
             start_date=str(payload.get("start_date", "") or ""),
             end_date=str(payload.get("end_date", "") or ""),
             row_count=int(payload.get("row_count", 0) or 0),
-            schema_hash=str(payload.get("schema_hash", "") or ""),
-            shards=[ShardManifestEntry.from_mapping(item) for item in list(payload.get("shards", []) or []) if isinstance(item, Mapping)],
+            shards=[
+                ShardManifestEntry.from_mapping(item)
+                for item in list(payload.get("shards", []) or [])
+                if isinstance(item, Mapping)
+            ],
             source=dict(payload.get("source", {}) or {}),
             quality=dict(payload.get("quality", {}) or {}),
             created_at=str(payload.get("created_at", "") or utc_now()),
-            schema=[{str(k): str(v) for k, v in dict(item).items()} for item in list(payload.get("schema", []) or []) if isinstance(item, Mapping)],
+            schema=[
+                {str(key): str(value) for key, value in dict(item).items()}
+                for item in list(payload.get("schema", []) or [])
+                if isinstance(item, Mapping)
+            ],
             notes=[str(item) for item in list(payload.get("notes", []) or [])],
         )
 
@@ -282,7 +244,9 @@ def write_active_manifest(root: str | Path, payload: Mapping[str, Any]) -> Path:
     return atomic_write_json(Path(root) / "active" / "active.json", active)
 
 
-def dataset_manifest_for_id(root: str | Path, dataset_id: str, domain_hint: str = "") -> Path | None:
+def dataset_manifest_for_id(
+    root: str | Path, dataset_id: str, domain_hint: str = ""
+) -> Path | None:
     resolved = Path(root)
     if domain_hint:
         candidate = dataset_manifest_path(resolved, domain_hint, dataset_id)

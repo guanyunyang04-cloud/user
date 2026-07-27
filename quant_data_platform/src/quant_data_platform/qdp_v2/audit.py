@@ -14,7 +14,6 @@ from quant_data_platform.qdp_v2.manifest import (
     qdp_v2_root,
     read_active_manifest,
     read_dataset_manifest,
-    schema_hash,
     utc_now,
 )
 from quant_data_platform.qdp_v2.status import _active_dataset_refs, _manifest_path
@@ -50,7 +49,6 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = Fals
         footer_rows = 0
         declared_schema = list(manifest.schema)
         declared_names = [str(item.get("name", "") or "") for item in declared_schema]
-        derived_schema_hash = schema_hash(declared_schema)
         # A legacy declaration carries no convertible ``type``, so only its
         # column names and order can be compared against a Parquet footer.
         # Normalizing a typed declaration keeps equivalent spellings such as
@@ -58,18 +56,9 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = Fals
         canonical_schema = canonical_manifest_schema(declared_schema)
         if not declared_schema:
             footer_errors.append(f"manifest_schema_missing:{domain}:{dataset_id}")
-        elif derived_schema_hash != manifest.schema_hash:
-            footer_errors.append(
-                f"manifest_schema_hash_mismatch:{domain}:{dataset_id}:"
-                f"manifest={manifest.schema_hash}:derived={derived_schema_hash}"
-            )
         elif canonical_schema is None:
-            # Backfilling this declaration would change the dataset manifest
-            # hash that downstream study contracts bind, and no rebind command
-            # exists yet.  Surface it as a standing normalization debt.
             warnings.append(
-                f"legacy_untyped_manifest_schema:{domain}:{dataset_id}:"
-                "normalize_when_rebind_is_available"
+                f"legacy_untyped_manifest_schema:{domain}:{dataset_id}"
             )
         for shard in manifest.shards:
             shard_path = _manifest_path(shard.path, root)

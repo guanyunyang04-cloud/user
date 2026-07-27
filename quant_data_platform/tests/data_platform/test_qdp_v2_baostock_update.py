@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pandas as pd
 
 from quant_data_platform.qdp_v2 import baostock_update, factor_update, update
-from quant_data_platform.qdp_v2.repair import _InstalledParquet, shard_mutation_id
 
 
 class _FakeBaostock:
@@ -188,36 +187,6 @@ def test_factor_tail_continues_with_cumulative_back_factor_ratio() -> None:
         "baostock.back_adjust_factor_ratio+qdp_prior_carry"
     ]
     assert metrics["continued_event_count"] == 1
-
-
-def test_compact_prevalidated_mutation_id_matches_repair(tmp_path: Path) -> None:
-    context = SimpleNamespace(
-        root=tmp_path,
-        domain="market_intraday_5m",
-        dataset_id="market_intraday_5m__test",
-    )
-    old = tmp_path / "data" / "old.parquet"
-    new = tmp_path / "runtime" / "new.parquet"
-    digest = "ab" * 32
-    item = _InstalledParquet(
-        source_path=new,
-        target_path=tmp_path / "data" / f"repair_mutate_append_{digest[:24]}.parquet",
-        row_count=1,
-        start_date="2026-01-01",
-        end_date="2026-01-01",
-        file_sha256=digest,
-        created=False,
-    )
-
-    mutation_id = shard_mutation_id(
-        context,
-        replacement_old_paths=[],
-        replacement_items=[],
-        removal_paths=[old],
-        append_items=[item],
-    )
-    assert mutation_id.startswith("shard-mutation-v1:")
-    assert len(mutation_id) == len("shard-mutation-v1:") + 64
 
 
 def test_qdp_update_reports_failed_stage_and_keeps_runtime(

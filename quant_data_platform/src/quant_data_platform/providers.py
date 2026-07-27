@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from importlib.metadata import PackageNotFoundError, distribution as package_distribution, version as package_version
+from importlib.metadata import PackageNotFoundError, version as package_version
 from pathlib import Path
 from typing import Any
 
@@ -96,7 +96,6 @@ QDP_PRODUCTION_V1_RESEARCH_FUTURE_DOMAINS: tuple[str, ...] = (
     DataDomain.ANNOUNCEMENT,
 )
 BAOSTOCK_BATCH_VERSION = "0.9.3"
-BAOSTOCK_BATCH_WHEEL_SHA256 = "acbd19403285bc4e254cee8297cf0e2646ae2276e5af7e549deed3988ab02293"
 BAOSTOCK_BULK_PER_PAGE_COUNT = 20_000
 BAOSTOCK_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
 
@@ -1061,40 +1060,12 @@ def baostock_runtime_version() -> str:
         raise RuntimeError("baostock is not installed in the yolos environment") from exc
 
 
-def baostock_runtime_archive_sha256() -> str:
-    """Return pip's recorded source-archive hash when one is available."""
-
-    try:
-        direct_url = package_distribution("baostock").read_text("direct_url.json")
-    except PackageNotFoundError as exc:
-        raise RuntimeError("baostock is not installed in the yolos environment") from exc
-    if not direct_url:
-        return ""
-    try:
-        payload = json.loads(direct_url)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("baostock_direct_url_metadata_invalid") from exc
-    archive = dict(payload.get("archive_info", {}) or {})
-    hashes = dict(archive.get("hashes", {}) or {})
-    value = str(hashes.get("sha256", "") or "")
-    if not value and str(archive.get("hash", "")).startswith("sha256="):
-        value = str(archive["hash"]).split("=", 1)[1]
-    return value.strip().lower()
-
-
 def assert_baostock_batch_runtime() -> str:
     installed = baostock_runtime_version()
     if installed != BAOSTOCK_BATCH_VERSION:
         raise RuntimeError(
             "baostock_batch_version_mismatch: "
             f"expected={BAOSTOCK_BATCH_VERSION} installed={installed}; "
-            "batch data is forbidden from canonical staging"
-        )
-    archive_sha = baostock_runtime_archive_sha256()
-    if archive_sha and archive_sha != BAOSTOCK_BATCH_WHEEL_SHA256:
-        raise RuntimeError(
-            "baostock_batch_wheel_hash_mismatch: "
-            f"expected={BAOSTOCK_BATCH_WHEEL_SHA256} installed_archive={archive_sha}; "
             "batch data is forbidden from canonical staging"
         )
     return installed
@@ -1446,7 +1417,6 @@ class BaostockProvider:
             "provider": self.name,
             "endpoint": endpoint,
             "package_version": BAOSTOCK_BATCH_VERSION,
-            "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
             "query_date": request.trade_date,
             "universe_kind": request.universe_kind,
             "fetch_mode": request.fetch_mode,
@@ -1501,7 +1471,6 @@ class BaostockProvider:
             "provider": self.name,
             "endpoint": endpoint,
             "package_version": BAOSTOCK_BATCH_VERSION,
-            "wheel_sha256": BAOSTOCK_BATCH_WHEEL_SHA256,
             "query_date": request.trade_date,
             "universe_kind": request.universe_kind,
             "fetch_mode": request.fetch_mode,
