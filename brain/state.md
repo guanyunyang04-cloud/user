@@ -104,5 +104,6 @@ Updated: `2026-07-27`
 - 第一版入场机会主标签确定为 D5/D10/D20/D40 `mfe_H`；早期路径保留 D3/D5/D10 `state_H`，D20 state 降为次级对照；风险输出保留 D3/D5/D10/D20/D40 `pre_peak_mae_H`。`g_1/g_3` 拒绝，`g_60` 只保留为长期挑战者。
 - 这支持“两阶段”语义：入场前预测异常大的上涨机会幅度，入场后依据实际早期路径更新留存/退出判断。各期限标量与状态概率暂时分开输出，不先合并为一个向量损失。
 - 权威 compact record：`daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json`；解释：`daily_research/brain/references/seq100_short_horizon_target_reaudit_20260727.md`。用户授权复用 2023-2025 作为本轮确认/决策窗口，但不宣称它们是全新留出集；2026 完全未读取，也不是本轮标签决策的必要确认年。
-- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；下一步只能另立合同做保留标签的分组特征增量审计，尚未选择退出规则、持有期、槽位、杠杆、止损或继任架构。
+- `seq100_target_redundancy_audit_v1` 已作为结果前合同冻结并进入活动状态，先用既有 2023-2025 OOS 预测审计 D5/D10/D20/D40 MFE 的跨期限冗余，以及 D3/D5/D10/D20 state 在全部 MFE 分数之后的残余信息。合同绑定 24 个 task、126 个证据文件，preflight 已通过；不训练 booster，不读取 2026。
+- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；冗余审计收口后才冻结分组特征增量合同，尚未选择退出规则、持有期、槽位、杠杆、止损或继任架构。
 <!-- seq100-signal-quality:end -->

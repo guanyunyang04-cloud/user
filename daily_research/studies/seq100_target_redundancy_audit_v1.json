@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_current_study",
+  "study_id": "seq100_target_redundancy_audit_v1",
+  "status": "active",
+  "contract": {
+    "schema_version": 1,
+    "contract_id": "seq100_target_redundancy_audit_v1",
+    "objective": "freeze_the_minimum_nonredundant_mfe_and_state_head_set_before_any_feature_family_expansion",
+    "inputs": {
+      "source_learnability_contract": {
+        "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/contract.json",
+        "file_sha256": "248040c166f17a2a8bf636cf5c28864cfc70681ab80f9ccb156ed569810dc73e",
+        "contract_sha256": "7d542696c8b2e1c15650049740db675555d1633bc43ce92307da4739224ee7ac"
+      },
+      "source_learnability_artifact": {
+        "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json",
+        "file_sha256": "c76a59e43ec0bf348cff20203d00d7fb7cd4fa33be32145b3b044e2e87f58fdb",
+        "artifact_sha256": "4e5c2edf3cc4c6b1684437d0f30554a7c82d75ef25f216371b30aadf3f09dad4"
+      },
+      "source_reassessment_contract": {
+        "path": "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/contract.json",
+        "file_sha256": "a1afd162fca3e8d3546c34834666236072fbc8b0ed585828d1a0a59219d0a3b5",
+        "contract_sha256": "08d1843529a27fff8e915ded1080f690f3760158a03a403c66aa3388f21ec8ea"
+      },
+      "source_reassessment_artifact": {
+        "path": "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json",
+        "file_sha256": "d468b10a1e8106461014cdf3516268139898c7e84b20c87e60c4443e33527fa4",
+        "artifact_sha256": "c562cd673c0e996057d9cfb8581bf340be29f03fe95d2faaf81f7b57a9fad09a"
+      },
+      "consumed_evidence_set": {
+        "enumeration": "unique sorted workspace-relative task_result, prediction, model, daily_metrics, group_manifest, and evaluation_rows files for all declared target-horizon-years",
+        "file_count": 126,
+        "sha256": "3c21690f813da2a4b8604375ebb7338ccf5b528f42db8ee3439fc584c888f853"
+      }
+    },
+    "protocol": {
+      "fold_years": [2023, 2024, 2025],
+      "fold_role": "owner-authorized reused recent confirmation/decision folds; not a pristine holdout",
+      "mfe_horizons": [5, 10, 20, 40],
+      "state_horizons": [3, 5, 10, 20],
+      "state_to_nearest_mfe": {"3": 5, "5": 5, "10": 10, "20": 20},
+      "row_universe": "intersection of the original full-candidate OOS rows needed by each comparison without future fill filtering",
+      "prediction_retraining": false,
+      "new_booster_count": 0,
+      "score_orthogonalization": "within-date demeaned weighted ridge using predictor scores only; no outcome enters residual coefficients",
+      "mfe_primary_tests": [
+        "pairwise_within_date_score_correlation",
+        "leave_one_horizon_out_residual_information",
+        "forward_shorter_to_longer_residual_information",
+        "incremental_window_opportunity_information"
+      ],
+      "state_primary_tests": [
+        "pairwise_state_expected_score_vs_mfe_score_correlation",
+        "state_expected_score_residual_after_all_mfe_scores",
+        "actual_state_vs_nearest_mfe_daily_tertile",
+        "sequential_mfe_only_vs_mfe_plus_state_probability_meta_calibration"
+      ],
+      "diagnostic_meta_calibration": {
+        "2024_source_years": [2023],
+        "2025_source_years": [2023, 2024],
+        "features": "daily cross-sectional percentile ranks of MFE scores, augmented by raw state probabilities",
+        "model": "L2 multinomial logistic regression",
+        "retention": "metrics only; fitted diagnostic models are not saved"
+      }
+    },
+    "evaluation": {
+      "ridge_penalty": 0.001,
+      "diagnostic_logistic_c": 1.0,
+      "date_equal_weighting": true,
+      "residual_metrics": [
+        "daily_cross_sectional_rank_ic",
+        "daily_top_5pct_mean_lift",
+        "daily_top_5pct_realized_tail_enrichment",
+        "HAC_p_value_with_lag_H_minus_1"
+      ],
+      "state_probability_metrics": [
+        "multiclass_brier",
+        "multiclass_logloss",
+        "relative_improvement_over_mfe_only_meta_model"
+      ],
+      "pooled_only_conclusions_forbidden": true,
+      "report_each_year_separately": true
+    },
+    "decision": {
+      "residual_head_thresholds": {
+        "minimum_strong_residual_rank_ic": 0.01,
+        "core_minimum_strong_years": 2,
+        "secondary_minimum_positive_years": 2,
+        "secondary_minimum_positive_tail_years": 2,
+        "secondary_worst_rank_ic": -0.01
+      },
+      "mfe_final_status": "stronger of leave-one-out residual status and incremental-window opportunity status; D5 uses leave-one-out only",
+      "probability_increment_thresholds": {
+        "supported": "Brier and logloss both improve in 2024 and 2025",
+        "conditional": "both improve in at least one year and neither metric deteriorates more than tolerance in the other year",
+        "secondary_maximum_relative_deterioration": 0.005
+      },
+      "state_feature_audit_status": "ordinal residual status is authoritative; literal probability status is reported separately",
+      "next_step": "freeze a separate feature-family increment study using only non-omitted heads and the same owner-authorized 2023-2025 folds"
+    },
+    "scientific_firewall": {
+      "forbidden_years": [2026],
+      "forbidden_uses": [
+        "row_loading",
+        "score_loading",
+        "calibration_fit",
+        "metric_computation",
+        "threshold_setting",
+        "decision"
+      ],
+      "maximum_consumed_outcome_date": "2025-12-31",
+      "owner_directive": "continue using the recent 2023-2025 folds",
+      "pristine_holdout_claim": false
+    },
+    "non_selections": [
+      "feature_family_winner",
+      "joint_loss",
+      "score_fusion",
+      "exit_rule",
+      "holding_period",
+      "slot_count",
+      "leverage",
+      "stop_loss",
+      "successor_architecture"
+    ],
+    "workflow": {
+      "cli_module": "daily_research.path_policy.seq100_target_redundancy_audit",
+      "output_root": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1",
+      "commands": ["self-test", "preflight", "audit"],
+      "one_foreground_entry": true,
+      "full_hash_preflight_required": true
+    },
+    "protection": {
+      "qdp_mutation": false,
+      "source_pack_mutation": false,
+      "source_prediction_mutation": false,
+      "model_training": false,
+      "model_registry_mutation": false,
+      "registered_checkpoint_mutation": false,
+      "active_execution_mutation": false,
+      "formal_successor_contract_creation": false
+    },
+    "retention": {
+      "process_material_location": "ignored study output",
+      "retain_source_predictions": true,
+      "compact_indexed_conclusion_required": true,
+      "active_contract_removal_after_closeout": true
+    },
+    "completion_states": [
+      "completed_nonredundant_head_set",
+      "completed_all_heads_redundant",
+      "study_incomplete"
+    ]
+  },
+  "contract_sha256": "c012bf5aaa3311b825d6bf92789b0707c6efd4b265d8511e20f1b2863a017934"
+}

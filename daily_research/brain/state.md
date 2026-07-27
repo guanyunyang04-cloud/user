@@ -195,6 +195,19 @@ Updated: `2026-07-27`
   `daily_research/brain/references/seq100_short_horizon_target_reaudit_20260727.md`;
   frozen-input evidence:
   `daily_research/brain/references/seq100_short_horizon_target_reaudit_inputs_20260727.md`.
+- TARGET REDUNDANCY AUDIT ACTIVE. The pre-result contract
+  `seq100_target_redundancy_audit_v1` freezes two read-only questions before any
+  feature expansion: which D5/D10/D20/D40 MFE heads retain leave-one-out or
+  incremental-window information, and which D3/D5/D10/D20 state scores retain
+  ordinal information after all four MFE scores. It separately tests whether
+  state probabilities improve a sequential MFE-only diagnostic calibrator.
+- The contract binds 24 existing OOS tasks and a 126-file evidence-set digest.
+  Full preflight passed with zero new boosters, maximum outcome date
+  `2025-12-31`, and no forbidden-year consumption. The owner explicitly keeps
+  the recent reused 2023-2025 folds; no pristine-holdout claim is allowed.
+  Decision gates distinguish core, secondary, and omitted heads before results.
+  Contract evidence:
+  `daily_research/brain/references/seq100_target_redundancy_audit_contract_20260727.md`.
 - The path-map audit now distinguishes exchange-level entry from reference-order
   affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
   one 100-share lot with the CNY 100,000 diagnostic order; they remain clustered
