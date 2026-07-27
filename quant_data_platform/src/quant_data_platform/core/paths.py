@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,23 +23,18 @@ def workspace_root(start: str | Path | None = None) -> Path:
 
     initial = Path.cwd().resolve()
     for candidate in (initial, *initial.parents):
-        if _is_main_brain_root(candidate):
+        if _looks_like_workspace(candidate):
             return candidate
     return Path(__file__).resolve().parents[4]
 
 
-def _is_main_brain_root(path: Path) -> bool:
-    manifest = path / "brain" / "brain_manifest.json"
-    if not manifest.exists():
+def _looks_like_workspace(path: Path) -> bool:
+    if not (path / "quant_data_platform").is_dir():
         return False
-    try:
-        payload = json.loads(manifest.read_text(encoding="utf-8"))
-    except Exception:
-        return False
-    return str(dict(payload).get("brain_type", "") or "").strip().lower() in {
-        "main",
-        "project",
-    }
+    return any(
+        (path / marker).exists()
+        for marker in (".git", "AGENTS.md", "README.md", "daily_research")
+    )
 
 
 def project_root(root: str | Path | None = None) -> Path:

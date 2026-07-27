@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from quant_data_platform.core.paths import workspace_root
 from quant_data_platform.qdp_v2.audit import audit_active
 from quant_data_platform.qdp_v2.check import run_check
 from quant_data_platform.qdp_v2.database_audit import (
@@ -56,11 +57,19 @@ def _write_parquet(path: Path, frame: pd.DataFrame) -> None:
 
 def _workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
-    _write_json(
-        workspace / "brain" / "brain_manifest.json",
-        {"schema_version": 1, "brain_type": "main"},
-    )
+    (workspace / "quant_data_platform").mkdir(parents=True)
+    (workspace / "AGENTS.md").write_text("workspace\n", encoding="utf-8")
     return workspace
+
+
+def test_workspace_root_does_not_depend_on_brain(tmp_path: Path, monkeypatch) -> None:
+    workspace = _workspace(tmp_path)
+    nested = workspace / "daily_research" / "path_policy"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
+    monkeypatch.delenv("QDP_WORKSPACE_ROOT", raising=False)
+
+    assert workspace_root() == workspace.resolve()
 
 
 def _write_domain(
