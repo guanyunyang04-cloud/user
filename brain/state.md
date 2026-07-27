@@ -40,10 +40,10 @@ Updated: `2026-07-27`
   Formal fold training was 3 of 18 cells done (LightGBM, all three folds, seed 7);
   one TabM cell was interrupted and resumable; there was no `evaluate` and no
   winner. Neural runtime v2 was implemented and hardware-qualified. The later
-  independent learnability audit now supplies a target candidate, but no
-  successor implementation contract or account policy is designed, and any
-  successor must treat 2023-2025 as burned discovery years. Authoritative detail
-  lives in
+  independent learnability audit and short-horizon reassessment now supply a
+  target decision, but no successor implementation contract or account policy
+  is designed. The owner explicitly accepts reused 2023-2025 evidence for that
+  decision without claiming a pristine holdout. Authoritative detail lives in
   `daily_research/brain/state.md` and
   `daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md`.
 - The true-batch-1024 comparison remains paused and may resume only on explicit
@@ -100,9 +100,9 @@ Updated: `2026-07-27`
 <!-- seq100-signal-quality:start -->
 - `seq100_pit_signal_quality_v1` 已以 `research_design_insufficient` 收口；selector winner 为 `null`。
 - 权威 compact record：`daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json`。
-- 独立研究 `seq100_path_label_learnability_v1` 已完成 63/63 个 LightGBM 并收口。冻结规则选择 D5/D10/D20 `state_H` low/mid/high 概率作为主目标候选，D5/D10/D20/D40 `pre_peak_mae_H` 作为辅助风险；MFE 幅度可学、`g_60` 接近通过以及长周期概率校准问题均保留为限定证据。
-- 权威 compact record：`daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json`；解释：`daily_research/brain/references/seq100_path_label_learnability_20260727.md`。2023-2025 已烧为发现/评价折，2026 未读取。
-- 独立合同 `seq100_short_horizon_target_reaudit_v1` 已冻结并进入活动状态。用户指定复用 2023-2025 作为本轮确认/决策窗口，同时明确披露其并非全新留出集；2026 仍完全禁用。
-- D3 pre-2023 全域 K2-K10 画像与 D1/D3 全量标签已完成并审计：D3 state 对逐日 `g3` 三分位 NMI 仅 0.172，不是简单收益离散化；2026 的 156,376 行均保持缺失。下一步只训练 15 个新模型并复用旧 OOS 预测重评 MFE、`g60`、校准和多期限冗余。
-- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 仍只允许新合同确认。
+- `seq100_short_horizon_target_reaudit_v1` 已完成 15/15 个新 LightGBM 并收口。D3 pre-2023 固定 K3 最低跨窗口 ARI 为 0.7025，且与逐日 `g_3` 三分位 NMI 仅 0.1723，证明早期路径状态不只是终点收益离散化。
+- 第一版入场机会主标签确定为 D5/D10/D20/D40 `mfe_H`；早期路径保留 D3/D5/D10 `state_H`，D20 state 降为次级对照；风险输出保留 D3/D5/D10/D20/D40 `pre_peak_mae_H`。`g_1/g_3` 拒绝，`g_60` 只保留为长期挑战者。
+- 这支持“两阶段”语义：入场前预测异常大的上涨机会幅度，入场后依据实际早期路径更新留存/退出判断。各期限标量与状态概率暂时分开输出，不先合并为一个向量损失。
+- 权威 compact record：`daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json`；解释：`daily_research/brain/references/seq100_short_horizon_target_reaudit_20260727.md`。用户授权复用 2023-2025 作为本轮确认/决策窗口，但不宣称它们是全新留出集；2026 完全未读取，也不是本轮标签决策的必要确认年。
+- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；下一步只能另立合同做保留标签的分组特征增量审计，尚未选择退出规则、持有期、槽位、杠杆、止损或继任架构。
 <!-- seq100-signal-quality:end -->

@@ -77,11 +77,10 @@ Updated: `2026-07-27`
   amplitude rather than on growth. Cash share inside the selected Top-1% is
   0.03-0.7%, so unfilled and limit-up candidates are not what caps the result.
   Evidence script: `tmp/seq100_ic_growth_transfer.py` (ignored output).
-- SUCCESSOR IMPLEMENTATION NOT YET DESIGNED. The owner has accepted growth as
-  the objective and the completed learnability audit now supplies a target
-  candidate, but no successor training contract, architecture, score-combination
-  rule, account policy, or 2026 confirmation has been written. Any successor
-  must be a new study and treat 2023-2025 as burned discovery years.
+- TARGET CHOICE COMPLETE; SUCCESSOR IMPLEMENTATION NOT YET DESIGNED. The owner
+  accepts reused 2023-2025 evidence for the target decision while explicitly
+  waiving a pristine-holdout claim. No successor training contract, architecture,
+  score-combination rule, exit policy, or account policy has been written.
 - PRE-2023 FUTURE-PATH ATLAS COMPLETE. The read-only discovery cohort contains
   6,096,195 full-universe candidates from `2010-09-29` through `2022-09-30`, with
   every D60 outcome ending by `2022-12-30`. Of these, 5,929,931 (97.27%) have a
@@ -159,20 +158,42 @@ Updated: `2026-07-27`
   `daily_research/research_records/seq100/seq100_path_label_learnability_v1/artifact.json`;
   interpretation:
   `daily_research/brain/references/seq100_path_label_learnability_20260727.md`.
-- SHORT-HORIZON TARGET REAUDIT IS ACTIVE under the frozen contract
-  `seq100_short_horizon_target_reaudit_v1`. The owner explicitly designates
-  2023-2025 as this round's reused confirmation/decision window; the record must
-  still disclose that those years are not a pristine holdout. 2026 remains
-  unread and forbidden for every use.
+- SHORT-HORIZON TARGET REAUDIT COMPLETE. All 15 new CPU LightGBM boosters
+  finished, all old D5-D60 boosters were reused rather than retrained, and the
+  final aggregation consumed no outcome after `2025-12-31`. The owner explicitly
+  designates 2023-2025 as this round's reused confirmation/decision window; they
+  are not represented as a pristine holdout. 2026 remained completely unread.
 - The pre-2023 D1-D3 atlas covers 6,096,195 candidates and 5,929,931 assignable
   paths. K2-K10 selects `3/2/3/3` over 2018/2020/2021/2022; fixed-K3 minimum
   calendar ARI is 0.702494. State3 is not merely endpoint tertiles: NMI with
   daily `g3` tertiles is 0.172274 and ARI is 0.108288.
-- Full-universe D1/D3 inputs are prepared and audited under ignored output.
-  Valid counts are 8,338,623 `g1`, 8,332,519 `g3/state3`, and 8,319,539
-  `mfe3/pre_peak_mae3`; 5,929,931 pre-2023 state assignments have zero mismatch
-  and all 156,376 2026 rows remain missing. The frozen run will train only 15
-  new boosters and reuse the old D5-D60 OOS predictions. Evidence:
+- The revised upper-tail gate qualifies `mfe_H` at D5/D10/D20/D40 as the primary
+  pre-entry opportunity family. Rank IC by 2023/2024/2025 is D5
+  `0.0591/0.0691/0.0968`, D10 `0.1088/0.1225/0.1581`, D20
+  `0.1426/0.1610/0.1898`, and D40 `0.0605/0.2050/0.0748`; every retained horizon
+  enriches the realized daily MFE top quintile in all three years. D3 MFE fails
+  on negative 2023 IC, and D60 MFE fails on negative 2024 tail enrichment.
+- Early state outputs retain D3/D5/D10 as primary path-update coordinates.
+  D20 passes the mechanical probability gate but is secondary because residual
+  2025 Top-5 lift after D3/D5/D10 is negative. Sequentially calibrated Brier
+  skill stays positive through D20, but transported temperatures often worsen
+  the next year; any actual calibrator must use an inner temporal split or a
+  rolling protocol.
+- `g_1` and `g_3` fail. `g_60` passes the revised scalar gate but remains only a
+  long-horizon challenger: 66.5% of 2023 dates have a constant cross-section and
+  2023 residual IC after shorter `g` scores is negative. Retain
+  `pre_peak_mae_H` at D3/D5/D10/D20/D40 as separate adversity/risk outputs.
+- The resulting first target structure is separate opportunity-amplitude scores,
+  early-state probabilities, and pre-peak adversity scores by supported horizon;
+  it is not one vector loss. This supports the owner's two-stage logic of
+  predicting upside opportunity before entry and updating keep/exit decisions
+  from the realized early path. It does not select a feature expansion, exit
+  rule, holding period, slot count, leverage, stop loss, or successor architecture.
+- The active contract is archived and removed. Authoritative compact record:
+  `daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json`;
+  interpretation:
+  `daily_research/brain/references/seq100_short_horizon_target_reaudit_20260727.md`;
+  frozen-input evidence:
   `daily_research/brain/references/seq100_short_horizon_target_reaudit_inputs_20260727.md`.
 - The path-map audit now distinguishes exchange-level entry from reference-order
   affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
@@ -250,9 +271,10 @@ Updated: `2026-07-27`
 - The old V4 pilot is diagnostic evidence only. It fixed the fictitious low-open
   path but selected pre-signal overheated names whose next-open execution often
   preceded mean reversion; it must not be resumed under its old contract.
-- 2026 remains frozen confirmation only. No 2026 result may select a model,
-  ranking rule, exit rule, Top-K, slot count, or account behavior. The audited
-  full-history terminal result hard-cuts every price observation at 2025-12-31.
+- 2026 remains untouched and is not required for the completed target decision.
+  No 2026 result may select a model, ranking rule, exit rule, Top-K, slot count,
+  or account behavior. The audited full-history terminal result hard-cuts every
+  price observation at 2025-12-31.
 - Protected packs and the 15 registered model bundles remain unchanged. The
   retained study checkpoints are research evidence and are not registered or
   active for execution.
@@ -260,5 +282,5 @@ Updated: `2026-07-27`
 <!-- seq100-signal-quality:start -->
 - `seq100_pit_signal_quality_v1` 已以 `research_design_insufficient` 收口；selector winner 为 `null`。
 - 权威 compact record：`daily_research/research_records/seq100/seq100_pit_signal_quality_v1/artifact.json`。
-- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 仍只允许新合同确认。
+- 正式模型 registry、active execution、QDP 与完整 PIT pack 均未修改；2026 未读取，也不是当前标签决策的必要确认年。
 <!-- seq100-signal-quality:end -->

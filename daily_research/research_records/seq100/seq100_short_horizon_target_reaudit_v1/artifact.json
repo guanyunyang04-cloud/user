@@ -1,0 +1,471 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_short_horizon_target_reaudit_research_record",
+  "status": "completed_target_reassessment",
+  "completed_at": "2026-07-27T14:41:50+08:00",
+  "study_id": "seq100_short_horizon_target_reaudit_v1",
+  "contract": {
+    "path": "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/contract.json",
+    "contract_sha256": "08d1843529a27fff8e915ded1080f690f3760158a03a403c66aa3388f21ec8ea",
+    "contract_file_sha256": "a1afd162fca3e8d3546c34834666236072fbc8b0ed585828d1a0a59219d0a3b5"
+  },
+  "scope": {
+    "candidate_count": 8674588,
+    "continuous_feature_count": 296,
+    "categorical_feature_count": 5,
+    "new_fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "new_targets_by_horizon": {
+      "1": [
+        "g"
+      ],
+      "3": [
+        "g",
+        "mfe",
+        "pre_peak_mae",
+        "state"
+      ]
+    },
+    "old_prediction_reanalysis_horizons": [
+      5,
+      10,
+      20,
+      40,
+      60
+    ],
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "forbidden_years_consumed": [],
+    "fold_role": "user-approved reused confirmation/decision window; not a pristine holdout"
+  },
+  "execution": {
+    "new_task_count": 15,
+    "new_task_status": "completed",
+    "old_boosters_retrained": 0,
+    "foreground_wall_seconds": 7085,
+    "summed_training_seconds": 6004.001723200316,
+    "memory_guard_lowest_available_gb": 2.484111785888672,
+    "best_iteration": {
+      "minimum": 15,
+      "median": 117,
+      "maximum": 280
+    }
+  },
+  "prepared_inputs": {
+    "d3_atlas": {
+      "pre_2023_candidate_count": 6096195,
+      "assignable_path_count": 5929931,
+      "selected_k_2018_2020_2021_2022": [
+        3,
+        2,
+        3,
+        3
+      ],
+      "fixed_k3_minimum_calendar_ari": 0.7024940062241616,
+      "fixed_k3_mean_calendar_ari": 0.8445360059822394,
+      "minimum_centroid_correlation": 0.9978143666294624,
+      "state_vs_daily_g3_tertile_nmi": 0.17227434974745928,
+      "state_vs_daily_g3_tertile_ari": 0.10828814964925325,
+      "interpretation": "D3 state retains D1-D2 path-shape information and is not merely an endpoint-return tertile."
+    },
+    "valid_label_counts": {
+      "g_1": 8338623,
+      "g_3": 8332519,
+      "mfe_3": 8319539,
+      "pre_peak_mae_3": 8319539,
+      "state_3": 8332519
+    },
+    "pre_2023_state_crosscheck_count": 5929931,
+    "pre_2023_state_mismatch_count": 0,
+    "post_2025_missing_row_count": 156376
+  },
+  "mechanical_decision": {
+    "qualified_mfe_horizons": [
+      5,
+      10,
+      20,
+      40
+    ],
+    "qualified_endpoint_return_horizons": [
+      60
+    ],
+    "qualified_state_horizons_after_sequential_calibration": [
+      3,
+      5,
+      10,
+      20
+    ],
+    "g1_supported": false,
+    "g3_supported": false,
+    "g60_supported": true,
+    "g60_two_of_three_year_residual_rule_passed": true,
+    "d3_state_not_merely_endpoint_tertiles": true
+  },
+  "scientific_conclusion": {
+    "primary_target_family": "mfe_H_upside_opportunity_amplitude",
+    "primary_horizons": [
+      5,
+      10,
+      20,
+      40
+    ],
+    "early_path_state_targets": [
+      3,
+      5,
+      10
+    ],
+    "secondary_state_comparator": 20,
+    "auxiliary_risk_horizons": [
+      3,
+      5,
+      10,
+      20,
+      40
+    ],
+    "long_horizon_endpoint_challenger": 60,
+    "rejected_short_endpoint_targets": [
+      "g_1",
+      "g_3"
+    ],
+    "interpretation": "The evidence supports the owner's two-stage logic: predict whether a stock has unusually large upside opportunity, then update keep/exit decisions from the realized early path. MFE D5-D40 is the strongest pre-entry target family. D3/D5/D10 state supplies early path identity that endpoint returns do not. Pre-peak MAE describes the adversity required to realize the opportunity.",
+    "g60_qualification": "g60 passes the frozen revised scalar gate, but it is not promoted to the primary stock-selection target because 66.5% of 2023 dates have a constant cross-section and its residual IC after shorter g scores is negative in 2023. It remains a long-horizon challenger and control.",
+    "state20_qualification": "state20 passes the target-level probability gate, but its residual score IC after D3/D5/D10 is 0.0189/0.0394/0.0090 and its 2025 residual Top5 lift is negative. It remains a secondary comparator rather than an independently required head.",
+    "probability_qualification": "Sequential temperature scaling preserves positive Brier skill for D3-D20, but frequently worsens the next year's skill and leaves D20 multiclass skill near zero in 2024. A successor must calibrate through an inner temporal split or rolling protocol, not assume one transported temperature is stable.",
+    "output_structure": "retain separate scalar opportunity and risk scores per supported horizon plus separate early-state probabilities; do not collapse them into one vector loss before the feature audit establishes incremental value",
+    "does_not_select": [
+      "new_feature_family",
+      "exit_rule",
+      "holding_period",
+      "slot_count",
+      "leverage",
+      "stop_loss",
+      "successor_architecture"
+    ]
+  },
+  "mfe_evidence": [
+    {
+      "horizon": 5,
+      "rank_ic_2023_2024_2025": [
+        0.059109436720061165,
+        0.0691251804036777,
+        0.09679091254366289
+      ],
+      "top5_mean_mfe_lift_2023_2024_2025": [
+        0.016620917696936497,
+        0.012503861211435648,
+        0.01760874852988739
+      ],
+      "top5_daily_mfe_top_quintile_lift_2023_2024_2025": [
+        0.19381309423095464,
+        0.1432618421167401,
+        0.18681661190807347
+      ]
+    },
+    {
+      "horizon": 10,
+      "rank_ic_2023_2024_2025": [
+        0.1088261939381684,
+        0.12248849159296411,
+        0.1581448466551385
+      ],
+      "top5_mean_mfe_lift_2023_2024_2025": [
+        0.02981554129103745,
+        0.028709865213977913,
+        0.033026157579278646
+      ],
+      "top5_daily_mfe_top_quintile_lift_2023_2024_2025": [
+        0.20368663165852993,
+        0.16405704947047267,
+        0.192206136647682
+      ]
+    },
+    {
+      "horizon": 20,
+      "rank_ic_2023_2024_2025": [
+        0.14261752642146786,
+        0.16098167458586243,
+        0.18981959338545457
+      ],
+      "top5_mean_mfe_lift_2023_2024_2025": [
+        0.043288823561490386,
+        0.05226195889906413,
+        0.04901970761860298
+      ],
+      "top5_daily_mfe_top_quintile_lift_2023_2024_2025": [
+        0.18572085483271228,
+        0.17312978690859443,
+        0.1691970927765884
+      ]
+    },
+    {
+      "horizon": 40,
+      "rank_ic_2023_2024_2025": [
+        0.06051548136316375,
+        0.20503602375973587,
+        0.07481825869331325
+      ],
+      "top5_mean_mfe_lift_2023_2024_2025": [
+        0.017069160416235143,
+        0.08477712653656277,
+        0.04090736431163174
+      ],
+      "top5_daily_mfe_top_quintile_lift_2023_2024_2025": [
+        0.05396140284820743,
+        0.17195996794204552,
+        0.09024365022404664
+      ]
+    }
+  ],
+  "mfe_rejections": {
+    "D3": {
+      "rank_ic_2023_2024_2025": [
+        -0.005456220799548402,
+        0.012808944900936209,
+        0.025999105030009344
+      ],
+      "reason": "2023 cross-sectional Rank IC is negative despite positive tail concentration."
+    },
+    "D60": {
+      "rank_ic_2023_2024_2025": [
+        0.08374365882510285,
+        0.1012816425269719,
+        0.12227329800665275
+      ],
+      "top5_daily_mfe_top_quintile_lift_2023_2024_2025": [
+        0.08013486020630121,
+        -0.01287985518561706,
+        0.10891131648616578
+      ],
+      "reason": "2024 Top5 predictions do not enrich the realized daily MFE top quintile."
+    }
+  },
+  "state_evidence": [
+    {
+      "horizon": 3,
+      "rank_ic_2023_2024_2025": [
+        0.04682914651539126,
+        0.024201774972711452,
+        0.03881852036236208
+      ],
+      "selected_multiclass_brier_skill_2023_2024_2025": [
+        0.05027410718154934,
+        0.02159981739197936,
+        0.0717745567876863
+      ]
+    },
+    {
+      "horizon": 5,
+      "rank_ic_2023_2024_2025": [
+        0.0690850072157372,
+        0.03004741429671688,
+        0.048992030553114116
+      ],
+      "selected_multiclass_brier_skill_2023_2024_2025": [
+        0.041559914542004694,
+        0.012563506747015452,
+        0.05090457498809953
+      ]
+    },
+    {
+      "horizon": 10,
+      "rank_ic_2023_2024_2025": [
+        0.07461503815043737,
+        0.07172496594073945,
+        0.0708281994697119
+      ],
+      "selected_multiclass_brier_skill_2023_2024_2025": [
+        0.031368364022750894,
+        0.004878649954694669,
+        0.05924288207971551
+      ]
+    },
+    {
+      "horizon": 20,
+      "rank_ic_2023_2024_2025": [
+        0.0854767173528806,
+        0.08124404539416935,
+        0.060713339531604335
+      ],
+      "selected_multiclass_brier_skill_2023_2024_2025": [
+        0.017890255633238428,
+        0.000027940557396632926,
+        0.0050107413652296096
+      ]
+    }
+  ],
+  "endpoint_evidence": {
+    "g1_rank_ic_2023_2024_2025": [
+      -0.026155757925639858,
+      -0.0004231522921405905,
+      -0.03233193159493105
+    ],
+    "g3_rank_ic_2023_2024_2025": [
+      0.008864291712455183,
+      0.0015509134371136163,
+      0.023875054529675636
+    ],
+    "g60_rank_ic_2023_2024_2025": [
+      0.21045003238464438,
+      0.13137588509218043,
+      0.0936983142985229
+    ],
+    "g60_top5_lift_2023_2024_2025": [
+      0.008275592545156727,
+      0.0534750715607156,
+      0.032463756802951126
+    ],
+    "g60_constant_cross_section_fraction_2023_2024_2025": [
+      0.6652892561983471,
+      0.0,
+      0.12568306010928962
+    ],
+    "g60_residual_rank_ic_after_g5_g10_g20_g40_2023_2024_2025": [
+      -0.03822040826313577,
+      0.13036047424229877,
+      0.07092941838633554
+    ]
+  },
+  "risk_evidence": {
+    "pre_peak_mae_D3_rank_ic_2023_2024_2025": [
+      0.19074376518064415,
+      0.19334615266304672,
+      0.21700193791254976
+    ],
+    "previously_qualified_horizons_retained": [
+      5,
+      10,
+      20,
+      40
+    ]
+  },
+  "redundancy_evidence": {
+    "state_D5_residual_rank_ic_after_D3_2023_2024_2025": [
+      0.03220219269540827,
+      0.010462039563502858,
+      0.019720363399956246
+    ],
+    "state_D10_residual_rank_ic_after_D3_D5_2023_2024_2025": [
+      0.03793410906997232,
+      0.036952814018734396,
+      0.06075586414148146
+    ],
+    "state_D20_residual_rank_ic_after_D3_D5_D10_2023_2024_2025": [
+      0.018938355366621192,
+      0.03937304860113182,
+      0.008964963197254866
+    ],
+    "state_D20_residual_top5_lift_2023_2024_2025": [
+      0.03020845025521789,
+      0.021833217124265187,
+      -0.008085127736951954
+    ]
+  },
+  "market_stock_separation": {
+    "finding": "Daily cross-sectional Rank IC is stock-specific by construction; the audit additionally quantifies whether a model often emits no cross-sectional variation.",
+    "g1_within_date_variance_share_2023_2024_2025": [
+      0.2327539753294691,
+      0.06797323981509608,
+      0.04169558978052047
+    ],
+    "mfe20_within_date_variance_share_2023_2024_2025": [
+      0.7905656342363258,
+      0.46601010255844766,
+      0.4666547343679768
+    ],
+    "state10_within_date_variance_share_2023_2024_2025": [
+      0.4081843987464817,
+      0.22487762813426163,
+      0.31006727299075587
+    ],
+    "interpretation": "MFE and state predictions carry persistent within-date stock discrimination; short endpoint predictions are dominated by date-common variation and do not qualify."
+  },
+  "evidence": {
+    "input_root": "tmp/seq100_short_horizon_target_reaudit/attempt_001",
+    "output_root": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1",
+    "prepared_input_audit": {
+      "path": "tmp/seq100_short_horizon_target_reaudit/attempt_001/input_audit.json",
+      "sha256": "9ed49d40f96ea12d47246c79aac35df151728a4c555702050d08fc00f5b07abe"
+    },
+    "preflight": {
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/preflight.json",
+      "sha256": "107750c1f0e471c0ca18a4ebd890db687dda03f7d871a9572afc2fd08b72ac7f"
+    },
+    "training_summary": {
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/training_summary.json",
+      "sha256": "f27d0ff7363ac13b75b2d3c9c05b714713af59d636c00d79ff665d466eb43d04"
+    },
+    "summary": {
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/summary.json",
+      "sha256": "0b18a9d56a33c349e67391d0702b4c50c2026f055336ae20018b96951de7c2de"
+    },
+    "decision": {
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/decision.json",
+      "sha256": "2a89ebaa9e3cbf5156bf232937363714cbb34010e6f36ffc4fff4facc177a7e3"
+    },
+    "memory_guard": {
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/memory_guard.json",
+      "sha256": "b92be5bfd8e34d5ffd43868af1d808a3d84bc78ff25740d802832cfb5c03e98f"
+    },
+    "posthoc_memory_guard": {
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/posthoc_memory_guard.json",
+      "sha256": "7ee8945bbf3b58e267feffdab66913a8864340605c99b4b7d65eb698766d7ee2"
+    },
+    "task_result_count": 15,
+    "task_result_set_sha256": "d67819689b9a8400b7ba7fea03e6b346e04ea3483321f346215df8adeef504c1",
+    "task_result_set_algorithm": "sha256(canonical_json(sorted[{path,sha256}]))",
+    "retained_models": true,
+    "retained_predictions": true,
+    "retained_daily_metrics": true,
+    "retained_logs": true
+  },
+  "mutations": {
+    "qdp": false,
+    "source_pack": false,
+    "formal_model_registry": false,
+    "registered_checkpoints": false,
+    "active_execution": false,
+    "repository_push_authorized": true
+  },
+  "validations": {
+    "focused_tests": {
+      "command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/path_policy/tests/test_seq100_short_horizon_target_reaudit.py daily_research/path_policy/tests/test_seq100_path_label_learnability.py -q",
+      "status": "passed",
+      "passed_test_count": 14,
+      "warning_count": 1,
+      "duration_seconds": 8.39
+    },
+    "full_hash_preflight": {
+      "status": "passed",
+      "forbidden_years_consumed": []
+    },
+    "record_source_reconciliation": {
+      "status": "passed",
+      "checked_field_count_after_contract_removal": 71,
+      "checked_compact_metric_groups": 11,
+      "checked_task_result_count": 15,
+      "method": "strict equality against frozen summary, decision, training summary, input audit, file SHA-256 values, and canonical task-result-set SHA-256"
+    },
+    "brain_doctor": {
+      "status": "ok",
+      "error_count": 0,
+      "warning_count": 0
+    },
+    "brain_integrity": {
+      "status": "known_preexisting_blocked",
+      "error_count": 15,
+      "warning_count": 2,
+      "error_set_sha256": "a5e1a14ba1911d2472b951cb1fbd93197dd302ce920d5184899a65d9ae92839f",
+      "unchanged_from_pre_closeout_baseline": true,
+      "active_study_count_after_closeout": 2,
+      "scope": "all 15 errors are pre-existing registered-model training_summary SHA mismatches; none was modified by this study"
+    },
+    "git_diff_check": {
+      "status": "passed",
+      "scope": "staged closeout diff including new compact record and reference"
+    }
+  },
+  "active_contract_removed": true,
+  "artifact_sha256": "c562cd673c0e996057d9cfb8581bf340be29f03fe95d2faaf81f7b57a9fad09a"
+}
