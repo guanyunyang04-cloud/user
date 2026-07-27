@@ -1,72 +1,35 @@
 # Workspace instructions
 
-<!-- workspace-brain:start -->
-## Project brain
-
-本项目使用 `brain/` 保存持久项目记忆。
-
-- 在项目接管、任务恢复、跨域状态判断、Brain 写回或受保护对象变更时使用全局 `workspace-brain` Skill。普通问答和同一逻辑任务内的局部代码编辑不重复执行接管。
-- 一个逻辑任务通常只运行一次 `detect`。仅在上下文压缩、agent 交接、用户改变目标或切换 child brain 后重新接管；不得依赖中断前的对话记忆。
-- 最终回答前重新核对当前目标、实际改动、验证结果和必要的 brain 写回。
-- 当前事实写入 `state`，稳定知识写入 `knowledge`，可重复方法写入 `operations`，日期化证据写入 `references/`。
-- 已有权威 research record 时，Brain 只保存当前状态或简短指针，不重复复制整份实验结果。
-<!-- workspace-brain:end -->
-
 ## Runtime
 
-- Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` for Python and pytest.
+- Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe` for Python, modules, and pytest.
 - The shell is PowerShell. Use a PowerShell here-string for multiline Python.
+- Put `H:/quant_project` and, when needed, `H:/quant_project/quant_data_platform/src` on `PYTHONPATH`.
 
-## Protected assets
+## Data safety
 
-Do not delete or rewrite QDP datasets, `daily_research/data/research_store`, or
-registered checkpoints unless the user explicitly targets that exact asset and
-there is a verified replacement or recovery path. The canonical list is
-`brain/object_registry.json`; verify it with `tools.brain.integrity_check`.
+- Normal QDP updates, repairs, research outputs, and model training are allowed when they are part of the requested task.
+- Do not recursively delete or bulk overwrite QDP datasets, `daily_research/data/research_store`, checkpoints, or predictions unless the user explicitly targets those files.
+- Before a destructive file operation, resolve the exact path and keep it inside the intended workspace directory.
 
-## Keep the system small
+## Working style
 
-- Extend an existing core module before creating a new framework or wrapper.
-- One concept has one current name, path, contract, and CLI. Backward
-  compatibility is opt-in, not the default.
-- An experiment starts as one contract in `daily_research/studies/` and writes
-  process material only under ignored output. When it ends, always retain an
-  indexed compact conclusion. Preserve successful checkpoints, predictions,
-  account jobs, runners, and logs when the user or study marks them useful for
-  reproduction; delete only material explicitly classified as disposable.
-- Tests protect data integrity, PIT/no-future semantics, training/evaluation
-  meaning, recovery, and key numerical behavior. Do not test retired wrappers or
-  file layouts.
-- Brain documents describe current objects and state. Historical detail belongs
-  in references and must not re-enter the hot path.
-
-## Validation scope
-
-- Run the smallest tests that cover the changed behavior. Run the full
-  path-policy suite only for shared path-policy behavior or an explicit gate.
-- QDP checks are not a universal downstream research gate. Run quick checks when
-  QDP code, active manifests, or data changed; run full checks only after a data
-  rewrite, a deep data audit, or an explicit user request.
-- Scope data validation to consumed domains. Daily-only research does not require
-  historical intraday coverage validation.
-- Do not repeat successful expensive checks during evidence-only closeout unless
-  the closeout changes code or data covered by those checks.
+- The conversation is the primary collaboration surface. Explain results, interpretation, uncertainty, and recommendations directly to the user.
+- Keep implementation proportional to the task. Extend existing code before adding a framework, wrapper, registry, or compatibility layer.
+- Brain files are optional memory aids, not authority. Current user instructions, code, data, and observed results take precedence.
+- Put only durable project facts in `brain/README.md` and current cross-session state in `brain/state.md`.
+- Tests should cover data integrity, causal semantics, recovery, and numerical behavior only when the changed implementation needs them.
+- Research-specific dates, folds, labels, parameters, and evaluation rules belong in the research config and code, not in global instructions.
 
 ## Long tasks
 
-- Run one foreground training task per invocation unless the user asks otherwise.
-- Set tool timeout to roughly 1.5–2 times expected runtime. Let a local supervisor
-  and memory guard monitor it; do not poll from the model.
-- Keep full logs on `H:` and console output event-only. The supervisor exits as
-  soon as the child reaches a verified terminal state.
+- Run training in the foreground with one model process at a time.
+- A runner must recognize completed semantic tasks and resume from the first incomplete task.
+- Keep full logs on `H:` and console output concise. Use a local memory guard when the workload needs it.
 
 ## Git
 
-- Committing is allowed without asking once focused tests and `git diff --check`
-  pass. Stage only the paths the current task changed, and write the commit
-  message in English matching repo style.
-- Do not push unless the user explicitly asks.
-- Preserve unrelated dirty paths. Never stage or commit paths another task owns,
-  and never commit files that may carry secrets.
-- Amending, force-push, reset --hard, and other destructive git operations still
-  require an explicit user request.
+- Preserve unrelated user changes and stage only files changed by the current task.
+- Focused tests and `git diff --check` are sufficient before a commit unless the change genuinely needs broader validation.
+- Write English commit messages matching repository style. Do not push unless the user explicitly asks.
+- Do not amend, force-push, reset hard, or perform another destructive Git operation without explicit instruction.

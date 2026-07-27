@@ -1,30 +1,21 @@
-# Workspace brain
+# Project memory
 
-The brain is a takeover map, not a second application framework.
+This repository supports personal A-share quantitative research. QDP owns the
+current market data and update code; Daily Research owns Seq100 datasets,
+features, models, experiments, and scientific results.
 
-## Active objects
+Important locations:
 
-1. QDP owns canonical current datasets and provider-backed updates.
-2. Daily Research owns downstream packs, Seq100 models, evaluation, and evidence.
-3. The workspace brain owns only cross-project routing and protected-asset paths.
+- `quant_data_platform/data/qdp_v2/`: current QDP datasets and metadata.
+- `daily_research/data/research_store/`: downstream research packs.
+- `daily_research/path_policy/`: Seq100 research and account logic.
+- `daily_research/studies/`: concise scientific configurations.
+- `daily_research/research_records/`: retained empirical conclusions.
+- `daily_research/output/path_policy/studies/`: resumable experiment output.
 
-Machine ownership and protection live in `object_registry.json`. Current state
-lives in `state.md`. Project detail belongs in each child brain's `README.md` and
-`state.md`; long history belongs in `references/`.
+Use `C:/Users/ASUS/miniconda3/envs/yolos/python.exe`. The shell is PowerShell.
 
-## Complexity prevention
-
-- Do not create a new brain layer, registry, lifecycle, or guard when a file,
-  function, or existing manifest can express the fact.
-- Do not preserve a retired interface merely because an old artifact used it.
-- Do not let generated output become a truth source. Stable truth is a dataset
-  manifest, model registry entry, research record, or active study contract.
-- Close every experiment by compacting evidence and removing its machinery.
-- A new permanent abstraction needs at least two current consumers.
-- Prefer direct code, explicit paths, and Git recovery over compatibility and
-  migration ceremony.
-
-This directory is the `quant_project` brain instance. The globally installed
-`workspace-brain` skill defines the reusable method and template; project facts
-remain here, and always-on operating constraints remain in `AGENTS.md`. This
-repository does not carry a second copy of the global skill.
+The owner wants research depth, universe coverage, and scientific requirements
+preserved while process ceremony stays minimal. Discuss reasoning and results in
+the conversation. This Brain is only a possibly stale handoff note; current user
+instructions, code, data, and observed results take precedence.

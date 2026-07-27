@@ -1,22 +1,23 @@
 # Quant research workspace
 
-This workspace has three active systems:
+This personal workspace has two working systems:
 
-- `quant_data_platform/`: the QDP current data store and its update/check code.
-- `daily_research/`: Seq100 datasets, registered models, compact evidence, and active studies.
-- `brain/`: a small takeover map and protected-object registry.
+- `quant_data_platform/`: current market datasets and their update, repair, and validation code.
+- `daily_research/`: Seq100 research datasets, models, experiments, and retained scientific results.
 
-Start with `brain/README.md`. Current machine state is in `brain/state.md`.
+Persistent cross-session memory is intentionally small:
 
-Historical frontends, execution clients, compatibility surfaces, and terminal
-experiment frameworks are intentionally absent. Their useful research evidence
-is retained under `daily_research/research_records/` and the archived references.
+- `brain/README.md` contains stable project facts and important paths.
+- `brain/state.md` contains the current objective, pause point, and next action.
 
-Useful checks:
+Research configuration lives in `daily_research/studies/`. Experimental outputs
+live under ignored output directories, while conclusions worth retaining live in
+`daily_research/research_records/`. The conversation remains the primary place
+for explaining results and deciding what to do next.
+
+Use the yolos Python environment:
 
 ```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m tools.brain.integrity_check --json
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m daily_research.path_policy.seq100_development verify
 $env:PYTHONPATH='H:\quant_project\quant_data_platform\src;H:\quant_project'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quant_data_platform.cli --workspace-root H:\quant_project check --quick
 ```
