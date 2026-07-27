@@ -99,11 +99,15 @@
       "id": "seq100_short_horizon_target_reaudit_v1",
       "status": "completed_target_reassessment",
       "path": "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json"
+    },
+    {
+      "id": "seq100_target_redundancy_audit_v1",
+      "status": "completed_nonredundant_head_set",
+      "path": "daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/artifact.json"
     }
   ],
   "active_studies": [
     "daily_research/studies/pit_l35v2_oof_trees_v1.json",
-    "daily_research/studies/l35v2_batch1024.json",
-    "daily_research/studies/seq100_target_redundancy_audit_v1.json"
+    "daily_research/studies/l35v2_batch1024.json"
   ]
 }

@@ -1,0 +1,319 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_target_redundancy_audit_research_record",
+  "status": "completed_nonredundant_head_set",
+  "completed_at": "2026-07-27T16:27:29+08:00",
+  "study_id": "seq100_target_redundancy_audit_v1",
+  "contract": {
+    "path": "daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/contract.json",
+    "contract_sha256": "c012bf5aaa3311b825d6bf92789b0707c6efd4b265d8511e20f1b2863a017934",
+    "contract_file_sha256": "f79c5b35de0bfeb28b6e6ea0becabdfc61dfd0a41e637f59d89de7fcbb23defb"
+  },
+  "scope": {
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "fold_role": "user-approved reused recent confirmation/decision folds; not a pristine holdout",
+    "prediction_task_count": 24,
+    "consumed_evidence_file_count": 126,
+    "consumed_evidence_set_sha256": "3c21690f813da2a4b8604375ebb7338ccf5b528f42db8ee3439fc584c888f853",
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "forbidden_years_consumed": [],
+    "new_booster_count": 0,
+    "diagnostic_meta_models_retained": 0
+  },
+  "mechanical_decision": {
+    "mfe_heads": {
+      "5": "omit",
+      "10": "core",
+      "20": "core",
+      "40": "omit"
+    },
+    "mfe_heads_for_feature_audit": [
+      "mfe_10",
+      "mfe_20"
+    ],
+    "state_heads": {
+      "3": "omit",
+      "5": "omit",
+      "10": "core",
+      "20": "secondary"
+    },
+    "state_heads_for_feature_audit": [
+      "state_10",
+      "state_20"
+    ],
+    "state_literal_probability_status": {
+      "3": "supported",
+      "5": "supported",
+      "10": "supported",
+      "20": "unsupported"
+    },
+    "risk_heads_unchanged": [
+      "pre_peak_mae_3",
+      "pre_peak_mae_5",
+      "pre_peak_mae_10",
+      "pre_peak_mae_20",
+      "pre_peak_mae_40"
+    ],
+    "next_step": "freeze_feature_family_increment_audit_using_user_authorized_2023_2025_folds",
+    "does_not_select": [
+      "feature_family_winner",
+      "joint_loss",
+      "score_fusion",
+      "exit_rule",
+      "holding_period",
+      "slot_count",
+      "leverage",
+      "stop_loss",
+      "successor_architecture"
+    ]
+  },
+  "scientific_conclusion": {
+    "primary_pre_entry_feature_audit_heads": [
+      "mfe_10",
+      "mfe_20"
+    ],
+    "state_head_roles": {
+      "state_3": "omit_as_independent_pre_entry_ordinal_head_but_retain_for_post_entry_path_update_research",
+      "state_5": "omit_as_independent_pre_entry_ordinal_head_but_retain_for_post_entry_path_update_research",
+      "state_10": "core_pre_entry_state_head_after_primary_mfe_feature_screen",
+      "state_20": "secondary_comparator_not_a_required_literal_probability_head"
+    },
+    "risk_head_role": "mechanically unchanged; this audit did not re-evaluate adversity-head redundancy",
+    "mfe_interpretation": "D10 and D20 retain stable incremental opportunity information. D5 still enriches the realized tail but adds no broad residual ranking information after the other MFE scores. D40 reverses across years and is not stable enough for the first feature audit.",
+    "state_interpretation": "D3 and D5 retain positive residual ordinal IC, but their residual high-state Top-5 lift is negative in every year. Their full multiclass probabilities still improve sequential MFE-only diagnostics, so omission from pre-entry ordinal screening is not a claim that they contain no path information.",
+    "output_structure": "screen feature families first on separate MFE D10 and D20 scalar heads; only surviving feature families advance to state D10, secondary state D20, and risk-head checks; do not introduce a joint vector loss or fused entry score yet",
+    "two_stage_interpretation": "pre-entry learning should rank the magnitude of D10 and D20 upside opportunity; D3 and D5 state information is reserved for a later model that updates keep-or-exit judgments from the realized post-entry path",
+    "evidence_limit": "comparative recent-market evidence on repeatedly used 2023-2025 folds; target redundancy alone does not establish tradable account growth"
+  },
+  "mfe_evidence": [
+    {
+      "horizon": 5,
+      "final_status": "omit",
+      "leave_one_out_rank_ic_2023_2024_2025": [
+        -0.00030715380265359404,
+        -0.01002567025439141,
+        -0.016639648736788623
+      ],
+      "leave_one_out_daily_tail_top5_lift_2023_2024_2025": [
+        0.06115500880640674,
+        0.05508340955177445,
+        0.08033833629310717
+      ]
+    },
+    {
+      "horizon": 10,
+      "final_status": "core",
+      "incremental_window_rank_ic_2023_2024_2025": [
+        0.008363350629218379,
+        0.01937154878109122,
+        0.04665092349716784
+      ],
+      "incremental_window_daily_tail_top5_lift_2023_2024_2025": [
+        0.029161183108649603,
+        0.027248093495835284,
+        0.03592826330835299
+      ]
+    },
+    {
+      "horizon": 20,
+      "final_status": "core",
+      "leave_one_out_rank_ic_2023_2024_2025": [
+        0.06149985768694565,
+        0.009126297271830772,
+        0.02632179820179043
+      ],
+      "leave_one_out_daily_tail_top5_lift_2023_2024_2025": [
+        0.053378755147995866,
+        0.038309364546026445,
+        0.02796267584445317
+      ],
+      "incremental_window_rank_ic_2023_2024_2025": [
+        0.04998109379049914,
+        0.0026078576380570632,
+        0.010752402660583431
+      ],
+      "incremental_window_daily_tail_top5_lift_2023_2024_2025": [
+        0.036903527146339245,
+        0.01992541913452364,
+        0.01779226634311993
+      ]
+    },
+    {
+      "horizon": 40,
+      "final_status": "omit",
+      "leave_one_out_rank_ic_2023_2024_2025": [
+        -0.010157178698460813,
+        0.04602487658706207,
+        -0.09950239780204412
+      ],
+      "leave_one_out_daily_tail_top5_lift_2023_2024_2025": [
+        -0.02638775714026448,
+        0.044569138161099746,
+        -0.00868189533803891
+      ],
+      "incremental_window_rank_ic_2023_2024_2025": [
+        -0.03255663387976566,
+        0.03940472255179843,
+        -0.03474230405623328
+      ]
+    }
+  ],
+  "state_evidence": [
+    {
+      "horizon": 3,
+      "feature_audit_status": "omit",
+      "residual_rank_ic_2023_2024_2025": [
+        0.026594932567008338,
+        0.024414762490970777,
+        0.03480080907826662
+      ],
+      "residual_daily_tail_top5_lift_2023_2024_2025": [
+        -0.006570190936132512,
+        -0.0043225259345014535,
+        -0.017367941880964737
+      ],
+      "literal_probability_status": "supported",
+      "relative_brier_improvement_2024_2025": [
+        0.050238109304543296,
+        0.025508365846700416
+      ]
+    },
+    {
+      "horizon": 5,
+      "feature_audit_status": "omit",
+      "residual_rank_ic_2023_2024_2025": [
+        0.04258113886961435,
+        0.028398411866369856,
+        0.047932110620340446
+      ],
+      "residual_daily_tail_top5_lift_2023_2024_2025": [
+        -0.004213908704417589,
+        -0.01222696949601325,
+        -0.02283962277067245
+      ],
+      "literal_probability_status": "supported",
+      "relative_brier_improvement_2024_2025": [
+        0.04123537316090789,
+        0.018268622798916227
+      ]
+    },
+    {
+      "horizon": 10,
+      "feature_audit_status": "core",
+      "residual_rank_ic_2023_2024_2025": [
+        0.04929452445177284,
+        0.06116862781106225,
+        0.07778895333831491
+      ],
+      "residual_daily_tail_top5_lift_2023_2024_2025": [
+        0.00786623269853439,
+        0.008580829138936062,
+        0.01881030782446166
+      ],
+      "literal_probability_status": "supported",
+      "relative_brier_improvement_2024_2025": [
+        0.03886675249503531,
+        0.013246111502033609
+      ]
+    },
+    {
+      "horizon": 20,
+      "feature_audit_status": "secondary",
+      "residual_rank_ic_2023_2024_2025": [
+        0.058458088431610204,
+        0.0720786522581275,
+        0.07126336556231601
+      ],
+      "residual_daily_tail_top5_lift_2023_2024_2025": [
+        0.01375119999344922,
+        0.014010655367384422,
+        -0.019940577595501698
+      ],
+      "literal_probability_status": "unsupported",
+      "relative_brier_improvement_2024_2025": [
+        0.012101956989396095,
+        -0.00637554170235459
+      ]
+    }
+  ],
+  "runtime": {
+    "foreground_wall_seconds": 333.89256,
+    "memory_guard_lowest_available_gb": 4.945323944091797
+  },
+  "evidence": {
+    "output_root": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1",
+    "preflight": {
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/preflight.json",
+      "sha256": "c6c9fc406c2a9a0c2e4c1f2e746118885edffc40c19e207caec2cc5d79825548"
+    },
+    "mfe_cross_horizon": {
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/mfe_cross_horizon.json",
+      "sha256": "72435c4c1209853a51c3e2eeb342d58d72c09af4e1988142a3e49d88bb96f23e"
+    },
+    "state_vs_mfe": {
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/state_vs_mfe.json",
+      "sha256": "98f012c67da33135de668d33bf57fbffe6f2bfde4855090e36de06d6b8054c4d"
+    },
+    "summary": {
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/summary.json",
+      "sha256": "a1b27520dc93047e4683858cc85480c5352f1ebf3432d19b8a5190d6b47fbb5c"
+    },
+    "decision": {
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/decision.json",
+      "sha256": "73f318855ac76b278cbc932e521cf8791a8f1f457b9fdb5f17cb292c92650ccd"
+    },
+    "memory_guard": {
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/memory_guard.json",
+      "sha256": "e1fa55591b90db4f5eeca6a1dd8181b82717133a2a6999bb77a1d28b48f87753"
+    },
+    "source_prediction_task_count": 24,
+    "consumed_evidence_file_count": 126,
+    "diagnostic_meta_models_retained": false
+  },
+  "mutations": {
+    "qdp": false,
+    "source_pack": false,
+    "source_predictions": false,
+    "formal_model_registry": false,
+    "registered_checkpoints": false,
+    "active_execution": false,
+    "repository_push_authorized": true
+  },
+  "validations": {
+    "focused_tests": {
+      "command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/path_policy/tests/test_seq100_target_redundancy_audit.py -q",
+      "status": "passed",
+      "passed_test_count": 5,
+      "duration_seconds": 8.15
+    },
+    "record_source_reconciliation": {
+      "status": "passed",
+      "checked_field_count_after_artifact_hash": 62,
+      "method": "strict equality against the archived contract, frozen summary and decision, exact per-horizon metric arrays, output file SHA-256 values, and the research index"
+    },
+    "brain_doctor": {
+      "status": "ok",
+      "error_count": 0,
+      "warning_count": 0
+    },
+    "brain_integrity": {
+      "status": "known_preexisting_blocked",
+      "error_count": 15,
+      "warning_count": 2,
+      "error_set_sha256": "a5e1a14ba1911d2472b951cb1fbd93197dd302ce920d5184899a65d9ae92839f",
+      "unchanged_from_pre_closeout_baseline": true,
+      "active_study_count_after_closeout": 2,
+      "scope": "all 15 errors are pre-existing registered-model training_summary SHA mismatches; none was modified by this study"
+    },
+    "git_diff_check": {
+      "status": "passed",
+      "scope": "unstaged closeout diff before canonical artifact hashing"
+    }
+  },
+  "active_contract_removed": true,
+  "artifact_sha256": "5c8e14c1b7e67dea789e58146599a1c2fa363703353bf8619b5c8195688b7f40"
+}

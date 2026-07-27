@@ -8,7 +8,18 @@ from daily_research.path_policy import seq100_target_redundancy_audit as audit
 
 
 def test_load_study_freezes_recent_folds_and_2026_firewall() -> None:
-    study = audit.load_study()
+    archived_contract = (
+        audit.WORKSPACE_ROOT
+        / "daily_research/research_records/seq100"
+        / audit.STUDY_ID
+        / "contract.json"
+    )
+    contract_path = (
+        audit.DEFAULT_STUDY_PATH
+        if audit.DEFAULT_STUDY_PATH.exists()
+        else archived_contract
+    )
+    study = audit.load_study(contract_path)
 
     assert study["contract_sha256"] == audit._canonical_json_sha256(
         study["contract"]

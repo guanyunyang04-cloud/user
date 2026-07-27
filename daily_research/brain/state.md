@@ -167,46 +167,56 @@ Updated: `2026-07-27`
   paths. K2-K10 selects `3/2/3/3` over 2018/2020/2021/2022; fixed-K3 minimum
   calendar ARI is 0.702494. State3 is not merely endpoint tertiles: NMI with
   daily `g3` tertiles is 0.172274 and ARI is 0.108288.
-- The revised upper-tail gate qualifies `mfe_H` at D5/D10/D20/D40 as the primary
-  pre-entry opportunity family. Rank IC by 2023/2024/2025 is D5
+- The revised upper-tail gate first qualified `mfe_H` at D5/D10/D20/D40 as a
+  learnable opportunity family. Rank IC by 2023/2024/2025 is D5
   `0.0591/0.0691/0.0968`, D10 `0.1088/0.1225/0.1581`, D20
-  `0.1426/0.1610/0.1898`, and D40 `0.0605/0.2050/0.0748`; every retained horizon
-  enriches the realized daily MFE top quintile in all three years. D3 MFE fails
-  on negative 2023 IC, and D60 MFE fails on negative 2024 tail enrichment.
-- Early state outputs retain D3/D5/D10 as primary path-update coordinates.
-  D20 passes the mechanical probability gate but is secondary because residual
-  2025 Top-5 lift after D3/D5/D10 is negative. Sequentially calibrated Brier
-  skill stays positive through D20, but transported temperatures often worsen
-  the next year; any actual calibrator must use an inner temporal split or a
-  rolling protocol.
+  `0.1426/0.1610/0.1898`, and D40 `0.0605/0.2050/0.0748`; every horizon enriches
+  the realized daily MFE top quintile in all three years. The later redundancy
+  audit, not this absolute learnability gate, determines which heads enter the
+  first feature-family screen.
+- TARGET REDUNDANCY AUDIT COMPLETE. `seq100_target_redundancy_audit_v1` reused
+  24 existing OOS tasks and 126 bound evidence files, trained zero boosters,
+  retained zero diagnostic models, consumed outcomes only through `2025-12-31`,
+  and read no 2026 material. The owner-approved 2023-2025 folds remain reused
+  recent-market evidence and are not a pristine holdout.
+- The nonredundant core opportunity set is `mfe_10/mfe_20`. D10 incremental-
+  window IC is `0.0084/0.0194/0.0467`; D20 leave-one-out IC is
+  `0.0615/0.0091/0.0263`, with positive tail enrichment in all three years.
+  D5 leave-one-out IC is negative in every year despite positive tail enrichment,
+  so it is redundant for broad pre-entry ranking. D40 reverses in 2023/2025 and
+  is omitted from the first feature audit.
+- `state_10` is the core pre-entry state head; `state_20` is secondary. D3/D5
+  residual ordinal IC remains positive, but residual high-state Top-5 lift is
+  negative in all three years, so neither is an independent pre-entry ordinal
+  ranking head. Their full probabilities still improve MFE-only sequential
+  diagnostics in both 2024 and 2025; retain them for later realized-path update
+  research rather than treating them as informationless.
+- D20 literal probability improves 2024 and worsens 2025, so raw `state_20`
+  probability is unsupported. Any actual probability calibration must use an
+  inner temporal split or rolling protocol. `pre_peak_mae_H` at
+  D3/D5/D10/D20/D40 remains mechanically unchanged; this audit did not re-test
+  risk-head redundancy.
 - `g_1` and `g_3` fail. `g_60` passes the revised scalar gate but remains only a
   long-horizon challenger: 66.5% of 2023 dates have a constant cross-section and
   2023 residual IC after shorter `g` scores is negative. Retain
   `pre_peak_mae_H` at D3/D5/D10/D20/D40 as separate adversity/risk outputs.
-- The resulting first target structure is separate opportunity-amplitude scores,
-  early-state probabilities, and pre-peak adversity scores by supported horizon;
-  it is not one vector loss. This supports the owner's two-stage logic of
-  predicting upside opportunity before entry and updating keep/exit decisions
-  from the realized early path. It does not select a feature expansion, exit
-  rule, holding period, slot count, leverage, stop loss, or successor architecture.
+- The next feature-family audit first trains separate `mfe_10` and `mfe_20`
+  scalar heads. Only feature families that improve the core opportunity heads
+  advance to `state_10`, secondary `state_20`, and risk-head checks. D3/D5 state
+  moves to a later post-entry path-update study. This remains a separated output
+  design, not one vector loss or fused entry score.
 - The active contract is archived and removed. Authoritative compact record:
   `daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/artifact.json`;
   interpretation:
   `daily_research/brain/references/seq100_short_horizon_target_reaudit_20260727.md`;
   frozen-input evidence:
   `daily_research/brain/references/seq100_short_horizon_target_reaudit_inputs_20260727.md`.
-- TARGET REDUNDANCY AUDIT ACTIVE. The pre-result contract
-  `seq100_target_redundancy_audit_v1` freezes two read-only questions before any
-  feature expansion: which D5/D10/D20/D40 MFE heads retain leave-one-out or
-  incremental-window information, and which D3/D5/D10/D20 state scores retain
-  ordinal information after all four MFE scores. It separately tests whether
-  state probabilities improve a sequential MFE-only diagnostic calibrator.
-- The contract binds 24 existing OOS tasks and a 126-file evidence-set digest.
-  Full preflight passed with zero new boosters, maximum outcome date
-  `2025-12-31`, and no forbidden-year consumption. The owner explicitly keeps
-  the recent reused 2023-2025 folds; no pristine-holdout claim is allowed.
-  Decision gates distinguish core, secondary, and omitted heads before results.
-  Contract evidence:
+- The redundancy active contract is archived and removed. Authoritative compact
+  record:
+  `daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/artifact.json`;
+  interpretation:
+  `daily_research/brain/references/seq100_target_redundancy_audit_20260727.md`;
+  pre-result contract evidence:
   `daily_research/brain/references/seq100_target_redundancy_audit_contract_20260727.md`.
 - The path-map audit now distinguishes exchange-level entry from reference-order
   affordability. Exactly 766 market-buyable rows, all `600519.SH`, cannot fund
