@@ -1,0 +1,91 @@
+{
+  "study_id": "seq100_mfe_objective_alignment_v1",
+  "objective": "compare row-wise magnitude, smooth upper-tail magnitude, and date-grouped ranking objectives for MFE D10 and D20 entry opportunity",
+  "source": {
+    "study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "baseline_variant": "baseline"
+  },
+  "labels": {
+    "target": "mfe",
+    "horizons": [
+      10,
+      20
+    ],
+    "semantics": "highest legal entry-relative close opportunity through H days, excluding D1 under T+1",
+    "outputs_are_opportunity_scores_not_holding_periods": true
+  },
+  "folds": {
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "rule": "reuse the existing expanding-history outer folds and horizon purge",
+    "iteration_source": "reuse the corresponding Huber inner-year best iteration so only the objective changes",
+    "fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine holdout"
+  },
+  "objectives": {
+    "source_huber": {
+      "train_new_model": false,
+      "role": "continuous_magnitude_baseline"
+    },
+    "tail_weighted_huber": {
+      "train_new_model": true,
+      "role": "continuous_upper_tail_magnitude",
+      "within_date_weight": "1 + (maximum_multiplier - 1) * percentile^power, then renormalize each date",
+      "maximum_multiplier": 4.0,
+      "power": 4.0
+    },
+    "daily_lambdarank": {
+      "train_new_model": true,
+      "role": "date_grouped_cross_sectional_ranking",
+      "relevance_levels": 100,
+      "label_gain": "linear",
+      "lambdarank_truncation_level": 200,
+      "lambdarank_norm": true
+    }
+  },
+  "model": {
+    "library": "lightgbm_4.6.0",
+    "reuse_source_tree_parameters": true,
+    "reuse_source_iteration_count": true,
+    "one_model_per_process": true
+  },
+  "evaluation": {
+    "broad_ranking": [
+      "daily_spearman_rank_ic",
+      "decile_spearman",
+      "adjacent_decile_increase_fraction"
+    ],
+    "strong_candidate": [
+      "top1pct_realized_mfe_mean_and_lift",
+      "top5pct_realized_mfe_mean_and_lift",
+      "daily_realized_mfe_top_quintile_enrichment"
+    ],
+    "path_quality": [
+      "early_horizon_opportunity_share",
+      "first_legal_peak_day",
+      "pre_peak_mae",
+      "endpoint_return",
+      "high_state_rate"
+    ],
+    "early_horizon_by_target": {
+      "10": 5,
+      "20": 10
+    },
+    "report_each_year_horizon_and_objective": true,
+    "compare_roles_separately": true
+  },
+  "non_selections": [
+    "feature_family",
+    "entry_score_fusion",
+    "holding_model",
+    "exit_rule",
+    "holding_period",
+    "slot_count",
+    "leverage",
+    "stop_loss"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_objective_alignment_v1"
+}

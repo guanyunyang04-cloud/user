@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "study_id": "seq100_mfe_objective_alignment_v1",
+  "status": "completed_objective_comparison",
+  "completed_at": "2026-07-28T21:03:01+08:00",
+  "question": "For pre-entry MFE D10 and D20, should the model learn continuous magnitude, smoothly emphasize the upper tail, or directly learn the daily cross-sectional order?",
+  "scope": {
+    "candidate_count": 8674588,
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "horizons": [
+      10,
+      20
+    ],
+    "base_feature_count": 301,
+    "source_huber_models_reused": 6,
+    "new_models": 12
+  },
+  "decision": {
+    "primary_mfe_objective": "source_huber",
+    "tail_weighted_huber": "do_not_use_as_the_default_mfe_head; it is at most a fast-upside diagnostic",
+    "daily_lambdarank": "do_not_use_as_the_strong-MFE selector; its smoother path preference belongs in a separate path-quality or risk output",
+    "output_semantics": "keep separate continuous MFE D10 and D20 opportunity estimates; do not fuse magnitude, path quality, and risk into one score yet"
+  },
+  "evidence": {
+    "daily_lambdarank": {
+      "rank_ic_delta_vs_huber_d10_2023_2025": [
+        0.005465,
+        0.013308,
+        0.014985
+      ],
+      "rank_ic_delta_vs_huber_d20_2023_2025": [
+        0.010766,
+        0.013092,
+        0.012292
+      ],
+      "top5_mfe_lift_delta_d10_2023_2025": [
+        -0.006654,
+        -0.004904,
+        -0.008269
+      ],
+      "top5_mfe_lift_delta_d20_2023_2025": [
+        -0.002107,
+        -0.009097,
+        -0.005814
+      ],
+      "path_interpretation": "Across both horizons it selected later peaks and less adverse pre-peak paths with better endpoint returns, but consistently lost realized MFE-tail enrichment. Percentile relevance made broad order easier while compressing distinctions inside the extreme upside tail."
+    },
+    "tail_weighted_huber": {
+      "d10_top5_mfe_lift_delta_2023_2025": [
+        0.00076,
+        0.00065,
+        0.000122
+      ],
+      "d10_early_opportunity_share_delta_2023_2025": [
+        0.006272,
+        0.009929,
+        0.01369
+      ],
+      "d20_top1_mfe_lift_delta_2023_2025": [
+        0.005375,
+        0.004855,
+        0.002976
+      ],
+      "path_interpretation": "It shifted opportunity earlier, but selected deeper pre-peak adversity in every year and generally worse endpoint returns. D10 Top-5 gains were small; D20 Top-5 and tail gains were not stable.",
+      "magnitude_interpretation": "Its predictions were systematically shifted upward and had worse MAE than the source Huber in all six comparisons, so the weighted output cannot be read directly as expected MFE magnitude."
+    },
+    "source_huber": {
+      "interpretation": "It retained the best balance of continuous magnitude meaning and extreme-upside selection. D10 was the Top-1 MFE leader in two of three years; D20 remained stronger than LambdaRank in the Top-5 tail and did not impose the weighted model's path-risk tradeoff."
+    }
+  },
+  "limitations": [
+    "The three recent folds have been reused for research decisions and are comparative evidence, not a pristine final holdout.",
+    "Only one smooth tail-weight schedule and one 100-level linear-gain LambdaRank design were tested.",
+    "Tree counts were inherited from Huber to isolate the objective; objective-specific tuning could alter model strength but would answer a different question.",
+    "MFE is an opportunity label, not a holding rule or realized account return."
+  ],
+  "next_step": "Do not retrain the same Huber feature variants. Reuse existing predictions to classify D10 turnover-cost, D20 breakout/retest, and D20 traditional-indicator variants by broad-ranking versus strong-candidate role, then test state_10 and an independent adverse-path output as conditional path-quality coordinates.",
+  "outputs": {
+    "summary": "daily_research/output/path_policy/studies/seq100_mfe_objective_alignment_v1/summary.json",
+    "decision": "daily_research/output/path_policy/studies/seq100_mfe_objective_alignment_v1/decision.json",
+    "models": "daily_research/output/path_policy/studies/seq100_mfe_objective_alignment_v1/outer"
+  }
+}
