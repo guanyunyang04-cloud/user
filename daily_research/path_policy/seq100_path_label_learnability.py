@@ -461,7 +461,14 @@ def _hac_mean_test(values: np.ndarray, maximum_lag: int) -> dict[str, Any]:
         long_run_variance += 2.0 * bartlett * covariance
     long_run_variance = max(long_run_variance, 0.0)
     standard_error = math.sqrt(long_run_variance / count)
-    t_statistic = mean / standard_error if standard_error > 0.0 else math.inf
+    if standard_error > 0.0:
+        t_statistic = mean / standard_error
+    elif mean > 0.0:
+        t_statistic = math.inf
+    elif mean < 0.0:
+        t_statistic = -math.inf
+    else:
+        t_statistic = 0.0
     p_value = (
         float(2.0 * stats.norm.sf(abs(t_statistic)))
         if math.isfinite(t_statistic)

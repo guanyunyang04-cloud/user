@@ -4,22 +4,25 @@ Updated: 2026-07-28
 
 ## Objective
 
-Simplify repository-wide process machinery without reducing the scientific
-scope. Remove Brain governance, research contract lifecycles, and content-hash
-identity. Preserve QDP data, research packs, checkpoints, predictions, features,
-folds, labels, models, and evaluation logic.
+Determine which target and training objective best express pre-entry upside
+opportunity. Repository workflow simplification is complete; scientific scope,
+data, checkpoints, predictions, and generated features were retained.
 
-## Paused research
+## Completed feature audit
 
-`seq100_mfe_feature_family_audit_v1` tests which causal technical-analysis
-feature families add out-of-sample information to the nonredundant `mfe_10` and
-`mfe_20` opportunity targets.
+`seq100_mfe_feature_family_audit_v1` completed all 60 LightGBM tasks for
+`mfe_10` and `mfe_20` over the 2023-2025 folds. Results are under
+`daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1/`.
 
-- Output: `daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1/`.
-- Existing output: about 11.7 GB; features, models, predictions, and results are retained.
-- Completed: 28 of 60 LightGBM tasks, including all 3 D10 tuning tasks and 25 of 27 D10 outer tasks.
-- Pending: D10/2025 `turnover_cost_proxy` and `deterministic_noise`, plus all 30 D20 tasks.
-- No training process is running.
+- No family improved global rank quality and the strongest 5% tail together
+  strongly enough to pass every original gate; the negative control was exactly neutral.
+- `traditional_indicators` improved D20 Rank IC in all three years and passed
+  Rank-IC FDR, but reduced Top-5% opportunity quality in 2023 and 2025.
+- `breakout_retest_levels` improved D20 Top-5% mean and tail hit rate in all
+  three years, while its global Rank IC was not significant.
+- `turnover_cost_proxy` similarly improved the D10 Top-5% mean and tail hit
+  rate in all three years without significant global Rank-IC improvement.
+- The folds are deliberately reused recent decision folds, not a pristine holdout.
 
 ## Current scientific position
 
@@ -31,7 +34,8 @@ feature families add out-of-sample information to the nonredundant `mfe_10` and
 
 ## Next action
 
-Finish the repository simplification, verify that the runner recognizes 28
-completed and 32 pending tasks without hashes, then resume the remaining tasks
-one model process at a time and present the full D10/D20 result analysis in the
-conversation.
+Do not add all feature families or start a broad state-label audit. Design a
+focused objective-alignment comparison: D10 plus the turnover-cost proxy, D20
+plus breakout/retest levels, and D20 traditional indicators as the broad-rank
+comparator. Evaluate global ranking and strongest-candidate enrichment as
+separate roles rather than requiring one feature family to optimize both.

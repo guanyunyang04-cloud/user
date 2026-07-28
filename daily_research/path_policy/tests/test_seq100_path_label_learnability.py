@@ -27,6 +27,15 @@ def test_load_study_keeps_scientific_configuration() -> None:
     assert study["folds"]["horizons"] == [5, 10, 20, 40, 60]
 
 
+def test_hac_zero_delta_is_neutral() -> None:
+    result = learnability._hac_mean_test(np.zeros(32), maximum_lag=9)
+
+    assert result["mean"] == 0.0
+    assert result["standard_error"] == 0.0
+    assert result["t_statistic"] == 0.0
+    assert result["p_value_two_sided"] == 1.0
+
+
 def test_horizon_purge_uses_actual_dependency_and_date_weights_are_equal() -> None:
     calendar = np.asarray(
         [
