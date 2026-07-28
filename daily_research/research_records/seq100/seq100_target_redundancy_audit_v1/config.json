@@ -1,0 +1,74 @@
+{
+  "study_id": "seq100_target_redundancy_audit_v1",
+  "objective": "Identify the minimum nonredundant MFE and state head set before feature-family expansion.",
+  "data": {
+    "source_config": {
+      "path": "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/config.json"
+    },
+    "prediction_roots": [
+      "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1",
+      "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1"
+    ],
+    "row_universe": "intersection of original OOS rows required by each comparison"
+  },
+  "folds": {
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "mfe_horizons": [
+      5,
+      10,
+      20,
+      40
+    ],
+    "state_horizons": [
+      3,
+      5,
+      10,
+      20
+    ],
+    "maximum_outcome_date": "2025-12-31",
+    "fold_role": "recent reused comparison folds, not a pristine holdout"
+  },
+  "model": {
+    "train_new_boosters": false,
+    "diagnostic_meta_model": "L2 multinomial logistic regression",
+    "retain_diagnostic_models": false
+  },
+  "evaluation": {
+    "ridge_penalty": 0.001,
+    "diagnostic_logistic_c": 1.0,
+    "date_equal_weighting": true,
+    "residual_metrics": [
+      "daily cross-sectional Rank IC",
+      "daily top 5% mean lift",
+      "daily top 5% realized-tail enrichment",
+      "HAC p-value with lag H-1"
+    ],
+    "state_probability_metrics": [
+      "multiclass Brier",
+      "multiclass log-loss",
+      "relative improvement over MFE-only meta model"
+    ],
+    "report_each_year_separately": true
+  },
+  "decision": {
+    "residual_head_thresholds": {
+      "minimum_strong_residual_rank_ic": 0.01,
+      "core_minimum_strong_years": 2,
+      "secondary_minimum_positive_years": 2,
+      "secondary_minimum_positive_tail_years": 2,
+      "secondary_worst_rank_ic": -0.01
+    },
+    "probability_increment_thresholds": {
+      "secondary_maximum_relative_deterioration": 0.005
+    },
+    "mfe_final_status": "stronger of leave-one-out residual and incremental-window opportunity status",
+    "state_feature_audit_status": "ordinal residual status is authoritative; literal probability status is reported separately"
+  },
+  "output": {
+    "root": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1"
+  }
+}

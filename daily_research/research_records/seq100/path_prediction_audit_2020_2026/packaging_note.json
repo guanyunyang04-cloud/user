@@ -1,8 +1,0 @@
-{
-  "scope": "generated report.html only",
-  "reason": "Shared portable reader v0.2.8 uses width:100vw for the sticky top bar, producing 8px document overflow when Chromium reserves a 15px vertical scrollbar.",
-  "change": "Override .analytics-top-bar and .portable-page-header to width:100% with zero horizontal margins.",
-  "canonicalPayloadChanged": false,
-  "pluginOrRepositoryCodeChanged": false,
-  "verified": true
-}

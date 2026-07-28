@@ -24,7 +24,6 @@
       {
         "checkpoint_vintage": 2023,
         "run_dir": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\runs\\stage_2\\seq100_structured_ablation_s2_lookback180_turnover_2023_seed7_20260720_112253",
-        "checkpoint_sha256": "b293ada57c461c898e9a3639c741cab8017c34dc933e5bda3ce36616cd754f58",
         "architecture": {
           "model_type": "gru_structured_joint_turnover",
           "input_dim": 35,
@@ -172,7 +171,6 @@
       {
         "checkpoint_vintage": 2024,
         "run_dir": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\runs\\stage_2\\seq100_structured_ablation_s2_lookback180_turnover_2024_seed7_20260720_123758",
-        "checkpoint_sha256": "904e4179d06820cadd04e819fddc3f5115e58b55e8ecca3b5c6b32f848516ddf",
         "architecture": {
           "model_type": "gru_structured_joint_turnover",
           "input_dim": 35,
@@ -320,7 +318,6 @@
       {
         "checkpoint_vintage": 2025,
         "run_dir": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_input_ablation_rolling_2023_2025_v1\\runs\\stage_2\\seq100_structured_ablation_s2_lookback180_turnover_2025_seed7_20260720_140116",
-        "checkpoint_sha256": "f06d2cad8430bbfe44a175b569d15e4103e9837a1c4c8e015553ebe60ce782a2",
         "architecture": {
           "model_type": "gru_structured_joint_turnover",
           "input_dim": 35,
@@ -468,7 +465,6 @@
       {
         "checkpoint_vintage": 2026,
         "run_dir": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\runs\\development\\seq100_structured_180x35_2026_seed7_20260721_010142",
-        "checkpoint_sha256": "faacdfba49ae6d17f4f36806f4ef35e2097cd090ca8d2c5c74bdabf27aeb6cfd",
         "architecture": {
           "model_type": "gru_structured_joint_turnover",
           "input_dim": 35,

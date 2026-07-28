@@ -4,11 +4,6 @@
   "status": "completed_target_reassessment",
   "completed_at": "2026-07-27T14:41:50+08:00",
   "study_id": "seq100_short_horizon_target_reaudit_v1",
-  "contract": {
-    "path": "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/contract.json",
-    "contract_sha256": "08d1843529a27fff8e915ded1080f690f3760158a03a403c66aa3388f21ec8ea",
-    "contract_file_sha256": "a1afd162fca3e8d3546c34834666236072fbc8b0ed585828d1a0a59219d0a3b5"
-  },
   "scope": {
     "candidate_count": 8674588,
     "continuous_feature_count": 296,
@@ -290,7 +285,7 @@
       ],
       "selected_multiclass_brier_skill_2023_2024_2025": [
         0.017890255633238428,
-        0.000027940557396632926,
+        2.7940557396632926e-05,
         0.0050107413652296096
       ]
     }
@@ -385,87 +380,24 @@
     "input_root": "tmp/seq100_short_horizon_target_reaudit/attempt_001",
     "output_root": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1",
     "prepared_input_audit": {
-      "path": "tmp/seq100_short_horizon_target_reaudit/attempt_001/input_audit.json",
-      "sha256": "9ed49d40f96ea12d47246c79aac35df151728a4c555702050d08fc00f5b07abe"
-    },
-    "preflight": {
-      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/preflight.json",
-      "sha256": "107750c1f0e471c0ca18a4ebd890db687dda03f7d871a9572afc2fd08b72ac7f"
+      "path": "tmp/seq100_short_horizon_target_reaudit/attempt_001/input_audit.json"
     },
     "training_summary": {
-      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/training_summary.json",
-      "sha256": "f27d0ff7363ac13b75b2d3c9c05b714713af59d636c00d79ff665d466eb43d04"
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/training_summary.json"
     },
     "summary": {
-      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/summary.json",
-      "sha256": "0b18a9d56a33c349e67391d0702b4c50c2026f055336ae20018b96951de7c2de"
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/summary.json"
     },
     "decision": {
-      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/decision.json",
-      "sha256": "2a89ebaa9e3cbf5156bf232937363714cbb34010e6f36ffc4fff4facc177a7e3"
-    },
-    "memory_guard": {
-      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/memory_guard.json",
-      "sha256": "b92be5bfd8e34d5ffd43868af1d808a3d84bc78ff25740d802832cfb5c03e98f"
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/decision.json"
     },
     "posthoc_memory_guard": {
-      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/posthoc_memory_guard.json",
-      "sha256": "7ee8945bbf3b58e267feffdab66913a8864340605c99b4b7d65eb698766d7ee2"
+      "path": "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1/posthoc_memory_guard.json"
     },
     "task_result_count": 15,
-    "task_result_set_sha256": "d67819689b9a8400b7ba7fea03e6b346e04ea3483321f346215df8adeef504c1",
-    "task_result_set_algorithm": "sha256(canonical_json(sorted[{path,sha256}]))",
     "retained_models": true,
     "retained_predictions": true,
     "retained_daily_metrics": true,
     "retained_logs": true
-  },
-  "mutations": {
-    "qdp": false,
-    "source_pack": false,
-    "formal_model_registry": false,
-    "registered_checkpoints": false,
-    "active_execution": false,
-    "repository_push_authorized": true
-  },
-  "validations": {
-    "focused_tests": {
-      "command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/path_policy/tests/test_seq100_short_horizon_target_reaudit.py daily_research/path_policy/tests/test_seq100_path_label_learnability.py -q",
-      "status": "passed",
-      "passed_test_count": 14,
-      "warning_count": 1,
-      "duration_seconds": 8.39
-    },
-    "full_hash_preflight": {
-      "status": "passed",
-      "forbidden_years_consumed": []
-    },
-    "record_source_reconciliation": {
-      "status": "passed",
-      "checked_field_count_after_contract_removal": 71,
-      "checked_compact_metric_groups": 11,
-      "checked_task_result_count": 15,
-      "method": "strict equality against frozen summary, decision, training summary, input audit, file SHA-256 values, and canonical task-result-set SHA-256"
-    },
-    "brain_doctor": {
-      "status": "ok",
-      "error_count": 0,
-      "warning_count": 0
-    },
-    "brain_integrity": {
-      "status": "known_preexisting_blocked",
-      "error_count": 15,
-      "warning_count": 2,
-      "error_set_sha256": "a5e1a14ba1911d2472b951cb1fbd93197dd302ce920d5184899a65d9ae92839f",
-      "unchanged_from_pre_closeout_baseline": true,
-      "active_study_count_after_closeout": 2,
-      "scope": "all 15 errors are pre-existing registered-model training_summary SHA mismatches; none was modified by this study"
-    },
-    "git_diff_check": {
-      "status": "passed",
-      "scope": "staged closeout diff including new compact record and reference"
-    }
-  },
-  "active_contract_removed": true,
-  "artifact_sha256": "c562cd673c0e996057d9cfb8581bf340be29f03fe95d2faaf81f7b57a9fad09a"
+  }
 }

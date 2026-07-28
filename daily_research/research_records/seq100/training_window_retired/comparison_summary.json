@@ -4,7 +4,6 @@
   "status": "completed",
   "completed_at": "2026-07-20T22:20:58+08:00",
   "study_id": "seq100_structured_training_window_ablation_2025_v1",
-  "study_contract_sha256": "dc77eed18317599b9c82492391cff421b6624eaea1c0b2a9f27640872cb6b5a4",
   "objective": "equal mean double-slippage annualized log growth across Top1/1, Top3/3, and Top3/6",
   "models": [
     {

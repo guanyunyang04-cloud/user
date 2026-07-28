@@ -178,4 +178,4 @@ hybrid 仅作归因，不具备最终选择资格。下表将其最优行假设�
 - `l35v2_unit_time_ranks.csv`：L35V2 的 183 个 Top-K/退出组合单位时间排名。
 - `hybrid_diagnostics.csv` 与 `hybrid_annual_diagnostics.csv`：跨模型归因。
 - `checkpoint_2026_audit.json`：2026 checkpoint 状态与关键合同核验。
-- `audit_validation.json` 与 `source_manifest.json`：完整性检查和输入身份 sidecar。
+- `audit_validation.json`：关键数值检查。

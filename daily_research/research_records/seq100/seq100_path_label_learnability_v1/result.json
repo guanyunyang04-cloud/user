@@ -4,11 +4,6 @@
   "status": "completed_target_candidate",
   "completed_at": "2026-07-27T10:49:55+08:00",
   "study_id": "seq100_path_label_learnability_v1",
-  "contract": {
-    "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/contract.json",
-    "contract_sha256": "7d542696c8b2e1c15650049740db675555d1633bc43ce92307da4739224ee7ac",
-    "contract_file_sha256": "248040c166f17a2a8bf636cf5c28864cfc70681ab80f9ccb156ed569810dc73e"
-  },
   "scope": {
     "candidate_count": 8674588,
     "continuous_feature_count": 296,
@@ -280,70 +275,16 @@
   ],
   "evidence": {
     "output_root": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1",
-    "preflight": {
-      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/preflight.json",
-      "sha256": "9625c966b053d542175f0cc5b3572fa7ea5926e0a4d1a379a97ecd7e1199cfe5"
-    },
     "summary": {
-      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/summary.json",
-      "sha256": "d17956e58372735a39184070ac52436c9cf5feaf38141c5b52f3b30f6cbaacbc"
+      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/summary.json"
     },
     "decision": {
-      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/decision.json",
-      "sha256": "a19e1c01e38b76c39fa0d213dca19d839fc62b0d209d0423691f56e3bd86a99e"
-    },
-    "memory_guard": {
-      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/memory_guard.json",
-      "sha256": "fc3acb32be6b0451437005f66dd33cfb95c646f0d0b852e4b7b1ceaae534a920"
+      "path": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1/decision.json"
     },
     "task_result_count": 63,
-    "task_result_set_sha256": "004487f5430e6504a8c95a0dc27aabd12d7db0e11e094491f8b81e356d564fd5",
-    "task_result_set_algorithm": "sha256(canonical_json(sorted[{path,sha256}]))",
     "retained_models": true,
     "retained_predictions": true,
     "retained_daily_metrics": true,
     "retained_logs": true
-  },
-  "mutations": {
-    "qdp": false,
-    "source_pack": false,
-    "formal_model_registry": false,
-    "registered_checkpoints": false,
-    "active_execution": false,
-    "push_publish": false
-  },
-  "validations": {
-    "focused_tests": {
-      "command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/path_policy/tests/test_seq100_path_label_learnability.py -q",
-      "status": "passed",
-      "passed_test_count": 8,
-      "warning_count": 1,
-      "duration_seconds": 8.54
-    },
-    "record_source_reconciliation": {
-      "status": "passed",
-      "checked_primary_horizons": 3,
-      "checked_auxiliary_horizons": 4,
-      "checked_entry_years": 3,
-      "checked_task_result_count": 63
-    },
-    "brain_doctor": {
-      "status": "ok",
-      "error_count": 0,
-      "warning_count": 0
-    },
-    "brain_integrity": {
-      "status": "known_preexisting_blocked",
-      "error_count": 15,
-      "warning_count": 2,
-      "error_set_sha256": "a5e1a14ba1911d2472b951cb1fbd93197dd302ce920d5184899a65d9ae92839f",
-      "unchanged_from_pre_closeout_baseline": true,
-      "scope": "all 15 errors are pre-existing registered-model training_summary SHA mismatches; none was modified by this study"
-    },
-    "git_diff_check": {
-      "status": "passed"
-    }
-  },
-  "active_contract_removed": true,
-  "artifact_sha256": "4e5c2edf3cc4c6b1684437d0f30554a7c82d75ef25f216371b30aadf3f09dad4"
+  }
 }

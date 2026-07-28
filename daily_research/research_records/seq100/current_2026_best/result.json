@@ -33,9 +33,21 @@
             "label": "Checkpoint"
           },
           "tooltip": [
-            {"field": "annualized_log_growth", "format": "percent", "label": "区间年化对数增长"},
-            {"field": "maximum_drawdown", "format": "percent", "label": "最大回撤"},
-            {"field": "trade_count", "format": "number", "label": "交易数"}
+            {
+              "field": "annualized_log_growth",
+              "format": "percent",
+              "label": "区间年化对数增长"
+            },
+            {
+              "field": "maximum_drawdown",
+              "format": "percent",
+              "label": "最大回撤"
+            },
+            {
+              "field": "trade_count",
+              "format": "number",
+              "label": "交易数"
+            }
           ]
         },
         "valueFormat": "percent",
@@ -65,13 +77,44 @@
         },
         "density": "spacious",
         "columns": [
-          {"field": "rank", "label": "排名", "format": "number"},
-          {"field": "checkpoint", "label": "Checkpoint", "type": "text"},
-          {"field": "strategy", "label": "执行方式", "type": "text"},
-          {"field": "total_return", "label": "账户收益", "format": "percent", "movement": true},
-          {"field": "annualized_log_growth", "label": "区间年化对数增长", "format": "percent", "movement": true},
-          {"field": "maximum_drawdown", "label": "最大回撤", "format": "percent", "movement": true},
-          {"field": "trade_count", "label": "交易数", "format": "number"}
+          {
+            "field": "rank",
+            "label": "排名",
+            "format": "number"
+          },
+          {
+            "field": "checkpoint",
+            "label": "Checkpoint",
+            "type": "text"
+          },
+          {
+            "field": "strategy",
+            "label": "执行方式",
+            "type": "text"
+          },
+          {
+            "field": "total_return",
+            "label": "账户收益",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "annualized_log_growth",
+            "label": "区间年化对数增长",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "maximum_drawdown",
+            "label": "最大回撤",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "trade_count",
+            "label": "交易数",
+            "format": "number"
+          }
         ]
       },
       {
@@ -86,10 +129,29 @@
         },
         "density": "spacious",
         "columns": [
-          {"field": "checkpoint", "label": "Checkpoint", "type": "text"},
-          {"field": "strict_return", "label": "严格 101 日收益", "format": "percent", "movement": true},
-          {"field": "extended_return", "label": "扩展 121 日收益", "format": "percent", "movement": true},
-          {"field": "late_period_change", "label": "加入后 20 日的变化", "format": "percent", "movement": true}
+          {
+            "field": "checkpoint",
+            "label": "Checkpoint",
+            "type": "text"
+          },
+          {
+            "field": "strict_return",
+            "label": "严格 101 日收益",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "extended_return",
+            "label": "扩展 121 日收益",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "late_period_change",
+            "label": "加入后 20 日的变化",
+            "format": "percent",
+            "movement": true
+          }
         ]
       },
       {
@@ -104,12 +166,38 @@
         },
         "density": "spacious",
         "columns": [
-          {"field": "diagnostic", "label": "诊断口径", "type": "text"},
-          {"field": "checkpoint", "label": "Checkpoint", "type": "text"},
-          {"field": "strategy", "label": "执行方式", "type": "text"},
-          {"field": "selected_log_speed", "label": "选中组合年化 log speed", "format": "percent", "movement": true},
-          {"field": "alpha_log_speed", "label": "年化 alpha log speed", "format": "percent", "movement": true},
-          {"field": "signal_days", "label": "信号日", "format": "number"}
+          {
+            "field": "diagnostic",
+            "label": "诊断口径",
+            "type": "text"
+          },
+          {
+            "field": "checkpoint",
+            "label": "Checkpoint",
+            "type": "text"
+          },
+          {
+            "field": "strategy",
+            "label": "执行方式",
+            "type": "text"
+          },
+          {
+            "field": "selected_log_speed",
+            "label": "选中组合年化 log speed",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "alpha_log_speed",
+            "label": "年化 alpha log speed",
+            "format": "percent",
+            "movement": true
+          },
+          {
+            "field": "signal_days",
+            "label": "信号日",
+            "format": "number"
+          }
         ]
       }
     ],
@@ -258,24 +346,130 @@
     "status": "ready",
     "datasets": {
       "extended_ranking": [
-        {"rank": 1, "checkpoint": "2025", "strategy": "Top1/1 + fixed D7", "display_label": "2025 / Top1/1 + D7", "total_return": 0.1893663848074647, "annualized_log_growth": 0.34411039626919654, "maximum_drawdown": -0.3271359976331054, "trade_count": 18},
-        {"rank": 2, "checkpoint": "2023", "strategy": "Top1/1 + fixed D7", "display_label": "2023 / Top1/1 + D7", "total_return": 0.0713964716754687, "annualized_log_growth": 0.1368397924384542, "maximum_drawdown": -0.3983350230807702, "trade_count": 18},
-        {"rank": 3, "checkpoint": "2023", "strategy": "Top3/3 + fixed D7", "display_label": "2023 / Top3/3 + D7", "total_return": 0.031122156364496556, "annualized_log_growth": 0.060812722139988735, "maximum_drawdown": -0.2979819022679324, "trade_count": 54},
-        {"rank": 4, "checkpoint": "2026", "strategy": "Top3/3 + fixed D7", "display_label": "2026 / Top3/3 + D7", "total_return": -0.2064016152007545, "annualized_log_growth": -0.4587149219746615, "maximum_drawdown": -0.3284264802273551, "trade_count": 54},
-        {"rank": 5, "checkpoint": "2025", "strategy": "Top3/3 + fixed D7", "display_label": "2025 / Top3/3 + D7", "total_return": -0.24498290924510757, "annualized_log_growth": -0.5576043550663308, "maximum_drawdown": -0.3801417778827144, "trade_count": 54},
-        {"rank": 6, "checkpoint": "2026", "strategy": "Top1/1 + fixed D7", "display_label": "2026 / Top1/1 + D7", "total_return": -0.2622786656982993, "annualized_log_growth": -0.6035878631062014, "maximum_drawdown": -0.45260976472373193, "trade_count": 18},
-        {"rank": 7, "checkpoint": "2024", "strategy": "Top3/3 + fixed D7", "display_label": "2024 / Top3/3 + D7", "total_return": -0.3386630920884639, "annualized_log_growth": -0.8204720663574048, "maximum_drawdown": -0.4215285545826716, "trade_count": 53},
-        {"rank": 8, "checkpoint": "2024", "strategy": "Top1/1 + fixed D7", "display_label": "2024 / Top1/1 + D7", "total_return": -0.5158660662663235, "annualized_log_growth": -1.4393638532668223, "maximum_drawdown": -0.5843219035962628, "trade_count": 18}
+        {
+          "rank": 1,
+          "checkpoint": "2025",
+          "strategy": "Top1/1 + fixed D7",
+          "display_label": "2025 / Top1/1 + D7",
+          "total_return": 0.1893663848074647,
+          "annualized_log_growth": 0.34411039626919654,
+          "maximum_drawdown": -0.3271359976331054,
+          "trade_count": 18
+        },
+        {
+          "rank": 2,
+          "checkpoint": "2023",
+          "strategy": "Top1/1 + fixed D7",
+          "display_label": "2023 / Top1/1 + D7",
+          "total_return": 0.0713964716754687,
+          "annualized_log_growth": 0.1368397924384542,
+          "maximum_drawdown": -0.3983350230807702,
+          "trade_count": 18
+        },
+        {
+          "rank": 3,
+          "checkpoint": "2023",
+          "strategy": "Top3/3 + fixed D7",
+          "display_label": "2023 / Top3/3 + D7",
+          "total_return": 0.031122156364496556,
+          "annualized_log_growth": 0.060812722139988735,
+          "maximum_drawdown": -0.2979819022679324,
+          "trade_count": 54
+        },
+        {
+          "rank": 4,
+          "checkpoint": "2026",
+          "strategy": "Top3/3 + fixed D7",
+          "display_label": "2026 / Top3/3 + D7",
+          "total_return": -0.2064016152007545,
+          "annualized_log_growth": -0.4587149219746615,
+          "maximum_drawdown": -0.3284264802273551,
+          "trade_count": 54
+        },
+        {
+          "rank": 5,
+          "checkpoint": "2025",
+          "strategy": "Top3/3 + fixed D7",
+          "display_label": "2025 / Top3/3 + D7",
+          "total_return": -0.24498290924510757,
+          "annualized_log_growth": -0.5576043550663308,
+          "maximum_drawdown": -0.3801417778827144,
+          "trade_count": 54
+        },
+        {
+          "rank": 6,
+          "checkpoint": "2026",
+          "strategy": "Top1/1 + fixed D7",
+          "display_label": "2026 / Top1/1 + D7",
+          "total_return": -0.2622786656982993,
+          "annualized_log_growth": -0.6035878631062014,
+          "maximum_drawdown": -0.45260976472373193,
+          "trade_count": 18
+        },
+        {
+          "rank": 7,
+          "checkpoint": "2024",
+          "strategy": "Top3/3 + fixed D7",
+          "display_label": "2024 / Top3/3 + D7",
+          "total_return": -0.3386630920884639,
+          "annualized_log_growth": -0.8204720663574048,
+          "maximum_drawdown": -0.4215285545826716,
+          "trade_count": 53
+        },
+        {
+          "rank": 8,
+          "checkpoint": "2024",
+          "strategy": "Top1/1 + fixed D7",
+          "display_label": "2024 / Top1/1 + D7",
+          "total_return": -0.5158660662663235,
+          "annualized_log_growth": -1.4393638532668223,
+          "maximum_drawdown": -0.5843219035962628,
+          "trade_count": 18
+        }
       ],
       "cutoff_sensitivity": [
-        {"checkpoint": "2023", "strict_return": 0.6307162934128612, "extended_return": 0.0713964716754687, "late_period_change": -0.5593198217373925},
-        {"checkpoint": "2024", "strict_return": -0.3155989671331699, "extended_return": -0.5158660662663235, "late_period_change": -0.2002670991331536},
-        {"checkpoint": "2025", "strict_return": 0.39383230010070447, "extended_return": 0.1893663848074647, "late_period_change": -0.20446591529323977},
-        {"checkpoint": "2026", "strict_return": 0.03931036361689566, "extended_return": -0.2622786656982993, "late_period_change": -0.30158902931519494}
+        {
+          "checkpoint": "2023",
+          "strict_return": 0.6307162934128612,
+          "extended_return": 0.0713964716754687,
+          "late_period_change": -0.5593198217373925
+        },
+        {
+          "checkpoint": "2024",
+          "strict_return": -0.3155989671331699,
+          "extended_return": -0.5158660662663235,
+          "late_period_change": -0.2002670991331536
+        },
+        {
+          "checkpoint": "2025",
+          "strict_return": 0.39383230010070447,
+          "extended_return": 0.1893663848074647,
+          "late_period_change": -0.20446591529323976
+        },
+        {
+          "checkpoint": "2026",
+          "strict_return": 0.03931036361689566,
+          "extended_return": -0.2622786656982993,
+          "late_period_change": -0.30158902931519493
+        }
       ],
       "unit_time_diagnostics": [
-        {"diagnostic": "最高绝对速度", "checkpoint": "2023", "strategy": "Top1 + fixed D8", "selected_log_speed": 1.4997433204075865, "alpha_log_speed": 1.7308076196604758, "signal_days": 48},
-        {"diagnostic": "最高相对 alpha", "checkpoint": "2025", "strategy": "Top1 + rolling_path", "selected_log_speed": 1.4063172427333857, "alpha_log_speed": 1.8661526672881579, "signal_days": 48}
+        {
+          "diagnostic": "最高绝对速度",
+          "checkpoint": "2023",
+          "strategy": "Top1 + fixed D8",
+          "selected_log_speed": 1.4997433204075865,
+          "alpha_log_speed": 1.7308076196604758,
+          "signal_days": 48
+        },
+        {
+          "diagnostic": "最高相对 alpha",
+          "checkpoint": "2025",
+          "strategy": "Top1 + rolling_path",
+          "selected_log_speed": 1.4063172427333857,
+          "alpha_log_speed": 1.8661526672881579,
+          "signal_days": 48
+        }
       ]
     }
   }

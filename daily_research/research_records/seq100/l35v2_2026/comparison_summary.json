@@ -623,8 +623,6 @@
   "deployment_upgrade": false,
   "integrity": {
     "schema_version": "seq100_integrity_v2",
-    "data_snapshot_sha256": "151256904af2edff42f29c3949719c25043ebfbab9e1b41f17aefa81f1ab545b",
-    "candidate_semantic_sha256": "c20357efabd5b8c22504f8ab7e4682fdb619186aad8e93bd20c63594cbcb6b52",
     "candidate_semantic_detail": {
       "full_label_native_180": "01d3e47ae3c4d3a5b9999e159e5be13b5e48967920094bbbc5ec23cb0ac2cc2c",
       "full_label_common_100_audit": "8bf6e6b62158fd864b410660aaf65cdaa282a9147a29019c8f4841f1e4093a1b",
@@ -633,7 +631,6 @@
       "extended_native_180": "e6f822297c1d738544c71e1cd6b795a93b5ef9576fdaf2dfd1264fe98c545c1f",
       "strict_native_180": "57e9ca97830b3e8e075b7a9b55b19aaecd26f7824cded28fb4d728f6d8443b8c"
     },
-    "evaluation_contract_sha256": "20a92baab5feec24ca3d207d198c7b0ab9ca561f018f9728e268f61615ec3ec7",
     "evaluation_rules": {
       "schema_version": "seq100_structured_180x35_2026_evaluation_v1",
       "metric_semantic_version": "seq100_structured_180x35_2026_metrics_v1",
@@ -662,9 +659,7 @@
       "starting_cash_cny": 1000000.0,
       "candidate_mode": "native_180",
       "common_100_candidate_used_for_coverage_audit_only": true
-    },
-    "model_bundle_sha256": "d06ba9e620b0a6ab63874c15483636af0224aeaf20cbf7ff62b438f0ef4ef34a",
-    "result_artifact_sha256": "f2cc60e28919c2bc9489c7e2227bdbe8d03c865103b8243e493c769999c5f976"
+    }
   },
   "outputs": {
     "full_label_metrics": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_structured_180x35_2026_fold_v1\\full_label_metrics.csv",

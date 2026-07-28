@@ -1,0 +1,40 @@
+{
+  "study_id": "seq100_pit_signal_quality_v1",
+  "objective": "externally_researched_point_in_time_signal_quality_model_selection_for_sustained_post_entry_paths",
+  "data": {
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "candidate_index": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/candidate_index.parquet",
+    "sample_index": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/sample_index.parquet",
+    "universe": "shanghai_shenzhen_mainboard_dynamic_point_in_time_survivorship_complete",
+    "lookback_days": 180,
+    "source_forward_days": 60,
+    "primary_horizon_days": 20,
+    "label_endpoint_cutoff": "2025-12-31",
+    "candidate_membership": "signal_day_known_eligibility_only",
+    "future_label_fill_survival_filter": false
+  },
+  "folds": {
+    "years": [
+      2023,
+      2024,
+      2025
+    ],
+    "purge_trading_days": 60
+  },
+  "models": [
+    "lgbm_lambdarank_multioutput",
+    "tabm_multioutput",
+    "patchtst_student_t_path",
+    "market_industry_deepsets",
+    "deephit_competing_risk",
+    "neuralndcg_listwise_mlp"
+  ],
+  "seeds": {
+    "primary": 7,
+    "robustness": [
+      17,
+      29
+    ]
+  },
+  "output_dir": "daily_research/output/path_policy/studies/seq100_pit_signal_quality_v1"
+}

@@ -4,11 +4,6 @@
   "status": "completed_nonredundant_head_set",
   "completed_at": "2026-07-27T16:27:29+08:00",
   "study_id": "seq100_target_redundancy_audit_v1",
-  "contract": {
-    "path": "daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/contract.json",
-    "contract_sha256": "c012bf5aaa3311b825d6bf92789b0707c6efd4b265d8511e20f1b2863a017934",
-    "contract_file_sha256": "f79c5b35de0bfeb28b6e6ea0becabdfc61dfd0a41e637f59d89de7fcbb23defb"
-  },
   "scope": {
     "fold_years": [
       2023,
@@ -18,7 +13,6 @@
     "fold_role": "user-approved reused recent confirmation/decision folds; not a pristine holdout",
     "prediction_task_count": 24,
     "consumed_evidence_file_count": 126,
-    "consumed_evidence_set_sha256": "3c21690f813da2a4b8604375ebb7338ccf5b528f42db8ee3439fc584c888f853",
     "maximum_consumed_outcome_date": "2025-12-31",
     "forbidden_years_consumed": [],
     "new_booster_count": 0,
@@ -240,80 +234,22 @@
       ]
     }
   ],
-  "runtime": {
-    "foreground_wall_seconds": 333.89256,
-    "memory_guard_lowest_available_gb": 4.945323944091797
-  },
   "evidence": {
     "output_root": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1",
-    "preflight": {
-      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/preflight.json",
-      "sha256": "c6c9fc406c2a9a0c2e4c1f2e746118885edffc40c19e207caec2cc5d79825548"
-    },
     "mfe_cross_horizon": {
-      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/mfe_cross_horizon.json",
-      "sha256": "72435c4c1209853a51c3e2eeb342d58d72c09af4e1988142a3e49d88bb96f23e"
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/mfe_cross_horizon.json"
     },
     "state_vs_mfe": {
-      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/state_vs_mfe.json",
-      "sha256": "98f012c67da33135de668d33bf57fbffe6f2bfde4855090e36de06d6b8054c4d"
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/state_vs_mfe.json"
     },
     "summary": {
-      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/summary.json",
-      "sha256": "a1b27520dc93047e4683858cc85480c5352f1ebf3432d19b8a5190d6b47fbb5c"
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/summary.json"
     },
     "decision": {
-      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/decision.json",
-      "sha256": "73f318855ac76b278cbc932e521cf8791a8f1f457b9fdb5f17cb292c92650ccd"
-    },
-    "memory_guard": {
-      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/memory_guard.json",
-      "sha256": "e1fa55591b90db4f5eeca6a1dd8181b82717133a2a6999bb77a1d28b48f87753"
+      "path": "daily_research/output/path_policy/studies/seq100_target_redundancy_audit_v1/decision.json"
     },
     "source_prediction_task_count": 24,
     "consumed_evidence_file_count": 126,
     "diagnostic_meta_models_retained": false
-  },
-  "mutations": {
-    "qdp": false,
-    "source_pack": false,
-    "source_predictions": false,
-    "formal_model_registry": false,
-    "registered_checkpoints": false,
-    "active_execution": false,
-    "repository_push_authorized": true
-  },
-  "validations": {
-    "focused_tests": {
-      "command": "C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m pytest daily_research/path_policy/tests/test_seq100_target_redundancy_audit.py -q",
-      "status": "passed",
-      "passed_test_count": 5,
-      "duration_seconds": 8.15
-    },
-    "record_source_reconciliation": {
-      "status": "passed",
-      "checked_field_count_after_artifact_hash": 62,
-      "method": "strict equality against the archived contract, frozen summary and decision, exact per-horizon metric arrays, output file SHA-256 values, and the research index"
-    },
-    "brain_doctor": {
-      "status": "ok",
-      "error_count": 0,
-      "warning_count": 0
-    },
-    "brain_integrity": {
-      "status": "known_preexisting_blocked",
-      "error_count": 15,
-      "warning_count": 2,
-      "error_set_sha256": "a5e1a14ba1911d2472b951cb1fbd93197dd302ce920d5184899a65d9ae92839f",
-      "unchanged_from_pre_closeout_baseline": true,
-      "active_study_count_after_closeout": 2,
-      "scope": "all 15 errors are pre-existing registered-model training_summary SHA mismatches; none was modified by this study"
-    },
-    "git_diff_check": {
-      "status": "passed",
-      "scope": "unstaged closeout diff before canonical artifact hashing"
-    }
-  },
-  "active_contract_removed": true,
-  "artifact_sha256": "5c8e14c1b7e67dea789e58146599a1c2fa363703353bf8619b5c8195688b7f40"
+  }
 }

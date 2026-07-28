@@ -1,9 +1,0 @@
- M daily_research/path_policy/qdp_v2_sequence_path_training.py
- M daily_research/path_policy/seq100_candidate_execution.py
- M daily_research/path_policy/seq100_exit_policy_audit.py
- M daily_research/path_policy/seq100_finite_capital_backtest.py
- M daily_research/path_policy/tests/test_qdp_v2_sequence_path_training_development.py
- M daily_research/path_policy/tests/test_seq100_exit_policy_audit.py
- M daily_research/path_policy/tests/test_seq100_finite_capital_backtest.py
-?? daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/
-?? daily_research/studies/pit_l35v2_survivorship_frozen_audit_v1.json

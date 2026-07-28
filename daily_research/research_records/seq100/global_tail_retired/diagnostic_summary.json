@@ -17,11 +17,7 @@
     "best_epoch": 1,
     "checkpoint_policy": "best_development_price_total_loss",
     "score_coverage": 1.0,
-    "geometry_violation_count": 0,
-    "candidate_index_sha256": "c71fed492ef464a82eb9bc7fdc1c6c5b10a26a25809072d116496da851d2ab16",
-    "label_material_sha256": "b406b05f90ccb96debefa1243627fe84abb928d3ec92ff8a1b33d94e60d30aaa",
-    "execution_material_sha256": "afc05376bd597601567412647014973171bd52a29d43905170d2b8ba194c7aec",
-    "cost_contract_sha256": "f682af7908a6b95b389475171973539548170e732727e3617a84c872f6179289"
+    "geometry_violation_count": 0
   },
   "model_quality": {
     "rank_ic": 0.0407465067609409,

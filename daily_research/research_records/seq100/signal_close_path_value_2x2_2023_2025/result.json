@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_deterministic_signal_close_2x2_result",
+  "status": "completed",
+  "completed_at": "2026-07-24",
+  "study_id": "seq100_signal_close_path_value_2x2_v1",
+  "selection_years": [
+    2023,
+    2024,
+    2025
+  ],
+  "retained_evidence": {
+    "policy": "retain_all_successful_outputs_for_reproduction_without_automatic_cleanup",
+    "root": "daily_research/output/path_policy/studies/seq100_signal_close_path_value_2x2_v1",
+    "task_count": 12,
+    "checkpoint_count": 12,
+    "prediction_count": 12,
+    "account_job_count": 4148,
+    "training_validation": "daily_research/output/path_policy/studies/seq100_signal_close_path_value_2x2_v1/training_validation.json",
+    "study_result": "daily_research/output/path_policy/studies/seq100_signal_close_path_value_2x2_v1/reports/study_result.json",
+    "account_contract": "daily_research/output/path_policy/studies/seq100_signal_close_path_value_2x2_v1/account_evaluation/contract.json",
+    "runner": "daily_research/output/path_policy/studies/seq100_signal_close_path_value_2x2_v1/study_evaluation_runner.py"
+  },
+  "training_identity": {
+    "per_year": {
+      "2023": {
+        "train_rows": 5955385,
+        "candidate_rows": 742473
+      },
+      "2024": {
+        "train_rows": 6694518,
+        "candidate_rows": 749653
+      },
+      "2025": {
+        "train_rows": 7442557,
+        "candidate_rows": 747413
+      }
+    },
+    "p1_rank_gradient_budget_evidence_passed": true
+  },
+  "winner": {
+    "profile": "V2C-P0",
+    "top_k": 1,
+    "slot_count": 1,
+    "policy": "fixed_d44",
+    "fixed_day": 44,
+    "cost_scenario": "double_slippage",
+    "starting_cash_cny": 1000000.0,
+    "liquidated_ending_equity_cny": 9104613.69976791,
+    "liquidated_log_growth": 2.208781285016238,
+    "annualized_log_growth": 0.7656298264430426,
+    "full_path_maximum_drawdown": -0.48527365750110496,
+    "annual_log_growth": {
+      "2023": 0.12895526301179241,
+      "2024": 0.41194111298517255,
+      "2025": 1.3073669123500091
+    },
+    "positive_year_count": 3,
+    "qualified": true
+  },
+  "arm_results": [
+    {
+      "profile": "V2C-P0",
+      "policy": "fixed_d44",
+      "top_k": 1,
+      "slot_count": 1,
+      "liquidated_ending_equity_cny": 9104613.69976791,
+      "annualized_log_growth": 0.7656298264430426,
+      "full_path_maximum_drawdown": -0.48527365750110496,
+      "positive_year_count": 3,
+      "qualified": true
+    },
+    {
+      "profile": "V2C-P1",
+      "policy": "fixed_d46",
+      "top_k": 1,
+      "slot_count": 1,
+      "liquidated_ending_equity_cny": 4365713.869350345,
+      "annualized_log_growth": 0.51085693728702,
+      "full_path_maximum_drawdown": -0.5238712514555344,
+      "positive_year_count": 2,
+      "qualified": true
+    },
+    {
+      "profile": "V4-P0",
+      "policy": "fixed_d51",
+      "top_k": 1,
+      "slot_count": 1,
+      "liquidated_ending_equity_cny": 4623583.358168081,
+      "annualized_log_growth": 0.5307494440484555,
+      "full_path_maximum_drawdown": -0.6852345257719148,
+      "positive_year_count": 3,
+      "qualified": true
+    },
+    {
+      "profile": "V4-P1",
+      "policy": "fixed_d37",
+      "top_k": 1,
+      "slot_count": 1,
+      "liquidated_ending_equity_cny": 2212910.2706937487,
+      "annualized_log_growth": 0.27533114920963175,
+      "full_path_maximum_drawdown": -0.8373147349133614,
+      "positive_year_count": 1,
+      "qualified": false
+    }
+  ],
+  "qualified_arm_count": 3,
+  "tasks": [
+    {
+      "task_id": "V2C-P0_2023"
+    },
+    {
+      "task_id": "V2C-P0_2024"
+    },
+    {
+      "task_id": "V2C-P0_2025"
+    },
+    {
+      "task_id": "V2C-P1_2023"
+    },
+    {
+      "task_id": "V2C-P1_2024"
+    },
+    {
+      "task_id": "V2C-P1_2025"
+    },
+    {
+      "task_id": "V4-P0_2023"
+    },
+    {
+      "task_id": "V4-P0_2024"
+    },
+    {
+      "task_id": "V4-P0_2025"
+    },
+    {
+      "task_id": "V4-P1_2023"
+    },
+    {
+      "task_id": "V4-P1_2024"
+    },
+    {
+      "task_id": "V4-P1_2025"
+    }
+  ],
+  "model_state": {
+    "registered_model_registry_changed": false,
+    "active_execution_changed": false,
+    "all_successful_task_checkpoints_retained": true
+  },
+  "next_stages": {
+    "probability_model": "not_started_requires_separate_contract",
+    "strict_oof_trees": "not_started_requires_separate_contract",
+    "oos_2026_confirmation": "not_started_requires_separate_contract",
+    "batch_1024": "paused"
+  }
+}

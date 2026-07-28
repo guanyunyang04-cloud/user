@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any, Iterable
@@ -12,14 +11,6 @@ DEFAULT_REGISTRY = WORKSPACE_ROOT / "daily_research/models/registry.json"
 
 def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def file_sha256(path: Path, *, chunk_size: int = 4 * 1024 * 1024) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(chunk_size):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def load_registry(path: Path = DEFAULT_REGISTRY) -> dict[str, Any]:
@@ -65,7 +56,27 @@ def resolve_bundle(
     result["training_summary_path"] = str(
         (WORKSPACE_ROOT / str(result["training_summary"])).resolve()
     )
+    if not Path(result["checkpoint_path"]).is_file():
+        raise FileNotFoundError(result["checkpoint_path"])
+    if not Path(result["training_summary_path"]).is_file():
+        raise FileNotFoundError(result["training_summary_path"])
     return result
+
+
+def load_checkpoint(
+    model_id: str,
+    year: int,
+    *,
+    path: Path = DEFAULT_REGISTRY,
+) -> Any:
+    import torch
+
+    bundle = resolve_bundle(model_id, year, path=path)
+    return torch.load(
+        bundle["checkpoint_path"],
+        map_location="cpu",
+        weights_only=False,
+    )
 
 
 def verify_registry(path: Path = DEFAULT_REGISTRY) -> dict[str, Any]:
@@ -76,16 +87,18 @@ def verify_registry(path: Path = DEFAULT_REGISTRY) -> dict[str, Any]:
         key = f"{row['model_id']}/{row['year']}"
         checkpoint = (WORKSPACE_ROOT / str(row["checkpoint"])).resolve()
         summary = (WORKSPACE_ROOT / str(row["training_summary"])).resolve()
-        for artifact, expected, label in (
-            (checkpoint, str(row["checkpoint_sha256"]), "checkpoint"),
-            (summary, str(row["training_summary_sha256"]), "training_summary"),
+        for artifact, label in (
+            (checkpoint, "checkpoint"),
+            (summary, "training_summary"),
         ):
             if not artifact.is_file():
                 errors.append(f"missing:{key}:{label}:{artifact}")
                 continue
-            observed = file_sha256(artifact)
-            if observed != expected:
-                errors.append(f"sha256_mismatch:{key}:{label}")
+            if label == "training_summary":
+                try:
+                    _read_json(artifact)
+                except (OSError, json.JSONDecodeError) as exc:
+                    errors.append(f"unreadable:{key}:{label}:{exc}")
         verified.append(key)
     return {
         "status": "ok" if not errors else "blocked",

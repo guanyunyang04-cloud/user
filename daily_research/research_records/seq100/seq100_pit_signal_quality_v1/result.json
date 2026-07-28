@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_pit_signal_quality_research_record",
+  "status": "research_design_insufficient",
+  "completed_at": "2026-07-26T15:28:45+08:00",
+  "study_id": "seq100_pit_signal_quality_v1",
+  "selection_years": [
+    2023,
+    2024,
+    2025
+  ],
+  "confirmation_year": 2026,
+  "external_research": {
+    "review_path": "daily_research/output/path_policy/studies/seq100_pit_signal_quality_v1/research/research_review.json",
+    "source_count": 38,
+    "paper_or_book_count": 23,
+    "official_or_author_repository_count": 14,
+    "research_freeze_path": "daily_research/output/path_policy/studies/seq100_pit_signal_quality_v1/research/research_freeze.json"
+  },
+  "target": {
+    "status": "target_frozen",
+    "frozen_target_id": "pareto_ordinal_v1",
+    "target_manifest": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_pit_signal_quality_v1\\targets\\attempt_003\\target_manifest.json"
+  },
+  "features": {
+    "selected_profile": "F1",
+    "feature_freeze": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_pit_signal_quality_v1\\feature_screen\\attempt_002\\feature_freeze.json"
+  },
+  "formal_matrix": {
+    "model_ids": [
+      "lgbm_lambdarank_multioutput",
+      "tabm_multioutput",
+      "patchtst_student_t_path",
+      "market_industry_deepsets",
+      "deephit_competing_risk",
+      "neuralndcg_listwise_mlp"
+    ],
+    "formal_matrix": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_pit_signal_quality_v1\\model_screen\\attempt_001\\formal_matrix.json"
+  },
+  "terminal_evidence": {
+    "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_pit_signal_quality_v1\\design_invalidation\\attempt_001\\design_invalidation.json"
+  },
+  "winner": null,
+  "selector_winner": null,
+  "best_path_forecaster": null,
+  "key_statistics": {
+    "baseline_summaries": null,
+    "three_seed_model_summaries": null,
+    "final_qualification": null,
+    "reason": null
+  },
+  "retained_evidence": {
+    "root": "daily_research/output/path_policy/studies/seq100_pit_signal_quality_v1",
+    "checkpoints_retained": true,
+    "predictions_retained": true,
+    "logs_retained": true,
+    "source_review_retained": true
+  },
+  "design_invalidation": {
+    "class": "objective_cannot_answer_stated_question",
+    "statement": "The frozen primary metric U = min(g5/5, g10/10, g20/20) and the frozen ranking target pareto_ordinal_v1 rank path robustness rather than compounded growth, so this study cannot answer its own stated question of selecting a signal-quality model that maximizes long-run single-slot compounded growth. Perfect-foresight daily Top-1% annualized log growth is 1.03 / 1.72 / 1.28 for the frozen target across folds 2023 / 2024 / 2025 versus 4.53 / 5.13 / 5.99 for log1p(d20_net_return), so the frozen target caps achievable growth near 23 percent of the return-only reference on the same universe and selection size.",
+    "structural_argument": "The defect is structural, not a training or tuning failure. U is a minimum over horizon speeds, which is a robustness criterion mathematically equivalent to rewarding low path amplitude, and it is positive for only 21.7 / 25.7 / 30.9 percent of filled candidates, so six model families with negative mean U reflect the metric rather than absent alpha. The frozen target carries per-day IC of -0.67 to -0.73 against mdd20, and the trained LightGBM score inherits that: its IC against d20_net_return is only 0.1256 / 0.1016 / 0.0675 while its IC against mdd20 is -0.5387 / -0.5168 / -0.6301 and against realized amplitude about -0.50. The resulting selection is defensive by construction, beating the candidate universe in 2023 and 2024 and losing to it by 29 percentage points annualized in 2025, and its decile d20 curve is inverted-U with dec3 and dec4 above the top-scoring dec9. No choice of model family, seed, feature profile, or training budget can remove a ceiling imposed by the label itself, and the qualification gate compounds the defect by bootstrapping only the model-minus-baseline delta with no absolute positive-growth bound, which permits a negative-expectation winner. Continuing the remaining 15 formal cells would spend compute confirming a ranking objective that is misaligned with the study goal.",
+    "evidence": [
+      {
+        "path": "daily_research/brain/references/seq100_signal_quality_target_diagnosis_20260726.md"
+      },
+      {
+        "path": "tmp/seq100_label_ceiling.py"
+      },
+      {
+        "path": "tmp/seq100_ic_growth_transfer.py"
+      },
+      {
+        "path": "daily_research/output/path_policy/studies/seq100_pit_signal_quality_v1/training/lgbm_lambdarank_multioutput/fold_2023/seed_7/attempts/attempt_001/predictions.parquet"
+      },
+      {
+        "path": "daily_research/output/path_policy/studies/seq100_pit_signal_quality_v1/training/lgbm_lambdarank_multioutput/fold_2024/seed_7/attempts/attempt_001/predictions.parquet"
+      },
+      {
+        "path": "daily_research/output/path_policy/studies/seq100_pit_signal_quality_v1/training/lgbm_lambdarank_multioutput/fold_2025/seed_7/attempts/attempt_001/predictions.parquet"
+      }
+    ],
+    "inspected_alternatives": [
+      "U_min_speed_frozen_primary",
+      "pareto_ordinal_v1_frozen_target",
+      "g20_log1p_d20_net_return",
+      "g20_minus_0.25_mdd20",
+      "g20_minus_0.50_mdd20",
+      "g20_minus_1.00_mdd20",
+      "g20_minus_0.5_excess_mdd_tol_0.10",
+      "g20_minus_1.0_excess_mdd_tol_0.10",
+      "calmar_g20_over_max_mdd20_0.02",
+      "synthetic_IC_calibrated_g20_predictor_transfer_curve"
+    ],
+    "burned_fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "successor": {
+      "required": true,
+      "must_be_new_study_contract": true,
+      "formal_replacement_in_this_study": false,
+      "burned_fold_years_are_discovery_only": true
+    }
+  }
+}
