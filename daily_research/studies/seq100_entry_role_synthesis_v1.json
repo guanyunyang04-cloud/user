@@ -1,0 +1,142 @@
+{
+  "study_id": "seq100_entry_role_synthesis_v1",
+  "objective": "Reassess existing OOS MFE feature variants by role and test state/risk coordinates conditionally inside high predicted MFE candidates without retraining or score fusion.",
+  "sources": {
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "path_study_config": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
+    "path_output_root": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1"
+  },
+  "folds": {
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "maximum_outcome_date": "2025-12-31",
+    "fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine holdout",
+    "date_weighting": "each OOS signal date contributes equally",
+    "row_alignment": "all compared predictions must share the exact candidate row index within horizon-year"
+  },
+  "models": {
+    "train_new_boosters": false,
+    "retain_meta_models": false,
+    "mfe_variants": {
+      "10": [
+        "baseline",
+        "turnover_cost_proxy"
+      ],
+      "20": [
+        "baseline",
+        "breakout_retest_levels",
+        "traditional_indicators"
+      ]
+    },
+    "auxiliary_scores": {
+      "state_high_probability_10": {
+        "horizon": 10,
+        "source_target": "state",
+        "score": "probability_of_high_state",
+        "higher_is_better": true
+      },
+      "state_expected_value_10": {
+        "horizon": 10,
+        "source_target": "state",
+        "score": "P(mid) + 2 * P(high)",
+        "higher_is_better": true
+      },
+      "state_low_avoidance_10": {
+        "horizon": 10,
+        "source_target": "state",
+        "score": "1 - P(low)",
+        "higher_is_better": true
+      },
+      "pre_peak_mae_10": {
+        "horizon": 10,
+        "source_target": "pre_peak_mae",
+        "score": "predicted_pre_peak_mae",
+        "higher_is_better": true
+      },
+      "pre_peak_mae_20": {
+        "horizon": 20,
+        "source_target": "pre_peak_mae",
+        "score": "predicted_pre_peak_mae",
+        "higher_is_better": true
+      }
+    }
+  },
+  "evaluation": {
+    "early_horizon_by_target": {
+      "10": 5,
+      "20": 10
+    },
+    "role_metrics": [
+      "daily_spearman_rank_ic",
+      "top1_and_top5_realized_mfe",
+      "top1_and_top5_realized_mfe_top_quintile_rate",
+      "early_opportunity_share",
+      "first_legal_peak_day",
+      "pre_peak_mae",
+      "endpoint_return",
+      "high_state_rate"
+    ],
+    "relationship_metrics": [
+      "daily_prediction_spearman_and_pearson",
+      "top1_and_top5_overlap_and_jaccard",
+      "challenger_only_minus_baseline_only_path_quality",
+      "reciprocal_rank_ic_and_high_half_minus_low_half_inside_host_top5"
+    ],
+    "mfe_top_fractions": [
+      0.01,
+      0.05
+    ],
+    "auxiliary_quantile_count": 5,
+    "retention_fractions": [
+      0.2,
+      0.4,
+      0.5,
+      0.6,
+      0.8,
+      1.0
+    ],
+    "reference_top_fraction": 0.05,
+    "reference_retention_fraction": 0.5,
+    "mfe_tail_event": "within-date realized MFE top quintile in the full eligible cross-section",
+    "deep_adverse_event": "within-date realized pre-peak MAE bottom quintile in the full eligible cross-section",
+    "overlap_control": "Newey-West HAC on daily paired values with lag H-1",
+    "report_each_year_separately": true
+  },
+  "decision": {
+    "strong_candidate_role": {
+      "minimum_positive_top5_mfe_years": 3,
+      "minimum_positive_tail_hit_years": 2,
+      "minimum_worst_year_rank_ic_delta": -0.002
+    },
+    "broad_ranking_role": {
+      "minimum_positive_rank_ic_years": 3
+    },
+    "replacement_evidence": {
+      "minimum_positive_challenger_exclusive_mfe_years": 2
+    },
+    "conditional_coordinate": {
+      "minimum_mfe_mean_retention_ratio": 0.97,
+      "maximum_tail_hit_rate_loss": 0.02,
+      "intended_metric_must_improve_each_year": true,
+      "highest_vs_lowest_auxiliary_quintile_must_improve_each_year": true
+    },
+    "state_20_role": "retain only as a secondary comparison from prior target redundancy; do not add it to the primary entry output in this audit",
+    "no_fusion": true
+  },
+  "non_selections": [
+    "entry_score_fusion",
+    "holding_model",
+    "exit_rule",
+    "holding_period",
+    "slot_count",
+    "leverage",
+    "stop_loss",
+    "account_policy",
+    "post_entry_state_update_model"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1"
+}

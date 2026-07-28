@@ -1,0 +1,292 @@
+{
+  "schema_version": 1,
+  "artifact_type": "seq100_entry_role_synthesis_research_record",
+  "study_id": "seq100_entry_role_synthesis_v1",
+  "status": "completed_without_retraining_or_fusion",
+  "completed_at": "2026-07-28T22:11:27+08:00",
+  "question": "Which existing MFE feature variants should own strong-candidate selection, and do state_10 and pre-peak adversity predictions add useful conditional path coordinates inside high predicted MFE candidates?",
+  "scope": {
+    "candidate_universe_count": 8674588,
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine holdout",
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "mfe_oos_rows_by_horizon": {
+      "10": 2199260,
+      "20": 2168734
+    },
+    "reused_mfe_predictions": 15,
+    "reused_auxiliary_predictions": 9,
+    "new_boosters": 0,
+    "retained_meta_models": 0
+  },
+  "decision": {
+    "mfe_10": "replace the baseline score with the base-plus-turnover-cost model as the strong-candidate opportunity head",
+    "mfe_20": "replace the baseline score with the base-plus-breakout/retest model as the strong-candidate opportunity head",
+    "traditional_indicators_20": "retain only as a broad-ranking diagnostic; do not use it as the strong-candidate MFE head or a separate entry coordinate",
+    "state_10": "retain the full low/mid/high probability vector as an independent path-state coordinate, but do not apply a monotone hard filter; P(high), expected state, and low-state avoidance expose different opportunity/path tradeoffs",
+    "state_20": "retain only as the prior secondary comparison, not as a primary entry output",
+    "pre_peak_mae_10": "retain as an independent D10 adversity coordinate; it identifies safer paths but is not an opportunity-preserving hard filter",
+    "pre_peak_mae_20": "retain as an independent D20 adversity coordinate; it identifies safer paths but is not an opportunity-preserving hard filter",
+    "entry_output_contract": {
+      "coordinate_block_count": 5,
+      "coordinates": [
+        "mfe_10 scalar from turnover_cost_proxy",
+        "mfe_20 scalar from breakout_retest_levels",
+        "state_10 low/mid/high probability vector",
+        "pre_peak_mae_10 scalar",
+        "pre_peak_mae_20 scalar"
+      ],
+      "state_vector_degrees_of_freedom": 2,
+      "fusion_selected": false
+    }
+  },
+  "feature_role_evidence": {
+    "turnover_cost_proxy_d10": {
+      "role": "strong_candidate_selection",
+      "rank_ic_delta_2023_2024_2025": [
+        -0.000547,
+        0.002404,
+        0.002809
+      ],
+      "top5_mfe_delta_2023_2024_2025": [
+        0.000517,
+        0.000564,
+        0.000866
+      ],
+      "top5_tail_hit_delta_2023_2024_2025": [
+        0.00328,
+        0.001818,
+        0.005205
+      ],
+      "challenger_only_minus_baseline_only_top5_mfe_2023_2024_2025": [
+        0.010175,
+        0.00508,
+        0.002221
+      ],
+      "daily_prediction_spearman_2023_2024_2025": [
+        0.984818,
+        0.969335,
+        0.963234
+      ],
+      "top5_candidate_overlap_2023_2024_2025": [
+        0.918705,
+        0.791364,
+        0.804816
+      ],
+      "path_caveat": "The opportunity improvement is small but directionally stable. Early realization, peak day, pre-peak adversity, endpoint, and high-state deltas are mixed or small; this is an opportunity-head replacement, not a general path-quality claim."
+    },
+    "breakout_retest_levels_d20": {
+      "role": "strong_candidate_selection",
+      "rank_ic_delta_2023_2024_2025": [
+        -0.001291,
+        0.001934,
+        0.002519
+      ],
+      "top5_mfe_delta_2023_2024_2025": [
+        0.002134,
+        0.004268,
+        0.00143
+      ],
+      "top5_tail_hit_delta_2023_2024_2025": [
+        0.007153,
+        0.014887,
+        0.004791
+      ],
+      "challenger_only_minus_baseline_only_top5_mfe_2023_2024_2025": [
+        0.013781,
+        0.009222,
+        0.000458
+      ],
+      "daily_prediction_spearman_2023_2024_2025": [
+        0.882644,
+        0.926511,
+        0.942383
+      ],
+      "top5_candidate_overlap_2023_2024_2025": [
+        0.921568,
+        0.551591,
+        0.691455
+      ],
+      "path_caveat": "The stronger opportunity generally peaks later and realizes a smaller share by D10. Endpoint and adversity improve in some folds but not uniformly, so breakout/retest owns opportunity selection rather than path-quality screening."
+    },
+    "traditional_indicators_d20": {
+      "role": "broad_ranking_only",
+      "rank_ic_delta_2023_2024_2025": [
+        0.003697,
+        0.003506,
+        0.004097
+      ],
+      "top5_mfe_delta_2023_2024_2025": [
+        -0.001948,
+        0.001232,
+        -0.001375
+      ],
+      "top5_tail_hit_delta_2023_2024_2025": [
+        -0.009114,
+        0.004359,
+        -0.003812
+      ],
+      "challenger_only_minus_baseline_only_top5_mfe_2023_2024_2025": [
+        -0.022794,
+        0.006654,
+        -0.009135
+      ],
+      "interpretation": "Traditional indicators sort the broad cross-section more accurately but replace strong candidates poorly in two of three years. Breakout/retest continues to distinguish realized MFE inside the traditional-indicator Top 5% in every year, so the two scores have different roles rather than equal head status."
+    }
+  },
+  "conditional_path_evidence": {
+    "reference_definition": "Within each date's selected MFE-head Top 5%, retain the top 50% by the auxiliary score; compare with the unfiltered Top 5% pool. Grid evidence compares the highest and lowest auxiliary quintiles inside the same pool.",
+    "state_10": {
+      "probability_of_high_state": {
+        "status": "not_supported_as_a_path_quality_filter",
+        "mfe_mean_retention_ratio_2023_2024_2025": [
+          1.116621,
+          1.029604,
+          1.046189
+        ],
+        "high_state_rate_delta_2023_2024_2025": [
+          0.019203,
+          0.005614,
+          0.016502
+        ],
+        "endpoint_return_delta_2023_2024_2025": [
+          -0.002374,
+          -0.000084,
+          -0.001691
+        ],
+        "interpretation": "P(high) finds more upside and more realized high-state paths, but it also raises low-state incidence and adversity; it is a volatile-opportunity projection rather than a clean persistence projection."
+      },
+      "expected_state": {
+        "status": "informative_but_opportunity_tradeoff",
+        "mfe_mean_retention_ratio_2023_2024_2025": [
+          0.91535,
+          0.985576,
+          0.923942
+        ],
+        "mfe_tail_hit_delta_2023_2024_2025": [
+          -0.022485,
+          -0.010812,
+          -0.025886
+        ],
+        "endpoint_return_delta_2023_2024_2025": [
+          0.006112,
+          0.009263,
+          0.007992
+        ],
+        "expected_state_delta_2023_2024_2025": [
+          0.037629,
+          0.049439,
+          0.051651
+        ],
+        "highest_minus_lowest_endpoint_delta_2023_2024_2025": [
+          0.025373,
+          0.035335,
+          0.031304
+        ]
+      },
+      "low_state_avoidance": {
+        "status": "informative_but_opportunity_tradeoff",
+        "low_state_rate_delta_2023_2024_2025": [
+          -0.048315,
+          -0.045429,
+          -0.057678
+        ],
+        "endpoint_return_delta_2023_2024_2025": [
+          0.006347,
+          0.008727,
+          0.007682
+        ],
+        "mfe_mean_retention_ratio_2023_2024_2025": [
+          0.896895,
+          0.970761,
+          0.914913
+        ]
+      }
+    },
+    "pre_peak_mae_10": {
+      "status": "informative_but_opportunity_tradeoff",
+      "pre_peak_mae_delta_2023_2024_2025": [
+        0.005843,
+        0.006565,
+        0.008021
+      ],
+      "deep_adverse_rate_delta_2023_2024_2025": [
+        -0.045435,
+        -0.063067,
+        -0.061002
+      ],
+      "mfe_mean_retention_ratio_2023_2024_2025": [
+        0.901943,
+        0.95425,
+        0.919889
+      ],
+      "mfe_tail_hit_delta_2023_2024_2025": [
+        -0.030154,
+        -0.022287,
+        -0.029221
+      ]
+    },
+    "pre_peak_mae_20": {
+      "status": "informative_but_opportunity_tradeoff",
+      "pre_peak_mae_delta_2023_2024_2025": [
+        0.005646,
+        0.006623,
+        0.008814
+      ],
+      "deep_adverse_rate_delta_2023_2024_2025": [
+        -0.053475,
+        -0.057357,
+        -0.071233
+      ],
+      "mfe_mean_retention_ratio_2023_2024_2025": [
+        0.900173,
+        0.926442,
+        0.946032
+      ],
+      "mfe_tail_hit_delta_2023_2024_2025": [
+        -0.032256,
+        -0.038222,
+        -0.023563
+      ]
+    },
+    "gentle_80pct_retention": {
+      "interpretation": "Keeping 80% reduces the tradeoff but does not remove it across all years. Expected-state MFE retention is 95.62%/99.40%/96.90%; D10 risk retention is 94.03%/98.51%/96.25%; D20 risk retention is 94.61%/97.09%/97.88%. Each coordinate still improves endpoint or adversity, so it belongs in the output vector rather than a default exclusion rule."
+    }
+  },
+  "validation": {
+    "status": "ready_with_reuse_caveat",
+    "new_test_count": 8,
+    "module_self_test_count": 3,
+    "independent_numeric_checks": 612,
+    "date_symbol_duplicate_count": 0,
+    "forbidden_2026_row_count": 0,
+    "state_probability_maximum_row_sum_error": 4.470348358154297e-08,
+    "legal_missing_mfe_rows": {
+      "d10_2023": 42,
+      "d10_2024": 61,
+      "d10_2025": 49,
+      "d20_2023": 0,
+      "d20_2024": 0,
+      "d20_2025": 0
+    }
+  },
+  "limitations": [
+    "The three recent folds are repeatedly reused decision evidence, not a pristine final holdout.",
+    "Role replacement is based on stable effect direction, bounded broad-rank harm, and exclusive-candidate quality; not every yearly delta is individually HAC-significant.",
+    "Conditional curves diagnose path tradeoffs. They do not choose a retention threshold, slot count, portfolio, stop loss, holding period, or exit rule.",
+    "D10 and D20 adversity outputs were each validated against their matching MFE head; this study did not prove that the two risk horizons can be algebraically collapsed.",
+    "State_10 remains a vector coordinate. No evidence here supports reducing its three probabilities to one fixed scalar for all entry decisions."
+  ],
+  "next_step": "Freeze these five entry output blocks, then design the post-entry state-update target using original entry information plus realized D1/D3/D5 path. Do not fit an entry fusion score or account policy first.",
+  "outputs": {
+    "summary": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/summary.json",
+    "decision": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/decision.json",
+    "role_daily": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/role_comparison",
+    "model_relationship_daily": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/model_relationship",
+    "conditional_curves_and_grids": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/conditional"
+  }
+}

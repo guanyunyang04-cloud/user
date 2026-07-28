@@ -9,35 +9,28 @@ quality and risk, followed later by a separate post-entry state-update model.
 Repository workflow simplification is complete; scientific scope, data,
 checkpoints, predictions, and generated features were retained.
 
-## Completed objective alignment
+## Completed entry-role synthesis
 
-`seq100_mfe_objective_alignment_v1` compared source Huber, smooth upper-tail
-weighted Huber, and daily LambdaRank for `mfe_10` and `mfe_20`. All 12 new
-LightGBM tasks completed over the 2023-2025 folds. The compact result is
-`daily_research/research_records/seq100/seq100_mfe_objective_alignment_v1/result.json`.
+`seq100_entry_role_synthesis_v1` reused 15 MFE and 9 state/risk OOS
+predictions over the 2023-2025 folds. It trained no booster or meta model and
+read no 2026 row. The compact result is
+`daily_research/research_records/seq100/seq100_entry_role_synthesis_v1/result.json`.
 
-- Keep the original date-equal Huber as the primary continuous MFE objective.
-- Tail weighting found slightly faster opportunities but also deeper pre-peak
-  adversity, worse endpoints, and biased magnitude estimates; it is not the default.
-- LambdaRank improved broad Rank IC in every horizon-year comparison, but
-  consistently weakened the strongest realized MFE tail. Its smoother paths
-  support a separate path-quality output rather than replacing the MFE head.
-
-## Current scientific position
-
-- Pre-entry opportunity is best represented first by separate `mfe_10` and `mfe_20` scalar heads.
-- `state_10` remains the core entry-state challenger; `state_20` is secondary.
-- D3/D5 path probabilities remain useful for a later post-entry state-update model, not as independent entry rankings.
-- Opportunity, path state, and pre-peak adverse movement should remain separate outputs until evidence supports a joint loss.
-- No holding period, exit rule, slot count, leverage, stop loss, or final entry score has been selected.
-- The completed feature-family audit remains reusable: D10 turnover-cost helped
-  the strongest tail, D20 breakout/retest helped the strongest tail, and D20
-  traditional indicators helped broad ranking but hurt the tail in two years.
+- Use base plus `turnover_cost_proxy` for the `mfe_10` strong-candidate head.
+- Use base plus `breakout_retest_levels` for the `mfe_20` strong-candidate head.
+- `traditional_indicators` is a broad-ranking diagnostic, not a third MFE head.
+- Keep `state_10` as the full low/mid/high probability vector. `P(high)` favors
+  volatile opportunity, while expected state and low-state avoidance improve
+  endpoint/path quality at an MFE cost; no single monotone state filter is selected.
+- Keep `pre_peak_mae_10` and `pre_peak_mae_20` as separate adversity coordinates.
+  Both reduce deep adverse paths, but neither is an opportunity-preserving hard filter.
+- The current pre-entry contract has five output blocks: two MFE scalars, one
+  state probability vector, and two horizon-specific adversity scalars.
+- No fused score, retention threshold, holding model, exit rule, holding period,
+  slot count, leverage, stop loss, or account policy has been selected.
 
 ## Next action
 
-Do not run more MFE objective variants or retrain feature models that already
-exist. Reuse existing Huber predictions to make a no-retraining role synthesis
-of D10 turnover-cost, D20 breakout/retest, and D20 traditional indicators.
-Then test whether `state_10` and an independent adverse-path output improve
-selection conditionally inside high predicted MFE candidates.
+Freeze the five pre-entry output blocks. Design the post-entry state-update
+target from original entry information plus realized D1/D3/D5 path, without
+first introducing an entry fusion score or account policy.
