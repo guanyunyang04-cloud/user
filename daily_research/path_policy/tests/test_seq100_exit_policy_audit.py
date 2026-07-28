@@ -8,7 +8,7 @@ import pytest
 from daily_research.path_policy.seq100_candidate_execution import (
     _cashflow,
     _resolve_plan,
-    parse_execution_cost_contract,
+    parse_execution_costs,
 )
 from daily_research.path_policy.seq100_exit_policy_audit import (
     _next_valid_exit_indices,
@@ -20,8 +20,7 @@ from daily_research.path_policy.seq100_exit_policy_audit import (
 
 def _manifest() -> dict:
     return {
-        "execution_cost_contract": {
-            "contract": "a_share_round_trip_cashflow_v1",
+        "execution_costs": {
             "lot_size": 100,
             "commission_bps": 3.0,
             "minimum_commission_cny": 5.0,
@@ -85,7 +84,7 @@ def test_vector_fixed_policy_matches_authoritative_scalar_cashflow(
     filled, entries, prices, sellable = _fixture()
     planned_days = np.asarray([2, 2, 6, 3])
     next_valid = _next_valid_exit_indices(prices, sellable)
-    contract = parse_execution_cost_contract(_manifest())
+    contract = parse_execution_costs(_manifest())
     dates = _date_values()
     plan = resolve_planned_exit_batch(
         signal_date_idx=0,
@@ -153,7 +152,7 @@ def test_vector_oracle_matches_scalar_search_and_dominates_every_fixed_day(
 ) -> None:
     filled, entries, prices, sellable = _fixture()
     next_valid = _next_valid_exit_indices(prices, sellable)
-    contract = parse_execution_cost_contract(_manifest())
+    contract = parse_execution_costs(_manifest())
     dates = _date_values()
     oracle_plan, oracle_cash = oracle_executable_outcome_batch(
         signal_date_idx=0,

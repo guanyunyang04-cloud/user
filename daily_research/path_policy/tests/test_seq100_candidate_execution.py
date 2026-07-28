@@ -6,7 +6,6 @@ import pytest
 
 from daily_research.path_policy.seq100_candidate_execution import (
     evaluate_candidate_execution,
-    execution_cost_contract_sha256,
 )
 
 
@@ -14,8 +13,7 @@ def _manifest(*, forward_days: int = 3, tail_days: int = 1, recovery: float = 0.
     return {
         "forward_days": forward_days,
         "execution_tail_days": tail_days,
-        "execution_cost_contract": {
-            "contract": "a_share_round_trip_cashflow_v1",
+        "execution_costs": {
             "lot_size": 100,
             "commission_bps": 3.0,
             "minimum_commission_cny": 5.0,
@@ -34,7 +32,7 @@ def _manifest(*, forward_days: int = 3, tail_days: int = 1, recovery: float = 0.
             "slippage_application": "buy_price*(1+bps/10000), sell_price*(1-bps/10000)",
             "unaffordable_or_unfilled_order": "retain_cash",
         },
-        "terminal_execution_contract": {
+        "terminal_execution": {
             "unresolved_after_tail": "apply_precommitted_recovery_fraction",
             "recovery_fraction_of_entry_notional": recovery,
         },
@@ -233,5 +231,6 @@ def test_topk_retains_every_selected_name_and_cash_slot() -> None:
     assert topk["selected_realized_plan_coverage"] == 1.0
     assert topk["selected_cash_retained_count_base"] == 2
     assert topk["selected_terminal_recovery_count_base"] == 1
-    assert topk["execution_cost_contract_sha256"] == execution_cost_contract_sha256(manifest)
+    assert result.execution_costs.lot_size == 100
+    assert result.execution_costs.slippage_bps == 7.0
     assert topk["selected_net_realized_plan_return_stress"] <= topk["selected_net_realized_plan_return_base"]

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import gc
-import hashlib
 import importlib.util
 import json
 import math
@@ -24,7 +22,8 @@ from daily_research.path_policy import seq100_path_label_learnability as base
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_short_horizon_target_reaudit_v1"
 DEFAULT_STUDY_PATH = (
-    WORKSPACE_ROOT / "daily_research/studies/seq100_short_horizon_target_reaudit_v1.json"
+    WORKSPACE_ROOT
+    / "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/config.json"
 )
 DEFAULT_INPUT_ROOT = (
     WORKSPACE_ROOT / "tmp/seq100_short_horizon_target_reaudit/attempt_001"
@@ -33,9 +32,9 @@ DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
     / "daily_research/output/path_policy/studies/seq100_short_horizon_target_reaudit_v1"
 )
-OLD_CONTRACT_PATH = (
+OLD_CONFIG_PATH = (
     WORKSPACE_ROOT
-    / "daily_research/research_records/seq100/seq100_path_label_learnability_v1/contract.json"
+    / "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json"
 )
 OLD_OUTPUT_ROOT = (
     WORKSPACE_ROOT
@@ -65,24 +64,6 @@ FLAG_STATE_ASSIGNED = np.uint16(1 << 7)
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def _canonical_sha256(value: Any) -> str:
-    raw = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def _file_sha256(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(chunk_size):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -149,7 +130,6 @@ def _file_record(
     record: dict[str, Any] = {
         "path": str(path.resolve()),
         "size": int(path.stat().st_size),
-        "sha256": _file_sha256(path),
     }
     if shape is not None:
         record["shape"] = [int(value) for value in shape]
@@ -275,7 +255,7 @@ def prepare_d3_atlas(input_root: Path) -> dict[str, Any]:
         macro_labels=macro_labels,
         output_root=output_root,
     )
-    selected_profile = atlas.summarize_horizon_clusters(
+    _selected_profile = atlas.summarize_horizon_clusters(
         paths=paths,
         labels=selected,
         family="selected",
@@ -386,9 +366,8 @@ def prepare_d3_atlas(input_root: Path) -> dict[str, Any]:
         },
         "source": {
             "horizon_atlas_script": str(HORIZON_ATLAS_SCRIPT.resolve()),
-            "horizon_atlas_script_sha256": _file_sha256(HORIZON_ATLAS_SCRIPT),
             "pre2023_path_root": str(PRE2023_ATLAS_ROOT.resolve()),
-            "source_audit_sha256": _file_sha256(output_root / "source_audit.json"),
+            "source_audit": str((output_root / "source_audit.json").resolve()),
         },
     }
     _write_json(summary_path, payload)
@@ -571,15 +550,14 @@ def prepare_short_labels(input_root: Path) -> dict[str, Any]:
         "outcome_cutoff": "2025-12-31",
         "label_columns": list(SHORT_LABEL_COLUMNS),
         "state_column": "state_3",
-        "pack_manifest_sha256": str(source.pack_sha256),
-        "feature_view_manifest_sha256": str(source.feature_view_sha256),
-        "d3_model_sha256": _file_sha256(d3_model_path),
-        "input_prep_script_sha256": _file_sha256(INPUT_PREP_SCRIPT),
+        "pack_manifest": str(source.pack_path.resolve()),
+        "feature_view_manifest": str(source.feature_view_path.resolve()),
+        "d3_model": str(d3_model_path.resolve()),
+        "input_prep_script": str(INPUT_PREP_SCRIPT.resolve()),
     }
-    config_sha = _canonical_sha256(config)
     if paths["progress"].is_file():
         progress = json.loads(paths["progress"].read_text(encoding="utf-8"))
-        if str(progress.get("config_sha256")) != config_sha:
+        if dict(progress.get("config", {})) != config:
             raise ValueError("existing short-label output uses another config")
         mode = "r+"
     else:
@@ -589,7 +567,6 @@ def prepare_short_labels(input_root: Path) -> dict[str, Any]:
         progress = {
             "status": "initialized",
             "config": config,
-            "config_sha256": config_sha,
             "next_date_idx": int(source.signal_start_idx),
             "processed_candidates": 0,
             "created_at": _now(),
@@ -698,13 +675,9 @@ def prepare_short_labels(input_root: Path) -> dict[str, Any]:
         },
         "source": {
             "pack_manifest": str(source.pack_path.resolve()),
-            "pack_manifest_sha256": str(source.pack_sha256),
             "feature_view_manifest": str(source.feature_view_path.resolve()),
-            "feature_view_manifest_sha256": str(source.feature_view_sha256),
             "input_prep_script": str(INPUT_PREP_SCRIPT.resolve()),
-            "input_prep_script_sha256": _file_sha256(INPUT_PREP_SCRIPT),
             "d3_state_model": str(d3_model_path.resolve()),
-            "d3_state_model_sha256": _file_sha256(d3_model_path),
         },
         "files": {
             "short_labels": _file_record(
@@ -721,7 +694,6 @@ def prepare_short_labels(input_root: Path) -> dict[str, Any]:
             "generation_progress": _file_record(paths["progress"]),
         },
     }
-    payload["resolved_short_label_manifest_sha256"] = _canonical_sha256(payload)
     _write_json(manifest_path, payload)
     _emit("short_labels_complete", candidate_count=source.candidate_count)
     return payload
@@ -741,9 +713,9 @@ def _weighted_quantile(values: np.ndarray, weights: np.ndarray, quantile: float)
     return float(sorted_values[min(int(np.searchsorted(cumulative, target, side="left")), len(sorted_values) - 1)])
 
 
-def _load_old_inputs(*, verify_large_hashes: bool = False) -> base.LearnabilityInputs:
-    study = base.load_study(OLD_CONTRACT_PATH)
-    return base.LearnabilityInputs(study, verify_large_hashes=verify_large_hashes)
+def _load_old_inputs() -> base.LearnabilityInputs:
+    study = base.load_study(OLD_CONFIG_PATH)
+    return base.LearnabilityInputs(study)
 
 
 def _open_short_arrays(manifest: Mapping[str, Any]) -> tuple[np.memmap, np.memmap, np.memmap]:
@@ -778,7 +750,7 @@ def write_thresholds(input_root: Path) -> dict[str, Any]:
         (input_root / "labels/short_label_manifest.json").read_text(encoding="utf-8")
     )
     short_labels, _states, _flags = _open_short_arrays(manifest)
-    old = _load_old_inputs(verify_large_hashes=False)
+    old = _load_old_inputs()
     thresholds: list[dict[str, Any]] = []
     for horizon in (3, 5, 10, 20, 40, 60):
         values = (
@@ -825,7 +797,7 @@ def audit_prepared_inputs(input_root: Path) -> dict[str, Any]:
     manifest_path = input_root / "labels/short_label_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     labels, states, flags = _open_short_arrays(manifest)
-    old = _load_old_inputs(verify_large_hashes=False)
+    old = _load_old_inputs()
     if int(manifest["candidate_count"]) != old.candidate_count:
         raise ValueError("short labels no longer align with the base candidate universe")
     post_dates = np.flatnonzero(np.char.startswith(old.date_values, "2026-"))
@@ -918,74 +890,47 @@ def load_study(path: Path = DEFAULT_STUDY_PATH) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if str(payload.get("study_id")) != STUDY_ID:
         raise ValueError(f"study_id must be {STUDY_ID}")
-    contract = payload.get("contract")
-    if not isinstance(contract, Mapping):
-        raise ValueError("study contract is missing")
-    if str(contract.get("contract_id")) != STUDY_ID:
-        raise ValueError("contract_id changed")
-    declared = str(payload.get("contract_sha256", ""))
-    computed = _canonical_sha256(contract)
-    if declared != computed:
-        raise ValueError("study contract SHA-256 mismatch")
-    protocol = dict(contract.get("protocol", {}) or {})
-    if tuple(int(value) for value in protocol.get("fold_years", [])) != FOLD_YEARS:
+    folds = dict(payload.get("folds", {}) or {})
+    if tuple(int(value) for value in folds.get("fold_years", [])) != FOLD_YEARS:
         raise ValueError("fold years changed")
-    if dict(protocol.get("targets_by_horizon", {})) != {
+    if dict(folds.get("targets_by_horizon", {})) != {
         "1": ["g"],
         "3": ["g", "mfe", "pre_peak_mae", "state"],
     }:
         raise ValueError("short-horizon target schedule changed")
-    firewall = dict(contract.get("scientific_firewall", {}) or {})
-    if tuple(int(value) for value in firewall.get("forbidden_years", [])) != (2026,):
-        raise ValueError("2026 firewall changed")
-    for section_name in ("inputs", "implementation"):
-        section = dict(contract.get(section_name, {}) or {})
-        for name, record in section.items():
-            if not isinstance(record, Mapping) or "path" not in record or "sha256" not in record:
-                continue
-            bound_path = _resolve_path(str(record["path"]))
-            if not bound_path.is_file():
-                raise FileNotFoundError(bound_path)
-            if _file_sha256(bound_path) != str(record["sha256"]):
-                raise ValueError(f"bound {section_name}.{name} changed")
+    if not str(folds.get("maximum_outcome_date", "")):
+        raise ValueError("maximum_outcome_date is required")
     return payload
 
 
 class ShortHorizonInputs:
-    def __init__(self, study: Mapping[str, Any], *, verify_large_hashes: bool) -> None:
-        bindings = dict(study["contract"]["inputs"])
-        old_contract = _resolve_path(str(bindings["old_learnability_contract"]["path"]))
-        if _file_sha256(old_contract) != str(bindings["old_learnability_contract"]["sha256"]):
-            raise ValueError("old learnability contract changed")
-        old_study = base.load_study(old_contract)
-        self.old = base.LearnabilityInputs(
-            old_study, verify_large_hashes=verify_large_hashes
-        )
+    def __init__(self, study: Mapping[str, Any]) -> None:
+        bindings = dict(study["data"])
+        old_config = _resolve_path(str(bindings["base_config"]["path"]))
+        old_study = base.load_study(old_config)
+        self.old = base.LearnabilityInputs(old_study)
         manifest_path = _resolve_path(str(bindings["short_label_manifest"]["path"]))
-        if _file_sha256(manifest_path) != str(bindings["short_label_manifest"]["sha256"]):
-            raise ValueError("short label manifest changed")
+        if not manifest_path.is_file():
+            raise FileNotFoundError(manifest_path)
         self.short_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        expected_resolved = str(bindings["short_label_manifest"]["resolved_sha256"])
-        if str(self.short_manifest.get("resolved_short_label_manifest_sha256")) != expected_resolved:
-            raise ValueError("short label resolved manifest changed")
         files = dict(self.short_manifest["files"])
         for record in files.values():
-            file_path = Path(str(record["path"])).resolve()
+            file_path = _resolve_path(str(record["path"]))
+            if not file_path.is_file():
+                raise FileNotFoundError(file_path)
             if file_path.stat().st_size != int(record["size"]):
                 raise ValueError(f"short input size changed: {file_path}")
-            if verify_large_hashes and _file_sha256(file_path) != str(record["sha256"]):
-                raise ValueError(f"short input SHA-256 changed: {file_path}")
         self.candidate_count = self.old.candidate_count
         if int(self.short_manifest["candidate_count"]) != self.candidate_count:
             raise ValueError("short labels and base inputs have different row counts")
         self.short_labels = np.memmap(
-            Path(str(files["short_labels"]["path"])),
+            _resolve_path(str(files["short_labels"]["path"])),
             dtype=np.float32,
             mode="r",
             shape=(self.candidate_count, len(SHORT_LABEL_COLUMNS)),
         )
         self.state_3 = np.memmap(
-            Path(str(files["state_3"]["path"])),
+            _resolve_path(str(files["state_3"]["path"])),
             dtype=np.int8,
             mode="r",
             shape=(self.candidate_count,),
@@ -1001,19 +946,22 @@ class ShortHorizonInputs:
             "feature_names",
         ):
             setattr(self, name, getattr(self.old, name))
-        self._assert_firewall()
+        self.maximum_outcome_date = str(study["folds"]["maximum_outcome_date"])
+        if self.short_manifest.get("maximum_outcome_date_read") != self.maximum_outcome_date:
+            raise ValueError("short labels exceed the configured outcome boundary")
+        self._assert_outcome_boundary()
 
-    def _assert_firewall(self) -> None:
-        post_dates = np.flatnonzero(np.char.startswith(self.date_values, "2026-"))
-        post_start = (
-            int(np.searchsorted(self.candidate_date_idx, int(post_dates[0]), side="left"))
-            if len(post_dates)
-            else self.candidate_count
+    def _assert_outcome_boundary(self) -> None:
+        first_later_date = int(
+            np.searchsorted(self.date_values, self.maximum_outcome_date, side="right")
+        )
+        post_start = int(
+            np.searchsorted(self.candidate_date_idx, first_later_date, side="left")
         )
         if not bool(np.isnan(np.asarray(self.short_labels[post_start:])).all()):
-            raise ValueError("2026 candidate has a short label")
+            raise ValueError("candidate after maximum_outcome_date has a short label")
         if not bool((np.asarray(self.state_3[post_start:]) == -1).all()):
-            raise ValueError("2026 candidate has a D3 state")
+            raise ValueError("candidate after maximum_outcome_date has a D3 state")
 
     def label_values(self, target: str, horizon: int) -> np.ndarray:
         if int(horizon) == 1 and target == "g":
@@ -1044,82 +992,41 @@ def _task_dir(output_root: Path, year: int, horizon: int, target: str) -> Path:
     return output_root / "folds" / f"fold_{year}" / f"h{horizon:02d}" / target
 
 
-def _task_complete(path: Path, contract_sha256: str) -> bool:
+def _task_complete(
+    path: Path,
+    *,
+    study: Mapping[str, Any],
+    year: int,
+    horizon: int,
+    target: str,
+) -> bool:
     return base._task_result_complete(
         path,
-        contract_sha256,
+        expected={
+            "study_id": STUDY_ID,
+            "task_id": f"fold_{int(year)}_h{int(horizon):02d}_{target}",
+            "fold_year": int(year),
+            "target": str(target),
+            "horizon": int(horizon),
+            "parameters": base._model_parameters(study, target=target)[0],
+        },
         result_schema=RESULT_SCHEMA,
     )
 
 
-def _completed_task_count(output_root: Path, contract_sha256: str) -> int:
+def _completed_task_count(output_root: Path, study: Mapping[str, Any]) -> int:
     return sum(
-        _task_complete(path, contract_sha256)
-        for path in output_root.glob("folds/fold_*/h*/**/task_result.json")
+        _task_complete(
+            _task_dir(output_root, year, horizon, target) / "task_result.json",
+            study=study,
+            year=year,
+            horizon=horizon,
+            target=target,
+        )
+        for year in FOLD_YEARS
+        for horizon, targets in SHORT_TARGETS.items()
+        for target in targets
     )
-
-
-def preflight(
-    *,
-    study_path: Path = DEFAULT_STUDY_PATH,
-    output_root: Path = DEFAULT_OUTPUT_ROOT,
-) -> dict[str, Any]:
-    study = load_study(study_path)
-    started = time.perf_counter()
-    inputs = ShortHorizonInputs(study, verify_large_hashes=True)
-    folds: list[dict[str, Any]] = []
-    for year in FOLD_YEARS:
-        for horizon in SHORT_TARGETS:
-            fold = inputs.common_rows(year, horizon)
-            folds.append(
-                {
-                    "fold_year": year,
-                    "horizon": horizon,
-                    "targets": list(SHORT_TARGETS[horizon]),
-                    "dependency_days": horizon,
-                    "train_row_count": int(len(fold.train_rows)),
-                    "evaluation_row_count": int(len(fold.evaluation_rows)),
-                    "maximum_train_signal_date_idx": int(fold.maximum_train_signal_date_idx),
-                    "maximum_train_outcome_date_idx": int(
-                        fold.maximum_train_signal_date_idx + horizon
-                    ),
-                }
-            )
-    payload = {
-        "schema": "seq100_short_horizon_target_reaudit_preflight/v1",
-        "status": "passed",
-        "completed_at": _now(),
-        "study_id": STUDY_ID,
-        "contract_sha256": str(study["contract_sha256"]),
-        "large_input_hashes_verified": True,
-        "elapsed_seconds": float(time.perf_counter() - started),
-        "candidate_count": inputs.candidate_count,
-        "continuous_feature_count": len(inputs.continuous_columns),
-        "categorical_feature_count": len(inputs.categorical_columns),
-        "maximum_consumed_outcome_date": "2025-12-31",
-        "forbidden_years_consumed": [],
-        "folds": folds,
-        "parameters": {
-            target: base._model_parameters(study, target=target)[0]
-            for target in ("g", "mfe", "pre_peak_mae", "state")
-        },
-    }
-    output_root.mkdir(parents=True, exist_ok=True)
-    _write_json(output_root / "preflight.json", payload)
-    return payload
-
-
-def _require_preflight(study: Mapping[str, Any], output_root: Path) -> None:
-    path = output_root / "preflight.json"
-    if not path.is_file():
-        raise RuntimeError("full-hash preflight must pass before training")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("status") != "passed":
-        raise RuntimeError("preflight did not pass")
-    if str(payload.get("contract_sha256")) != str(study["contract_sha256"]):
-        raise RuntimeError("preflight belongs to another contract")
-    if not bool(payload.get("large_input_hashes_verified")):
-        raise RuntimeError("preflight skipped large hashes")
 
 
 def _run_group(
@@ -1136,7 +1043,10 @@ def _run_group(
         for target in SHORT_TARGETS[horizon]
         if not _task_complete(
             _task_dir(output_root, year, horizon, target) / "task_result.json",
-            str(study["contract_sha256"]),
+            study=study,
+            year=year,
+            horizon=horizon,
+            target=target,
         )
     ]
     if not pending:
@@ -1215,8 +1125,7 @@ def run_study(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> dict[str, Any]:
     study = load_study(study_path)
-    _require_preflight(study, output_root)
-    inputs = ShortHorizonInputs(study, verify_large_hashes=False)
+    inputs = ShortHorizonInputs(study)
     output_root.mkdir(parents=True, exist_ok=True)
     events_path = output_root / "events.jsonl"
     progress_path = output_root / "progress.json"
@@ -1230,15 +1139,12 @@ def run_study(
                     {
                         "schema": PROGRESS_SCHEMA,
                         "study_id": STUDY_ID,
-                        "contract_sha256": str(study["contract_sha256"]),
                         "status": "running",
                         "phase": "training",
                         "started_at": started_at,
                         "updated_at": _now(),
                         "task_count": 15,
-                        "completed_task_count": _completed_task_count(
-                            output_root, str(study["contract_sha256"])
-                        ),
+                        "completed_task_count": _completed_task_count(output_root, study),
                         "current_task": current,
                         **base._memory_snapshot(),
                     },
@@ -1256,7 +1162,13 @@ def run_study(
             for horizon, targets in SHORT_TARGETS.items():
                 for target in targets:
                     path = _task_dir(output_root, year, horizon, target) / "task_result.json"
-                    if not _task_complete(path, str(study["contract_sha256"])):
+                    if not _task_complete(
+                        path,
+                        study=study,
+                        year=year,
+                        horizon=horizon,
+                        target=target,
+                    ):
                         raise RuntimeError(f"short-horizon task incomplete: {path}")
                     results.append(json.loads(path.read_text(encoding="utf-8")))
         summary = {
@@ -1264,7 +1176,6 @@ def run_study(
             "status": "completed",
             "completed_at": _now(),
             "study_id": STUDY_ID,
-            "contract_sha256": str(study["contract_sha256"]),
             "task_count": len(results),
             "fold_years": list(FOLD_YEARS),
             "targets_by_horizon": {
@@ -1290,7 +1201,6 @@ def run_study(
             {
                 "schema": PROGRESS_SCHEMA,
                 "study_id": STUDY_ID,
-                "contract_sha256": str(study["contract_sha256"]),
                 "status": "completed",
                 "phase": "completed",
                 "started_at": started_at,
@@ -1308,15 +1218,12 @@ def run_study(
             {
                 "schema": PROGRESS_SCHEMA,
                 "study_id": STUDY_ID,
-                "contract_sha256": str(study["contract_sha256"]),
                 "status": "failed",
                 "phase": "failed",
                 "started_at": started_at,
                 "updated_at": _now(),
                 "task_count": 15,
-                "completed_task_count": _completed_task_count(
-                    output_root, str(study["contract_sha256"])
-                ),
+                "completed_task_count": _completed_task_count(output_root, study),
                 "error_type": type(exc).__name__,
                 "error": str(exc),
                 **base._memory_snapshot(),
@@ -1354,13 +1261,19 @@ def _prediction_bundle(
     actual = np.asarray(inputs.all_label_values(target, horizon)[rows])
     if len(rows) != len(actual) or len(rows) != len(prediction):
         raise ValueError(f"prediction alignment changed for {target} D{horizon} {year}")
-    for name in ("prediction", "daily_metrics", "model"):
-        record = dict(result["files"])[name]
-        path = Path(str(record["path"]))
-        if path.stat().st_size != int(record["size"]):
-            raise ValueError(f"prediction evidence size changed: {path}")
-        if _file_sha256(path) != str(record["sha256"]):
-            raise ValueError(f"prediction evidence SHA-256 changed: {path}")
+    expected = {
+        "study_id": str(result.get("study_id", STUDY_ID)),
+        "task_id": str(result["task_id"]),
+        "fold_year": int(year),
+        "target": str(target),
+        "horizon": int(horizon),
+    }
+    if not base._task_result_complete(
+        task_dir / "task_result.json",
+        expected=expected,
+        result_schema=str(result["schema"]),
+    ):
+        raise ValueError(f"prediction output cannot be loaded: {target} D{horizon} {year}")
     return PredictionBundle(
         year=int(year),
         horizon=int(horizon),
@@ -2005,8 +1918,8 @@ def run_posthoc_audit(
     training_summary = json.loads(training_summary_path.read_text(encoding="utf-8"))
     if training_summary.get("status") != "completed":
         raise RuntimeError("short-horizon training is incomplete")
-    inputs = ShortHorizonInputs(study, verify_large_hashes=False)
-    decision_thresholds = dict(study["contract"]["decision"]["qualification_thresholds"])
+    inputs = ShortHorizonInputs(study)
+    decision_thresholds = dict(study["decision"]["qualification_thresholds"])
     threshold_payload = json.loads(
         (input_root / "mfe_thresholds.json").read_text(encoding="utf-8")
     )
@@ -2160,7 +2073,6 @@ def run_posthoc_audit(
         "status": "completed",
         "completed_at": _now(),
         "study_id": STUDY_ID,
-        "contract_sha256": str(study["contract_sha256"]),
         "scope": {
             "fold_years": list(FOLD_YEARS),
             "fold_role": "user-approved reused confirmation/decision window; not a pristine holdout",
@@ -2233,12 +2145,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Re-audit short-horizon Seq100 targets without reading 2026."
     )
-    parser.add_argument("--study-contract", type=Path, default=DEFAULT_STUDY_PATH)
+    parser.add_argument("--config", type=Path, default=DEFAULT_STUDY_PATH)
     parser.add_argument("--input-root", type=Path, default=DEFAULT_INPUT_ROOT)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument(
         "command",
-        choices=("self-test", "prepare", "preflight", "run", "audit"),
+        choices=("self-test", "prepare", "run", "audit"),
     )
     return parser
 
@@ -2249,19 +2161,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = self_test()
     elif args.command == "prepare":
         result = prepare_all(args.input_root.resolve())
-    elif args.command == "preflight":
-        result = preflight(
-            study_path=args.study_contract.resolve(),
-            output_root=args.output_root.resolve(),
-        )
     elif args.command == "run":
         result = run_study(
-            study_path=args.study_contract.resolve(),
+            study_path=args.config.resolve(),
             output_root=args.output_root.resolve(),
         )
     else:
         result = run_posthoc_audit(
-            study_path=args.study_contract.resolve(),
+            study_path=args.config.resolve(),
             input_root=args.input_root.resolve(),
             output_root=args.output_root.resolve(),
         )

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
@@ -21,7 +20,8 @@ from daily_research.path_policy import seq100_short_horizon_target_reaudit as so
 WORKSPACE_ROOT = source.WORKSPACE_ROOT
 STUDY_ID = "seq100_target_redundancy_audit_v1"
 DEFAULT_STUDY_PATH = (
-    WORKSPACE_ROOT / "daily_research/studies/seq100_target_redundancy_audit_v1.json"
+    WORKSPACE_ROOT
+    / "daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/config.json"
 )
 DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
@@ -36,25 +36,6 @@ SUMMARY_SCHEMA = "seq100_target_redundancy_audit_summary/v1"
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def _canonical_json_sha256(value: Any) -> str:
-    raw = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=_json_default,
-    ).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while chunk := handle.read(8 * 1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _json_default(value: Any) -> Any:
@@ -79,26 +60,16 @@ def _write_json(path: Path, payload: Any) -> None:
 
 def load_study(path: Path = DEFAULT_STUDY_PATH) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("artifact_type") != "seq100_current_study":
-        raise ValueError("target redundancy contract has the wrong artifact type")
-    if payload.get("study_id") != STUDY_ID or payload.get("status") != "active":
-        raise ValueError("target redundancy contract is not the active frozen study")
-    contract = dict(payload.get("contract", {}))
-    if contract.get("contract_id") != STUDY_ID:
-        raise ValueError("target redundancy contract id changed")
-    if payload.get("contract_sha256") != _canonical_json_sha256(contract):
-        raise ValueError("target redundancy contract SHA-256 changed")
-    protocol = dict(contract["protocol"])
-    firewall = dict(contract["scientific_firewall"])
-    if tuple(protocol["fold_years"]) != FOLD_YEARS:
+    if payload.get("study_id") != STUDY_ID:
+        raise ValueError(f"study_id must be {STUDY_ID}")
+    folds = dict(payload.get("folds", {}))
+    if tuple(folds["fold_years"]) != FOLD_YEARS:
         raise ValueError("target redundancy fold years changed")
-    if tuple(protocol["mfe_horizons"]) != MFE_HORIZONS:
+    if tuple(folds["mfe_horizons"]) != MFE_HORIZONS:
         raise ValueError("target redundancy MFE horizons changed")
-    if tuple(protocol["state_horizons"]) != STATE_HORIZONS:
+    if tuple(folds["state_horizons"]) != STATE_HORIZONS:
         raise ValueError("target redundancy state horizons changed")
-    if firewall.get("forbidden_years") != [2026]:
-        raise ValueError("2026 firewall changed")
-    if int(protocol.get("new_booster_count", -1)) != 0:
+    if bool(payload.get("model", {}).get("train_new_boosters", True)):
         raise ValueError("target redundancy audit may not train a booster")
     return payload
 
@@ -106,14 +77,6 @@ def load_study(path: Path = DEFAULT_STUDY_PATH) -> dict[str, Any]:
 def _resolve(path: str) -> Path:
     candidate = Path(path)
     return candidate if candidate.is_absolute() else WORKSPACE_ROOT / candidate
-
-
-def _verify_self_hashed_artifact(path: Path, field: str) -> str:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    declared = str(payload.pop(field))
-    if declared != _canonical_json_sha256(payload):
-        raise ValueError(f"source artifact self hash changed: {path}")
-    return declared
 
 
 def _task_specs() -> list[tuple[int, str, int]]:
@@ -133,72 +96,6 @@ def _task_root(target: str, horizon: int) -> Path:
     return source.DEFAULT_OUTPUT_ROOT if horizon in source.SHORT_TARGETS else source.OLD_OUTPUT_ROOT
 
 
-def consumed_evidence_records() -> list[dict[str, str]]:
-    paths: dict[str, Path] = {}
-    for year, target, horizon in _task_specs():
-        root = _task_root(target, horizon)
-        group = root / "folds" / f"fold_{year}" / f"h{horizon:02d}"
-        task = group / target
-        for path in (
-            task / "task_result.json",
-            task / "prediction.npy",
-            task / "model.txt",
-            task / "daily_metrics.parquet",
-            group / "group_manifest.json",
-            group / "evaluation_rows.npy",
-        ):
-            relative = path.resolve().relative_to(WORKSPACE_ROOT.resolve()).as_posix()
-            paths[relative] = path
-    return [
-        {"path": relative, "sha256": _file_sha256(paths[relative])}
-        for relative in sorted(paths)
-    ]
-
-
-def _verify_bound_sources(study: Mapping[str, Any]) -> dict[str, Any]:
-    inputs = dict(study["contract"]["inputs"])
-    for name in (
-        "source_learnability_contract",
-        "source_learnability_artifact",
-        "source_reassessment_contract",
-        "source_reassessment_artifact",
-    ):
-        record = dict(inputs[name])
-        path = _resolve(str(record["path"]))
-        if _file_sha256(path) != str(record["file_sha256"]):
-            raise ValueError(f"bound source changed: {name}")
-        if name.endswith("artifact"):
-            declared = _verify_self_hashed_artifact(path, "artifact_sha256")
-            if declared != str(record["artifact_sha256"]):
-                raise ValueError(f"bound source artifact hash changed: {name}")
-    learnability_contract = _resolve(
-        str(inputs["source_learnability_contract"]["path"])
-    )
-    learnability_study = base.load_study(learnability_contract)
-    if learnability_study["contract_sha256"] != str(
-        inputs["source_learnability_contract"]["contract_sha256"]
-    ):
-        raise ValueError("source learnability canonical contract hash changed")
-    source_contract = _resolve(str(inputs["source_reassessment_contract"]["path"]))
-    source_study = source.load_study(source_contract)
-    if source_study["contract_sha256"] != str(
-        inputs["source_reassessment_contract"]["contract_sha256"]
-    ):
-        raise ValueError("source reassessment canonical contract hash changed")
-
-    evidence = consumed_evidence_records()
-    binding = dict(inputs["consumed_evidence_set"])
-    if len(evidence) != int(binding["file_count"]):
-        raise ValueError("consumed evidence file count changed")
-    if _canonical_json_sha256(evidence) != str(binding["sha256"]):
-        raise ValueError("consumed evidence set changed")
-    return {
-        "source_study": source_study,
-        "evidence_file_count": len(evidence),
-        "evidence_set_sha256": _canonical_json_sha256(evidence),
-    }
-
-
 def _load_all_bundles(
     inputs: source.ShortHorizonInputs,
 ) -> dict[tuple[int, str, int], source.PredictionBundle]:
@@ -212,42 +109,6 @@ def _load_all_bundles(
         )
         for year, target, horizon in _task_specs()
     }
-
-
-def preflight(
-    *,
-    study_path: Path = DEFAULT_STUDY_PATH,
-    output_root: Path = DEFAULT_OUTPUT_ROOT,
-) -> dict[str, Any]:
-    started = datetime.now().astimezone()
-    study = load_study(study_path)
-    verified = _verify_bound_sources(study)
-    inputs = source.ShortHorizonInputs(verified["source_study"], verify_large_hashes=False)
-    bundles = _load_all_bundles(inputs)
-    for (year, target, horizon), bundle in bundles.items():
-        if bundle.year != year or bundle.target != target or bundle.horizon != horizon:
-            raise AssertionError("loaded prediction bundle identity drifted")
-        if not np.all(np.char.startswith(inputs.date_values[bundle.date_idx], f"{year}-")):
-            raise ValueError("prediction bundle crosses its declared fold year")
-    payload = {
-        "schema": "seq100_target_redundancy_audit_preflight/v1",
-        "status": "passed",
-        "completed_at": _now(),
-        "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
-        "fold_years": list(FOLD_YEARS),
-        "mfe_horizons": list(MFE_HORIZONS),
-        "state_horizons": list(STATE_HORIZONS),
-        "prediction_task_count": len(bundles),
-        "consumed_evidence_file_count": verified["evidence_file_count"],
-        "consumed_evidence_set_sha256": verified["evidence_set_sha256"],
-        "maximum_consumed_outcome_date": "2025-12-31",
-        "forbidden_years_consumed": [],
-        "new_booster_count": 0,
-        "elapsed_seconds": (datetime.now().astimezone() - started).total_seconds(),
-    }
-    _write_json(output_root / "preflight.json", payload)
-    return payload
 
 
 @dataclass(frozen=True)
@@ -452,9 +313,9 @@ def _mfe_redundancy_audit(
     *,
     bundles: Mapping[tuple[int, str, int], source.PredictionBundle],
     inputs: source.ShortHorizonInputs,
-    contract: Mapping[str, Any],
+    config: Mapping[str, Any],
 ) -> dict[str, Any]:
-    ridge = float(contract["evaluation"]["ridge_penalty"])
+    ridge = float(config["evaluation"]["ridge_penalty"])
     pair_rows: list[dict[str, Any]] = []
     leave_one_out: list[dict[str, Any]] = []
     forward: list[dict[str, Any]] = []
@@ -520,7 +381,7 @@ def _mfe_redundancy_audit(
             )
             incremental.append(record)
 
-    thresholds = dict(contract["decision"]["residual_head_thresholds"])
+    thresholds = dict(config["decision"]["residual_head_thresholds"])
     heads: list[dict[str, Any]] = []
     for horizon in MFE_HORIZONS:
         loo_rows = [row for row in leave_one_out if row["target_horizon"] == horizon]
@@ -650,9 +511,9 @@ def _sequential_state_probability_increment(
     *,
     horizon: int,
     yearly: Sequence[StateMetaData],
-    contract: Mapping[str, Any],
+    config: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    c_value = float(contract["evaluation"]["diagnostic_logistic_c"])
+    c_value = float(config["evaluation"]["diagnostic_logistic_c"])
     rows: list[dict[str, Any]] = []
     history: list[StateMetaData] = []
     for current in yearly:
@@ -740,9 +601,9 @@ def _state_vs_mfe_audit(
     *,
     bundles: Mapping[tuple[int, str, int], source.PredictionBundle],
     inputs: source.ShortHorizonInputs,
-    contract: Mapping[str, Any],
+    config: Mapping[str, Any],
 ) -> dict[str, Any]:
-    ridge = float(contract["evaluation"]["ridge_penalty"])
+    ridge = float(config["evaluation"]["ridge_penalty"])
     pair_rows: list[dict[str, Any]] = []
     residual_rows: list[dict[str, Any]] = []
     label_relationship: list[dict[str, Any]] = []
@@ -827,13 +688,13 @@ def _state_vs_mfe_audit(
             _sequential_state_probability_increment(
                 horizon=horizon,
                 yearly=yearly_meta[horizon],
-                contract=contract,
+                config=config,
             )
         )
 
-    residual_thresholds = dict(contract["decision"]["residual_head_thresholds"])
+    residual_thresholds = dict(config["decision"]["residual_head_thresholds"])
     probability_thresholds = dict(
-        contract["decision"]["probability_increment_thresholds"]
+        config["decision"]["probability_increment_thresholds"]
     )
     head_decisions: list[dict[str, Any]] = []
     for horizon in STATE_HORIZONS:
@@ -874,16 +735,16 @@ def run_audit(
 ) -> dict[str, Any]:
     started = datetime.now().astimezone()
     study = load_study(study_path)
-    preflight_payload = preflight(study_path=study_path, output_root=output_root)
-    verified = _verify_bound_sources(study)
-    inputs = source.ShortHorizonInputs(verified["source_study"], verify_large_hashes=False)
+    source_config = source.load_study(
+        _resolve(str(study["data"]["source_config"]["path"]))
+    )
+    inputs = source.ShortHorizonInputs(source_config)
     bundles = _load_all_bundles(inputs)
-    contract = dict(study["contract"])
     mfe = _mfe_redundancy_audit(
-        bundles=bundles, inputs=inputs, contract=contract
+        bundles=bundles, inputs=inputs, config=study
     )
     state = _state_vs_mfe_audit(
-        bundles=bundles, inputs=inputs, contract=contract
+        bundles=bundles, inputs=inputs, config=study
     )
     mfe_heads = {
         str(item["horizon"]): item["final_status"] for item in mfe["head_decisions"]
@@ -917,7 +778,7 @@ def run_audit(
             "pre_peak_mae_20",
             "pre_peak_mae_40",
         ],
-        "next_step": "freeze_feature_family_increment_audit_using_user_authorized_2023_2025_folds",
+        "next_step": "run_feature_family_increment_audit_using_user_authorized_2023_2025_folds",
         "does_not_select": [
             "feature_family_winner",
             "joint_loss",
@@ -935,15 +796,11 @@ def run_audit(
         "status": "completed",
         "completed_at": _now(),
         "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
         "scope": {
             "fold_years": list(FOLD_YEARS),
             "fold_role": "user-approved reused recent confirmation/decision folds; not a pristine holdout",
             "prediction_task_count": len(bundles),
-            "consumed_evidence_file_count": verified["evidence_file_count"],
-            "consumed_evidence_set_sha256": verified["evidence_set_sha256"],
-            "maximum_consumed_outcome_date": "2025-12-31",
-            "forbidden_years_consumed": [],
+            "maximum_consumed_outcome_date": str(study["folds"]["maximum_outcome_date"]),
             "new_booster_count": 0,
             "diagnostic_meta_models_retained": 0,
         },
@@ -1033,9 +890,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Audit Seq100 MFE horizon redundancy and state information beyond MFE."
     )
-    parser.add_argument("--study-contract", type=Path, default=DEFAULT_STUDY_PATH)
+    parser.add_argument("--config", type=Path, default=DEFAULT_STUDY_PATH)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
-    parser.add_argument("command", choices=("self-test", "preflight", "audit"))
+    parser.add_argument("command", choices=("self-test", "audit"))
     return parser
 
 
@@ -1043,14 +900,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "self-test":
         result = self_test()
-    elif args.command == "preflight":
-        result = preflight(
-            study_path=args.study_contract.resolve(),
-            output_root=args.output_root.resolve(),
-        )
     else:
         result = run_audit(
-            study_path=args.study_contract.resolve(),
+            study_path=args.config.resolve(),
             output_root=args.output_root.resolve(),
         )
     print(json.dumps(result, ensure_ascii=False, default=_json_default), flush=True)

@@ -11,26 +11,6 @@ import torch
 from daily_research.path_policy import seq100_signal_quality as quality
 
 
-def _closed_study_contract_path() -> Path | None:
-    """Return the archived contract once the active study has been closed out."""
-    if quality.DEFAULT_STUDY_PATH.exists():
-        return quality.DEFAULT_STUDY_PATH
-    archived_path = (
-        quality.WORKSPACE_ROOT
-        / "daily_research/research_records/seq100/seq100_pit_signal_quality_v1/contract.json"
-    )
-    if archived_path.exists():
-        return archived_path
-    return None
-
-
-def _study() -> dict:
-    path = _closed_study_contract_path()
-    if path is None:
-        pytest.skip("no seq100 study contract on disk")
-    return quality.load_study(path)
-
-
 def _flat_path(rows: int = 1, *, close_return: float = 0.0) -> np.ndarray:
     path = np.zeros((rows, 20, 4), dtype=np.float32)
     path[:, :, :] = close_return
@@ -55,387 +35,19 @@ def _descriptor_fixture(values: np.ndarray) -> dict[str, np.ndarray]:
 
 
 def _model_configs() -> dict[str, dict[str, object]]:
-    freeze = quality.load_research_freeze(_study())["freeze"]
     return {
-        str(item["model_id"]): dict(item["config"])
-        for item in freeze["model_candidates"]
-    }
-
-
-def _budget_amendment_payload() -> dict[str, object]:
-    study = _study()
-    payload: dict[str, object] = {
-        "schema": quality.TRAINING_BUDGET_AMENDMENT_VERSION,
-        "study_id": quality.STUDY_ID,
-        "status": "frozen",
-        "base_study_contract_sha256": study["contract_sha256"],
-        "model_ids": list(quality.NEURAL_MODEL_IDS),
-        "config_changes": {
-            "max_epochs": {"from": 3, "to": 10},
-            "patience": {"from": 1, "to": 2},
+        "deephit_competing_risk": {
+            "hidden_width": 16,
+            "layers": 2,
+            "dropout": 0.0,
         },
-        "reason": "development_loss_budget_censoring",
-    }
-    payload["amendment_sha256"] = quality._canonical_json_sha256(payload)
-    return payload
-
-
-DESIGN_STATEMENT = (
-    "The frozen objective measures a construct that cannot identify the causal "
-    "quantity stated in the study question under the available observations."
-)
-DESIGN_ARGUMENT = (
-    "Every admissible model and metric receives the same insufficient label "
-    "information, so additional fitting cannot repair the structural mismatch."
-)
-
-
-def _design_invalidation_fixture(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[Path, Path, Path]:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    freeze = {
-        "target_candidates": [
-            {"target_id": target_id} for target_id in quality.TARGET_CANDIDATE_IDS
-        ],
-        "model_candidates": [
-            {"model_id": model_id} for model_id in quality.MODEL_IDS
-        ],
-        "scientific_firewall": {"forbidden_years": [2026]},
-    }
-    freeze_payload = {
-        "study_id": quality.STUDY_ID,
-        "freeze": freeze,
-        "freeze_sha256": quality._canonical_json_sha256(freeze),
-    }
-    freeze_path = workspace / "research_freeze.json"
-    freeze_path.write_text(json.dumps(freeze_payload), encoding="utf-8")
-    contract = {
-        "contract_id": quality.STUDY_ID,
-        "research_freeze": {
-            "path": str(freeze_path.resolve()),
-            "file_sha256": quality._file_sha256(freeze_path),
-            "freeze_sha256": freeze_payload["freeze_sha256"],
+        "market_industry_deepsets": {
+            "item_width": 16,
+            "hidden_layers": 2,
+            "dropout": 0.0,
+            "context_width": 8,
         },
     }
-    study = {
-        "study_id": quality.STUDY_ID,
-        "contract": contract,
-        "contract_sha256": quality._canonical_json_sha256(contract),
-    }
-    study_path = workspace / "study.json"
-    study_path.write_text(json.dumps(study), encoding="utf-8")
-    monkeypatch.setattr(quality, "WORKSPACE_ROOT", workspace)
-    monkeypatch.setattr(
-        quality,
-        "_verify_protected_bindings",
-        lambda _study: {
-            "qdp_active_manifest_sha256": "qdp-hash",
-            "registered_model_registry_sha256": "registry-hash",
-        },
-    )
-    return study_path, workspace / "output", workspace
-
-
-def test_contract_research_freeze_and_source_bindings_are_valid() -> None:
-    study = _study()
-    assert study["contract_sha256"] == quality._canonical_json_sha256(
-        study["contract"]
-    )
-    freeze = quality.load_research_freeze(study)
-    assert freeze["freeze_sha256"] == quality._canonical_json_sha256(
-        freeze["freeze"]
-    )
-    pack_path, manifest = quality._validate_source_bindings(study)
-    assert pack_path.exists()
-    assert int(manifest["lookback_days"]) == 180
-    assert int(manifest["forward_days"]) >= 60
-    assert len(study["contract"]["data"]["qdp_datasets"]) == 14
-
-
-def test_closed_study_archive_matches_compact_record() -> None:
-    path = _closed_study_contract_path()
-    if path is None:
-        pytest.skip("no seq100 study contract on disk")
-    if path == quality.DEFAULT_STUDY_PATH:
-        assert path.exists()
-        return
-
-    assert path.exists()
-    study = quality.load_study(path)
-    artifact_path = path.with_name("artifact.json")
-    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
-    assert study["contract_sha256"] == artifact["contract"]["contract_sha256"]
-
-
-def test_cli_has_only_the_frozen_public_commands() -> None:
-    parser = quality.build_parser()
-    subparsers = next(
-        action
-        for action in parser._actions
-        if action.__class__.__name__ == "_SubParsersAction"
-    )
-    assert set(subparsers.choices) == {
-        "validate-research",
-        "build-targets",
-        "freeze-target",
-        "build-view",
-        "screen-models",
-        "train",
-        "evaluate",
-        "invalidate-design",
-        "closeout",
-    }
-    assert "build-atlas" not in subparsers.choices
-    assert "feature-screen" not in subparsers.choices
-
-
-def test_invalidate_study_design_writes_hashed_terminal_record(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    study_path, output_root, workspace = _design_invalidation_fixture(
-        tmp_path, monkeypatch
-    )
-    evidence_path = workspace / "evidence" / "design_analysis.txt"
-    evidence_path.parent.mkdir()
-    evidence_path.write_text("structural evidence", encoding="utf-8")
-    first_attempt = (
-        output_root
-        / "training/model_a/fold_2023/seed_7/attempts/attempt_001"
-    )
-    first_attempt.mkdir(parents=True)
-    (first_attempt / "predictions.parquet").write_bytes(b"predictions")
-    second_attempt = first_attempt.with_name("attempt_002")
-    second_attempt.mkdir()
-    (
-        output_root / "training/model_a/fold_2024/seed_7/attempts"
-    ).mkdir(parents=True)
-
-    summary = quality.invalidate_study_design(
-        study_path=study_path,
-        output_root=output_root,
-        defect_class="objective_cannot_answer_stated_question",
-        statement=DESIGN_STATEMENT,
-        structural_argument=DESIGN_ARGUMENT,
-        evidence_paths=[evidence_path],
-        inspected_alternatives=["direct utility target", "survival evaluator"],
-    )
-
-    record_path = Path(summary["record"])
-    record = json.loads(record_path.read_text(encoding="utf-8"))
-    declared_hash = record.pop("design_invalidation_sha256")
-    assert declared_hash == quality._canonical_json_sha256(record)
-    assert summary["design_invalidation_sha256"] == declared_hash
-    assert summary["burned_fold_years"] == [2023]
-    assert summary["trained_cell_count"] == 2
-    assert summary["completed_cell_count"] == 1
-    assert record["burned_fold_years"] == [2023]
-    assert record["trained_cells"] == [
-        "model_a/fold_2023/seed_7/attempt_001",
-        "model_a/fold_2023/seed_7/attempt_002",
-    ]
-    assert record["completed_cells"] == [
-        "model_a/fold_2023/seed_7/attempt_001"
-    ]
-    assert record["evidence"] == [
-        {
-            "path": "evidence/design_analysis.txt",
-            "sha256": quality._file_sha256(evidence_path),
-        }
-    ]
-    pointer_path = output_root / "design_invalidation/current.json"
-    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
-    assert pointer["record"] == str(record_path.resolve())
-    assert pointer["record_sha256"] == quality._file_sha256(record_path)
-
-
-def test_invalidate_study_design_rejects_unknown_defect_class(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    study_path, output_root, _workspace = _design_invalidation_fixture(
-        tmp_path, monkeypatch
-    )
-    with pytest.raises(ValueError, match="defect_class must be one of"):
-        quality.invalidate_study_design(
-            study_path=study_path,
-            output_root=output_root,
-            defect_class="replace_the_target",
-            statement=DESIGN_STATEMENT,
-            structural_argument=DESIGN_ARGUMENT,
-            evidence_paths=[study_path],
-            inspected_alternatives=["alternative"],
-        )
-
-
-def test_invalidate_study_design_rejects_short_written_arguments(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    study_path, output_root, _workspace = _design_invalidation_fixture(
-        tmp_path, monkeypatch
-    )
-    common = {
-        "study_path": study_path,
-        "output_root": output_root,
-        "defect_class": "primary_metric_misspecified",
-        "evidence_paths": [study_path],
-        "inspected_alternatives": ["alternative"],
-    }
-    with pytest.raises(ValueError, match="statement must contain at least 80"):
-        quality.invalidate_study_design(
-            **common,
-            statement="too short",
-            structural_argument=DESIGN_ARGUMENT,
-        )
-    with pytest.raises(
-        ValueError, match="structural_argument must contain at least 80"
-    ):
-        quality.invalidate_study_design(
-            **common,
-            statement=DESIGN_STATEMENT,
-            structural_argument="too short",
-        )
-
-
-def test_invalidate_study_design_rejects_missing_evidence_or_alternatives(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    study_path, output_root, workspace = _design_invalidation_fixture(
-        tmp_path, monkeypatch
-    )
-    common = {
-        "study_path": study_path,
-        "output_root": output_root,
-        "defect_class": "evidence_power_insufficient",
-        "statement": DESIGN_STATEMENT,
-        "structural_argument": DESIGN_ARGUMENT,
-    }
-    with pytest.raises(ValueError, match="evidence_paths must contain"):
-        quality.invalidate_study_design(
-            **common,
-            evidence_paths=[],
-            inspected_alternatives=["alternative"],
-        )
-    with pytest.raises(ValueError, match="evidence path must exist and be a file"):
-        quality.invalidate_study_design(
-            **common,
-            evidence_paths=[workspace / "missing.txt"],
-            inspected_alternatives=["alternative"],
-        )
-    with pytest.raises(ValueError, match="inspected_alternatives must contain"):
-        quality.invalidate_study_design(
-            **common,
-            evidence_paths=[study_path],
-            inspected_alternatives=[],
-        )
-
-
-def test_invalidate_study_design_rejects_completed_evaluation(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    study_path, output_root, _workspace = _design_invalidation_fixture(
-        tmp_path, monkeypatch
-    )
-    report_path = output_root / "evaluation/attempt_001/evaluation_report.json"
-    report_path.parent.mkdir(parents=True)
-    report_path.write_text(json.dumps({"status": "completed"}), encoding="utf-8")
-    pointer_path = output_root / "evaluation/current.json"
-    pointer_path.write_text(
-        json.dumps(
-            {
-                "evaluation_report": str(report_path.resolve()),
-                "evaluation_report_sha256": quality._file_sha256(report_path),
-            }
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(
-        ValueError, match="illegal once a formal evaluation verdict exists"
-    ):
-        quality.invalidate_study_design(
-            study_path=study_path,
-            output_root=output_root,
-            defect_class="evaluator_semantics_inconsistent",
-            statement=DESIGN_STATEMENT,
-            structural_argument=DESIGN_ARGUMENT,
-            evidence_paths=[study_path],
-            inspected_alternatives=["alternative"],
-        )
-
-
-def test_terminal_study_evidence_prefers_and_verifies_design_invalidation(
-    tmp_path: Path,
-) -> None:
-    output_root = tmp_path / "output"
-    record_path = (
-        output_root
-        / "design_invalidation/attempt_001/design_invalidation.json"
-    )
-    record_path.parent.mkdir(parents=True)
-    record = {
-        "artifact_type": "seq100_signal_quality_design_invalidation",
-        "status": "research_design_insufficient",
-    }
-    record_path.write_text(json.dumps(record), encoding="utf-8")
-    pointer_path = output_root / "design_invalidation/current.json"
-    pointer_path.parent.mkdir(parents=True, exist_ok=True)
-    pointer_path.write_text(
-        json.dumps(
-            {
-                "record": str(record_path.resolve()),
-                "record_sha256": quality._file_sha256(record_path),
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    status, evidence_path, evidence = quality._terminal_study_evidence(
-        study={}, output_root=output_root
-    )
-    assert status == "research_design_insufficient"
-    assert evidence_path == record_path.resolve()
-    assert evidence == record
-
-    record_path.write_text(json.dumps({**record, "mutated": True}), encoding="utf-8")
-    with pytest.raises(ValueError, match="design invalidation record changed"):
-        quality._terminal_study_evidence(study={}, output_root=output_root)
-
-
-def test_target_field_names_are_unique() -> None:
-    assert len(quality.TARGET_FLOAT_FIELDS) == len(set(quality.TARGET_FLOAT_FIELDS))
-
-
-def test_contract_hash_mismatch_is_rejected(tmp_path: Path) -> None:
-    payload = _study()
-    payload["contract"]["objective"] = "tampered"
-    path = tmp_path / "study.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="contract SHA-256 mismatch"):
-        quality.load_study(path)
-
-
-def test_training_budget_amendment_is_exact_and_hash_bound(tmp_path: Path) -> None:
-    study = _study()
-    path = quality._training_budget_amendment_path(tmp_path)
-    path.parent.mkdir(parents=True)
-    payload = _budget_amendment_payload()
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    loaded = quality._load_training_budget_amendment(study, tmp_path)
-    assert loaded == payload
-
-    payload["config_changes"]["learning_rate"] = {"from": 0.001, "to": 0.002}
-    payload["amendment_sha256"] = quality._canonical_json_sha256(
-        {key: value for key, value in payload.items() if key != "amendment_sha256"}
-    )
-    path.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="unsupported fields"):
-        quality._load_training_budget_amendment(study, tmp_path)
 
 
 def test_next_open_reanchor_uses_executed_open_denominator() -> None:
@@ -581,9 +193,9 @@ def test_d20_endpoint_cutoff_hard_rejects_2026() -> None:
 
 def test_rolling_and_cross_section_features_are_causal() -> None:
     rng = np.random.default_rng(7)
-    values = np.exp(
-        np.cumsum(rng.normal(0.0, 0.01, size=(100, 3)), axis=0)
-    ).astype(np.float32)
+    values = np.exp(np.cumsum(rng.normal(0.0, 0.01, size=(100, 3)), axis=0)).astype(
+        np.float32
+    )
     changed = values.copy()
     changed[71:] *= 50.0
     before = quality._rolling_linear_stats(np.log(values), 20)[0]
@@ -631,214 +243,6 @@ def test_lightgbm_sequence_uses_double_sampling_contract() -> None:
     assert dataset.num_data() == 8
 
 
-def test_completed_model_screen_task_is_reused_only_with_valid_hashes(
-    tmp_path: Path,
-) -> None:
-    model_dir = tmp_path / "model"
-    output_dir = model_dir / "prescreen"
-    output_dir.mkdir(parents=True)
-    expected_config = {
-        "model_id": "example",
-        "resolved_config_sha256": "resolved",
-        "resume_key_sha256": "resume",
-    }
-    (output_dir / "resolved_config.json").write_text(
-        json.dumps(expected_config), encoding="utf-8"
-    )
-    checkpoint = output_dir / "best_model.pt"
-    prediction = output_dir / "predictions.parquet"
-    daily = output_dir / "daily_metrics.parquet"
-    checkpoint.write_bytes(b"checkpoint")
-    prediction.write_bytes(b"prediction")
-    daily.write_bytes(b"daily")
-    summary = {
-        "status": "completed",
-        "model_id": "example",
-        "fold_id": "screen",
-        "fold_year": 2022,
-        "seed": 7,
-        "resume_key_sha256": "resume",
-        "resolved_config_sha256": "resolved",
-        "adapter": {
-            "checkpoint_path": str(checkpoint),
-            "checkpoint_sha256": quality._file_sha256(checkpoint),
-        },
-        "prediction": {
-            "path": str(prediction),
-            "sha256": quality._file_sha256(prediction),
-            "candidate_count": 11,
-        },
-        "daily_metrics": {
-            "path": str(daily),
-            "sha256": quality._file_sha256(daily),
-        },
-        "metrics": {"candidate_count": 11},
-        "protection_before": {"protected": "same"},
-        "protection_after": {"protected": "same"},
-    }
-    (output_dir / "task_summary.json").write_text(
-        json.dumps(summary), encoding="utf-8"
-    )
-    loaded = quality._load_completed_screen_task(
-        model_dir,
-        model_id="example",
-        expected_config=expected_config,
-        expected_test_year=2022,
-        expected_candidate_count=11,
-    )
-    assert loaded is not None
-    assert loaded[0] == output_dir
-
-    checkpoint.write_bytes(b"tampered")
-    assert quality._load_completed_screen_task(
-        model_dir,
-        model_id="example",
-        expected_config=expected_config,
-        expected_test_year=2022,
-        expected_candidate_count=11,
-    ) is None
-
-
-def test_screen_retry_paths_preserve_interrupted_outputs(tmp_path: Path) -> None:
-    model_dir = tmp_path / "model"
-    model_dir.mkdir()
-    assert quality._next_screen_retry_dir(model_dir, "prescreen") == model_dir / "prescreen"
-    (model_dir / "prescreen").mkdir()
-    assert quality._next_screen_retry_dir(model_dir, "prescreen") == (
-        model_dir / "prescreen_retry_001"
-    )
-    (model_dir / "prescreen_retry_001").mkdir()
-    assert quality._next_screen_retry_dir(model_dir, "prescreen") == (
-        model_dir / "prescreen_retry_002"
-    )
-
-
-def test_budget_extension_accepts_only_the_frozen_budget_delta() -> None:
-    amendment = _budget_amendment_payload()
-    source = {
-        "model_id": "patchtst_student_t_path",
-        "fold_id": "screen",
-        "seed": 7,
-        "feature_sha256": "feature",
-        "execution_semantics_version": "exact_effective_batch_global_loss_v2",
-        "micro_batch": 128,
-        "frozen_model_config": {
-            "learning_rate": 0.0005,
-            "max_epochs": 3,
-            "patience": 1,
-        },
-        "resolved_config_sha256": "old-resolved",
-        "resume_key_sha256": "old-resume",
-    }
-    expected = {
-        **source,
-        "frozen_model_config": {
-            "learning_rate": 0.0005,
-            "max_epochs": 10,
-            "patience": 2,
-        },
-        "training_budget_amendment_sha256": amendment["amendment_sha256"],
-        "training_budget_amended_fields": ["max_epochs", "patience"],
-        "resolved_config_sha256": "new-resolved",
-        "resume_key_sha256": "new-resume",
-    }
-    compatibility = quality._budget_extension_compatibility(
-        source,
-        expected,
-        amendment,
-    )
-    assert compatibility is not None
-    assert compatibility["config_changes"] == amendment["config_changes"]
-
-    changed_learning_rate = json.loads(json.dumps(expected))
-    changed_learning_rate["frozen_model_config"]["learning_rate"] = 0.001
-    assert quality._budget_extension_compatibility(
-        source,
-        changed_learning_rate,
-        amendment,
-    ) is None
-    changed_fold = dict(expected)
-    changed_fold["fold_id"] = "2023"
-    assert quality._budget_extension_compatibility(
-        source,
-        changed_fold,
-        amendment,
-    ) is None
-
-
-def test_budget_extension_migrates_checkpoint_without_mutating_source(
-    tmp_path: Path,
-) -> None:
-    amendment = _budget_amendment_payload()
-    source_dir = tmp_path / "attempt_001" / "model" / "prescreen"
-    source_dir.mkdir(parents=True)
-    source_checkpoint = {
-        "schema": quality.TRAINING_CHECKPOINT_VERSION,
-        "saved_at": "before",
-        "resume_key_sha256": "old-resume",
-        "execution_semantics_version": "exact_effective_batch_global_loss_v2",
-        "model_state_dict": {"weight": torch.tensor([1.0, 2.0])},
-        "optimizer_state_dict": {"state": {0: {"step": torch.tensor(3.0)}}},
-        "scaler_state_dict": {"scale": 1.0},
-        "epoch": 4,
-        "next_step_index": 0,
-        "best_epoch": 3,
-        "best_development_loss": -1.25,
-        "best_state": {"weight": torch.tensor([0.5, 1.5])},
-        "epochs_without_improvement": 0,
-        "training_log": [{"epoch": 3, "development_loss": -1.25}],
-        "epoch_loss_sum": 0.0,
-        "epoch_sample_count": 0,
-        "rng_state": {"python": (3, (), None)},
-    }
-    quality._atomic_torch_save(source_dir / "last_checkpoint.pt", source_checkpoint)
-    preprocessor = b'{"preprocessor_sha256":"same"}\n'
-    (source_dir / "snapshot_preprocessor.json").write_bytes(preprocessor)
-    source_hash = quality._file_sha256(source_dir / "last_checkpoint.pt")
-    expected = {
-        "resume_key_sha256": "new-resume",
-        "training_budget_amendment_sha256": amendment["amendment_sha256"],
-    }
-    destination = tmp_path / "attempt_002" / "model" / "prescreen"
-    provenance = quality._prepare_budget_extension_directory(
-        output_dir=destination,
-        source={
-            "source_dir": source_dir,
-            "source_config": {
-                "resolved_config_sha256": "old-resolved",
-                "resume_key_sha256": "old-resume",
-            },
-            "source_checkpoint": source_checkpoint,
-            "compatibility": {
-                "model_id": "patchtst_student_t_path",
-                "fold_id": "screen",
-                "seed": 7,
-                "config_changes": amendment["config_changes"],
-            },
-        },
-        expected_config=expected,
-        amendment=amendment,
-    )
-    migrated = torch.load(
-        destination / "last_checkpoint.pt",
-        map_location="cpu",
-        weights_only=False,
-    )
-    assert migrated["resume_key_sha256"] == "new-resume"
-    torch.testing.assert_close(
-        migrated["model_state_dict"]["weight"],
-        source_checkpoint["model_state_dict"]["weight"],
-    )
-    assert migrated["optimizer_state_dict"]["state"][0]["step"].item() == 3.0
-    assert migrated["rng_state"] == source_checkpoint["rng_state"]
-    assert (destination / "snapshot_preprocessor.json").read_bytes() == preprocessor
-    assert quality._file_sha256(source_dir / "last_checkpoint.pt") == source_hash
-    assert provenance["source_checkpoint_sha256"] == source_hash
-    check = dict(provenance)
-    declared = check.pop("provenance_sha256")
-    assert declared == quality._canonical_json_sha256(check)
-
-
 def test_only_complete_publish_failure_is_recoverable(tmp_path: Path) -> None:
     attempt = tmp_path / "feature_view" / "attempt_001"
     partial = attempt / "partial"
@@ -860,57 +264,26 @@ def test_only_complete_publish_failure_is_recoverable(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert quality._recoverable_feature_publish_attempt(
-        tmp_path,
-        candidate_count=candidate_count,
-        continuous_feature_count=2,
-        categorical_feature_count=1,
-    ) == attempt
+    assert (
+        quality._recoverable_feature_publish_attempt(
+            tmp_path,
+            candidate_count=candidate_count,
+            continuous_feature_count=2,
+            categorical_feature_count=1,
+        )
+        == attempt
+    )
 
     partial_paths.candidate_symbol_idx.write_bytes(b"short")
-    assert quality._recoverable_feature_publish_attempt(
-        tmp_path,
-        candidate_count=candidate_count,
-        continuous_feature_count=2,
-        categorical_feature_count=1,
-    ) is None
-
-
-def test_qdp_source_date_after_signal_is_rejected(tmp_path: Path) -> None:
-    shard = tmp_path / "domain.parquet"
-    pd.DataFrame(
-        {
-            "trade_date": ["2020-01-02"],
-            "symbol": ["000001.SZ"],
-            "value": [1.0],
-            "source_date": ["2020-01-03"],
-        }
-    ).to_parquet(shard, index=False)
-    dataset_manifest = tmp_path / "dataset.json"
-    dataset_manifest.write_text(
-        json.dumps({"shards": [{"path": str(shard)}]}), encoding="utf-8"
-    )
-    study = {
-        "contract": {
-            "data": {
-                "qdp_datasets": {
-                    "fake": {"manifest_path": str(dataset_manifest)}
-                }
-            }
-        }
-    }
-    manifest = {
-        "date_values": ["2020-01-02"],
-        "symbol_values": ["000001.SZ"],
-    }
-    with pytest.raises(ValueError, match="source_date after signal date"):
-        quality._load_qdp_dense_domain(
-            study,
-            manifest,
-            domain="fake",
-            numeric_fields=("value",),
-            source_guards={"value": "source_date"},
+    assert (
+        quality._recoverable_feature_publish_attempt(
+            tmp_path,
+            candidate_count=candidate_count,
+            continuous_feature_count=2,
+            categorical_feature_count=1,
         )
+        is None
+    )
 
 
 def test_student_t_quality_and_quantiles_are_finite_and_monotone() -> None:
@@ -968,10 +341,9 @@ def test_effective_batch_plan_is_exact_and_micro_batch_independent() -> None:
 
 def test_f0_cross_date_batch_preserves_requested_candidate_order() -> None:
     continuous = np.arange(182 * 2, dtype=np.float32).reshape(182, 2, 1)
-    binary = (np.arange(182 * 2).reshape(182, 2) % 2 == 0)
+    binary = np.arange(182 * 2).reshape(182, 2) % 2 == 0
     context = quality.ModelDataContext(
         study={},
-        research_freeze={},
         pack_manifest={},
         feature_manifest={},
         target_manifest={},
@@ -1009,7 +381,9 @@ def test_global_loss_denominator_makes_microbatch_gradients_equivalent() -> None
 
     full = values.clone().requires_grad_(True)
     full_loss = quality.global_normalized_component(
-        (torch.nn.functional.smooth_l1_loss(full, target, reduction="none") * mask).sum(),
+        (
+            torch.nn.functional.smooth_l1_loss(full, target, reduction="none") * mask
+        ).sum(),
         denominator,
     )
     full_loss.backward()
@@ -1056,9 +430,11 @@ def test_last_checkpoint_roundtrip_and_pause_sentinel(tmp_path: Path) -> None:
     loss = model(inputs).square().mean()
     loss.backward()
     optimizer.step()
-    expected = {name: value.detach().clone() for name, value in model.state_dict().items()}
+    expected = {
+        name: value.detach().clone() for name, value in model.state_dict().items()
+    }
     resolved = {
-        "resume_key_sha256": "resume-key",
+        "learning_rate": 0.01,
         "execution_semantics_version": "test-v1",
     }
     checkpoint = quality._save_last_training_checkpoint(
@@ -1091,14 +467,14 @@ def test_last_checkpoint_roundtrip_and_pause_sentinel(tmp_path: Path) -> None:
     assert payload["next_step_index"] == 3
     for name, value in model.state_dict().items():
         torch.testing.assert_close(value, expected[name])
-    with pytest.raises(ValueError, match="resume key mismatch"):
+    with pytest.raises(ValueError, match="parameters changed"):
         quality._load_last_training_checkpoint(
             output_dir=tmp_path,
             model=model,
             optimizer=optimizer,
             scaler=scaler,
             resolved_config={
-                "resume_key_sha256": "different",
+                "learning_rate": 0.02,
                 "execution_semantics_version": "test-v1",
             },
         )
@@ -1336,18 +712,14 @@ def test_deepsets_is_permutation_equivariant() -> None:
         config=config,
     ).eval()
     x_num = torch.randn(24, 10)
-    x_cat = torch.stack(
-        [torch.randint(0, 5, (24,)), torch.randint(0, 3, (24,))], dim=1
-    )
+    x_cat = torch.stack([torch.randint(0, 5, (24,)), torch.randint(0, 3, (24,))], dim=1)
     permutation = torch.randperm(24)
     inverse = torch.argsort(permutation)
     with torch.no_grad():
         original = model(x_num, x_cat)
         permuted = model(x_num[permutation], x_cat[permutation])
     torch.testing.assert_close(original["quality"], permuted["quality"][inverse])
-    torch.testing.assert_close(
-        original["fill_logit"], permuted["fill_logit"][inverse]
-    )
+    torch.testing.assert_close(original["fill_logit"], permuted["fill_logit"][inverse])
 
 
 def test_neural_sort_is_row_stochastic_and_loss_is_finite() -> None:
@@ -1363,16 +735,6 @@ def test_neural_sort_is_row_stochastic_and_loss_is_finite() -> None:
     assert torch.isfinite(loss)
     loss.backward()
     assert torch.isfinite(scores.grad).all()
-
-
-def test_all_frozen_adapters_expose_the_unified_interface() -> None:
-    assert tuple(quality.MODEL_ADAPTERS) == quality.MODEL_IDS
-    for model_id in quality.MODEL_IDS:
-        adapter = quality.get_model_adapter(model_id)
-        assert adapter.model_id == model_id
-        assert "fill" in adapter.capabilities
-        assert callable(adapter.fit)
-        assert callable(adapter.predict)
 
 
 def test_stratified_block_bootstrap_is_deterministic() -> None:

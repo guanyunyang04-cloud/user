@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 import gc
-import hashlib
 import json
 import math
 import random
@@ -25,18 +24,16 @@ from torch.utils.data import BatchSampler, Dataset
 from daily_research.path_policy.seq100_candidate_execution import (
     DEFAULT_DAILY_COHORT_CASH_CNY,
     evaluate_candidate_execution,
-    parse_execution_cost_contract,
+    parse_execution_costs,
 )
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
     DEFAULT_FORWARD_DAYS,
     DEFAULT_LOOKBACK_DAYS,
     PATH_OHLCVA_FIELDS,
     PATH_OHLC_FIELDS,
-    PATH_SUMMARY_COLUMNS,
     _json_default,
     _resolve_deferred_exit_days,
     _write_json,
-    assert_qdp_source_fresh,
     assert_sequence_continuity_contract,
     path_summary_columns,
     path_value_column,
@@ -375,25 +372,6 @@ def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _file_sha256(path: Path, *, chunk_size: int = 1024 * 1024) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        while chunk := handle.read(int(chunk_size)):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _model_state_sha256(model: nn.Module) -> str:
-    digest = hashlib.sha256()
-    for name, value in sorted(model.state_dict().items()):
-        array = value.detach().cpu().contiguous().numpy()
-        digest.update(name.encode("utf-8"))
-        digest.update(str(array.dtype).encode("ascii"))
-        digest.update(json.dumps(list(array.shape), separators=(",", ":")).encode("ascii"))
-        digest.update(array.tobytes(order="C"))
-    return digest.hexdigest()
-
-
 def _parse_int_list(raw: str | None, *, default: tuple[int, ...]) -> tuple[int, ...]:
     if raw is None:
         return default
@@ -622,7 +600,6 @@ class SequencePathPackDataset(Dataset):
         index_role: str = "supervised",
     ) -> None:
         self.manifest = dict(manifest)
-        assert_qdp_source_fresh(self.manifest)
         assert_sequence_continuity_contract(self.manifest)
         self.index_role = str(index_role or "supervised").strip().lower()
         if self.index_role not in {"supervised", "candidate"}:
@@ -662,7 +639,6 @@ class SequencePathPackDataset(Dataset):
                 "policy": "all_candidates" if self.index_role == "candidate" else self.sample_selection["policy"],
                 "index_role": self.index_role,
                 "index_path": str(self.index_path),
-                "index_sha256": _file_sha256(self.index_path) if self.index_role == "candidate" else "",
             }
         )
         self.date_idx_values = _validated_sample_date_indices(
@@ -814,9 +790,9 @@ class SequencePathPackDataset(Dataset):
             else None
         )
         self.execution_tail_days = int(self.manifest.get("execution_tail_days", 0) or 0)
-        terminal_contract = dict(self.manifest.get("terminal_execution_contract", {}) or {})
+        terminal_execution = dict(self.manifest.get("terminal_execution", {}) or {})
         self.terminal_recovery_fraction = float(
-            terminal_contract.get("recovery_fraction_of_entry_notional", 0.0) or 0.0
+            terminal_execution.get("recovery_fraction_of_entry_notional", 0.0) or 0.0
         )
         self.has_deterministic_execution = bool(
             self.entry_open_raw_panel is not None
@@ -2199,7 +2175,7 @@ def _v3_growth_multiplier_for_dates(
     The training target intentionally excludes lot-size/minimum-commission
     effects (those are account-level and allocation-dependent), but it keeps
     the date-dependent stamp-tax schedule and proportional commission,
-    transfer, and slippage terms from the execution contract.
+    transfer, and slippage terms from the configured execution costs.
     """
 
     indices = np.asarray(date_indices, dtype=np.int64).reshape(-1)
@@ -2207,7 +2183,7 @@ def _v3_growth_multiplier_for_dates(
     if horizon <= 0:
         raise ValueError("forward_days must be positive")
     dates = [pd.Timestamp(value).strftime("%Y-%m-%d") for value in list(manifest.get("date_values", []) or [])]
-    if not isinstance(manifest.get("execution_cost_contract"), Mapping) or not dates:
+    if not isinstance(manifest.get("execution_costs"), Mapping) or not dates:
         fallback_cost = float(PATH_VALUE_V3_TRANSACTION_COST) * (
             2.0 if float(slippage_multiplier) > 1.0 else 1.0
         )
@@ -2216,7 +2192,7 @@ def _v3_growth_multiplier_for_dates(
             1.0 - fallback_cost,
             dtype=np.float32,
         )
-    contract = parse_execution_cost_contract(manifest)
+    contract = parse_execution_costs(manifest)
     schedule = tuple(contract.stamp_tax_schedule)
     fallback_cost = float(PATH_VALUE_V3_TRANSACTION_COST) * (
         2.0 if float(slippage_multiplier) > 1.0 else 1.0
@@ -3649,12 +3625,7 @@ _EXECUTION_INTERNAL_COLUMNS = {
     "_execution_exit_close_raw_path",
     "_execution_exit_sellable_path",
 }
-_EXECUTION_DAILY_MERGE_KEYS = ("trade_date", "top_k", "universe_hash")
-
-
-def _candidate_universe_hash(symbols: pd.Series | list[str]) -> str:
-    normalized = sorted(str(item) for item in list(symbols))
-    return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
+_EXECUTION_DAILY_MERGE_KEYS = ("trade_date", "top_k")
 
 
 def _merge_candidate_execution_daily_rows(
@@ -3662,7 +3633,6 @@ def _merge_candidate_execution_daily_rows(
     execution_rows: pd.DataFrame,
     *,
     expected_candidate_count: int,
-    expected_universe_hash: str,
 ) -> list[dict[str, Any]]:
     """One-to-one merge execution cashflows into the already-ranked daily diagnostics."""
 
@@ -3683,8 +3653,6 @@ def _merge_candidate_execution_daily_rows(
                 f"{name} daily TopK candidate count drifted from the candidate index: "
                 f"expected={expected_candidate_count}, observed={universe_counts.tolist()}"
             )
-        if not bool(frame["universe_hash"].astype(str).eq(str(expected_universe_hash)).all()):
-            raise ValueError(f"{name} daily TopK universe hash drifted from the candidate index")
     opportunity_keys = set(
         map(tuple, opportunity[list(_EXECUTION_DAILY_MERGE_KEYS)].astype(str).to_numpy())
     )
@@ -3772,12 +3740,6 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
         sort_columns = ["score", *( ["symbol"] if "symbol" in group.columns else [])]
         ascending = [False, *( [True] if "symbol" in group.columns else [])]
         group = group.sort_values(sort_columns, ascending=ascending, kind="mergesort")
-        universe_symbols = (
-            sorted(group["symbol"].astype(str).tolist())
-            if "symbol" in group.columns
-            else [str(item) for item in sorted(group.index.tolist())]
-        )
-        universe_hash = _candidate_universe_hash(universe_symbols)
         for top_k in top_k_values:
             top = group.head(int(top_k))
             row: dict[str, Any] = {
@@ -3785,7 +3747,6 @@ def _topk_daily_rows(frame: pd.DataFrame, *, top_k_values: tuple[int, ...], forw
                 "top_k": int(top_k),
                 "universe_count": int(len(group)),
                 "selected_count": int(len(top)),
-                "universe_hash": universe_hash,
                 "universe_labeled_count": int(pd.to_numeric(group[value_column], errors="coerce").notna().sum()),
                 "selected_labeled_count": int(pd.to_numeric(top[value_column], errors="coerce").notna().sum()),
             }
@@ -3915,13 +3876,11 @@ def _topk_candidate_rows(
         "ending_cash_stress_cny",
         "candidate_allocation_cash_cny",
         "value_label_available",
-        "execution_cost_contract_sha256",
     ]
     string_metric_columns = {
         "realized_plan_resolved_exit_date",
         "realized_plan_exit_date",
         "realized_plan_exit_status",
-        "execution_cost_contract_sha256",
     }
     retained_prediction_columns = sorted(
         column
@@ -3937,12 +3896,6 @@ def _topk_candidate_rows(
         sort_columns = ["score", *( ["symbol"] if "symbol" in group.columns else [])]
         ascending = [False, *( [True] if "symbol" in group.columns else [])]
         group = group.sort_values(sort_columns, ascending=ascending, kind="mergesort")
-        universe_symbols = (
-            sorted(group["symbol"].astype(str).tolist())
-            if "symbol" in group.columns
-            else [str(item) for item in sorted(group.index.tolist())]
-        )
-        universe_hash = _candidate_universe_hash(universe_symbols)
         top = group.head(max(int(max_top_k), 0))
         for rank, (_, item) in enumerate(top.iterrows(), start=1):
             row: dict[str, Any] = {
@@ -3951,7 +3904,6 @@ def _topk_candidate_rows(
                 "symbol": str(item.get("symbol", "")),
                 "score": float(item["score"]),
                 "universe_count": int(len(group)),
-                "universe_hash": universe_hash,
                 "label_available": bool(pd.notna(pd.to_numeric(pd.Series([item.get(value_column)]), errors="coerce").iloc[0])),
             }
             for column in metric_columns:
@@ -3972,27 +3924,14 @@ def _aggregate_topk_daily_rows(rows: list[dict[str, Any]]) -> pd.DataFrame:
     out_rows: list[dict[str, Any]] = []
     for top_k, group in daily.groupby("top_k", sort=True):
         out: dict[str, Any] = {"top_k": int(top_k), "day_count": int(len(group))}
-        if "execution_cost_contract_sha256" in group.columns:
-            contract_hashes = sorted(
-                {
-                    str(value)
-                    for value in group["execution_cost_contract_sha256"].dropna().tolist()
-                    if str(value)
-                }
-            )
-            if len(contract_hashes) != 1:
-                raise ValueError("daily TopK rows must bind exactly one execution cost contract")
-            out["execution_cost_contract_sha256"] = contract_hashes[0]
         ignored = {
             "trade_date",
             "top_k",
-            "universe_hash",
             "score_column",
             "selected_symbols",
             "selected_symbols_json",
             "selected_exit_status_counts_json",
             "universe_exit_status_counts_json",
-            "execution_cost_contract_sha256",
         }
         for col in [c for c in group.columns if c not in ignored]:
             values = pd.to_numeric(group[col], errors="coerce")
@@ -4074,11 +4013,6 @@ def _validate_development_topk_execution_coverage(topk: pd.DataFrame) -> None:
         values = pd.to_numeric(topk[column], errors="coerce")
         if values.empty or not bool(np.isfinite(values).all()):
             raise ValueError(f"development TopK net-return metric must be finite and complete: {column}")
-    if "execution_cost_contract_sha256" not in topk.columns:
-        raise ValueError("development TopK is missing execution_cost_contract_sha256")
-    hashes = topk["execution_cost_contract_sha256"].astype(str)
-    if hashes.empty or not bool(hashes.str.fullmatch(r"[0-9a-f]{64}").all()):
-        raise ValueError("development TopK execution cost contract hash is invalid")
 
 
 def _split_metrics_for_score(
@@ -5302,7 +5236,7 @@ def _predict_split(
             symbols = group["symbol"].astype(str).tolist()
             expected_development_universes[normalized_date] = {
                 "candidate_count": int(len(group)),
-                "universe_hash": _candidate_universe_hash(symbols),
+                "symbols": tuple(sorted(symbols)),
                 "signal_date_idx": signal_idx,
             }
     pending_date: str | None = None
@@ -5372,15 +5306,14 @@ def _predict_split(
             expected = expected_development_universes.get(trade_date)
             if expected is None:
                 raise ValueError(f"development prediction contains an unregistered candidate date: {trade_date}")
-            observed_symbols = date_frame["symbol"].astype(str)
-            observed_hash = _candidate_universe_hash(observed_symbols.tolist())
+            observed_symbols = tuple(sorted(date_frame["symbol"].astype(str).tolist()))
             if int(len(date_frame)) != int(expected["candidate_count"]):
                 raise ValueError(
                     "development daily candidate count drifted from candidate index: "
                     f"trade_date={trade_date}, expected={expected['candidate_count']}, observed={len(date_frame)}"
                 )
-            if observed_hash != str(expected["universe_hash"]):
-                raise ValueError(f"development daily universe hash drifted for {trade_date}")
+            if observed_symbols != tuple(expected["symbols"]):
+                raise ValueError(f"development daily symbols drifted for {trade_date}")
             score_values = pd.to_numeric(date_frame["score"], errors="coerce").to_numpy(
                 dtype=np.float64
             )
@@ -5437,10 +5370,6 @@ def _predict_split(
             )
             date_frame = execution.candidates
             execution_daily_rows = execution.daily_topk
-            if execution.execution_cost_contract_sha256 != str(
-                execution_daily_rows["execution_cost_contract_sha256"].iloc[0]
-            ):
-                raise ValueError("candidate execution result has inconsistent cost-contract hashes")
             seen_development_dates.add(trade_date)
         score_columns = ["score"]
         for optional_score in ["path_value_score", "residual_score"]:
@@ -5467,7 +5396,6 @@ def _predict_split(
                     daily_rows,
                     execution_daily_rows,
                     expected_candidate_count=int(expected["candidate_count"]),
-                    expected_universe_hash=str(expected["universe_hash"]),
                 )
             for row in daily_rows:
                 row["score_column"] = str(score_col)
@@ -6173,22 +6101,10 @@ def _predict_split(
             }
         )
     if candidate_complete_development:
-        contract_hashes = sorted(
-            {
-                str(value)
-                for value in daily_topk.get(
-                    "execution_cost_contract_sha256", pd.Series(dtype="string")
-                ).dropna()
-            }
-        )
-        if len(contract_hashes) != 1:
-            raise ValueError("development daily TopK must bind exactly one execution cost contract")
         metrics.update(
             {
-                "execution_cost_contract_sha256": contract_hashes[0],
                 "candidate_complete_score_coverage": 1.0,
                 "candidate_universe_date_count_verified": int(len(seen_development_dates)),
-                "candidate_universe_hash_policy": "sha256_sorted_symbol_newline_v1",
             }
         )
     diagnostics: dict[str, dict[str, Any]] = {}
@@ -6305,10 +6221,10 @@ def _write_report(
     lines.append(
         f"- Path-value gradient profile: `{summary.get('path_value_gradient_profile', PATH_VALUE_GRADIENT_PROFILE_SMOOTH)}`."
     )
-    ranking_contract = dict(summary.get("ranking_contract", {}) or {})
+    ranking = dict(summary.get("ranking", {}) or {})
     lines.append(
-        f"- Rank training profile: `{ranking_contract.get('profile', RANK_TRAINING_PROFILE_LOCAL_CHUNK)}`; "
-        f"separate path/rank batches={bool(ranking_contract.get('path_and_rank_batches_separate', False))}."
+        f"- Rank training profile: `{ranking.get('profile', RANK_TRAINING_PROFILE_LOCAL_CHUNK)}`; "
+        f"separate path/rank batches={bool(ranking.get('path_and_rank_batches_separate', False))}."
     )
     if str(summary.get("evaluation_mode", "")) == EVALUATION_MODE_FIXED_OOS:
         lines.append("- OOS was not read during training and did not select the checkpoint.")
@@ -6373,7 +6289,7 @@ class TrainConfig:
     early_stopping_metric: str = ""
     early_stopping_mode: str = ""
     minimum_complete_epochs: int = 1
-    development_contract: Path | None = None
+    development_config: Path | None = None
     development_fixed_final_epoch: bool = False
     geometry_loss_weight: float = 0.0
     utility_curve_loss_weight: float = 0.0
@@ -6442,40 +6358,23 @@ def _validate_evaluation_mode(config: TrainConfig) -> str:
     return mode
 
 
-def _canonical_json_sha256(payload: Any) -> str:
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_json_default)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
-
-
-def _validated_development_contract(path: Path) -> dict[str, Any]:
-    contract_path = Path(path).resolve()
-    payload = json.loads(contract_path.read_text(encoding="utf-8"))
-    mutable_study = (
-        str(payload.get("artifact_type", "")) == "seq100_current_study"
-        or isinstance(payload.get("contract"), Mapping)
-    )
-    semantic_payload = dict(payload.get("contract", {}) or {}) if mutable_study else dict(payload)
-    declared = str(
-        payload.get("contract_sha256", semantic_payload.get("contract_sha256", "")) or ""
-    )
-    semantic_payload.pop("contract_sha256", None)
-    computed = _canonical_json_sha256(semantic_payload)
-    if not declared or computed != declared:
-        raise ValueError("development contract semantic sha256 does not match contract_sha256")
+def _load_development_config(path: Path) -> dict[str, Any]:
+    config_path = Path(path).resolve()
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
     protocol = dict(
-        semantic_payload.get("development", {})
-        or semantic_payload.get("development_protocol", {})
+        payload.get("development", {})
+        or payload.get("development_protocol", {})
         or {}
     )
     if dict(protocol.get("split_roles", {}) or {}) != {"fit": "train", "evaluation": "development"}:
-        raise ValueError("development contract must declare train/development split roles")
-    early = dict(semantic_payload.get("early_stopping", {}) or {})
-    shared_training = dict(semantic_payload.get("shared_training", {}) or {})
-    legacy_training = dict(semantic_payload.get("training", {}) or {})
+        raise ValueError("development config must declare train/development split roles")
+    early = dict(payload.get("early_stopping", {}) or {})
+    shared_training = dict(payload.get("shared_training", {}) or {})
+    training = dict(payload.get("training", {}) or {})
     fixed_final_epoch = bool(
         str(shared_training.get("checkpoint_policy", ""))
         == "fixed_final_epoch_without_oos_checkpoint_selection"
-        or legacy_training.get("development_fixed_final_epoch", False)
+        or training.get("development_fixed_final_epoch", False)
     )
     if not fixed_final_epoch and (
         str(early.get("metric", "")) not in {
@@ -6486,20 +6385,18 @@ def _validated_development_contract(path: Path) -> dict[str, Any]:
         or int(early.get("minimum_complete_epochs", 0)) < 1
         or not bool(early.get("restore_best_checkpoint", False))
     ):
-        raise ValueError("development contract checkpoint semantics are incompatible")
+        raise ValueError("development config checkpoint semantics are incompatible")
     return {
-        "contract_id": str(semantic_payload.get("contract_id", payload.get("contract_id", ""))),
-        "path": str(contract_path),
-        "contract_sha256": declared,
-        "contract_file_sha256": declared if mutable_study else _file_sha256(contract_path),
-        "expected_input_dim": int(dict(semantic_payload.get("profile", {}) or {}).get("input_dim", 0) or 0),
+        "study_id": str(payload.get("study_id", payload.get("config_id", ""))),
+        "path": str(config_path),
+        "expected_input_dim": int(dict(payload.get("profile", {}) or {}).get("input_dim", 0) or 0),
         "fixed_final_epoch": fixed_final_epoch,
     }
 
 
 def _development_split_storage_name(manifest: Mapping[str, Any]) -> str:
-    contract = dict(manifest.get("development_walkforward", {}) or {})
-    split_roles = dict(contract.get("split_roles", {}) or {})
+    split_config = dict(manifest.get("development_walkforward", {}) or {})
+    split_roles = dict(split_config.get("split_roles", {}) or {})
     if split_roles != {"fit": "train", "evaluation": "development"}:
         raise ValueError("development fold must declare split_roles fit=train and evaluation=development")
     index_paths = [Path(str(manifest.get("sample_index_path", "") or ""))]
@@ -6511,14 +6408,10 @@ def _development_split_storage_name(manifest: Mapping[str, Any]) -> str:
     ]
     if split_sets and all("development" in values for values in split_sets):
         return "development"
-    # Explicit compatibility only: the manifest's canonical evaluation role is
-    # development, while both stored indexes use the retired physical name oos.
-    if split_sets and all("oos" in values for values in split_sets):
-        return "oos"
     raise ValueError("development fold indexes must contain the canonical development split")
 
 
-def _validate_fixed_oos_split_contract(
+def _validate_fixed_oos_split(
     *,
     manifest: Mapping[str, Any],
     train_ds: SequencePathPackDataset,
@@ -6545,45 +6438,34 @@ def _validate_fixed_oos_split_contract(
             "fixed_oos requires every training label to end before OOS: "
             f"label_overlap_count={overlap_count}"
         )
-    contract = dict(manifest.get("purged_walkforward", {}) or {})
-    if not contract:
-        raise ValueError("fixed_oos requires a purged_walkforward contract")
-    declared_start = int(contract.get("oos_start_date_idx", -1))
+    split_config = dict(manifest.get("purged_walkforward", {}) or {})
+    if not split_config:
+        raise ValueError("fixed_oos requires purged_walkforward metadata")
+    declared_start = int(split_config.get("oos_start_date_idx", -1))
     if declared_start != oos_start_idx:
         raise ValueError("fixed_oos manifest oos_start_date_idx does not match the sample index")
-    if int(contract.get("label_overlap_count", -1)) != 0:
+    if int(split_config.get("label_overlap_count", -1)) != 0:
         raise ValueError("fixed_oos manifest does not declare label_overlap_count=0")
     normalization = dict(manifest.get("normalization", {}) or {})
     if normalization.get("fit_scope") != "feature_dates_before_oos_start":
         raise ValueError("fixed_oos normalization must use feature_dates_before_oos_start")
-    if str(normalization.get("fit_date_end_exclusive", "")) != str(contract.get("oos_start", "")):
+    if str(normalization.get("fit_date_end_exclusive", "")) != str(split_config.get("oos_start", "")):
         raise ValueError("fixed_oos normalization cutoff does not match OOS start")
 
-    # The walk-forward builder binds the sample index, normalization, panels,
-    # masks, and split/purge metadata into this immutable digest.  Recompute it
-    # here as well so a direct training CLI call cannot bypass orchestration QA.
-    from daily_research.path_policy.seq100_fold_contract import (
-        validate_fold_training_contract,
-        validate_source_view_provenance,
-    )
-
-    validate_fold_training_contract(manifest)
-    if str(contract.get("method", "")) == "expanding_train_fixed_oos":
-        validate_source_view_provenance(manifest)
 
 
-def _validate_development_split_contract(
+def _validate_development_split(
     *,
     manifest: Mapping[str, Any],
     train_ds: SequencePathPackDataset,
     development_ds: SequencePathPackDataset,
 ) -> None:
-    contract = dict(manifest.get("development_walkforward", {}) or {})
-    contract_schema = int(contract.get("schema_version", 1) or 1)
+    split_config = dict(manifest.get("development_walkforward", {}) or {})
+    config_schema = int(split_config.get("schema_version", 1) or 1)
     dependency_days = int(
-        contract.get(
+        split_config.get(
             "training_label_dependency_days",
-            contract.get(
+            split_config.get(
                 "max_label_dependency_days",
                 manifest.get("max_label_dependency_days", train_ds.forward_days),
             ),
@@ -6591,7 +6473,7 @@ def _validate_development_split_contract(
     )
     if dependency_days <= 0:
         raise ValueError("development max_label_dependency_days must be positive")
-    if contract_schema >= 2 and dependency_days != int(train_ds.forward_days):
+    if config_schema >= 2 and dependency_days != int(train_ds.forward_days):
         raise ValueError("development training purge must equal forward_days")
     if int(development_ds.forward_days) != int(train_ds.forward_days):
         raise ValueError("development train and evaluation forward_days must match")
@@ -6609,7 +6491,7 @@ def _validate_development_split_contract(
             "training_label_end_date_idx",
             "label_end_date_idx",
         )
-        if contract_schema >= 2
+        if config_schema >= 2
         else (
             "dependency_end_date_idx",
             "max_label_dependency_date_idx",
@@ -6635,19 +6517,28 @@ def _validate_development_split_contract(
             f"label_overlap_count={overlap_count}"
         )
     declared_start = int(
-        contract.get("development_start_date_idx", contract.get("oos_start_date_idx", -1))
+        split_config.get(
+            "development_start_date_idx", split_config.get("oos_start_date_idx", -1)
+        )
     )
     if declared_start != development_start_idx:
         raise ValueError("development manifest start date index does not match supervised index")
     if int(
-        contract.get(
+        split_config.get(
             "label_dependency_overlap_count",
-            contract.get("label_overlap_count", contract.get("dependency_overlap_count", -1)),
+            split_config.get(
+                "label_overlap_count", split_config.get("dependency_overlap_count", -1)
+            ),
         )
     ) != 0:
         raise ValueError("development manifest does not declare label dependency overlap count=0")
     normalization = dict(manifest.get("normalization", {}) or {})
-    expected_start = str(contract.get("development_start", contract.get("oos_start", "")) or "")
+    expected_start = str(
+        split_config.get(
+            "development_start", split_config.get("oos_start", "")
+        )
+        or ""
+    )
     if normalization.get("fit_scope") not in {
         "feature_dates_before_development_start",
         "feature_dates_before_oos_start",
@@ -6655,11 +6546,6 @@ def _validate_development_split_contract(
         raise ValueError("development normalization must use only feature dates before development start")
     if str(normalization.get("fit_date_end_exclusive", "")) != expected_start:
         raise ValueError("development normalization cutoff does not match development start")
-    from daily_research.path_policy.seq100_fold_contract import (
-        validate_development_fold_training_contract,
-    )
-
-    validate_development_fold_training_contract(manifest)
 
 
 VALIDATION_LOSS_KEYS = (
@@ -6895,39 +6781,23 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             raise ValueError("global_tail_512 requires rank_interval > 0")
     _set_seed(config.seed)
     manifest = json.loads(Path(config.pack_manifest).read_text(encoding="utf-8"))
-    assert_qdp_source_fresh(manifest)
     assert_sequence_continuity_contract(manifest)
-    development_contract_binding: dict[str, Any] = {}
-    execution_cost_contract_sha256 = ""
+    development_config: dict[str, Any] = {}
     if evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
-        manifest_contract = dict(manifest.get("research_contract", {}) or {})
-        contract_path_raw = (
-            config.development_contract
-            or manifest_contract.get("path")
+        manifest_config = dict(manifest.get("research_config", {}) or {})
+        config_path_raw = (
+            config.development_config
+            or manifest_config.get("path")
         )
-        if not contract_path_raw:
-            raise ValueError("development requires an approved development_contract path")
-        development_contract_binding = _validated_development_contract(Path(contract_path_raw))
-        for field in ("contract_id", "contract_sha256", "contract_file_sha256"):
-            if str(manifest_contract.get(field, "") or "") != str(
-                development_contract_binding[field]
-            ):
-                raise ValueError(f"manifest research_contract {field} does not match approved contract")
+        if not config_path_raw:
+            raise ValueError("development requires a development config path")
+        development_config = _load_development_config(Path(config_path_raw))
         if bool(config.development_fixed_final_epoch) != bool(
-            development_contract_binding.get("fixed_final_epoch", False)
+            development_config.get("fixed_final_epoch", False)
         ):
-            raise ValueError("development fixed-final mode does not match the approved contract")
-        execution_cost_contract = dict(manifest.get("execution_cost_contract", {}) or {})
-        if not execution_cost_contract:
-            raise ValueError("development requires a manifest-bound execution_cost_contract")
-        execution_cost_contract_sha256 = _canonical_json_sha256(execution_cost_contract)
-    fold_training_contract = (
-        manifest.get("development_fold_training_contract")
-        if evaluation_mode == EVALUATION_MODE_DEVELOPMENT
-        else manifest.get("fold_training_contract")
-    )
-    if fold_training_contract is not None and not isinstance(fold_training_contract, Mapping):
-        raise ValueError("fold_training_contract must be a JSON object")
+            raise ValueError("development fixed-final mode does not match the config")
+        if not isinstance(manifest.get("execution_costs"), Mapping):
+            raise ValueError("development requires execution_costs in the pack manifest")
     device = _resolve_device(config.device)
     amp_enabled = bool(config.amp and device.type == "cuda")
     output_dir = config.output_root / f"{config.run_tag}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -6975,11 +6845,11 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "source": "legacy_constant" if configured_temperature <= 0.0 else "configured",
             "temperature": float(path_value_temperature),
         }
-    expected_input_dim = int(development_contract_binding.get("expected_input_dim", 0) or 0)
+    expected_input_dim = int(development_config.get("expected_input_dim", 0) or 0)
     if evaluation_mode == EVALUATION_MODE_DEVELOPMENT and expected_input_dim > 0:
         if int(train_ds.input_dim) != expected_input_dim:
             raise ValueError(
-                "development model input dimension does not match the research contract: "
+                "development model input dimension does not match the research config: "
                 f"{train_ds.input_dim} != {expected_input_dim}"
             )
     if len(train_ds) == 0:
@@ -6997,7 +6867,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         )
         if len(oos_ds) == 0:
             raise ValueError("oos split is empty")
-        _validate_fixed_oos_split_contract(manifest=manifest, train_ds=train_ds, oos_ds=oos_ds)
+        _validate_fixed_oos_split(manifest=manifest, train_ds=train_ds, oos_ds=oos_ds)
     elif evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
         val_ds = None
         test_ds = None
@@ -7028,7 +6898,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             )
         if int(development_scoring_ds.execution_tail_days) <= 0:
             raise ValueError("development requires a positive execution_tail_days retry window")
-        _validate_development_split_contract(
+        _validate_development_split(
             manifest=manifest,
             train_ds=train_ds,
             development_ds=development_ds,
@@ -7094,7 +6964,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         activation_checkpoint_profile=str(config.activation_checkpoint_profile),
     ).to(device)
     model.residual_weight = float(config.residual_score_weight)
-    initial_model_state_sha256 = _model_state_sha256(model)
     uses_direct_value = bool(getattr(model, "uses_direct_value", False))
     uses_derived_path_value = bool(getattr(model, "uses_derived_path_value", False))
     uses_ohlcva_path = bool(getattr(model, "uses_ohlcva_path", False))
@@ -7476,7 +7345,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 torch.save(
                     {
                         "model_state_dict": model.state_dict(),
-                        "initial_model_state_sha256": initial_model_state_sha256,
                         "config": config.__dict__,
                         "input_dim": train_ds.input_dim,
                         "summary_columns": train_ds.path_summary_columns,
@@ -7596,7 +7464,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                 epochs_without_improvement = 0
                 checkpoint_payload = {
                     "model_state_dict": model.state_dict(),
-                    "initial_model_state_sha256": initial_model_state_sha256,
                     "optimizer_state_dict": optimizer.state_dict(),
                     "scaler_state_dict": scaler.state_dict(),
                     "python_random_state": random.getstate(),
@@ -7610,11 +7477,9 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     "input_dim": train_ds.input_dim,
                     "summary_columns": train_ds.path_summary_columns,
                     "feature_channels": manifest.get("feature_channels", {}),
-                    "fold_training_contract": fold_training_contract,
-                    "research_contract": development_contract_binding,
+                    "development_config": development_config,
                     "development_candidate_index": {
                         "path": str(development_scoring_ds.index_path),
-                        "sha256": str(development_scoring_ds.sample_selection["index_sha256"]),
                         "row_count": int(len(development_scoring_ds)),
                     },
                     "best_epoch": int(epoch),
@@ -7623,7 +7488,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
                     "best_development_metric": development_selector,
                     "best_development_metric_value": best_development_loss,
                     "development_loss_components": development_loss,
-                    "execution_cost_contract_sha256": execution_cost_contract_sha256,
+                    "execution_costs": dict(manifest["execution_costs"]),
                     "checkpoint_policy": (
                         "fixed_final_development_epoch"
                         if fixed_final_epoch else f"best_{development_selector}"
@@ -7712,7 +7577,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         torch.save(
             {
                 "model_state_dict": model.state_dict(),
-                "initial_model_state_sha256": initial_model_state_sha256,
                 "config": config.__dict__,
                 "input_dim": train_ds.input_dim,
                 "summary_columns": train_ds.path_summary_columns,
@@ -7854,7 +7718,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "generated_at": _now(),
         "run_tag": str(config.run_tag),
         "seed": int(config.seed),
-        "initial_model_state_sha256": initial_model_state_sha256,
         "top_k": [int(item) for item in config.top_k],
         "pack_manifest": str(Path(config.pack_manifest).resolve()),
         "output_dir": str(output_dir.resolve()),
@@ -7992,7 +7855,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "turnover_level": float(config.turnover_level_loss_weight),
             "turnover_delta": float(config.turnover_delta_loss_weight),
         },
-        "legal_exit_contract": {
+        "legal_exit": {
             "earliest_legal_exit_day": PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY,
             "exit_argmax_domain": [PATH_VALUE_V2_EARLIEST_LEGAL_EXIT_DAY, int(train_ds.forward_days)],
             "tie_break": "earliest_legal_day",
@@ -8042,7 +7905,7 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
         "rank_gradient_budget_diagnostics": _rank_gradient_budget_payload(
             rank_gradient_budget_state
         ),
-        "ranking_contract": {
+        "ranking": {
             "profile": rank_training_profile,
             "path_and_rank_batches_separate": bool(
                 rank_training_profile == RANK_TRAINING_PROFILE_GLOBAL_TAIL_512
@@ -8093,7 +7956,6 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             ),
         },
         "best_checkpoint": str(best_path.resolve()),
-        "best_checkpoint_sha256": _file_sha256(best_path),
         "history": history,
         "split_metrics": split_metrics.to_dict("records"),
         "outputs": {
@@ -8109,20 +7971,15 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
     }
     if evaluation_mode == EVALUATION_MODE_DEVELOPMENT:
         assert development_scoring_ds is not None
-        summary["research_contract"] = development_contract_binding
+        summary["development_config"] = development_config
         summary["development_candidate_index"] = {
             "path": str(development_scoring_ds.index_path),
-            "sha256": str(development_scoring_ds.sample_selection["index_sha256"]),
             "row_count": int(len(development_scoring_ds)),
             "date_count": int(development_scoring_ds.sample_index["date_idx"].nunique()),
             "policy": "all_candidates",
         }
         summary["candidate_index_path"] = str(development_scoring_ds.index_path)
-        summary["candidate_index_sha256"] = str(
-            development_scoring_ds.sample_selection["index_sha256"]
-        )
-        summary["execution_cost_contract_sha256"] = execution_cost_contract_sha256
-        summary["development_fold_training_contract"] = fold_training_contract
+        summary["execution_costs"] = dict(manifest["execution_costs"])
         summary["development_execution_evaluation"] = {
             "entry": "raw_next_open",
             "earliest_exit_day": 2,
@@ -8134,15 +7991,13 @@ def train_sequence_path_model(config: TrainConfig) -> dict[str, Any]:
             "daily_cohort_cash_cny": float(DEFAULT_DAILY_COHORT_CASH_CNY),
             "allocation": "equal_cash_per_top_k_name_with_unfilled_cash_retained",
             "gross_realized_plan_return_semantics": "raw_execution_return_before_costs",
-            "net_realized_plan_return_semantics": "manifest_bound_lots_fees_tax_transfer_and_slippage",
+            "net_realized_plan_return_semantics": "configured_lots_fees_tax_transfer_and_slippage",
             "net_realized_plan_value_semantics": "gross_path_value_plus_net_return_minus_gross_return",
             "execution_scenarios": ["base_slippage", "double_slippage_stress"],
             "label_dependent_value_missing_policy": "report_coverage_and_never_impute",
             "candidate_diagnostics_timing": "restored_best_checkpoint_only",
-            "portfolio_review_required_before_champion_freeze": True,
+            "portfolio_review_required_before_model_selection": True,
         }
-    if fold_training_contract is not None:
-        summary["fold_training_contract"] = fold_training_contract
     if bool(getattr(model, "uses_residual_score", False)):
         summary["loss_weights"]["residual_score_weight"] = float(config.residual_score_weight)
         summary["loss_weights"]["residual_penalty"] = float(config.residual_penalty_weight)
@@ -8318,7 +8173,7 @@ def _build_parser() -> argparse.ArgumentParser:
     train.add_argument("--early-stopping-metric", default="")
     train.add_argument("--early-stopping-mode", default="", choices=("", *EARLY_STOPPING_MODES))
     train.add_argument("--min-complete-epochs", type=int, default=1)
-    train.add_argument("--development-contract", type=Path, default=None)
+    train.add_argument("--development-config", type=Path, default=None)
     train.add_argument(
         "--development-fixed-final-epoch",
         action="store_true",
@@ -8401,7 +8256,7 @@ def main(argv: list[str] | None = None) -> int:
         early_stopping_metric=str(args.early_stopping_metric),
         early_stopping_mode=str(args.early_stopping_mode),
         minimum_complete_epochs=int(args.min_complete_epochs),
-        development_contract=(Path(args.development_contract) if args.development_contract else None),
+        development_config=(Path(args.development_config) if args.development_config else None),
         development_fixed_final_epoch=bool(args.development_fixed_final_epoch),
         activation_checkpoint_profile=str(args.activation_checkpoint_profile),
     )

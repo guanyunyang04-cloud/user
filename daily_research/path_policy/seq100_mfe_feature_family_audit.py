@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import argparse
 import gc
-import hashlib
 import json
 import math
 import os
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -47,7 +48,7 @@ REAL_FAMILIES = (
     "confirmed_swing_structure",
     "turnover_cost_proxy",
 )
-CONTROL_FAMILY = "deterministic_hash_noise"
+CONTROL_FAMILY = "deterministic_noise"
 ALL_FAMILIES = (*REAL_FAMILIES, CONTROL_FAMILY)
 PREPARED_FEATURE_SCHEMA = "seq100_mfe_feature_family_features/v1"
 TASK_RESULT_SCHEMA = "seq100_mfe_feature_family_task_result/v1"
@@ -56,27 +57,6 @@ SUMMARY_SCHEMA = "seq100_mfe_feature_family_summary/v1"
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def _canonical_json_sha256(value: Any) -> str:
-    raw = json.dumps(
-        value,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def _file_sha256(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            block = handle.read(chunk_size)
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
@@ -99,7 +79,6 @@ def _resolve(path: str | Path) -> Path:
 def _record_for_file(path: Path) -> dict[str, Any]:
     return {
         "path": path.relative_to(WORKSPACE_ROOT).as_posix(),
-        "sha256": _file_sha256(path),
         "size": int(path.stat().st_size),
     }
 
@@ -275,7 +254,7 @@ def feature_catalog() -> dict[str, tuple[str, ...]]:
             "survivor_mass",
             "survivor_mean_age_days",
         ),
-        CONTROL_FAMILY: tuple(f"hash_noise_{index:02d}" for index in range(32)),
+        CONTROL_FAMILY: tuple(f"noise_{index:02d}" for index in range(32)),
     }
 
 
@@ -295,132 +274,47 @@ def feature_catalog_payload() -> dict[str, Any]:
     }
 
 
-def feature_catalog_sha256() -> str:
-    return _canonical_json_sha256(feature_catalog_payload())
-
-
 def load_study(path: Path = DEFAULT_STUDY_PATH) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("study_id") != STUDY_ID:
         raise ValueError("unexpected feature-family study id")
-    if payload.get("status") != "active":
-        raise ValueError("feature-family study must be active")
-    contract = dict(payload.get("contract", {}) or {})
-    if payload.get("contract_sha256") != _canonical_json_sha256(contract):
-        raise ValueError("feature-family contract hash mismatch")
-    if contract.get("contract_id") != STUDY_ID:
-        raise ValueError("feature-family contract id changed")
-    protocol = dict(contract.get("protocol", {}) or {})
+    protocol = dict(payload.get("folds", {}) or {})
     if tuple(int(value) for value in protocol.get("fold_years", [])) != FOLD_YEARS:
         raise ValueError("feature-family folds changed")
     if tuple(int(value) for value in protocol.get("primary_horizons", [])) != TARGET_HORIZONS:
         raise ValueError("feature-family target horizons changed")
-    if tuple(protocol.get("candidate_feature_families", [])) != REAL_FAMILIES:
+    groups = dict(payload.get("feature_groups", {}) or {})
+    if tuple(groups.get("candidates", [])) != REAL_FAMILIES:
         raise ValueError("candidate feature family order changed")
-    if protocol.get("negative_control_family") != CONTROL_FAMILY:
+    if groups.get("negative_control") != CONTROL_FAMILY:
         raise ValueError("negative control changed")
-    declared_catalog = str(contract.get("feature_catalog", {}).get("sha256", ""))
-    if declared_catalog != feature_catalog_sha256():
-        raise ValueError("feature catalog hash changed")
-    firewall = dict(contract.get("scientific_firewall", {}) or {})
-    if tuple(int(value) for value in firewall.get("forbidden_years", [])) != (2026,):
-        raise ValueError("2026 must remain forbidden")
-    if firewall.get("maximum_feature_source_date") != "2025-12-31":
-        raise ValueError("feature-source cutoff changed")
-    if firewall.get("maximum_consumed_outcome_date") != "2025-12-31":
-        raise ValueError("outcome cutoff changed")
+    expected_counts = {name: len(values) for name, values in feature_catalog().items()}
+    declared_counts = {
+        str(name): int(value)
+        for name, value in dict(groups.get("feature_counts", {}) or {}).items()
+    }
+    if declared_counts != expected_counts:
+        raise ValueError("feature catalog does not match the configured groups")
     return payload
 
 
-def _verify_bound_json(record: Mapping[str, Any]) -> tuple[Path, dict[str, Any]]:
-    path = _resolve(str(record["path"]))
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    if _file_sha256(path) != str(record["file_sha256"]):
-        raise ValueError(f"bound JSON changed: {path}")
-    return path, json.loads(path.read_text(encoding="utf-8"))
-
-
-def _verify_bound_file(
-    record: Mapping[str, Any],
-    *,
-    label: str,
-    verify_hash: bool = True,
-) -> Path:
-    path = _resolve(str(record["path"]))
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    if "size" in record and path.stat().st_size != int(record["size"]):
-        raise ValueError(f"bound {label} size changed: {path}")
-    if verify_hash and _file_sha256(path) != str(record["file_sha256"]):
-        raise ValueError(f"bound {label} changed: {path}")
-    return path
-
-
-def _verify_self_hashed_artifact(
-    record: Mapping[str, Any],
-    *,
-    expected_study_id: str,
-) -> tuple[Path, dict[str, Any]]:
-    path, artifact = _verify_bound_json(record)
-    if artifact.get("study_id") != expected_study_id:
-        raise ValueError(f"source artifact study changed: {path}")
-    declared = str(artifact.get("artifact_sha256", ""))
-    compact = dict(artifact)
-    compact.pop("artifact_sha256", None)
-    if declared != _canonical_json_sha256(compact):
-        raise ValueError(f"source artifact self-hash changed: {path}")
-    if declared != str(record["artifact_sha256"]):
-        raise ValueError(f"source artifact binding changed: {path}")
-    return path, artifact
-
-
-def _load_source_inputs(
-    study: Mapping[str, Any],
-    *,
-    verify_large_hashes: bool,
-) -> base.LearnabilityInputs:
-    inputs = dict(study["contract"]["inputs"])
-    path, source_study = _verify_bound_json(inputs["source_learnability_contract"])
-    if source_study.get("contract_sha256") != str(
-        inputs["source_learnability_contract"]["contract_sha256"]
-    ):
-        raise ValueError(f"source contract canonical hash changed: {path}")
-    return base.LearnabilityInputs(
-        source_study,
-        verify_large_hashes=verify_large_hashes,
-    )
-
-
-def _verify_redundancy_record(study: Mapping[str, Any]) -> dict[str, Any]:
-    record = dict(study["contract"]["inputs"]["target_redundancy_artifact"])
-    _path, artifact = _verify_self_hashed_artifact(
-        record,
-        expected_study_id="seq100_target_redundancy_audit_v1",
-    )
-    expected = ["mfe_10", "mfe_20"]
-    if artifact["mechanical_decision"]["mfe_heads_for_feature_audit"] != expected:
-        raise ValueError("target redundancy decision no longer selects MFE D10/D20")
-    return artifact
+def _load_source_inputs(study: Mapping[str, Any]) -> base.LearnabilityInputs:
+    return base.LearnabilityInputs(study)
 
 
 def _verify_source_panels(
     study: Mapping[str, Any],
     pack: Mapping[str, Any],
-    *,
-    verify_large_hashes: bool,
 ) -> dict[str, dict[str, Any]]:
-    records = dict(study["contract"]["inputs"]["source_feature_panels"])
+    records = dict(study["data"]["source_feature_panels"])
     channels = dict(pack["feature_channels"])
     verified: dict[str, dict[str, Any]] = {}
     for name in ("daily_raw", "turnover"):
         record = dict(records[name])
         channel = dict(channels[name])
-        path = _verify_bound_file(
-            record,
-            label=f"source feature panel {name}",
-            verify_hash=verify_large_hashes,
-        )
+        path = _resolve(str(record["path"]))
+        if not path.is_file():
+            raise FileNotFoundError(path)
         if path != _resolve(channel["path"]):
             raise ValueError(f"source feature panel path changed: {name}")
         if tuple(int(value) for value in record["shape"]) != tuple(
@@ -429,90 +323,26 @@ def _verify_source_panels(
             raise ValueError(f"source feature panel shape changed: {name}")
         if str(record["dtype"]) != str(channel.get("dtype", "float32")):
             raise ValueError(f"source feature panel dtype changed: {name}")
-        if name == "turnover" and str(channel.get("sha256", "")) != str(
-            record["file_sha256"]
-        ):
-            raise ValueError("pack turnover hash and contract binding differ")
         verified[name] = {
             "path": record["path"],
             "size": int(path.stat().st_size),
-            "sha256_verified": bool(verify_large_hashes),
         }
     return verified
 
 
-def _verify_frozen_bindings(
-    study: Mapping[str, Any],
-    *,
-    verify_large_hashes: bool,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    records = dict(study["contract"]["inputs"])
-    source_contract_path, source_study = _verify_bound_json(
-        records["source_learnability_contract"]
-    )
-    source_contract_sha = str(
-        records["source_learnability_contract"]["contract_sha256"]
-    )
-    if source_study.get("contract_sha256") != source_contract_sha:
-        raise ValueError(f"source contract canonical hash changed: {source_contract_path}")
-    if source_contract_sha != _canonical_json_sha256(source_study["contract"]):
-        raise ValueError(f"source contract self-hash changed: {source_contract_path}")
-
-    _source_artifact_path, source_artifact = _verify_self_hashed_artifact(
-        records["source_learnability_artifact"],
-        expected_study_id="seq100_path_label_learnability_v1",
-    )
-    if source_artifact["contract"]["contract_sha256"] != source_contract_sha:
-        raise ValueError("source learnability artifact and contract differ")
-    scope = dict(source_artifact["scope"])
-    if scope.get("maximum_consumed_outcome_date") != "2025-12-31":
-        raise ValueError("source learnability artifact exceeds the outcome cutoff")
-    if list(scope.get("forbidden_years_consumed", [])):
-        raise ValueError("source learnability artifact consumed a forbidden year")
-
-    source_inputs = dict(source_study["contract"]["inputs"])
-    resolved_fields = {
-        "label_manifest": "resolved_label_manifest_sha256",
-        "base_feature_manifest": "resolved_base_feature_manifest_sha256",
-    }
-    for name, resolved_field in resolved_fields.items():
-        record = dict(records[name])
-        path, manifest = _verify_bound_json(record)
-        source_record = dict(source_inputs[name])
-        if str(record["path"]) != str(source_record["path"]):
-            raise ValueError(f"{name} path differs from source contract")
-        if str(record["file_sha256"]) != str(source_record["sha256"]):
-            raise ValueError(f"{name} file hash differs from source contract")
-        if str(record["resolved_sha256"]) != str(source_record["resolved_sha256"]):
-            raise ValueError(f"{name} resolved hash differs from source contract")
-        if str(manifest.get(resolved_field, "")) != str(record["resolved_sha256"]):
-            raise ValueError(f"{name} resolved hash changed: {path}")
-
-    pack_path, pack = _verify_bound_json(records["source_pack_manifest"])
-    label_manifest = json.loads(
-        _resolve(records["label_manifest"]["path"]).read_text(encoding="utf-8")
-    )
+def _load_pack(study: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    records = dict(study["data"])
+    pack_path = _resolve(records["source_pack_manifest"]["path"])
+    if not pack_path.is_file():
+        raise FileNotFoundError(pack_path)
+    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+    label_path = _resolve(records["label_manifest"]["path"])
+    if not label_path.is_file():
+        raise FileNotFoundError(label_path)
+    label_manifest = json.loads(label_path.read_text(encoding="utf-8"))
     if _resolve(label_manifest["source"]["pack_manifest"]) != pack_path:
         raise ValueError("label source and feature source pack differ")
-    if str(label_manifest["source"]["pack_manifest_sha256"]) != str(
-        records["source_pack_manifest"]["file_sha256"]
-    ):
-        raise ValueError("label source pack hash and contract binding differ")
-    _verify_bound_file(records["implementation"], label="implementation")
-    panel_verification = _verify_source_panels(
-        study,
-        pack,
-        verify_large_hashes=verify_large_hashes,
-    )
-    return pack, {
-        "source_contract_sha256": source_contract_sha,
-        "source_artifact_sha256": source_artifact["artifact_sha256"],
-        "source_pack_manifest_sha256": records["source_pack_manifest"][
-            "file_sha256"
-        ],
-        "implementation_sha256": records["implementation"]["file_sha256"],
-        "source_feature_panels": panel_verification,
-    }
+    return pack, {"source_feature_panels": _verify_source_panels(study, pack)}
 
 
 def _model_task_plan() -> list[dict[str, Any]]:
@@ -521,6 +351,7 @@ def _model_task_plan() -> list[dict[str, Any]]:
         for year in FOLD_YEARS:
             tasks.append(
                 {
+                    "task_id": f"mfe{horizon}_{year}_baseline_tuning",
                     "stage": "iteration_tuning",
                     "variant": "baseline",
                     "horizon": horizon,
@@ -531,6 +362,7 @@ def _model_task_plan() -> list[dict[str, Any]]:
             for variant in ("baseline", *ALL_FAMILIES):
                 tasks.append(
                     {
+                        "task_id": f"mfe{horizon}_{year}_{variant}_outer",
                         "stage": "outer_evaluation",
                         "variant": variant,
                         "horizon": horizon,
@@ -540,72 +372,30 @@ def _model_task_plan() -> list[dict[str, Any]]:
     return tasks
 
 
-def preflight(
-    *,
-    study_path: Path = DEFAULT_STUDY_PATH,
-    output_root: Path = DEFAULT_OUTPUT_ROOT,
-    verify_large_hashes: bool = False,
-) -> dict[str, Any]:
+def _load_validated_inputs(
+    study: Mapping[str, Any],
+) -> tuple[base.LearnabilityInputs, dict[str, Any]]:
     import lightgbm as lgb
 
-    started = time.perf_counter()
-    study = load_study(study_path)
-    redundancy = _verify_redundancy_record(study)
-    pack, binding_verification = _verify_frozen_bindings(
-        study,
-        verify_large_hashes=verify_large_hashes,
-    )
-    inputs = _load_source_inputs(study, verify_large_hashes=verify_large_hashes)
-    contract_inputs = dict(study["contract"]["inputs"])
-    if inputs.candidate_count != int(contract_inputs["candidate_count"]):
-        raise ValueError("candidate count differs from the frozen contract")
-    expected_library = str(study["contract"]["model"]["library"])
+    pack, _source = _load_pack(study)
+    inputs = _load_source_inputs(study)
+    if inputs.candidate_count != int(study["data"]["candidate_count"]):
+        raise ValueError("candidate count differs from the configuration")
+    expected_library = str(study["model"]["library"])
     if expected_library != f"lightgbm_{lgb.__version__}":
-        raise ValueError("LightGBM runtime version differs from the contract")
+        raise ValueError("LightGBM runtime version differs from the configuration")
     if pack["data_semantics"]["price_adjustment"] != "back_adjust":
-        raise ValueError("feature source must use the bound back-adjusted panel")
-    if str(inputs.date_values[inputs.cutoff_date_idx]) != "2025-12-31":
-        raise ValueError("input cutoff changed")
+        raise ValueError("feature source must use a back-adjusted panel")
+    maximum_outcome_date = str(study["folds"]["maximum_outcome_date"])
+    if str(inputs.date_values[inputs.cutoff_date_idx]) != maximum_outcome_date:
+        raise ValueError("input cutoff differs from the configured outcome boundary")
     catalog = feature_catalog_payload()
     names = [name for family in catalog["families"] for name in family["features"]]
     if len(names) != len(set(names)):
         raise ValueError("new feature names must be globally unique")
     if any(name in set(inputs.feature_names) for name in names):
         raise ValueError("new feature catalog duplicates a base feature name")
-    task_plan = _model_task_plan()
-    result = {
-        "schema": "seq100_mfe_feature_family_preflight/v1",
-        "status": "passed",
-        "completed_at": _now(),
-        "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
-        "target_artifact_sha256": redundancy["artifact_sha256"],
-        "binding_verification": binding_verification,
-        "candidate_count": inputs.candidate_count,
-        "base_continuous_feature_count": len(inputs.continuous_columns),
-        "base_categorical_feature_count": len(inputs.categorical_columns),
-        "feature_catalog_sha256": feature_catalog_sha256(),
-        "feature_counts": {
-            item["family"]: item["feature_count"] for item in catalog["families"]
-        },
-        "fold_years": list(FOLD_YEARS),
-        "primary_horizons": list(TARGET_HORIZONS),
-        "iteration_tuning_task_count": sum(
-            row["stage"] == "iteration_tuning" for row in task_plan
-        ),
-        "outer_evaluation_task_count": sum(
-            row["stage"] == "outer_evaluation" for row in task_plan
-        ),
-        "total_booster_count": len(task_plan),
-        "maximum_feature_source_date": "2025-12-31",
-        "forbidden_years_consumed": [],
-        "large_file_hashes_verified": bool(verify_large_hashes),
-        "elapsed_seconds": float(time.perf_counter() - started),
-    }
-    _atomic_write_json(output_root / "preflight.json", result)
-    _atomic_write_json(output_root / "feature_catalog.json", catalog)
-    _atomic_write_json(output_root / "task_plan.json", task_plan)
-    return result
+    return inputs, pack
 
 
 @dataclass(frozen=True)
@@ -1604,8 +1394,6 @@ def load_prepared_family(
     output_root: Path,
     family: str,
     *,
-    verify_hash: bool,
-    contract_sha256: str,
     candidate_count: int,
 ) -> PreparedFamily:
     path = _family_manifest_path(output_root, family)
@@ -1614,10 +1402,6 @@ def load_prepared_family(
         raise ValueError(f"unexpected prepared feature schema: {family}")
     if manifest.get("family") != family:
         raise ValueError(f"prepared family id changed: {family}")
-    if manifest.get("contract_sha256") != str(contract_sha256):
-        raise ValueError(f"prepared family belongs to another contract: {family}")
-    if manifest.get("feature_catalog_sha256") != feature_catalog_sha256():
-        raise ValueError(f"prepared family catalog changed: {family}")
     feature_names = tuple(str(value) for value in manifest["feature_names"])
     if feature_names != feature_catalog()[family]:
         raise ValueError(f"prepared feature order changed: {family}")
@@ -1635,14 +1419,12 @@ def load_prepared_family(
     if shape != expected_shape:
         raise ValueError(f"prepared feature shape changed: {family}")
     if record.get("dtype") != "float32" or record.get("layout") != "feature_major":
-        raise ValueError(f"prepared feature storage contract changed: {family}")
+        raise ValueError(f"prepared feature storage format changed: {family}")
     expected_size = int(np.prod(expected_shape, dtype=np.int64)) * 4
     if int(record["size"]) != expected_size:
         raise ValueError(f"prepared feature declared size changed: {family}")
     if feature_path.stat().st_size != int(record["size"]):
         raise ValueError(f"prepared feature size changed: {family}")
-    if verify_hash and _file_sha256(feature_path) != str(record["sha256"]):
-        raise ValueError(f"prepared feature hash changed: {family}")
     return PreparedFamily(
         family=family,
         path=feature_path,
@@ -1661,22 +1443,18 @@ def prepare_family(
     if family not in ALL_FAMILIES:
         raise ValueError(f"unknown feature family: {family}")
     study = load_study(study_path)
-    candidate_count = int(study["contract"]["inputs"]["candidate_count"])
+    candidate_count = int(study["data"]["candidate_count"])
     existing = _family_manifest_path(output_root, family)
     if existing.exists():
         return load_prepared_family(
             output_root,
             family,
-            verify_hash=True,
-            contract_sha256=str(study["contract_sha256"]),
             candidate_count=candidate_count,
         ).manifest
     started = time.perf_counter()
-    inputs = _load_source_inputs(study, verify_large_hashes=False)
+    inputs, pack = _load_validated_inputs(study)
     if inputs.candidate_count != candidate_count:
-        raise ValueError("prepared feature candidate count differs from contract")
-    pack_path = _resolve(study["contract"]["inputs"]["source_pack_manifest"]["path"])
-    pack = json.loads(pack_path.read_text(encoding="utf-8"))
+        raise ValueError("prepared feature candidate count differs from configuration")
     raw, turnover, raw_columns, turnover_columns = _raw_views(
         pack, inputs.cutoff_date_idx
     )
@@ -1730,9 +1508,9 @@ def prepare_family(
     else:
         _generate_noise(writer)
     writer.finish()
-    post_2025 = writer.values[:, writer.valid_count :]
-    if post_2025.size and not bool(np.isnan(post_2025).all()):
-        raise AssertionError("prepared feature family contains a 2026 value")
+    after_boundary = writer.values[:, writer.valid_count :]
+    if after_boundary.size and not bool(np.isnan(after_boundary).all()):
+        raise AssertionError("prepared feature family exceeds the configured date boundary")
     file_record = _record_for_file(feature_path)
     file_record.update(
         {
@@ -1746,15 +1524,13 @@ def prepare_family(
         "status": "completed",
         "completed_at": _now(),
         "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
         "family": family,
         "role": "negative_control" if family == CONTROL_FAMILY else "candidate",
-        "feature_catalog_sha256": feature_catalog_sha256(),
         "feature_names": list(names),
         "candidate_count": inputs.candidate_count,
-        "candidate_count_through_2025": writer.valid_count,
-        "maximum_source_date": "2025-12-31",
-        "post_2025_rows_all_missing": True,
+        "candidate_count_through_boundary": writer.valid_count,
+        "maximum_source_date": study["folds"]["maximum_feature_source_date"],
+        "rows_after_boundary_all_missing": True,
         "file": file_record,
         "elapsed_seconds": float(time.perf_counter() - started),
     }
@@ -1768,8 +1544,7 @@ def prepare_features(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     family: str | None = None,
 ) -> dict[str, Any]:
-    study = load_study(study_path)
-    _require_full_hash_preflight(study, output_root)
+    load_study(study_path)
     selected = ALL_FAMILIES if family is None else (str(family),)
     manifests = [
         prepare_family(
@@ -1788,18 +1563,17 @@ def prepare_features(
             {
                 "family": item["family"],
                 "feature_count": len(item["feature_names"]),
-                "sha256": item["file"]["sha256"],
+                "path": item["file"]["path"],
+                "size": item["file"]["size"],
             }
             for item in manifests
         ],
     }
-    if family is None:
-        _atomic_write_json(output_root / "preparation_summary.json", result)
     return result
 
 
 def _model_parameters(study: Mapping[str, Any]) -> tuple[dict[str, Any], int, int]:
-    model = dict(study["contract"]["model"])
+    model = dict(study["model"])
     parameters = {
         "objective": "huber",
         "metric": str(model["early_stopping_metric"]),
@@ -1943,7 +1717,7 @@ def _build_datasets(
         np.asarray(train_rows, dtype=np.int64),
         inputs.categorical_columns,
     )
-    batch_size = int(study["contract"]["model"]["sequence_batch_size"])
+    batch_size = int(study["model"]["sequence_batch_size"])
     train_sequence = _combined_sequence(
         inputs=inputs,
         row_ids=train_rows,
@@ -1976,8 +1750,8 @@ def _build_datasets(
         range(len(feature_names) - categorical_count, len(feature_names))
     )
     construction = {
-        "max_bin": int(study["contract"]["model"]["max_bin"]),
-        "data_random_seed": int(study["contract"]["model"]["seed"]),
+        "max_bin": int(study["model"]["max_bin"]),
+        "data_random_seed": int(study["model"]["seed"]),
         "feature_pre_filter": False,
         "verbosity": -1,
     }
@@ -2047,10 +1821,18 @@ def _save_npy(path: Path, values: np.ndarray) -> None:
     os.replace(temporary, path)
 
 
-def _task_complete(path: Path, contract_sha256: str) -> bool:
+def _task_complete(
+    path: Path,
+    *,
+    task: Mapping[str, Any],
+    study: Mapping[str, Any],
+    output_root: Path,
+) -> bool:
     if not path.is_file():
         return False
     try:
+        import lightgbm as lgb
+
         result = json.loads(path.read_text(encoding="utf-8"))
         if result.get("schema") != TASK_RESULT_SCHEMA:
             return False
@@ -2058,15 +1840,46 @@ def _task_complete(path: Path, contract_sha256: str) -> bool:
             return False
         if result.get("status") != "completed":
             return False
-        if result.get("contract_sha256") != contract_sha256:
+        for key in ("task_id", "stage", "variant", "fold_year", "horizon"):
+            if result.get(key) != task.get(key):
+                return False
+        if result.get("target") != "mfe" or int(result.get("purge_days", -1)) != int(
+            task["horizon"]
+        ):
             return False
-        for record in dict(result.get("files", {})).values():
+        expected_parameters, _rounds, _patience = _model_parameters(study)
+        if dict(result.get("parameters", {}) or {}) != expected_parameters:
+            return False
+        files = dict(result.get("files", {}) or {})
+        for record in files.values():
             file_path = _resolve(record["path"])
             if not file_path.is_file() or file_path.stat().st_size != int(
                 record["size"]
             ):
                 return False
-            if _file_sha256(file_path) != str(record["sha256"]):
+        lgb.Booster(model_file=str(_resolve(files["model"]["path"])))
+        prediction = np.load(_resolve(files["prediction"]["path"]), allow_pickle=False)
+        if tuple(prediction.shape) != tuple(files["prediction"]["shape"]):
+            return False
+        pd.read_parquet(_resolve(files["daily_metrics"]["path"]))
+        if task["stage"] == "outer_evaluation":
+            rows = np.load(_resolve(files["evaluation_rows"]["path"]), allow_pickle=False)
+            if tuple(rows.shape) != tuple(files["evaluation_rows"]["shape"]):
+                return False
+            tuning_task = _task_by_id(
+                f"mfe{int(task['horizon'])}_{int(task['fold_year'])}_baseline_tuning"
+            )
+            tuning_path = _task_result_path(output_root, tuning_task)
+            if not tuning_path.is_file():
+                return False
+            tuning = json.loads(tuning_path.read_text(encoding="utf-8"))
+            if tuning.get("status") != "completed" or tuning.get(
+                "task_id"
+            ) != tuning_task["task_id"]:
+                return False
+            if int(result["fixed_iteration_source"]["best_iteration"]) != int(
+                tuning["best_iteration"]
+            ):
                 return False
         return True
     except Exception:
@@ -2089,6 +1902,28 @@ def _outer_dir(
     )
 
 
+def _task_by_id(task_id: str) -> dict[str, Any]:
+    for task in _model_task_plan():
+        if task["task_id"] == task_id:
+            return task
+    raise KeyError(f"unknown task id: {task_id}")
+
+
+def _task_result_path(output_root: Path, task: Mapping[str, Any]) -> Path:
+    if task["stage"] == "iteration_tuning":
+        directory = _tuning_dir(
+            output_root, int(task["fold_year"]), int(task["horizon"])
+        )
+    else:
+        directory = _outer_dir(
+            output_root,
+            int(task["fold_year"]),
+            int(task["horizon"]),
+            str(task["variant"]),
+        )
+    return directory / "task_result.json"
+
+
 def _run_tuning_task(
     *,
     study: Mapping[str, Any],
@@ -2101,7 +1936,13 @@ def _run_tuning_task(
 
     output_dir = _tuning_dir(output_root, year, horizon)
     result_path = output_dir / "task_result.json"
-    if _task_complete(result_path, str(study["contract_sha256"])):
+    task = _task_by_id(f"mfe{horizon}_{year}_baseline_tuning")
+    if _task_complete(
+        result_path,
+        task=task,
+        study=study,
+        output_root=output_root,
+    ):
         return json.loads(result_path.read_text(encoding="utf-8"))
     inner_year = int(year) - 1
     fold = inputs.common_path_rows(inner_year, horizon)
@@ -2152,7 +1993,9 @@ def _run_tuning_task(
         "status": "completed",
         "completed_at": _now(),
         "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
+        "task_id": task["task_id"],
+        "target": "mfe",
+        "purge_days": int(horizon),
         "stage": "iteration_tuning",
         "variant": "baseline",
         "fold_year": int(year),
@@ -2193,15 +2036,26 @@ def _run_outer_task(
 
     output_dir = _outer_dir(output_root, year, horizon, variant)
     result_path = output_dir / "task_result.json"
-    if _task_complete(result_path, str(study["contract_sha256"])):
-        return json.loads(result_path.read_text(encoding="utf-8"))
-    tuning = _run_tuning_task(
+    task = _task_by_id(f"mfe{horizon}_{year}_{variant}_outer")
+    if _task_complete(
+        result_path,
+        task=task,
         study=study,
-        inputs=inputs,
         output_root=output_root,
-        year=year,
-        horizon=horizon,
-    )
+    ):
+        return json.loads(result_path.read_text(encoding="utf-8"))
+    tuning_task = _task_by_id(f"mfe{horizon}_{year}_baseline_tuning")
+    tuning_path = _task_result_path(output_root, tuning_task)
+    if not _task_complete(
+        tuning_path,
+        task=tuning_task,
+        study=study,
+        output_root=output_root,
+    ):
+        raise RuntimeError(
+            f"iteration tuning must complete before outer task: {tuning_task['task_id']}"
+        )
+    tuning = json.loads(tuning_path.read_text(encoding="utf-8"))
     iterations = int(tuning["best_iteration"])
     extra = None
     extra_names: tuple[str, ...] = ()
@@ -2210,8 +2064,6 @@ def _run_outer_task(
         prepared = load_prepared_family(
             output_root,
             variant,
-            verify_hash=False,
-            contract_sha256=str(study["contract_sha256"]),
             candidate_count=inputs.candidate_count,
         )
         extra = prepared.open()
@@ -2258,7 +2110,9 @@ def _run_outer_task(
         "status": "completed",
         "completed_at": _now(),
         "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
+        "task_id": task["task_id"],
+        "target": "mfe",
+        "purge_days": int(horizon),
         "stage": "outer_evaluation",
         "variant": variant,
         "fold_year": int(year),
@@ -2268,9 +2122,7 @@ def _run_outer_task(
         "fixed_iteration_source": {
             "inner_validation_year": int(tuning["inner_validation_year"]),
             "best_iteration": iterations,
-            "tuning_result_sha256": _file_sha256(
-                _tuning_dir(output_root, year, horizon) / "task_result.json"
-            ),
+            "task_id": tuning_task["task_id"],
         },
         "training_seconds": elapsed,
         "parameters": parameters,
@@ -2281,10 +2133,9 @@ def _run_outer_task(
             if prepared is None
             else {
                 "family": prepared.family,
-                "manifest": _record_for_file(
-                    _family_manifest_path(output_root, prepared.family)
-                ),
-                "data_file_sha256": prepared.manifest["file"]["sha256"],
+                "manifest": _family_manifest_path(
+                    output_root, prepared.family
+                ).relative_to(WORKSPACE_ROOT).as_posix(),
             }
         ),
         "metrics": metrics,
@@ -2309,114 +2160,149 @@ def _run_outer_task(
     return result
 
 
-def _require_full_hash_preflight(
-    study: Mapping[str, Any], output_root: Path
-) -> dict[str, Any]:
-    preflight_path = output_root / "preflight.json"
-    if not preflight_path.is_file():
-        raise RuntimeError("full-hash preflight must run before preparation or training")
-    preflight_record = json.loads(preflight_path.read_text(encoding="utf-8"))
-    if preflight_record.get("status") != "passed":
-        raise RuntimeError("feature-family preflight did not pass")
-    if preflight_record.get("contract_sha256") != study["contract_sha256"]:
-        raise RuntimeError("preflight belongs to another contract")
-    if not bool(preflight_record.get("large_file_hashes_verified")):
-        raise RuntimeError("preflight did not verify large input hashes")
-    if preflight_record.get("maximum_feature_source_date") != "2025-12-31":
-        raise RuntimeError("preflight feature-source cutoff changed")
-    if list(preflight_record.get("forbidden_years_consumed", [])):
-        raise RuntimeError("preflight consumed a forbidden year")
-    return preflight_record
-
-
 def _require_training_inputs(
     study: Mapping[str, Any],
     inputs: base.LearnabilityInputs,
     output_root: Path,
 ) -> None:
-    _require_full_hash_preflight(study, output_root)
     for family in ALL_FAMILIES:
         load_prepared_family(
             output_root,
             family,
-            verify_hash=True,
-            contract_sha256=str(study["contract_sha256"]),
             candidate_count=inputs.candidate_count,
         )
 
 
-def run_primary(
+def task_status(
     *,
     study_path: Path = DEFAULT_STUDY_PATH,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> dict[str, Any]:
     study = load_study(study_path)
-    inputs = _load_source_inputs(study, verify_large_hashes=False)
-    _require_training_inputs(study, inputs, output_root)
-    completed = 0
-    for horizon in TARGET_HORIZONS:
-        for year in FOLD_YEARS:
-            tuning_path = _tuning_dir(output_root, year, horizon) / "task_result.json"
-            was_complete = _task_complete(tuning_path, study["contract_sha256"])
+    groups: dict[str, list[str]] = {"completed": [], "pending": [], "failed": []}
+    for task in _model_task_plan():
+        path = _task_result_path(output_root, task)
+        if _task_complete(
+            path,
+            task=task,
+            study=study,
+            output_root=output_root,
+        ):
+            state = "completed"
+        elif path.is_file():
+            state = "failed"
+        else:
+            state = "pending"
+        groups[state].append(str(task["task_id"]))
+    result = {
+        "study_id": STUDY_ID,
+        "total_task_count": len(_model_task_plan()),
+        "completed_count": len(groups["completed"]),
+        "pending_count": len(groups["pending"]),
+        "failed_count": len(groups["failed"]),
+        **groups,
+    }
+    return result
+
+
+def run_task(
+    *,
+    task_id: str,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+) -> dict[str, Any]:
+    study = load_study(study_path)
+    task = _task_by_id(task_id)
+    result_path = _task_result_path(output_root, task)
+    if _task_complete(
+        result_path,
+        task=task,
+        study=study,
+        output_root=output_root,
+    ):
+        return {"task_id": task_id, "status": "completed", "skipped": True}
+    try:
+        inputs, _pack = _load_validated_inputs(study)
+        if task["stage"] == "iteration_tuning":
             _run_tuning_task(
                 study=study,
                 inputs=inputs,
                 output_root=output_root,
-                year=year,
-                horizon=horizon,
+                year=int(task["fold_year"]),
+                horizon=int(task["horizon"]),
             )
-            completed += int(not was_complete)
-            for variant in ("baseline", *ALL_FAMILIES):
-                task_path = (
-                    _outer_dir(output_root, year, horizon, variant)
-                    / "task_result.json"
+        else:
+            if task["variant"] != "baseline":
+                load_prepared_family(
+                    output_root,
+                    str(task["variant"]),
+                    candidate_count=inputs.candidate_count,
                 )
-                was_complete = _task_complete(
-                    task_path, study["contract_sha256"]
-                )
-                print(
-                    json.dumps(
-                        {
-                            "event": "task_started",
-                            "variant": variant,
-                            "horizon": horizon,
-                            "fold_year": year,
-                            "already_complete": was_complete,
-                        }
-                    ),
-                    flush=True,
-                )
-                _run_outer_task(
-                    study=study,
-                    inputs=inputs,
-                    output_root=output_root,
-                    year=year,
-                    horizon=horizon,
-                    variant=variant,
-                )
-                completed += int(not was_complete)
-                print(
-                    json.dumps(
-                        {
-                            "event": "task_completed",
-                            "variant": variant,
-                            "horizon": horizon,
-                            "fold_year": year,
-                        }
-                    ),
-                    flush=True,
-                )
-    result = {
-        "schema": "seq100_mfe_feature_family_training_summary/v1",
-        "status": "completed",
-        "completed_at": _now(),
-        "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
-        "newly_completed_task_count": completed,
-        "total_task_count": len(_model_task_plan()),
-    }
-    _atomic_write_json(output_root / "training_summary.json", result)
-    return result
+            _run_outer_task(
+                study=study,
+                inputs=inputs,
+                output_root=output_root,
+                year=int(task["fold_year"]),
+                horizon=int(task["horizon"]),
+                variant=str(task["variant"]),
+            )
+    except Exception as exc:
+        failed = {
+            "schema": TASK_RESULT_SCHEMA,
+            "study_id": STUDY_ID,
+            "task_id": task_id,
+            "target": "mfe",
+            "purge_days": int(task["horizon"]),
+            "stage": task["stage"],
+            "variant": task["variant"],
+            "fold_year": int(task["fold_year"]),
+            "horizon": int(task["horizon"]),
+            "status": "failed",
+            "failed_at": _now(),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        _atomic_write_json(result_path, failed)
+        raise
+    return {"task_id": task_id, "status": "completed", "skipped": False}
+
+
+def run_pending(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+) -> dict[str, Any]:
+    study_path = study_path.resolve()
+    output_root = output_root.resolve()
+    initial = task_status(study_path=study_path, output_root=output_root)
+    runnable = set(initial["pending"]) | set(initial["failed"])
+    completed_now: list[str] = []
+    for task in _model_task_plan():
+        task_id = str(task["task_id"])
+        if task_id not in runnable:
+            continue
+        print(json.dumps({"event": "task_started", "task_id": task_id}), flush=True)
+        command = [
+            sys.executable,
+            "-m",
+            "daily_research.path_policy.seq100_mfe_feature_family_audit",
+            "--config",
+            str(study_path),
+            "--output-root",
+            str(output_root),
+            "--task-id",
+            task_id,
+            "run-task",
+        ]
+        child = subprocess.run(command, cwd=WORKSPACE_ROOT, check=False)
+        if child.returncode != 0:
+            raise RuntimeError(
+                f"task {task_id} exited with code {child.returncode}; rerun continues here"
+            )
+        completed_now.append(task_id)
+        print(json.dumps({"event": "task_completed", "task_id": task_id}), flush=True)
+    final = task_status(study_path=study_path, output_root=output_root)
+    final["newly_completed"] = completed_now
+    return final
 
 
 def _load_outer_result(
@@ -2425,17 +2311,19 @@ def _load_outer_result(
     year: int,
     horizon: int,
     variant: str,
-    contract_sha256: str,
+    study: Mapping[str, Any],
 ) -> tuple[dict[str, Any], np.ndarray, np.ndarray]:
-    result_path = _outer_dir(output_root, year, horizon, variant) / "task_result.json"
-    if not _task_complete(result_path, contract_sha256):
+    task = _task_by_id(f"mfe{horizon}_{year}_{variant}_outer")
+    result_path = _task_result_path(output_root, task)
+    if not _task_complete(
+        result_path,
+        task=task,
+        study=study,
+        output_root=output_root,
+    ):
         raise RuntimeError(f"outer task is incomplete: {result_path}")
     result = json.loads(result_path.read_text(encoding="utf-8"))
     files = dict(result["files"])
-    for record in files.values():
-        path = _resolve(record["path"])
-        if _file_sha256(path) != str(record["sha256"]):
-            raise ValueError(f"outer task file hash changed: {path}")
     prediction = np.load(_resolve(files["prediction"]["path"]), allow_pickle=False)
     rows = np.load(_resolve(files["evaluation_rows"]["path"]), allow_pickle=False)
     return result, np.asarray(prediction, dtype=np.float32), np.asarray(rows, dtype=np.int64)
@@ -2658,22 +2546,20 @@ def _compile_family_decision(
     }
 
 
-def evaluate_primary(
+def evaluate_results(
     *,
     study_path: Path = DEFAULT_STUDY_PATH,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> dict[str, Any]:
     study = load_study(study_path)
-    _require_full_hash_preflight(study, output_root)
-    training_path = output_root / "training_summary.json"
-    if not training_path.is_file():
-        raise RuntimeError("primary training has not completed")
-    training = json.loads(training_path.read_text(encoding="utf-8"))
-    if training.get("status") != "completed" or training.get(
-        "contract_sha256"
-    ) != study["contract_sha256"]:
-        raise RuntimeError("primary training summary is incomplete or stale")
-    inputs = _load_source_inputs(study, verify_large_hashes=False)
+    current = task_status(study_path=study_path, output_root=output_root)
+    if current["completed_count"] != current["total_task_count"]:
+        raise RuntimeError(
+            "training is incomplete: "
+            f"{current['completed_count']} completed, "
+            f"{current['pending_count']} pending, {current['failed_count']} failed"
+        )
+    inputs = _load_source_inputs(study)
     evidence: list[dict[str, Any]] = []
     for variant in ALL_FAMILIES:
         for horizon in TARGET_HORIZONS:
@@ -2684,14 +2570,14 @@ def evaluate_primary(
                     year=year,
                     horizon=horizon,
                     variant="baseline",
-                    contract_sha256=study["contract_sha256"],
+                    study=study,
                 )
                 _variant_result, variant_prediction, variant_rows = _load_outer_result(
                     output_root,
                     year=year,
                     horizon=horizon,
                     variant=variant,
-                    contract_sha256=study["contract_sha256"],
+                    study=study,
                 )
                 if not np.array_equal(baseline_rows, variant_rows):
                     raise ValueError("baseline and variant evaluation rows differ")
@@ -2750,7 +2636,7 @@ def evaluate_primary(
         for row in evidence
     }
     q_values = _benjamini_hochberg(p_values)
-    thresholds = dict(study["contract"]["decision"]["head_thresholds"])
+    thresholds = dict(study["decision"]["head_thresholds"])
     head_status: dict[str, dict[str, Any]] = {}
     for row in evidence:
         key = f"{row['variant']}__h{int(row['horizon']):02d}"
@@ -2769,7 +2655,7 @@ def evaluate_primary(
         head_status=head_status,
         evidence=evidence,
         thresholds=thresholds,
-        non_selections=study["contract"]["non_selections"],
+        non_selections=study["non_selections"],
     )
     decision_status = str(decision["status"])
     summary = {
@@ -2777,13 +2663,13 @@ def evaluate_primary(
         "status": decision_status,
         "completed_at": _now(),
         "study_id": STUDY_ID,
-        "contract_sha256": study["contract_sha256"],
         "scope": {
             "fold_years": list(FOLD_YEARS),
-            "fold_role": study["contract"]["protocol"]["fold_role"],
+            "fold_role": study["folds"]["fold_role"],
             "primary_horizons": list(TARGET_HORIZONS),
-            "maximum_consumed_outcome_date": "2025-12-31",
-            "forbidden_years_consumed": [],
+            "maximum_consumed_outcome_date": study["folds"][
+                "maximum_outcome_date"
+            ],
         },
         "evidence": evidence,
         "decision": decision,
@@ -2793,92 +2679,45 @@ def evaluate_primary(
     return summary
 
 
-def self_test() -> dict[str, Any]:
-    catalog = feature_catalog()
-    expected_counts = {
-        "recent_kline_sequence": 100,
-        "breakout_retest_levels": 40,
-        "long_daily_context": 54,
-        "completed_week_month_context": 48,
-        "traditional_indicators": 27,
-        "confirmed_swing_structure": 24,
-        "turnover_cost_proxy": 5,
-        CONTROL_FAMILY: 32,
-    }
-    if {key: len(value) for key, value in catalog.items()} != expected_counts:
-        raise AssertionError("feature family catalog counts changed")
-    source = np.arange(12, dtype=np.float32).reshape(6, 2)
-    shifted = _shift_panel(source, 2)
-    if not bool(np.isnan(shifted[:2]).all()) or not np.array_equal(
-        shifted[2:], source[:-2]
-    ):
-        raise AssertionError("lagged feature is not causal")
-    high = np.asarray([[1.0], [2.0], [5.0], [3.0], [2.0], [1.0]], dtype=np.float32)
-    events, levels = _confirmed_pivot_events(high, 2, mode="high")
-    if not bool(events[4, 0]) or float(levels[4, 0]) != 5.0:
-        raise AssertionError("five-bar pivot was not delayed until confirmation")
-    if bool(events[:4].any()):
-        raise AssertionError("pivot leaked before right-side confirmation")
-    dates = np.asarray([0] * 20 + [1] * 20, dtype=np.int32)
-    actual = np.tile(np.linspace(-1.0, 1.0, 20), 2)
-    baseline_score = -actual
-    variant_score = actual.copy()
-    paired = paired_daily_increment(
-        date_idx=dates,
-        actual=actual,
-        baseline_score=baseline_score,
-        variant_score=variant_score,
-    )
-    if not bool((paired["rank_ic_delta"] > 1.9).all()):
-        raise AssertionError("paired daily increment lost cross-sectional information")
-    p = _benjamini_hochberg({"a": 0.01, "b": 0.04, "c": 0.03})
-    if not (p["a"] <= p["c"] <= p["b"]):
-        raise AssertionError("Benjamini-Hochberg ordering changed")
-    return {
-        "status": "passed",
-        "test_count": 5,
-        "feature_catalog_sha256": feature_catalog_sha256(),
-        "feature_counts": expected_counts,
-    }
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Audit incremental causal feature families for Seq100 MFE D10/D20."
     )
-    parser.add_argument("--study-contract", type=Path, default=DEFAULT_STUDY_PATH)
+    parser.add_argument("--config", type=Path, default=DEFAULT_STUDY_PATH)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--family", choices=ALL_FAMILIES)
-    parser.add_argument("--full-hash", action="store_true")
+    parser.add_argument("--task-id")
     parser.add_argument(
         "command",
-        choices=("self-test", "preflight", "prepare", "run-primary", "evaluate"),
+        choices=("status", "prepare", "run", "evaluate", "run-task"),
     )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    study_path = args.study_contract.resolve()
+    study_path = args.config.resolve()
     output_root = args.output_root.resolve()
-    if args.command == "self-test":
-        result = self_test()
-    elif args.command == "preflight":
-        result = preflight(
-            study_path=study_path,
-            output_root=output_root,
-            verify_large_hashes=bool(args.full_hash),
-        )
+    if args.command == "status":
+        result = task_status(study_path=study_path, output_root=output_root)
     elif args.command == "prepare":
         result = prepare_features(
             study_path=study_path,
             output_root=output_root,
             family=args.family,
         )
-    elif args.command == "run-primary":
-        result = run_primary(study_path=study_path, output_root=output_root)
+    elif args.command == "run":
+        result = run_pending(study_path=study_path, output_root=output_root)
+    elif args.command == "run-task":
+        if not args.task_id:
+            raise ValueError("--task-id is required for run-task")
+        result = run_task(
+            task_id=str(args.task_id),
+            study_path=study_path,
+            output_root=output_root,
+        )
     else:
-        result = evaluate_primary(study_path=study_path, output_root=output_root)
+        result = evaluate_results(study_path=study_path, output_root=output_root)
     print(json.dumps(result, ensure_ascii=False), flush=True)
     return 0
 

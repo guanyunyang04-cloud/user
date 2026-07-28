@@ -17,7 +17,11 @@ from daily_research.path_policy import qdp_v2_sequence_path_training as training
 def _write_float32(path: Path, values: np.ndarray) -> dict[str, Any]:
     array = np.asarray(values, dtype=np.float32)
     array.tofile(path)
-    return {"path": str(path.resolve()), "shape": list(array.shape)}
+    return {
+        "path": str(path.resolve()),
+        "shape": list(array.shape),
+        "dtype": "float32",
+    }
 
 
 def _build_tiny_pack(tmp_path: Path, *, fixed_oos: bool) -> Path:
@@ -111,9 +115,9 @@ def _build_tiny_pack(tmp_path: Path, *, fixed_oos: bool) -> Path:
                 "oos_feature_date_count": 0,
             }
         )
-        from daily_research.path_policy.seq100_fold_contract import compute_fold_training_contract
+        from daily_research.path_policy.seq100_time_splits import validate_fixed_oos_split
 
-        manifest["fold_training_contract"] = compute_fold_training_contract(manifest)
+        validate_fixed_oos_split(manifest)
     manifest_path = tmp_path / "manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     return manifest_path
@@ -193,8 +197,7 @@ def _make_v4_tiny_pack(tmp_path: Path) -> Path:
         ),
     }
     manifest["label_arrays"]["future_ohlc_path"]["price_anchor"] = "today_close"
-    manifest["execution_cost_contract"] = {
-        "contract": "a_share_round_trip_cashflow_v1",
+    manifest["execution_costs"] = {
         "lot_size": 100,
         "commission_bps": 3.0,
         "minimum_commission_cny": 5.0,
@@ -205,9 +208,9 @@ def _make_v4_tiny_pack(tmp_path: Path) -> Path:
             {"effective_date": "1900-01-01", "stamp_tax_bps": 10.0}
         ],
     }
-    from daily_research.path_policy.seq100_fold_contract import compute_fold_training_contract
+    from daily_research.path_policy.seq100_time_splits import validate_fixed_oos_split
 
-    manifest["fold_training_contract"] = compute_fold_training_contract(manifest)
+    validate_fixed_oos_split(manifest)
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     return manifest_path
 
@@ -268,7 +271,6 @@ def test_v4_close_excursion_training_runs_end_to_end(
         assert len(diagnostics["snapshots"]) >= 1
     checkpoint = torch.load(summary["best_checkpoint"], map_location="cpu", weights_only=False)
     assert checkpoint["path_value_temperature"] >= training.PATH_VALUE_V4_TEMPERATURE_FLOOR
-    assert checkpoint["initial_model_state_sha256"] == summary["initial_model_state_sha256"]
     assert checkpoint["rank_gradient_budget_diagnostics"] == diagnostics
 
 
@@ -411,7 +413,6 @@ def test_p0_explicit_none_preserves_exact_numerical_training(tmp_path: Path) -> 
     )
     left = torch.load(implicit["best_checkpoint"], map_location="cpu", weights_only=False)
     right = torch.load(explicit["best_checkpoint"], map_location="cpu", weights_only=False)
-    assert implicit["initial_model_state_sha256"] == explicit["initial_model_state_sha256"]
     assert left["model_state_dict"].keys() == right["model_state_dict"].keys()
     for name in left["model_state_dict"]:
         assert torch.equal(left["model_state_dict"][name], right["model_state_dict"][name])
@@ -419,7 +420,7 @@ def test_p0_explicit_none_preserves_exact_numerical_training(tmp_path: Path) -> 
     assert explicit["rank_gradient_budget_diagnostics"]["update_count"] == 0
 
 
-def test_signal_close_2x2_tiny_pack_has_shared_initial_state_and_valid_budgets(
+def test_signal_close_2x2_tiny_pack_has_valid_budgets(
     tmp_path: Path,
 ) -> None:
     manifest_path = _make_v4_tiny_pack(tmp_path)
@@ -454,7 +455,6 @@ def test_signal_close_2x2_tiny_pack_has_shared_initial_state_and_valid_budgets(
         )
         summaries.append(training.train_sequence_path_model(config))
 
-    assert len({row["initial_model_state_sha256"] for row in summaries}) == 1
     for row in summaries:
         diagnostics = row["rank_gradient_budget_diagnostics"]
         if row["run_tag"].endswith("P1"):
@@ -626,12 +626,9 @@ def test_fixed_oos_skips_training_evaluation_and_evaluates_oos_once(
     assert {row["split"] for row in summary["split_metrics"]} == {"oos"}
     assert "validation_predictions_csv" not in summary["outputs"]
     assert "test_predictions_csv" not in summary["outputs"]
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert summary["fold_training_contract"] == manifest["fold_training_contract"]
     persisted = json.loads(
         (Path(summary["output_dir"]) / "sequence_path_training_summary.json").read_text(encoding="utf-8")
     )
-    assert persisted["fold_training_contract"] == manifest["fold_training_contract"]
     expected_config = {
         key: value
         for key, value in config.__dict__.items()
@@ -736,24 +733,6 @@ def test_fixed_oos_rejects_early_stopping(
     assert calls == []
 
 
-def test_fixed_oos_rejects_tampered_training_contract(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manifest_path = _build_tiny_pack(tmp_path, fixed_oos=True)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["fold_training_contract"]["sha256"] = "0" * 64
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    calls = _install_fake_evaluation(monkeypatch)
-
-    with pytest.raises(ValueError, match="fold_training_contract"):
-        training.train_sequence_path_model(
-            _config(tmp_path, manifest_path, evaluation_mode="fixed_oos")
-        )
-
-    assert calls == []
-
-
 def test_fixed_oos_rejects_training_labels_that_reach_oos(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -834,7 +813,7 @@ def test_fixed_oos_rejects_invalid_date_index_schema(
     datasets[split] = SimpleNamespace(sample_index=frame, forward_days=2)
 
     with pytest.raises(ValueError, match=message):
-        training._validate_fixed_oos_split_contract(
+        training._validate_fixed_oos_split(
             manifest={},
             train_ds=datasets["train"],
             oos_ds=datasets["oos"],

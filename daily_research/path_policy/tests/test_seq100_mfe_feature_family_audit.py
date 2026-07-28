@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 
 import numpy as np
@@ -9,26 +8,22 @@ import pytest
 from daily_research.path_policy import seq100_mfe_feature_family_audit as audit
 
 
-def test_load_study_freezes_contract_and_2026_firewall(tmp_path) -> None:
+def test_load_study_reads_plain_scientific_config(tmp_path) -> None:
     study = audit.load_study()
 
-    assert study["contract_sha256"] == audit._canonical_json_sha256(
-        study["contract"]
-    )
-    assert study["contract"]["protocol"]["fold_years"] == [2023, 2024, 2025]
-    assert study["contract"]["protocol"]["primary_horizons"] == [10, 20]
-    assert study["contract"]["scientific_firewall"]["forbidden_years"] == [2026]
+    assert study["folds"]["fold_years"] == [2023, 2024, 2025]
+    assert study["folds"]["primary_horizons"] == [10, 20]
+    assert study["feature_groups"]["negative_control"] == "deterministic_noise"
 
     changed = json.loads(json.dumps(study))
-    changed["contract"]["scientific_firewall"]["forbidden_years"] = [2027]
-    changed["contract_sha256"] = audit._canonical_json_sha256(changed["contract"])
-    changed_path = tmp_path / "changed_contract.json"
+    changed["folds"]["primary_horizons"] = [10, 60]
+    changed_path = tmp_path / "changed_config.json"
     changed_path.write_text(json.dumps(changed), encoding="utf-8")
-    with pytest.raises(ValueError, match="2026 must remain forbidden"):
+    with pytest.raises(ValueError, match="target horizons changed"):
         audit.load_study(changed_path)
 
 
-def test_feature_catalog_counts_and_hash_are_frozen() -> None:
+def test_feature_catalog_counts_match_the_scientific_config() -> None:
     expected = {
         "recent_kline_sequence": 100,
         "breakout_retest_levels": 40,
@@ -44,10 +39,7 @@ def test_feature_catalog_counts_and_hash_are_frozen() -> None:
         family: len(features)
         for family, features in audit.feature_catalog().items()
     } == expected
-    assert (
-        audit.feature_catalog_sha256()
-        == "0f91e81c7181e04336b5d43c151859d92ae7d31c40641f3905fe6a157dfbfc63"
-    )
+    assert audit.load_study()["feature_groups"]["feature_counts"] == expected
 
 
 def test_lag_and_confirmed_pivot_are_causal() -> None:
@@ -173,7 +165,7 @@ def test_no_incremental_family_has_distinct_completion_state() -> None:
     assert decision["next_step"] == "stop_and_reassess_base_inputs"
 
 
-def test_prepared_family_is_bound_to_contract_and_candidate_count(tmp_path) -> None:
+def test_prepared_family_checks_shape_path_and_candidate_count(tmp_path) -> None:
     family = "turnover_cost_proxy"
     family_root = tmp_path / "features" / family
     family_root.mkdir(parents=True)
@@ -183,13 +175,10 @@ def test_prepared_family_is_bound_to_contract_and_candidate_count(tmp_path) -> N
     manifest = {
         "schema": audit.PREPARED_FEATURE_SCHEMA,
         "family": family,
-        "contract_sha256": "contract",
-        "feature_catalog_sha256": audit.feature_catalog_sha256(),
         "feature_names": list(audit.feature_catalog()[family]),
         "candidate_count": 3,
         "file": {
             "path": str(data_path),
-            "sha256": hashlib.sha256(data_path.read_bytes()).hexdigest(),
             "size": int(data_path.stat().st_size),
             "shape": [5, 3],
             "dtype": "float32",
@@ -201,40 +190,75 @@ def test_prepared_family_is_bound_to_contract_and_candidate_count(tmp_path) -> N
     prepared = audit.load_prepared_family(
         tmp_path,
         family,
-        verify_hash=True,
-        contract_sha256="contract",
         candidate_count=3,
     )
     assert prepared.shape == (5, 3)
-    with pytest.raises(ValueError, match="another contract"):
+    with pytest.raises(ValueError, match="candidate count"):
         audit.load_prepared_family(
             tmp_path,
             family,
-            verify_hash=False,
-            contract_sha256="other",
-            candidate_count=3,
+            candidate_count=4,
         )
 
 
-def test_completed_task_rejects_same_size_file_corruption(tmp_path) -> None:
-    data_path = tmp_path / "prediction.npy"
-    data_path.write_bytes(b"abcd")
-    result_path = tmp_path / "task_result.json"
+def test_completed_task_loads_outputs_and_rejects_unreadable_prediction(tmp_path) -> None:
+    import lightgbm as lgb
+    import pandas as pd
+
+    study = audit.load_study()
+    task = audit._task_by_id("mfe10_2023_baseline_tuning")
+    result_path = audit._task_result_path(tmp_path, task)
+    result_path.parent.mkdir(parents=True)
+    model_path = result_path.parent / "model.txt"
+    prediction_path = result_path.parent / "prediction.npy"
+    daily_path = result_path.parent / "daily_metrics.parquet"
+    train = lgb.Dataset(
+        np.arange(16, dtype=np.float32).reshape(8, 2),
+        label=np.arange(8, dtype=np.float32),
+    )
+    lgb.train({"objective": "regression", "verbosity": -1}, train, 1).save_model(
+        str(model_path)
+    )
+    np.save(prediction_path, np.arange(4, dtype=np.float32), allow_pickle=False)
+    pd.DataFrame({"date_idx": [1], "rank_ic": [0.1]}).to_parquet(
+        daily_path, index=False
+    )
+    parameters, _rounds, _patience = audit._model_parameters(study)
     result = {
         "schema": audit.TASK_RESULT_SCHEMA,
         "status": "completed",
         "study_id": audit.STUDY_ID,
-        "contract_sha256": "contract",
+        **task,
+        "target": "mfe",
+        "purge_days": 10,
+        "parameters": parameters,
+        "best_iteration": 1,
+        "evaluation_row_count": 4,
         "files": {
+            "model": {
+                "path": str(model_path),
+                "size": model_path.stat().st_size,
+            },
             "prediction": {
-                "path": str(data_path),
-                "size": 4,
-                "sha256": hashlib.sha256(b"abcd").hexdigest(),
-            }
+                "path": str(prediction_path),
+                "size": prediction_path.stat().st_size,
+                "shape": [4],
+            },
+            "daily_metrics": {
+                "path": str(daily_path),
+                "size": daily_path.stat().st_size,
+            },
         },
     }
+    result["inner_validation_year"] = 2022
     result_path.write_text(json.dumps(result), encoding="utf-8")
 
-    assert audit._task_complete(result_path, "contract")
-    data_path.write_bytes(b"wxyz")
-    assert not audit._task_complete(result_path, "contract")
+    assert audit._task_complete(
+        result_path, task=task, study=study, output_root=tmp_path
+    )
+    raw = bytearray(prediction_path.read_bytes())
+    raw[0] ^= 0xFF
+    prediction_path.write_bytes(raw)
+    assert not audit._task_complete(
+        result_path, task=task, study=study, output_root=tmp_path
+    )

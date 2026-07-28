@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -12,7 +11,6 @@ import pytest
 import torch
 
 from daily_research.path_policy import qdp_v2_sequence_path_training as training
-from daily_research.path_policy.qdp_v2_sequence_path_pack import _bind_research_contract
 from daily_research.path_policy.tests.test_qdp_v2_sequence_path_training_fixed_oos import (
     _build_tiny_pack,
     _config,
@@ -20,38 +18,23 @@ from daily_research.path_policy.tests.test_qdp_v2_sequence_path_training_fixed_o
 )
 
 
-APPROVED_CONTRACT = Path(
-    "daily_research/brain/references/seq100_candidate_complete_development_walkforward_contract_20260711.json"
-).resolve()
-
-
-def _write_current_study_contract(path: Path, *, valid_digest: bool = True) -> Path:
-    semantic = {
-        "schema_version": 1,
-        "contract_id": "tiny_rebound_study",
+def _write_development_config(path: Path, *, fixed_final: bool = False) -> Path:
+    payload: dict[str, Any] = {
+        "study_id": "tiny_development_study",
         "profile": {"input_dim": 2},
-        "shared_training": {
-            "checkpoint_policy": "fixed_final_epoch_without_oos_checkpoint_selection"
-        },
         "development": {
             "split_roles": {"fit": "train", "evaluation": "development"}
         },
     }
-    digest = hashlib.sha256(
-        json.dumps(
-            semantic,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    payload = {
-        "schema_version": 1,
-        "artifact_type": "seq100_current_study",
-        "study_id": "tiny_rebound_study",
-        "contract": semantic,
-        "contract_sha256": digest if valid_digest else "0" * 64,
-    }
+    if fixed_final:
+        payload["training"] = {"development_fixed_final_epoch": True}
+    else:
+        payload["early_stopping"] = {
+            "metric": training.EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
+            "mode": training.EARLY_STOPPING_MODE_MIN,
+            "minimum_complete_epochs": 1,
+            "restore_best_checkpoint": True,
+        }
     path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
@@ -122,12 +105,11 @@ def _build_development_pack(tmp_path: Path) -> Path:
         "path": str(sellable_path.resolve()),
         "shape": list(exit_sellable.shape),
     }
-    manifest["terminal_execution_contract"] = {
+    manifest["terminal_execution"] = {
         "unresolved_after_tail": "apply_precommitted_recovery_fraction",
         "recovery_fraction_of_entry_notional": 0.0,
     }
-    manifest["execution_cost_contract"] = {
-        "contract": "a_share_round_trip_cashflow_v1",
+    manifest["execution_costs"] = {
         "lot_size": 100,
         "commission_bps": 3.0,
         "minimum_commission_cny": 5.0,
@@ -140,7 +122,6 @@ def _build_development_pack(tmp_path: Path) -> Path:
         "slippage_bps": 7.0,
         "stress_slippage_multiplier": 2.0,
     }
-    manifest["research_contract"] = _bind_research_contract(APPROVED_CONTRACT)
     manifest["development_walkforward"] = {
         "method": "expanding_train_development_walkforward",
         "split_roles": {"fit": "train", "evaluation": "development"},
@@ -178,7 +159,6 @@ def _install_development_diagnostics(monkeypatch: pytest.MonkeyPatch) -> list[st
                     "universe_realized_plan_return_coverage": 1.0,
                     "universe_realized_plan_value_coverage": 0.75,
                     "universe_realized_plan_coverage": 1.0,
-                    "execution_cost_contract_sha256": "0" * 64,
                     **{
                         f"{scope}_net_realized_plan_return_{scenario}": 0.0
                         for scope in ("selected", "universe", "alpha")
@@ -215,26 +195,21 @@ def _install_development_diagnostics(monkeypatch: pytest.MonkeyPatch) -> list[st
     monkeypatch.setattr(training, "_write_report", lambda output_dir, **_: str(output_dir / "report.md"))
     monkeypatch.setattr(training, "_find_latest_baseline_summary", lambda _: {})
     monkeypatch.setattr(training, "_trim_working_set", lambda: None)
-    monkeypatch.setattr(training, "_validate_development_split_contract", lambda **_: None)
+    monkeypatch.setattr(training, "_validate_development_split", lambda **_: None)
     return calls
 
 
-def test_v2_development_contract_purges_only_the_prediction_horizon(tmp_path: Path) -> None:
+def test_development_split_purges_only_the_prediction_horizon(tmp_path: Path) -> None:
     manifest_path = _build_development_pack(tmp_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     sample_path = Path(manifest["sample_index_path"])
-    candidate_path = Path(manifest["candidate_index_path"])
     samples = pd.read_parquet(sample_path)
-    candidates = pd.read_parquet(candidate_path)
     samples["year"] = samples["trade_date"].astype(str).str[:4].astype(int)
-    candidates["year"] = candidates["trade_date"].astype(str).str[:4].astype(int)
     samples["entry_trade_date"] = "2022-01-05"
-    candidates["entry_trade_date"] = "2022-01-05"
     samples.to_parquet(sample_path, index=False)
-    candidates.to_parquet(candidate_path, index=False)
+    manifest["forward_days"] = 2
     manifest["max_label_dependency_days"] = 2
     manifest["max_execution_dependency_days"] = 3
-    manifest["development_contract"] = dict(manifest["research_contract"])
     manifest["development_walkforward"].update(
         {
             "schema_version": 2,
@@ -248,17 +223,15 @@ def test_v2_development_contract_purges_only_the_prediction_horizon(tmp_path: Pa
     )
     manifest["normalization"]["development_feature_date_count"] = 0
 
-    from daily_research.path_policy.seq100_fold_contract import (
-        compute_development_fold_training_contract,
-    )
+    from daily_research.path_policy.seq100_time_splits import validate_development_split
 
-    contract = compute_development_fold_training_contract(manifest)
+    split = validate_development_split(manifest, sample_frame=samples)
 
-    assert contract["payload"]["training_label_dependency_days"] == 2
-    assert contract["payload"]["execution_dependency_days"] == 3
+    assert split["training_label_dependency_days"] == 2
+    assert split["execution_dependency_days"] == 3
     manifest["development_walkforward"]["training_label_dependency_days"] = 3
     with pytest.raises(ValueError, match="purge must equal forward_days"):
-        compute_development_fold_training_contract(manifest)
+        validate_development_split(manifest, sample_frame=samples)
 
 
 def test_build_development_fold_view_keeps_execution_tail_out_of_purge(
@@ -278,15 +251,13 @@ def test_build_development_fold_view_keeps_execution_tail_out_of_purge(
     manifest["artifact_type"] = "qdp_v2_sequence_path_pack"
     manifest["max_label_dependency_days"] = 2
     manifest["max_execution_dependency_days"] = 3
-    manifest["research_contract"] = _bind_research_contract(APPROVED_CONTRACT)
-    manifest["development_contract"] = dict(manifest["research_contract"])
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    import daily_research.path_policy.seq100_fold_contract as fold_contract
+    import daily_research.path_policy.seq100_time_splits as time_splits
 
-    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", tmp_path)
+    monkeypatch.setattr(time_splits, "WORKSPACE_ROOT", tmp_path)
 
-    result = fold_contract.build_development_fold_view(
+    result = time_splits.build_development_fold_view(
         source_manifest=manifest_path,
         output_root=tmp_path / "folds",
         development_year=2022,
@@ -296,96 +267,8 @@ def test_build_development_fold_view_keeps_execution_tail_out_of_purge(
     assert view["development_walkforward"]["training_label_dependency_days"] == 2
     assert view["development_walkforward"]["execution_dependency_days"] == 3
     assert view["development_walkforward"]["purged_signal_date_count"] == 2
-    assert view["development_fold_training_contract"]["schema_version"] == 2
-    provenance = view["source_view_provenance"]
-    assert provenance["schema_version"] == 2
-    assert not Path(provenance["manifest_path"]).is_absolute()
-    assert not Path(provenance["sample_index_path"]).is_absolute()
-    assert not Path(provenance["candidate_index_path"]).is_absolute()
-    assert all(set(item) == {"path", "size", "sha256"} for item in provenance["backing_files"])
-
-
-def test_rebind_development_fold_view_preserves_immutable_indexes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    source_root = tmp_path / "source"
-    source_root.mkdir()
-    manifest_path = _build_development_pack(source_root)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    for raw_path in (manifest["sample_index_path"], manifest["candidate_index_path"]):
-        frame = pd.read_parquet(raw_path)
-        frame["year"] = frame["trade_date"].astype(str).str[:4].astype(int)
-        frame["entry_trade_date"] = "2022-01-05"
-        frame.to_parquet(raw_path, index=False)
-    manifest["artifact_type"] = "qdp_v2_sequence_path_pack"
-    manifest["max_label_dependency_days"] = 2
-    manifest["max_execution_dependency_days"] = 3
-    manifest["research_contract"] = _bind_research_contract(APPROVED_CONTRACT)
-    manifest["development_contract"] = dict(manifest["research_contract"])
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-
-    from daily_research.path_policy.seq100_fold_contract import (
-        build_development_fold_view,
-        rebind_development_fold_view,
-        validate_development_fold_training_contract,
-    )
-    import daily_research.path_policy.seq100_fold_contract as fold_contract
-
-    monkeypatch.setattr(fold_contract, "WORKSPACE_ROOT", tmp_path)
-
-    built = build_development_fold_view(
-        source_manifest=manifest_path,
-        output_root=tmp_path / "folds",
-        development_year=2022,
-    )
-    source_view = json.loads(Path(built["view_path"]).read_text(encoding="utf-8"))
-    sample_path = Path(source_view["sample_index_path"])
-    candidate_path = Path(source_view["candidate_index_path"])
-    hashes_before = {
-        path: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (sample_path, candidate_path)
-    }
-    contract_path = _write_current_study_contract(tmp_path / "study.json")
-    rebound_path = tmp_path / "rebound" / "view.json"
-
-    result = rebind_development_fold_view(
-        source_view=built["view_path"],
-        research_contract=contract_path,
-        output_path=rebound_path,
-    )
-    rebound = json.loads(rebound_path.read_text(encoding="utf-8"))
-
-    assert rebound["sample_index_path"] == source_view["sample_index_path"]
-    assert rebound["candidate_index_path"] == source_view["candidate_index_path"]
-    assert rebound["research_contract"] == rebound["development_contract"]
-    assert rebound["research_contract"]["contract_id"] == "tiny_rebound_study"
-    assert result["development_fold_training_contract_sha256"] == (
-        validate_development_fold_training_contract(rebound)["sha256"]
-    )
-    assert hashes_before == {
-        path: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in (sample_path, candidate_path)
-    }
-
-
-def test_rebind_development_fold_view_rejects_bad_study_digest(tmp_path: Path) -> None:
-    contract_path = _write_current_study_contract(
-        tmp_path / "bad_study.json", valid_digest=False
-    )
-    source_view = Path(
-        "daily_research/data/research_store/seq100_pit_l35v2_v1/folds/views/"
-        "l35v2_pit_2023.json"
-    )
-    from daily_research.path_policy.seq100_fold_contract import (
-        rebind_development_fold_view,
-    )
-
-    with pytest.raises(ValueError, match="semantic SHA-256"):
-        rebind_development_fold_view(
-            source_view=source_view,
-            research_contract=contract_path,
-            output_path=tmp_path / "bad.json",
-        )
+    assert Path(view["sample_index_path"]).is_file()
+    assert Path(view["candidate_index_path"]).is_file()
 
 
 def test_fixed_final_development_accepts_patience_zero(tmp_path: Path) -> None:
@@ -400,8 +283,10 @@ def test_fixed_final_development_accepts_patience_zero(tmp_path: Path) -> None:
     )
 
     assert training._validate_evaluation_mode(config) == training.EVALUATION_MODE_DEVELOPMENT
-    contract_path = _write_current_study_contract(tmp_path / "current_study.json")
-    binding = training._validated_development_contract(contract_path)
+    config_path = _write_development_config(
+        tmp_path / "development_config.json", fixed_final=True
+    )
+    binding = training._load_development_config(config_path)
     assert binding["fixed_final_epoch"] is True
 
 
@@ -432,7 +317,7 @@ def test_development_early_stops_on_total_loss_and_restores_best_epoch(
         early_stopping_metric=training.EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
         early_stopping_mode=training.EARLY_STOPPING_MODE_MIN,
         minimum_complete_epochs=1,
-        development_contract=APPROVED_CONTRACT,
+        development_config=_write_development_config(tmp_path / "development.json"),
     )
 
     summary = training.train_sequence_path_model(config)
@@ -446,21 +331,17 @@ def test_development_early_stops_on_total_loss_and_restores_best_epoch(
     assert 0 < summary["best_optimizer_step"] <= summary["optimizer_step_count"]
     assert summary["resolved_training_config"]["minimum_complete_epochs"] == 1
     assert "min_complete_epochs" not in summary["resolved_training_config"]
-    assert len(summary["execution_cost_contract_sha256"]) == 64
+    assert summary["execution_costs"]["lot_size"] == 100
     assert calls == ["development"]  # Only the restored-best checkpoint gets candidate diagnostics.
     assert summary["sample_selection"]["train"]["policy"] == "all_rows"
     assert summary["sample_selection"]["development_supervised"]["selected_row_count"] == 3
     assert summary["sample_selection"]["development_candidates"]["policy"] == "all_candidates"
     assert summary["sample_selection"]["development_candidates"]["selected_row_count"] == 4
-    assert summary["candidate_index_sha256"]
-    assert summary["research_contract"]["contract_sha256"] == (
-        "e461c3e4654b0e97b31508874f2eacf89258d5219bf0fb452d8f1690ee193f11"
-    )
+    assert summary["development_config"]["study_id"] == "tiny_development_study"
     checkpoint = torch.load(summary["best_checkpoint"], map_location="cpu", weights_only=False)
     assert checkpoint["best_epoch"] == 2
     assert checkpoint["best_optimizer_step"] == summary["best_optimizer_step"]
     assert checkpoint["optimizer_step_count"] == summary["best_optimizer_step"]
-    assert checkpoint["execution_cost_contract_sha256"] == summary["execution_cost_contract_sha256"]
     assert checkpoint["best_development_total_loss"] == 2.0
     assert checkpoint["checkpoint_policy"] == "best_development_total_loss"
     assert all("development_total_loss" in row for row in summary["history"])
@@ -477,7 +358,7 @@ def test_development_early_stops_on_total_loss_and_restores_best_epoch(
         ({"minimum_complete_epochs": 0}, "at least 1"),
     ],
 )
-def test_development_rejects_non_contract_training_controls(
+def test_development_rejects_invalid_training_controls(
     tmp_path: Path,
     updates: dict[str, Any],
     message: str,
@@ -491,7 +372,7 @@ def test_development_rejects_non_contract_training_controls(
         early_stopping_metric=training.EARLY_STOPPING_METRIC_DEVELOPMENT_TOTAL_LOSS,
         early_stopping_mode=training.EARLY_STOPPING_MODE_MIN,
         minimum_complete_epochs=1,
-        development_contract=APPROVED_CONTRACT,
+        development_config=_write_development_config(tmp_path / "development.json"),
     )
     config = replace(config, **updates)
 
@@ -628,8 +509,6 @@ def test_predict_split_merges_candidate_complete_execution_after_full_date(
 
     assert len(daily) == 2
     assert daily["universe_count"].eq(4).all()
-    assert daily["universe_hash"].nunique() == 1
-    assert daily["execution_cost_contract_sha256"].str.fullmatch(r"[0-9a-f]{64}").all()
     assert daily["selected_realized_plan_return_coverage"].eq(1.0).all()
     assert daily["universe_realized_plan_return_coverage"].eq(1.0).all()
     assert daily["selected_realized_plan_coverage"].eq(1.0).all()

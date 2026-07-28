@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -41,31 +40,6 @@ SCHEMA_VERSION = 1
 
 def _read_json(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def _canonical_json(payload: Any) -> str:
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-
-
-def _sha256_json(payload: Any) -> str:
-    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(8 * 1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
@@ -245,7 +219,6 @@ class StudyEvaluationSpec:
     replace_rejected_from_ranked_candidates: bool = True
     allow_pyramiding: bool = False
     input_channel_profile: str = training.INPUT_CHANNEL_PROFILE_DAILY_ONLY_TURNOVER
-    source_contract_sha256: str = ""
     expected_job_count: int = 0
 
     def validate(self) -> None:
@@ -441,7 +414,7 @@ class BacktestMarket:
     exit_close_raw: np.ndarray
     exit_sellable: np.ndarray
     entry_filled: np.ndarray
-    contract: Any
+    costs: Any
     terminal_recovery_fraction: float
     forward_days: int = 60
     execution_days: int = 80
@@ -549,7 +522,6 @@ class LoadedMaterial:
     raw_top3_paths: Mapping[tuple[int, int], np.ndarray]
     first_signal_date_idx: int
     last_signal_date_idx: int
-    source_hashes: Mapping[str, str]
 
 
 def _load_material(
@@ -569,14 +541,13 @@ def _load_material(
         exit_close_raw=audit_pack.exit_close_raw,
         exit_sellable=audit_pack.exit_sellable,
         entry_filled=audit_pack.entry_filled,
-        contract=audit_pack.contract,
+        costs=audit_pack.costs,
         terminal_recovery_fraction=float(audit_pack.terminal_recovery_fraction),
         forward_days=int(audit_pack.forward_days),
         execution_days=int(audit_pack.execution_days),
     )
     books = {profile: ForecastBook(profile) for profile in PROFILES}
     raw_paths: dict[tuple[int, int], np.ndarray] = {}
-    source_hashes: dict[str, str] = {}
 
     for year in YEARS:
         memory_guard.check()
@@ -599,7 +570,6 @@ def _load_material(
         groups = candidates.groupby("date_idx", sort=True).indices
 
         for profile, prediction_path in prediction_paths.items():
-            source_hashes[f"{profile}:{year}"] = _sha256_file(prediction_path)
             frame = pd.read_csv(
                 prediction_path,
                 usecols=["trade_date", "symbol", "score", "predicted_exit_day"],
@@ -681,7 +651,6 @@ def _load_material(
         raw_top3_paths=raw_paths,
         first_signal_date_idx=int(signal_indices[0]),
         last_signal_date_idx=int(signal_indices[-1]),
-        source_hashes=source_hashes,
     )
 
 
@@ -720,7 +689,7 @@ def load_study_evaluation_material(
         exit_close_raw=audit_pack.exit_close_raw,
         exit_sellable=audit_pack.exit_sellable,
         entry_filled=audit_pack.entry_filled,
-        contract=audit_pack.contract,
+        costs=audit_pack.costs,
         terminal_recovery_fraction=float(audit_pack.terminal_recovery_fraction),
         forward_days=int(audit_pack.forward_days),
         execution_days=int(audit_pack.execution_days),
@@ -735,18 +704,11 @@ def load_study_evaluation_material(
         for profile in spec.profiles
     }
     raw_paths: dict[tuple[int, int], np.ndarray] = {}
-    source_hashes: dict[str, str] = {}
 
     for year in spec.years:
         guard.check()
         view_path = Path(spec.fold_views[int(year)]).resolve()
         manifest = _read_json(view_path)
-        binding = dict(manifest.get("research_contract", {}) or {})
-        if spec.source_contract_sha256 and str(binding.get("contract_sha256", "")) != str(
-            spec.source_contract_sha256
-        ):
-            raise ValueError(f"fold contract mismatch for {year}")
-        source_hashes[f"fold_view:{year}"] = _sha256_file(view_path)
         dataset = training.SequencePathPackDataset(
             manifest,
             split="development",
@@ -766,7 +728,6 @@ def load_study_evaluation_material(
             prediction_path = Path(spec.prediction_paths[profile][int(year)]).resolve()
             if not prediction_path.is_file():
                 raise FileNotFoundError(prediction_path)
-            source_hashes[f"prediction:{profile}:{year}"] = _sha256_file(prediction_path)
             frame = _read_compact_prediction_frame(prediction_path)
             if len(frame) != len(candidates):
                 raise RuntimeError(f"prediction/sample count mismatch: {profile}:{year}")
@@ -858,7 +819,6 @@ def load_study_evaluation_material(
         raw_top3_paths=raw_paths,
         first_signal_date_idx=int(signal_indices[0]),
         last_signal_date_idx=int(signal_indices[-1]),
-        source_hashes=source_hashes,
     )
 
 
@@ -1131,7 +1091,7 @@ def simulate_portfolio(
     multiplier = (
         1.0
         if cost_scenario == "base"
-        else float(market.contract.stress_slippage_multiplier)
+        else float(market.costs.stress_slippage_multiplier)
     )
     final_date_idx = int(last_signal_date_idx) + int(market.execution_days)
     if final_date_idx >= len(market.date_values):
@@ -1202,7 +1162,7 @@ def simulate_portfolio(
                     available_cash=cash,
                     allocated_cash=allocation,
                     entry_price=entry_price,
-                    contract=market.contract,
+                    contract=market.costs,
                     slippage_multiplier=multiplier,
                 )
                 if shares <= 0:
@@ -1292,7 +1252,7 @@ def simulate_portfolio(
                 exit_price=float(exit_price),
                 exit_date_idx=date_idx,
                 date_values=market.date_values,
-                contract=market.contract,
+                contract=market.costs,
                 slippage_multiplier=multiplier,
             )
             cash += float(proceeds)
@@ -1524,16 +1484,15 @@ def _study_job_id(job: StudyEvaluationJob) -> str:
     )
 
 
-def study_evaluation_contract_payload(
+def study_evaluation_config(
     spec: StudyEvaluationSpec,
     material: LoadedMaterial,
 ) -> dict[str, Any]:
     spec.validate()
     return {
         "schema_version": 1,
-        "artifact_type": "seq100_study_evaluation_contract",
+        "artifact_type": "seq100_study_evaluation_config",
         "study_id": spec.study_id,
-        "source_contract_sha256": spec.source_contract_sha256,
         "profiles": list(spec.profiles),
         "years": [int(value) for value in spec.years],
         "fold_views": {
@@ -1547,9 +1506,8 @@ def study_evaluation_contract_payload(
             }
             for profile, paths in sorted(spec.prediction_paths.items())
         },
-        "source_file_sha256": dict(sorted(material.source_hashes.items())),
         "source_pack_manifest": str(material.manifest_path),
-        "execution_cost_contract": asdict(material.market.contract),
+        "execution_costs": asdict(material.market.costs),
         "terminal_recovery_fraction": float(
             material.market.terminal_recovery_fraction
         ),
@@ -1568,7 +1526,7 @@ def study_evaluation_contract_payload(
         "policies": [asdict(policy) for policy in spec.policies],
         "cost_scenarios": list(spec.cost_scenarios),
         "job_count": len(_study_jobs(spec)),
-        "position_contract": {
+        "position_rules": {
             "entry": "next_trading_day_raw_open",
             "exit": "requested_raw_close_with_sellability_deferral",
             "allocation": "equal_total_slot_fraction",
@@ -1594,24 +1552,22 @@ def _selected_detail_policy(profile: str, policy: PolicySpec, cost_scenario: str
     )
 
 
-def _contract_payload(material: LoadedMaterial) -> dict[str, Any]:
-    policy_contract = {
+def _config_payload(material: LoadedMaterial) -> dict[str, Any]:
+    policy_config = {
         profile: [asdict(policy) for policy in _policy_grid(profile)] for profile in PROFILES
     }
     return {
         "schema_version": SCHEMA_VERSION,
-        "artifact_type": "seq100_finite_capital_backtest_contract",
+        "artifact_type": "seq100_finite_capital_backtest_config",
         "source_study_root": str(DEFAULT_STUDY_ROOT),
         "source_study_id": str(material.study.get("study_id", "")),
-        "source_study_contract_sha256": str(material.study.get("contract_sha256", "")),
-        "source_prediction_sha256": dict(sorted(material.source_hashes.items())),
         "source_pack_manifest": str(material.manifest_path),
         "profiles": list(PROFILES),
         "years": list(YEARS),
         "starting_cash_cny": STARTING_CASH_CNY,
         "daily_selection": "model_score_top3_stable_symbol_tie_break",
         "slot_counts": list(SLOT_COUNTS),
-        "position_contract": {
+        "position_rules": {
             "entry": "signal_D1_raw_open",
             "exit": "requested_raw_close_or_causal_stop_event_price",
             "same_day_cash_order": "entries_before_exits",
@@ -1621,7 +1577,7 @@ def _contract_payload(material: LoadedMaterial) -> dict[str, Any]:
             "cash_when_unfilled": True,
             "terminal_tail_days": 20,
         },
-        "rolling_contract": {
+        "rolling_rules": {
             "forecast_observed": "each_close",
             "nonpositive_score": "request_next_trading_day_close",
             "positive_score": "accelerate_only_to_fresh_absolute_planned_day",
@@ -1629,7 +1585,7 @@ def _contract_payload(material: LoadedMaterial) -> dict[str, Any]:
             "original_signal_hard_cap_day": 60,
             "same_close_execution": False,
         },
-        "stop_contract": {
+        "stop_rules": {
             "domain": "D2_D60",
             "intraday_same_bar_tie": "stop_loss_first_conservative",
             "gap_execution": "raw_open",
@@ -1638,30 +1594,66 @@ def _contract_payload(material: LoadedMaterial) -> dict[str, Any]:
             "unsellable": "next_sellable_raw_close",
         },
         "cost_scenarios": ["base", "double_slippage_selected_policies"],
-        "policies": policy_contract,
-        "protected_boundaries": {
-            "qdp_mutated": False,
-            "source_pack_mutated": False,
-            "models_retrained": False,
-            "live_state_mutated": False,
-        },
+        "policies": policy_config,
     }
 
 
-def _load_completed_job(path: Path, contract_sha256: str) -> dict[str, Any] | None:
+def _load_completed_job(
+    path: Path,
+    expected_job: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     try:
         payload = _read_json(path)
     except (OSError, json.JSONDecodeError):
         return None
-    if payload.get("contract_sha256") != contract_sha256:
+    if payload.get("status") != "completed":
+        return None
+    if expected_job is not None and dict(payload.get("job", {}) or {}) != dict(
+        expected_job
+    ):
         return None
     if not isinstance(payload.get("metric"), dict):
         return None
     if not isinstance(payload.get("annual_metrics"), list):
         return None
     return payload
+
+
+def _backtest_job_semantics(
+    profile: str,
+    policy: PolicySpec,
+    slots: int,
+    cost_scenario: str,
+) -> dict[str, Any]:
+    return {
+        "profile": str(profile),
+        "policy": asdict(policy),
+        "top_k": TOP_K,
+        "slots": int(slots),
+        "cost_scenario": str(cost_scenario),
+        "starting_cash_cny": float(STARTING_CASH_CNY),
+    }
+
+
+def _study_job_semantics(
+    spec: StudyEvaluationSpec,
+    job: StudyEvaluationJob,
+) -> dict[str, Any]:
+    return {
+        "profile": str(job.profile),
+        "policy": asdict(job.policy),
+        "top_k": int(job.top_k),
+        "slots": int(job.slots),
+        "cost_scenario": str(job.cost_scenario),
+        "starting_cash_cny": float(spec.starting_cash_cny),
+        "allow_pyramiding": bool(spec.allow_pyramiding),
+        "replace_rejected_from_ranked_candidates": bool(
+            spec.replace_rejected_from_ranked_candidates
+        ),
+        "years": [int(value) for value in spec.years],
+    }
 
 
 def run_backtests(
@@ -1683,22 +1675,17 @@ def run_backtests(
         include_raw_top3_paths=True,
         memory_guard=guard,
     )
-    contract = _contract_payload(material)
-    contract["source_study_root"] = str(study_root.resolve())
-    contract_sha256 = _sha256_json(contract)
-    contract_document = {**contract, "contract_sha256": contract_sha256}
-    contract_path = output_root / "contract.json"
-    if contract_path.is_file():
-        existing = _read_json(contract_path)
-        if existing.get("contract_sha256") != contract_sha256:
-            raise RuntimeError(
-                "finite-capital output root contains a different source/contract; "
-                "choose a new output root"
-            )
-    else:
-        _atomic_write_json(contract_path, contract_document)
-
     jobs = _all_jobs()
+    config = _config_payload(material)
+    config["source_study_root"] = str(study_root.resolve())
+    config["jobs"] = [
+        {
+            "job_id": _job_id(profile, policy.name, slots, cost_scenario),
+            **_backtest_job_semantics(profile, policy, slots, cost_scenario),
+        }
+        for profile, policy, slots, cost_scenario in jobs
+    ]
+    _atomic_write_json(output_root / "config.json", config)
     completed = 0
     resumed = 0
     started_at = time.monotonic()
@@ -1706,7 +1693,10 @@ def run_backtests(
         guard.check()
         identifier = _job_id(profile, policy.name, slots, cost_scenario)
         job_path = jobs_dir / f"{identifier}.json"
-        existing = _load_completed_job(job_path, contract_sha256)
+        job_semantics = _backtest_job_semantics(
+            profile, policy, slots, cost_scenario
+        )
+        existing = _load_completed_job(job_path, job_semantics)
         if existing is not None:
             completed += 1
             resumed += 1
@@ -1726,8 +1716,9 @@ def run_backtests(
         payload = {
             "schema_version": SCHEMA_VERSION,
             "artifact_type": "seq100_finite_capital_backtest_job",
-            "contract_sha256": contract_sha256,
+            "status": "completed",
             "job_id": identifier,
+            "job": job_semantics,
             "metric": metric,
             "annual_metrics": annual,
         }
@@ -1741,7 +1732,6 @@ def run_backtests(
             state = {
                 "schema_version": SCHEMA_VERSION,
                 "status": "running" if completed < len(jobs) else "completed",
-                "contract_sha256": contract_sha256,
                 "completed_job_count": int(completed),
                 "total_job_count": int(len(jobs)),
                 "resumed_job_count": int(resumed),
@@ -1758,7 +1748,6 @@ def run_backtests(
     final_state = {
         "schema_version": SCHEMA_VERSION,
         "status": "completed",
-        "contract_sha256": contract_sha256,
         "completed_job_count": int(completed),
         "total_job_count": int(len(jobs)),
         "resumed_job_count": int(resumed),
@@ -1788,18 +1777,13 @@ def run_study_evaluation(
         include_raw_selected_paths=any(policy.kind == "stop" for policy in spec.policies),
         memory_guard=guard,
     )
-    contract = study_evaluation_contract_payload(spec, loaded)
-    contract_sha256 = _sha256_json(contract)
-    contract_document = {**contract, "contract_sha256": contract_sha256}
-    contract_path = resolved_output / "contract.json"
-    if contract_path.is_file():
-        existing_contract = _read_json(contract_path)
-        if str(existing_contract.get("contract_sha256", "")) != contract_sha256:
-            raise RuntimeError("account output root contains a different resolved contract")
-    else:
-        _atomic_write_json(contract_path, contract_document)
-
     jobs = _study_jobs(spec)
+    config = study_evaluation_config(spec, loaded)
+    config["jobs"] = [
+        {"job_id": _study_job_id(job), **_study_job_semantics(spec, job)}
+        for job in jobs
+    ]
+    _atomic_write_json(resolved_output / "config.json", config)
     completed = 0
     resumed = 0
     started_at = time.monotonic()
@@ -1807,7 +1791,8 @@ def run_study_evaluation(
         guard.check()
         identifier = _study_job_id(job)
         job_path = jobs_dir / f"{identifier}.json"
-        existing = _load_completed_job(job_path, contract_sha256)
+        job_semantics = _study_job_semantics(spec, job)
+        existing = _load_completed_job(job_path, job_semantics)
         if existing is not None:
             completed += 1
             resumed += 1
@@ -1834,15 +1819,9 @@ def run_study_evaluation(
         payload = {
             "schema_version": 1,
             "artifact_type": "seq100_study_evaluation_job",
-            "contract_sha256": contract_sha256,
+            "status": "completed",
             "job_id": identifier,
-            "resolved_job": {
-                "profile": job.profile,
-                "policy": asdict(job.policy),
-                "top_k": int(job.top_k),
-                "slots": int(job.slots),
-                "cost_scenario": job.cost_scenario,
-            },
+            "job": job_semantics,
             "metric": metric,
             "annual_metrics": annual,
         }
@@ -1852,7 +1831,6 @@ def run_study_evaluation(
             state = {
                 "schema_version": 1,
                 "status": "running" if completed < len(jobs) else "completed",
-                "contract_sha256": contract_sha256,
                 "completed_job_count": int(completed),
                 "total_job_count": int(len(jobs)),
                 "resumed_job_count": int(resumed),
@@ -1869,7 +1847,6 @@ def run_study_evaluation(
     final_state = {
         "schema_version": 1,
         "status": "completed",
-        "contract_sha256": contract_sha256,
         "completed_job_count": int(completed),
         "total_job_count": int(len(jobs)),
         "resumed_job_count": int(resumed),
@@ -2006,21 +1983,26 @@ def select_study_winner(
     if not training_complete:
         raise RuntimeError("all training arms must be complete before winner selection")
     root = Path(account_output_root).resolve()
-    contract = _read_json(root / "contract.json")
-    contract_sha256 = str(contract["contract_sha256"])
-    payloads = [
-        payload
-        for path in sorted((root / "jobs").glob("*.json"))
-        if (payload := _load_completed_job(path, contract_sha256)) is not None
-    ]
-    expected = int(contract.get("job_count", 0) or 0)
+    config = _read_json(root / "config.json")
+    expected_jobs = {
+        str(item["job_id"]): {
+            key: value for key, value in dict(item).items() if key != "job_id"
+        }
+        for item in config.get("jobs", [])
+    }
+    payloads = []
+    for identifier, expected_job in expected_jobs.items():
+        payload = _load_completed_job(root / "jobs" / f"{identifier}.json", expected_job)
+        if payload is not None:
+            payloads.append(payload)
+    expected = int(config.get("job_count", len(expected_jobs)) or 0)
     if expected <= 0 or len(payloads) != expected:
         raise RuntimeError(f"account grid is incomplete: {len(payloads)}/{expected}")
     rows: list[dict[str, Any]] = []
     annual_rows: list[dict[str, Any]] = []
     for payload in payloads:
         metric = dict(payload["metric"])
-        resolved = dict(payload.get("resolved_job", {}) or {})
+        resolved = dict(payload.get("job", {}) or {})
         policy_spec = dict(resolved.get("policy", metric.get("policy_spec", {})) or {})
         row = {
             **metric,
@@ -2055,7 +2037,7 @@ def select_study_winner(
                 }
             )
     if set(str(value) for value in profiles) != {row["profile"] for row in rows}:
-        raise RuntimeError("account grid profile set does not match the frozen arms")
+        raise RuntimeError("account grid profile set does not match the configured arms")
 
     def growth(row: Mapping[str, Any]) -> float:
         value = row.get("liquidated_log_growth")
@@ -2154,7 +2136,6 @@ def select_study_winner(
     result = {
         "schema_version": 1,
         "artifact_type": "seq100_signal_close_2x2_selection",
-        "account_contract_sha256": contract_sha256,
         "fallback_tolerance": float(fallback_tolerance),
         "account_job_count": int(len(rows)),
         "group_selection_count": int(len(fallback_rows)),
@@ -2194,11 +2175,18 @@ def _markdown_percent(value: Any) -> str:
 
 
 def summarize_backtests(output_root: Path) -> dict[str, Any]:
-    contract = _read_json(output_root / "contract.json")
-    contract_sha256 = str(contract["contract_sha256"])
+    config = _read_json(output_root / "config.json")
+    expected_by_id = {
+        str(item["job_id"]): {
+            key: value for key, value in dict(item).items() if key != "job_id"
+        }
+        for item in config.get("jobs", [])
+    }
     payloads: list[dict[str, Any]] = []
-    for path in sorted((output_root / "jobs").glob("*.json")):
-        payload = _load_completed_job(path, contract_sha256)
+    for identifier, expected_job in expected_by_id.items():
+        payload = _load_completed_job(
+            output_root / "jobs" / f"{identifier}.json", expected_job
+        )
         if payload is not None:
             payloads.append(payload)
     expected_jobs = _all_jobs()
@@ -2353,7 +2341,6 @@ def summarize_backtests(output_root: Path) -> dict[str, Any]:
     summary = {
         "schema_version": SCHEMA_VERSION,
         "artifact_type": "seq100_finite_capital_backtest_summary",
-        "contract_sha256": contract_sha256,
         "job_count": int(len(metrics)),
         "base_job_count": int(metrics["cost_scenario"].eq("base").sum()),
         "stress_job_count": int(metrics["cost_scenario"].eq("double_slippage").sum()),

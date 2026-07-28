@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -18,7 +17,7 @@ REQUIRED_STRESS_SLIPPAGE_MULTIPLIER = 2.0
 
 
 @dataclass(frozen=True)
-class ExecutionCostContract:
+class ExecutionCosts:
     lot_size: int
     commission_bps: float
     minimum_commission_cny: float
@@ -26,14 +25,13 @@ class ExecutionCostContract:
     slippage_bps: float
     stress_slippage_multiplier: float
     stamp_tax_schedule: tuple[tuple[str, float], ...]
-    semantic_sha256: str
 
 
 @dataclass(frozen=True)
 class CandidateExecutionEvaluation:
     candidates: pd.DataFrame
     daily_topk: pd.DataFrame
-    execution_cost_contract_sha256: str
+    execution_costs: ExecutionCosts
 
 
 @dataclass(frozen=True)
@@ -57,45 +55,25 @@ class _Cashflow:
     cash_utilization: float
 
 
-def _canonical_json(payload: Any) -> str:
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-
-
-def execution_cost_contract_sha256(manifest_or_contract: Mapping[str, Any]) -> str:
-    """Hash the manifest-bound cost semantics independently of JSON key order."""
-
-    payload = dict(manifest_or_contract)
-    contract = payload.get("execution_cost_contract", payload)
-    if not isinstance(contract, Mapping) or not contract:
-        raise ValueError("manifest is missing execution_cost_contract")
-    return hashlib.sha256(_canonical_json(dict(contract)).encode("utf-8")).hexdigest()
-
-
-def parse_execution_cost_contract(manifest: Mapping[str, Any]) -> ExecutionCostContract:
-    raw = manifest.get("execution_cost_contract")
+def parse_execution_costs(manifest: Mapping[str, Any]) -> ExecutionCosts:
+    raw = manifest.get("execution_costs")
     if not isinstance(raw, Mapping) or not raw:
-        raise ValueError("manifest is missing execution_cost_contract")
-    contract = dict(raw)
+        raise ValueError("manifest is missing execution_costs")
+    costs = dict(raw)
 
     def finite_non_negative(name: str, default: float | None = None) -> float:
-        value = contract.get(name, default)
+        value = costs.get(name, default)
         if value is None:
-            raise ValueError(f"execution_cost_contract is missing {name}")
+            raise ValueError(f"execution_costs is missing {name}")
         number = float(value)
         if not math.isfinite(number) or number < 0.0:
-            raise ValueError(f"execution_cost_contract.{name} must be finite and non-negative")
+            raise ValueError(f"execution_costs.{name} must be finite and non-negative")
         return number
 
-    lot_size = int(contract.get("lot_size", 0))
+    lot_size = int(costs.get("lot_size", 0))
     if lot_size != REQUIRED_LOT_SIZE:
         raise ValueError(f"seq100 execution requires lot_size={REQUIRED_LOT_SIZE}")
-    schedule_raw = contract.get("stamp_tax_schedule")
+    schedule_raw = costs.get("stamp_tax_schedule")
     if not schedule_raw:
         schedule_raw = [
             {
@@ -104,7 +82,7 @@ def parse_execution_cost_contract(manifest: Mapping[str, Any]) -> ExecutionCostC
             }
         ]
     if not isinstance(schedule_raw, Sequence) or isinstance(schedule_raw, (str, bytes)):
-        raise ValueError("execution_cost_contract.stamp_tax_schedule must be a sequence")
+        raise ValueError("execution_costs.stamp_tax_schedule must be a sequence")
     schedule: list[tuple[str, float]] = []
     previous = ""
     for item in schedule_raw:
@@ -146,7 +124,7 @@ def parse_execution_cost_contract(manifest: Mapping[str, Any]) -> ExecutionCostC
         abs_tol=1.0e-12,
     ):
         raise ValueError(f"seq100 execution requires slippage_bps={REQUIRED_BASE_SLIPPAGE_BPS}")
-    return ExecutionCostContract(
+    return ExecutionCosts(
         lot_size=lot_size,
         commission_bps=finite_non_negative("commission_bps"),
         minimum_commission_cny=finite_non_negative("minimum_commission_cny"),
@@ -154,16 +132,15 @@ def parse_execution_cost_contract(manifest: Mapping[str, Any]) -> ExecutionCostC
         slippage_bps=slippage_bps,
         stress_slippage_multiplier=stress_multiplier,
         stamp_tax_schedule=tuple(schedule),
-        semantic_sha256=execution_cost_contract_sha256(manifest),
     )
 
 
 def _terminal_recovery_fraction(manifest: Mapping[str, Any]) -> float:
-    terminal = manifest.get("terminal_execution_contract", {})
+    terminal = manifest.get("terminal_execution", {})
     if terminal is None:
         terminal = {}
     if not isinstance(terminal, Mapping):
-        raise ValueError("terminal_execution_contract must be an object")
+        raise ValueError("terminal_execution must be an object")
     value = float(terminal.get("recovery_fraction_of_entry_notional", 0.0))
     if not math.isfinite(value) or not 0.0 <= value <= 1.0:
         raise ValueError("terminal recovery fraction must be within [0, 1]")
@@ -243,7 +220,7 @@ def _exit_date_lookup(
     return from_global
 
 
-def _stamp_tax_bps(contract: ExecutionCostContract, exit_date: str) -> float:
+def _stamp_tax_bps(contract: ExecutionCosts, exit_date: str) -> float:
     matches = [rate for effective_date, rate in contract.stamp_tax_schedule if effective_date <= exit_date]
     if not matches:
         raise ValueError("exit trade date predates the stamp-tax schedule")
@@ -303,7 +280,7 @@ def _cashflow(
     entry_filled: bool,
     entry_price: float,
     plan: _ResolvedPlan,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
     slippage_multiplier: float,
 ) -> _Cashflow:
     cash = float(allocated_cash)
@@ -384,7 +361,7 @@ def _evaluate_rows_for_allocation(
     entry_prices: np.ndarray,
     gross_values: np.ndarray | None,
     allocated_cash: float,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
 ) -> dict[str, np.ndarray]:
     count = len(frame)
     output: dict[str, np.ndarray] = {
@@ -464,7 +441,7 @@ def _daily_topk_rows(
     entry_filled: np.ndarray,
     entry_prices: np.ndarray,
     gross_values: np.ndarray | None,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
     top_k_values: tuple[int, ...],
     daily_cohort_cash_cny: float,
 ) -> list[dict[str, Any]]:
@@ -487,8 +464,6 @@ def _daily_topk_rows(
             na_position="last",
         )
         ranked_positions = ranked["_position"].to_numpy(dtype=np.int64)
-        universe_symbols = ranked["_symbol"].tolist()
-        universe_hash = hashlib.sha256("\n".join(sorted(universe_symbols)).encode("utf-8")).hexdigest()
         for top_k in top_k_values:
             allocation = float(daily_cohort_cash_cny) / int(top_k)
             scenario = _evaluate_rows_for_allocation(
@@ -580,10 +555,8 @@ def _daily_topk_rows(
                 "unused_cash_slot_count": unused_slots,
                 "selected_symbols": selected_symbols,
                 "selected_symbols_json": json.dumps(selected_symbols, ensure_ascii=False, separators=(",", ":")),
-                "universe_hash": universe_hash,
                 "daily_cohort_cash_cny": float(daily_cohort_cash_cny),
                 "per_name_allocation_cash_cny": allocation,
-                "execution_cost_contract_sha256": contract.semantic_sha256,
                 "selected_net_realized_plan_return_base": selected_base,
                 "universe_net_realized_plan_return_base": universe_base,
                 "alpha_net_realized_plan_return_base": selected_base - universe_base,
@@ -739,7 +712,7 @@ def evaluate_candidate_execution(
         date_values=date_values,
     )
     terminal_recovery = _terminal_recovery_fraction(manifest)
-    contract = parse_execution_cost_contract(manifest)
+    contract = parse_execution_costs(manifest)
     plans = tuple(
         _resolve_plan(
             predicted_exit_day=float(predicted_days[row]),
@@ -815,7 +788,6 @@ def evaluate_candidate_execution(
     frame["ending_cash_base_cny"] = canonical["ending_cash_base"]
     frame["ending_cash_stress_cny"] = canonical["ending_cash_stress"]
     frame["candidate_allocation_cash_cny"] = canonical_allocation
-    frame["execution_cost_contract_sha256"] = contract.semantic_sha256
     del canonical
 
     daily_topk = pd.DataFrame(
@@ -835,7 +807,7 @@ def evaluate_candidate_execution(
     return CandidateExecutionEvaluation(
         candidates=frame,
         daily_topk=daily_topk,
-        execution_cost_contract_sha256=contract.semantic_sha256,
+        execution_costs=contract,
     )
 
 
@@ -846,9 +818,8 @@ __all__ = [
     "CandidateExecutionEvaluation",
     "DEFAULT_DAILY_COHORT_CASH_CNY",
     "DEFAULT_TOP_K_VALUES",
-    "ExecutionCostContract",
+    "ExecutionCosts",
     "evaluate_candidate_complete_execution",
     "evaluate_candidate_execution",
-    "execution_cost_contract_sha256",
-    "parse_execution_cost_contract",
+    "parse_execution_costs",
 ]

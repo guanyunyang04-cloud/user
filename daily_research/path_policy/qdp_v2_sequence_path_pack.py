@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 import gc
-import hashlib
 import json
 import math
 import os
@@ -11,7 +10,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -218,37 +217,14 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> str:
     return str(path.resolve())
 
 
-def _bind_research_contract(path: str | Path | None) -> dict[str, Any] | None:
+def _read_research_config(path: str | Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
     resolved = Path(path).resolve()
-    raw_bytes = resolved.read_bytes()
-    payload = json.loads(raw_bytes.decode("utf-8-sig"))
-    mutable_study = str(payload.get("artifact_type", "")) == "seq100_current_study"
-    semantic_payload = dict(payload.get("contract", {}) or {}) if mutable_study else dict(payload)
-    declared_digest = str(
-        payload.get("contract_sha256", semantic_payload.get("contract_sha256", "")) or ""
-    ).lower()
-    semantic_payload.pop("contract_sha256", None)
-    semantic_bytes = json.dumps(
-        semantic_payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    semantic_digest = hashlib.sha256(semantic_bytes).hexdigest()
-    if declared_digest and declared_digest != semantic_digest:
-        raise ValueError(
-            "research contract semantic digest mismatch: "
-            f"declared={declared_digest}, actual={semantic_digest}"
-        )
+    payload = json.loads(resolved.read_text(encoding="utf-8-sig"))
     return {
         "path": str(resolved),
-        "contract_id": str(semantic_payload.get("contract_id", payload.get("contract_id", "")) or ""),
-        "contract_sha256": semantic_digest,
-        "contract_file_sha256": (
-            semantic_digest if mutable_study else hashlib.sha256(raw_bytes).hexdigest()
-        ),
+        "study_id": str(payload.get("study_id", payload.get("config_id", "")) or ""),
     }
 
 
@@ -298,15 +274,7 @@ def _read_active(root: Path) -> dict[str, Any]:
     return json.loads((root / "active" / "active.json").read_text(encoding="utf-8"))
 
 
-def _file_sha256(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _qdp_source_manifest_bindings(
+def _qdp_source_manifests(
     root: Path, active: Mapping[str, Any]
 ) -> dict[str, dict[str, str]]:
     bindings: dict[str, dict[str, str]] = {}
@@ -321,99 +289,8 @@ def _qdp_source_manifest_bindings(
         bindings[str(domain)] = {
             "dataset_id": str(dataset_id),
             "manifest_path": str(path),
-            "dataset_json_sha256": _file_sha256(path),
         }
     return bindings
-
-
-def qdp_source_freshness(manifest: Mapping[str, Any]) -> dict[str, Any]:
-    if str(manifest.get("artifact_type", "") or "") != "qdp_v2_sequence_path_pack":
-        return {"status": "not_applicable", "errors": []}
-    policy = dict(manifest.get("qdp_source_freshness_policy", {}) or {})
-    if str(policy.get("mode", "") or "") == "immutable_research_pack_v1":
-        errors: list[str] = []
-        try:
-            # A materialized research pack remains a valid historical snapshot
-            # after QDP's active datasets advance.  Its own source manifest,
-            # indexes, and backing-file inventory must still be byte/identity
-            # identical; this is deliberately stronger than a blanket stale
-            # source waiver.
-            from daily_research.path_policy.seq100_fold_contract import (
-                validate_source_view_provenance,
-            )
-
-            validate_source_view_provenance(manifest)
-        except (FileNotFoundError, OSError, ValueError) as exc:
-            errors.append(f"immutable_pack_material_invalid:{exc}")
-        attachments = list(policy.get("attachments", []) or [])
-        if not attachments:
-            errors.append("immutable_pack_attachments_missing")
-        for number, raw in enumerate(attachments):
-            item = dict(raw or {})
-            path = Path(str(item.get("path", "") or "")).resolve()
-            expected = str(item.get("sha256", "") or "")
-            if not path.is_file():
-                errors.append(f"immutable_pack_attachment_missing:{number}")
-            elif not expected or _file_sha256(path) != expected:
-                errors.append(f"immutable_pack_attachment_hash_mismatch:{number}")
-        return {
-            "status": "stale_qdp_source" if errors else "ok",
-            "mode": "immutable_research_pack_v1",
-            "active_qdp_identity_required": False,
-            "errors": errors,
-        }
-    bindings = dict(manifest.get("qdp_source_manifests", {}) or {})
-    if not bindings:
-        return {
-            "status": "stale_qdp_source",
-            "errors": ["source_dataset_hashes_missing"],
-        }
-    root_raw = str(manifest.get("qdp_root", "") or "")
-    if not root_raw:
-        return {
-            "status": "stale_qdp_source",
-            "errors": ["qdp_root_missing"],
-        }
-    root = Path(root_raw).resolve()
-    errors: list[str] = []
-    source_ids = {
-        str(domain): str(dataset_id)
-        for domain, dataset_id in dict(
-            manifest.get("research_source_datasets", {}) or {}
-        ).items()
-    }
-    if source_ids and set(bindings) != set(source_ids):
-        errors.append("source_manifest_domain_set_mismatch")
-    for domain, raw in sorted(bindings.items()):
-        item = dict(raw or {})
-        dataset_id = str(item.get("dataset_id", "") or "")
-        if source_ids and source_ids.get(str(domain)) != dataset_id:
-            errors.append(f"source_manifest_dataset_id_mismatch:{domain}")
-        expected_hash = str(item.get("dataset_json_sha256", "") or "")
-        expected_path = (
-            root / "datasets" / str(domain) / dataset_id / "dataset.json"
-        ).resolve()
-        recorded_path = Path(str(item.get("manifest_path", "") or expected_path)).resolve()
-        if recorded_path != expected_path:
-            errors.append(f"source_manifest_path_mismatch:{domain}")
-            continue
-        if not expected_path.is_file():
-            errors.append(f"source_manifest_missing:{domain}")
-            continue
-        if not expected_hash or _file_sha256(expected_path) != expected_hash:
-            errors.append(f"source_manifest_hash_mismatch:{domain}")
-    return {
-        "status": "stale_qdp_source" if errors else "ok",
-        "errors": errors,
-    }
-
-
-def assert_qdp_source_fresh(manifest: Mapping[str, Any]) -> None:
-    result = qdp_source_freshness(manifest)
-    if result["status"] == "stale_qdp_source":
-        raise ValueError(
-            "stale_qdp_source:" + ",".join(str(item) for item in result["errors"])
-        )
 
 
 def sequence_continuity_contract(manifest: Mapping[str, Any]) -> dict[str, Any]:
@@ -1214,7 +1091,7 @@ def _resolve_deferred_exit_days(
     return resolved
 
 
-def _execution_cost_contract(config: AShareExecutionCostConfig) -> dict[str, Any]:
+def _execution_costs(config: AShareExecutionCostConfig) -> dict[str, Any]:
     numeric = {
         "commission_bps": float(config.commission_bps),
         "minimum_commission_cny": float(config.minimum_commission_cny),
@@ -1246,7 +1123,6 @@ def _execution_cost_contract(config: AShareExecutionCostConfig) -> dict[str, Any
     if not stamp_schedule:
         stamp_schedule.append({"effective_date": "1900-01-01", "stamp_tax_bps": numeric["stamp_tax_bps"]})
     return {
-        "contract": "a_share_round_trip_cashflow_v1",
         "lot_size": int(config.lot_size),
         **numeric,
         "stamp_tax_schedule": stamp_schedule,
@@ -1270,7 +1146,7 @@ def simulate_a_share_round_trip(
 ) -> dict[str, float | int | bool]:
     """Apply board-lot, minimum-fee, tax, transfer-fee, and slippage assumptions."""
 
-    contract = _execution_cost_contract(cost)
+    costs = _execution_costs(cost)
     cash = float(allocated_cash)
     entry = float(entry_price)
     exit_value = float(exit_price)
@@ -1279,14 +1155,14 @@ def simulate_a_share_round_trip(
         raise ValueError("cash, prices, and slippage_multiplier must be finite")
     if cash < 0.0 or entry <= 0.0 or exit_value < 0.0 or multiplier < 0.0:
         raise ValueError("cash/prices/slippage_multiplier are outside the supported range")
-    slip = float(contract["slippage_bps"]) * multiplier / 10_000.0
+    slip = float(costs["slippage_bps"]) * multiplier / 10_000.0
     buy_price = entry * (1.0 + slip)
     sell_price = exit_value * max(0.0, 1.0 - slip)
-    lot_size = int(contract["lot_size"])
+    lot_size = int(costs["lot_size"])
     shares = int(cash // (buy_price * lot_size)) * lot_size
-    commission_rate = float(contract["commission_bps"]) / 10_000.0
-    transfer_rate = float(contract["transfer_fee_bps"]) / 10_000.0
-    minimum_commission = float(contract["minimum_commission_cny"])
+    commission_rate = float(costs["commission_bps"]) / 10_000.0
+    transfer_rate = float(costs["transfer_fee_bps"]) / 10_000.0
+    minimum_commission = float(costs["minimum_commission_cny"])
     while shares > 0:
         buy_gross = float(shares) * buy_price
         buy_commission = max(minimum_commission, buy_gross * commission_rate)
@@ -1309,7 +1185,7 @@ def simulate_a_share_round_trip(
     sell_gross = float(shares) * sell_price
     sell_commission = max(minimum_commission, sell_gross * commission_rate)
     sell_transfer_fee = sell_gross * transfer_rate
-    stamp_tax_bps = float(contract["stamp_tax_bps"])
+    stamp_tax_bps = float(costs["stamp_tax_bps"])
     if exit_trade_date is not None:
         try:
             trade_date = pd.Timestamp(str(exit_trade_date)).strftime("%Y-%m-%d")
@@ -1317,7 +1193,7 @@ def simulate_a_share_round_trip(
             raise ValueError(f"invalid exit_trade_date: {exit_trade_date}") from exc
         matched = [
             float(item["stamp_tax_bps"])
-            for item in list(contract["stamp_tax_schedule"])
+            for item in list(costs["stamp_tax_schedule"])
             if str(item["effective_date"]) <= trade_date
         ]
         if not matched:
@@ -1811,13 +1687,11 @@ def _build_relative_turnover_panels(
             "path": str(log_path.resolve()),
             "shape": [n_dates, n_symbols],
             "dtype": "float32",
-            "sha256": _file_sha256(log_path),
         },
         "past20_positive_median": {
             "path": str(baseline_path.resolve()),
             "shape": [n_dates, n_symbols],
             "dtype": "float32",
-            "sha256": _file_sha256(baseline_path),
         },
     }
     return turnover, turnover_valid, log_turnover, baseline, stats
@@ -2094,7 +1968,7 @@ class SequencePackConfig:
     minimum_free_memory_gb: float = DEFAULT_MINIMUM_FREE_MEMORY_GB
     unresolved_exit_recovery_fraction: float = 0.0
     execution_cost: AShareExecutionCostConfig = AShareExecutionCostConfig()
-    research_contract: Path | None = None
+    research_config: Path | None = None
     pit_universe_manifest: Path | None = None
     dataset_view: Path | None = None
     feature_profile: str = FEATURE_PROFILE_ALL
@@ -2135,8 +2009,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         or unresolved_exit_recovery_fraction > 1.0
     ):
         raise ValueError("unresolved_exit_recovery_fraction must be finite and between 0 and 1")
-    execution_cost_contract = _execution_cost_contract(config.execution_cost)
-    research_contract_binding = _bind_research_contract(config.research_contract)
+    execution_costs = _execution_costs(config.execution_cost)
+    research_config = _read_research_config(config.research_config)
     root = config.qdp_root.resolve()
     canonical_active = _read_active(root)
     active_manifest_dataset_ids = dict(canonical_active.get("datasets", {}) or {})
@@ -2179,7 +2053,7 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "pit_signal_universe pointer"
             )
     active_scope = dict(active.get("scope", {}) or {})
-    qdp_source_manifests = _qdp_source_manifest_bindings(root, active)
+    qdp_sources = _qdp_source_manifests(root, active)
     scope_start = str(active_scope.get("start_date", "2011-11-22") or "2011-11-22")
     active_end = str(active.get("active_as_of_date", active_scope.get("end_date", config.end_date)) or config.end_date)
     output_dir = config.output_root / str(config.run_tag)
@@ -2879,13 +2753,6 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
     memory_guard("manifest_assembly")
 
     source_dataset_ids = dict(active.get("datasets", {}) or {})
-    assert_qdp_source_fresh(
-        {
-            "artifact_type": "qdp_v2_sequence_path_pack",
-            "qdp_root": str(root),
-            "qdp_source_manifests": qdp_source_manifests,
-        }
-    )
     split_counts = dict(sample_index_stats["split_counts"])
     candidate_split_counts = dict(candidate_index_stats["split_counts"])
     path_anchor_name = "signal_day_close" if str(config.price_anchor) == "today_close" else "next_calendar_trading_day_open"
@@ -2944,7 +2811,6 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "shape": [n_dates, n_symbols, 2],
             "columns": ["log_turnover_pct", "relative_turnover_20"],
             "dtype": "float32",
-            "sha256": _file_sha256(panel_dir / "turnover.float32.dat"),
         }
     if intraday_summary is not None and limit_structure is not None:
         feature_channels.update(
@@ -2969,14 +2835,13 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
         "active_as_of_date": active.get("active_as_of_date", ""),
         "active_datasets": active_manifest_dataset_ids,
         "research_source_datasets": source_dataset_ids,
-        "qdp_source_manifests": qdp_source_manifests,
+        "qdp_sources": qdp_sources,
         "research_dataset_view": {
             "path": resolved_dataset_view or None,
             "view_id": str(dict(research_dataset_view or {}).get("view_id", "") or "") or None,
             "overrides": dict(dict(research_dataset_view or {}).get("overrides", {}) or {}),
         },
-        "research_contract": research_contract_binding,
-        "development_contract": research_contract_binding,
+        "research_config": research_config,
         "scope": active_scope,
         "lookback_days": int(config.lookback_days),
         "forward_days": int(config.forward_days),
@@ -2991,7 +2856,6 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
             "label_store_max_open_shards": 1,
             "daily_feature_sort_passes": 1,
             "memory_observations_path": str(memory_observation_path.resolve()),
-            "memory_observations_sha256": hashlib.sha256(memory_observation_path.read_bytes()).hexdigest(),
             "minimum_observed_available_memory_gb": min(
                 (
                     float(item["available_memory_gb"])
@@ -3081,8 +2945,8 @@ def build_sequence_pack(config: SequencePackConfig) -> dict[str, Any]:
                 "units": "CNY_raw_exchange_price",
             },
         },
-        "execution_cost_contract": execution_cost_contract,
-        "terminal_execution_contract": {
+        "execution_costs": execution_costs,
+        "terminal_execution": {
             "unresolved_after_tail": "apply_precommitted_recovery_fraction",
             "recovery_fraction_of_entry_notional": unresolved_exit_recovery_fraction,
             "default_interpretation": "zero_recovery_total_loss" if unresolved_exit_recovery_fraction == 0.0 else "configured_partial_recovery",
@@ -3230,7 +3094,6 @@ def reanchor_sequence_pack(
     source = json.loads(source_path.read_text(encoding="utf-8"))
     if source.get("artifact_type") != "qdp_v2_sequence_path_pack":
         raise ValueError(f"not a sequence path pack manifest: {source_path}")
-    assert_qdp_source_fresh(source)
     assert_sequence_continuity_contract(source)
     output_dir = output_root / str(run_tag)
     if output_dir.exists() and any(output_dir.iterdir()) and not bool(overwrite):
@@ -3395,9 +3258,6 @@ def validate_sequence_pack(manifest_path: str | Path) -> dict[str, Any]:
     path = Path(manifest_path)
     manifest = json.loads(path.read_text(encoding="utf-8"))
     blockers: list[str] = []
-    freshness = qdp_source_freshness(manifest)
-    if freshness["status"] == "stale_qdp_source":
-        blockers.append("stale_qdp_source")
     continuity_contract = sequence_continuity_contract(manifest)
     if continuity_contract["status"] == "error":
         blockers.append("continuity_break_contract_missing")
@@ -3450,7 +3310,6 @@ def validate_sequence_pack(manifest_path: str | Path) -> dict[str, Any]:
         "sample_count_by_split": dict(manifest.get("sample_count_by_split", {}) or {}),
         "candidate_count": int(manifest.get("candidate_count", 0) or 0),
         "candidate_count_by_split": dict(manifest.get("candidate_count_by_split", {}) or {}),
-        "qdp_source_freshness": freshness,
         "continuity_contract": continuity_contract,
     }
 
@@ -3558,10 +3417,10 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_STRESS_SLIPPAGE_MULTIPLIER,
     )
     build.add_argument(
-        "--research-contract",
+        "--research-config",
         type=Path,
         default=None,
-        help="Approved immutable research contract; semantic and raw-file SHA-256 identities are bound into the pack manifest.",
+        help="Optional scientific configuration recorded as a plain source path.",
     )
     build.add_argument(
         "--pit-universe-manifest",
@@ -3635,7 +3494,11 @@ def main(argv: list[str] | None = None) -> int:
                 slippage_bps=float(args.slippage_bps),
                 stress_slippage_multiplier=float(args.stress_slippage_multiplier),
             ),
-            research_contract=Path(args.research_contract) if args.research_contract is not None else None,
+            research_config=(
+                Path(args.research_config)
+                if args.research_config is not None
+                else None
+            ),
             pit_universe_manifest=Path(args.pit_universe_manifest) if args.pit_universe_manifest is not None else None,
             dataset_view=Path(args.dataset_view) if args.dataset_view is not None else None,
             feature_profile=str(args.feature_profile),

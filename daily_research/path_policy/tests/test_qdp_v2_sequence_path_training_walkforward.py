@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from types import SimpleNamespace
 
 import pandas as pd
@@ -49,9 +48,8 @@ def _topk_frame() -> pd.DataFrame:
     )
 
 
-def test_topk_ties_counts_and_universe_hash_are_order_independent() -> None:
+def test_topk_ties_and_counts_are_order_independent() -> None:
     frame = _topk_frame()
-    expected_hash = hashlib.sha256("AAA\nBBB\nCCC\nDDD".encode("utf-8")).hexdigest()
 
     rows = _topk_daily_rows(
         frame,
@@ -69,14 +67,12 @@ def test_topk_ties_counts_and_universe_hash_are_order_independent() -> None:
     assert rows == shuffled_rows
     assert [row["universe_count"] for row in rows] == [4, 4]
     assert [row["selected_count"] for row in rows] == [1, 4]
-    assert {row["universe_hash"] for row in rows} == {expected_hash}
     # AAA wins the score tie with CCC by the stable symbol tie-break.
     assert rows[0][f"selected_{VALUE_COLUMN}"] == 0.10
 
 
 def test_topk_candidate_rows_retain_deterministic_rank_and_audit_fields() -> None:
     frame = _topk_frame()
-    expected_hash = hashlib.sha256("AAA\nBBB\nCCC\nDDD".encode("utf-8")).hexdigest()
 
     rows = _topk_candidate_rows(
         frame.sample(frac=1.0, random_state=23),
@@ -88,5 +84,4 @@ def test_topk_candidate_rows_retain_deterministic_rank_and_audit_fields() -> Non
     assert [row["symbol"] for row in rows] == ["AAA", "CCC", "BBB"]
     assert [row["score_rank"] for row in rows] == [1, 2, 3]
     assert {row["universe_count"] for row in rows} == {4}
-    assert {row["universe_hash"] for row in rows} == {expected_hash}
     assert rows[0][VALUE_COLUMN] == 0.10

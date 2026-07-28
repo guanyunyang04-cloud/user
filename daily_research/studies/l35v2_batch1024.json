@@ -1,16 +1,31 @@
 {
-  "schema_version": 1,
   "study_id": "seq100_structured_l35v2_batch1024_v1",
-  "status": "paused_ready",
+  "objective": "test whether a native batch size of 1024 improves the selected L35v2 sequence model",
   "model_id": "structured_joint_turnover_180x35_v2",
   "baseline_batch_size": 512,
   "challenger_batch_size": 1024,
   "seed": 7,
   "epochs": 1,
-  "fixed_contract": ["input", "architecture", "loss", "learning_rate", "candidate", "label", "execution", "cost"],
-  "probe_order": ["native_batch1024", "gru_activation_checkpoint_batch1024", "record_hardware_infeasible"],
-  "forbidden_shortcuts": ["gradient_accumulation_as_fake_1024", "automatic_learning_rate_scaling", "batch768_fallback"],
+  "fixed_conditions": [
+    "input",
+    "architecture",
+    "loss",
+    "learning_rate",
+    "candidate",
+    "label",
+    "execution",
+    "cost"
+  ],
+  "probe_order": [
+    "native_batch1024",
+    "gru_activation_checkpoint_batch1024",
+    "record_hardware_infeasible"
+  ],
+  "forbidden_shortcuts": [
+    "gradient_accumulation_as_fake_1024",
+    "automatic_learning_rate_scaling",
+    "batch768_fallback"
+  ],
   "selection": "strictly higher 2023-2025 double-slippage continuous-account annualized log growth",
-  "resume_after": "sixfold durability evidence completed; resume only on explicit user request",
-  "sixfold_evidence": "daily_research/research_records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"
+  "prior_evidence": "daily_research/research_records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"
 }

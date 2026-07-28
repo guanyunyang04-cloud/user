@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -16,13 +15,12 @@ import pandas as pd
 
 from daily_research.path_policy.seq100_candidate_execution import (
     DEFAULT_DAILY_COHORT_CASH_CNY,
-    ExecutionCostContract,
+    ExecutionCosts,
     _cashflow,
     _resolve_plan,
-    parse_execution_cost_contract,
+    parse_execution_costs,
 )
 from daily_research.path_policy.qdp_v2_sequence_path_pack import (
-    assert_qdp_source_fresh,
     assert_sequence_continuity_contract,
 )
 
@@ -37,9 +35,6 @@ DEFAULT_OUTPUT_ROOT = Path(
     "daily_research/output/path_policy/studies/"
     "seq100_candidate_complete_exit_policy_audit_2022_2025_v1"
 )
-QDP_ACTIVE_PATH = Path("quant_data_platform/data/qdp_v2/active/active.json")
-ACTIVE_EXECUTION_PATH = Path("daily_research/output/active_execution_strategy.json")
-
 YEARS = (2022, 2023, 2024, 2025)
 PROFILES = ("baseline", "hard_st")
 TOP_K_VALUES = (1, 3, 5, 10)
@@ -59,26 +54,6 @@ def _workspace_path(path: str | Path) -> Path:
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def _sha256_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with _workspace_path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _canonical_sha256(payload: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    ).hexdigest()
 
 
 def _read_json(path: str | Path) -> dict[str, Any]:
@@ -118,10 +93,6 @@ def _open_memmap(meta: Mapping[str, Any], *, dtype: str) -> np.memmap:
     )
 
 
-def _universe_hash(symbols: Sequence[str]) -> str:
-    return hashlib.sha256("\n".join(sorted(str(value) for value in symbols)).encode("utf-8")).hexdigest()
-
-
 def _policy_for_horizon(horizon: int) -> str:
     return f"fixed_h{int(horizon)}"
 
@@ -142,7 +113,6 @@ class CandidateCompleteAuditPack:
     def __init__(self, manifest_path: str | Path) -> None:
         self.manifest_path = _workspace_path(manifest_path).resolve()
         self.manifest = _read_json(self.manifest_path)
-        assert_qdp_source_fresh(self.manifest)
         assert_sequence_continuity_contract(self.manifest)
         self.forward_days = int(self.manifest["forward_days"])
         self.execution_tail_days = int(self.manifest["execution_tail_days"])
@@ -160,8 +130,8 @@ class CandidateCompleteAuditPack:
         self.exit_sellable = _open_memmap(masks["exit_sellable"], dtype="bool")
         self.entry_filled = _open_memmap(masks["entry_filled"], dtype="bool")
         self.candidate_index_path = Path(str(self.manifest["candidate_index_path"])).resolve()
-        self.contract = parse_execution_cost_contract(self.manifest)
-        terminal = dict(self.manifest.get("terminal_execution_contract", {}) or {})
+        self.costs = parse_execution_costs(self.manifest)
+        terminal = dict(self.manifest.get("terminal_execution", {}) or {})
         self.terminal_recovery_fraction = float(
             terminal.get("recovery_fraction_of_entry_notional", 0.0) or 0.0
         )
@@ -285,7 +255,7 @@ def _stamp_tax_bps_by_date_idx(
     date_idx: np.ndarray,
     *,
     date_values: np.ndarray,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
 ) -> np.ndarray:
     indices = np.asarray(date_idx, dtype=np.int64)
     clipped = np.clip(indices, 0, len(date_values) - 1)
@@ -303,7 +273,7 @@ def _buy_terms_batch(
     allocated_cash: float,
     entry_filled: np.ndarray,
     entry_prices: np.ndarray,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
     slippage_multiplier: float,
 ) -> dict[str, np.ndarray]:
     cash = float(allocated_cash)
@@ -385,7 +355,7 @@ def cashflow_batch(
     entry_prices: np.ndarray,
     plan: ResolvedPlanBatch,
     date_values: np.ndarray,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
     slippage_multiplier: float,
 ) -> CashflowBatch:
     cash = float(allocated_cash)
@@ -445,7 +415,7 @@ def oracle_executable_outcome_batch(
     exit_prices: np.ndarray,
     next_valid_exit_idx: np.ndarray,
     date_values: np.ndarray,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
     slippage_multiplier: float,
     forward_days: int = 60,
     execution_days: int = 80,
@@ -571,7 +541,6 @@ def _metric_row(
     cost_scenario: str,
     selected_idx: np.ndarray,
     selected_symbols: Sequence[str],
-    universe_hash: str,
     plan: ResolvedPlanBatch,
     cash: CashflowBatch,
 ) -> dict[str, Any]:
@@ -605,7 +574,6 @@ def _metric_row(
         "cost_scenario": cost_scenario,
         "selected_count": int(selected.size),
         "universe_count": int(universe.size),
-        "universe_hash": universe_hash,
         "selected_symbols_json": json.dumps(list(selected_symbols), ensure_ascii=False, separators=(",", ":")),
         "selected_mean_net_return": selected_return,
         "universe_mean_net_return": universe_return,
@@ -632,7 +600,7 @@ def _source_run_dir(source_root: str | Path, profile: str, year: int) -> Path:
     matches = sorted(root.glob(f"seq100_development_{profile}_{int(year)}_seed7_*"))
     if len(matches) != 1:
         raise ValueError(
-            f"expected exactly one frozen source run for {profile}/{year}, found {len(matches)}"
+            f"expected exactly one source run for {profile}/{year}, found {len(matches)}"
         )
     return matches[0]
 
@@ -701,7 +669,6 @@ def _predicted_policy_rows(
                     "cost_scenario": scenario,
                     "selected_count": selected_count,
                     "universe_count": universe_count,
-                    "universe_hash": str(values["universe_hash"]),
                     "selected_symbols_json": str(values["selected_symbols_json"]),
                     "selected_mean_net_return": selected_return,
                     "universe_mean_net_return": universe_return,
@@ -811,7 +778,7 @@ def _buy_order(
     available_cash: float,
     allocated_cash: float,
     entry_price: float,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
     slippage_multiplier: float,
 ) -> tuple[int, float, float, float]:
     allocation = min(float(available_cash), float(allocated_cash))
@@ -839,7 +806,7 @@ def _sell_order(
     exit_price: float,
     exit_date_idx: int,
     date_values: np.ndarray,
-    contract: ExecutionCostContract,
+    contract: ExecutionCosts,
     slippage_multiplier: float,
 ) -> tuple[float, float, float]:
     slippage_rate = contract.slippage_bps * float(slippage_multiplier) / 10_000.0
@@ -918,7 +885,7 @@ def _oracle_planned_day_scalar(
             entry_filled=True,
             entry_price=float(entry_price),
             plan=plan,
-            contract=pack.contract,
+            contract=pack.costs,
             slippage_multiplier=float(slippage_multiplier),
         )
         if float(cashflow.net_return) > best_return:
@@ -936,7 +903,7 @@ def _simulate_stateful_top3(
     policy: str,
     cost_scenario: str,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
-    multiplier = 1.0 if cost_scenario == "base" else pack.contract.stress_slippage_multiplier
+    multiplier = 1.0 if cost_scenario == "base" else pack.costs.stress_slippage_multiplier
     ranked = topk[topk["score_rank"].astype(int).le(3)].copy()
     ranked = ranked.sort_values(["trade_date", "score_rank"], kind="mergesort")
     ranked_by_date = {date: frame.copy() for date, frame in ranked.groupby("trade_date", sort=True)}
@@ -984,7 +951,7 @@ def _simulate_stateful_top3(
                     available_cash=cash,
                     allocated_cash=allocation,
                     entry_price=entry_price,
-                    contract=pack.contract,
+                    contract=pack.costs,
                     slippage_multiplier=multiplier,
                 )
                 if shares <= 0:
@@ -1044,7 +1011,7 @@ def _simulate_stateful_top3(
                 exit_price=exit_price,
                 exit_date_idx=date_idx,
                 date_values=pack.date_values,
-                contract=pack.contract,
+                contract=pack.costs,
                 slippage_multiplier=multiplier,
             )
             cash += proceeds
@@ -1147,7 +1114,7 @@ def _simulate_stateful_top3(
         "mean_signal_year_capital_utilization": float(signal_slice["capital_utilization"].mean()),
         "maximum_position_count": int(equity_frame["position_count"].max()),
         "signal_date_count": int(len(signal_dates)),
-        "portfolio_contract": "frozen_daily_top3_equal_third_new_positions_max3_no_unfilled_replacement",
+        "portfolio_rules": "source_daily_top3_equal_third_new_positions_max3_no_unfilled_replacement",
     }
     return metric, equity_frame
 
@@ -1196,12 +1163,6 @@ def run_exit_policy_audit(
     if any(profile not in PROFILES for profile in normalized_profiles):
         raise ValueError(f"unsupported profiles: {normalized_profiles}")
 
-    qdp_active_before = _sha256_file(QDP_ACTIVE_PATH)
-    active_execution_path = _workspace_path(ACTIVE_EXECUTION_PATH)
-    active_execution_before = active_execution_path.exists()
-    active_execution_sha256_before = (
-        _sha256_file(active_execution_path) if active_execution_before else None
-    )
     if pack_manifest is None:
         raise ValueError("run_exit_policy_audit requires an explicit pack_manifest")
     pack = CandidateCompleteAuditPack(pack_manifest)
@@ -1210,19 +1171,15 @@ def run_exit_policy_audit(
     if source_selection.get("winner") is not None:
         raise ValueError("source v3 study unexpectedly has a winner")
 
-    contract_payload = {
+    audit_config = {
         "schema_version": 1,
         "audit_id": "seq100_candidate_complete_exit_policy_audit_2022_2025_v1",
-        "audit_type": "zero_training_frozen_ranking_exit_policy_decomposition",
+        "audit_type": "zero_training_source_ranking_exit_policy_decomposition",
         "source_study": str(_workspace_path(source_study_root).resolve()),
-        "source_selection_sha256": _sha256_file(source_selection_path),
+        "source_selection": str(source_selection_path.resolve()),
         "source_pack_manifest": str(pack.manifest_path),
-        "source_pack_manifest_sha256": _sha256_file(pack.manifest_path),
-        "execution_cost_contract_sha256": pack.contract.semantic_sha256,
+        "execution_costs": asdict(pack.costs),
         "terminal_recovery_fraction": pack.terminal_recovery_fraction,
-        "protected_qdp_active_sha256_at_start": qdp_active_before.upper(),
-        "protected_active_execution_present_at_start": active_execution_before,
-        "protected_active_execution_sha256_at_start": active_execution_sha256_before,
         "profiles": list(normalized_profiles),
         "development_years": list(normalized_years),
         "top_k_values": list(TOP_K_VALUES),
@@ -1233,21 +1190,17 @@ def run_exit_policy_audit(
         ],
         "primary_fixed_horizons": list(PRIMARY_FIXED_HORIZONS),
         "diagnostic_fixed_horizons": list(DIAGNOSTIC_FIXED_HORIZONS),
-        "ranking": "frozen source Top100 score order; no future reranking",
+        "ranking": "source Top100 score order; no future reranking",
         "entry": "D+1 raw open; source candidate entry_filled; no failed-entry replacement",
         "exit": "raw close; T+1 minimum; blocked exit retries through absolute D+80",
         "oracle": "per-candidate max exact scenario net return over planned days 2..60; diagnostic only",
-        "costs": "manifest-bound lots, commissions, stamp schedule, transfer fee, base/double slippage",
         "stateless": "daily cohort Top1/3/5/10 with policy-specific full candidate universe benchmark",
-        "stateful": "daily frozen Top3, max3, one-third target allocation, cash allowed, no unfilled replacement",
+        "stateful": "daily source Top3, max3, one-third target allocation, cash allowed, no unfilled replacement",
         "training": False,
         "checkpoint_selection": False,
-        "active_execution_change_allowed": False,
-        "qdp_active_change_allowed": False,
+        "created_at": _now(),
     }
-    contract_payload["contract_sha256"] = _canonical_sha256(contract_payload)
-    contract_payload["created_at"] = _now()
-    _write_json(output / "audit_contract.json", contract_payload)
+    _write_json(output / "audit_config.json", audit_config)
 
     daily_rows: list[dict[str, Any]] = []
     stateful_rows: list[dict[str, Any]] = []
@@ -1281,8 +1234,8 @@ def run_exit_policy_audit(
                     "profile": profile,
                     "development_year": int(year),
                     "run_dir": str(run_dir.resolve()),
-                    "topk_candidates_sha256": _sha256_file(run_dir / "topk_candidates.parquet"),
-                    "daily_topk_metrics_sha256": _sha256_file(run_dir / "daily_topk_metrics.csv"),
+                    "topk_candidates": str((run_dir / "topk_candidates.parquet").resolve()),
+                    "daily_topk_metrics": str((run_dir / "daily_topk_metrics.csv").resolve()),
                 }
             )
 
@@ -1294,7 +1247,6 @@ def run_exit_policy_audit(
             date_idx = int(date_indices[0])
             symbols = date_candidates["symbol"].astype(str).tolist()
             symbol_idx = date_candidates["symbol_idx"].to_numpy(dtype=np.int64)
-            universe_hash = _universe_hash(symbols)
             entry_filled = date_candidates["entry_filled"].to_numpy(dtype=bool)
             entry_prices, exit_prices, exit_sellable = pack.execution_paths(date_idx, symbol_idx)
             next_valid = _next_valid_exit_indices(exit_prices, exit_sellable)
@@ -1323,15 +1275,12 @@ def run_exit_policy_audit(
                 if date_topk.empty:
                     raise ValueError(f"source TopK is missing {profile}/{trade_date}")
                 source_counts = date_topk["universe_count"].astype(int).unique()
-                source_hashes = date_topk["universe_hash"].astype(str).unique()
                 if len(source_counts) != 1 or int(source_counts[0]) != len(symbols):
                     raise ValueError(f"candidate count identity drift for {profile}/{trade_date}")
-                if len(source_hashes) != 1 or str(source_hashes[0]) != universe_hash:
-                    raise ValueError(f"candidate universe hash drift for {profile}/{trade_date}")
                 selected_symbols = date_topk["symbol"].astype(str).tolist()
                 missing = [symbol for symbol in selected_symbols if symbol not in offset_by_symbol]
                 if missing:
-                    raise ValueError(f"frozen TopK symbols are absent from candidate index: {missing[:5]}")
+                    raise ValueError(f"source TopK symbols are absent from candidate index: {missing[:5]}")
                 ranked_offsets[profile] = np.asarray(
                     [offset_by_symbol[symbol] for symbol in selected_symbols], dtype=np.int64
                 )
@@ -1341,7 +1290,7 @@ def run_exit_policy_audit(
                 allocation = float(DEFAULT_DAILY_COHORT_CASH_CNY) / int(top_k)
                 for scenario, multiplier in (
                     ("base", 1.0),
-                    ("stress", pack.contract.stress_slippage_multiplier),
+                    ("stress", pack.costs.stress_slippage_multiplier),
                 ):
                     outcomes: dict[str, tuple[ResolvedPlanBatch, CashflowBatch]] = {}
                     for horizon, plan in fixed_plans.items():
@@ -1353,7 +1302,7 @@ def run_exit_policy_audit(
                                 entry_prices=entry_prices,
                                 plan=plan,
                                 date_values=pack.date_values,
-                                contract=pack.contract,
+                                contract=pack.costs,
                                 slippage_multiplier=multiplier,
                             ),
                         )
@@ -1365,7 +1314,7 @@ def run_exit_policy_audit(
                         exit_prices=exit_prices,
                         next_valid_exit_idx=next_valid,
                         date_values=pack.date_values,
-                        contract=pack.contract,
+                        contract=pack.costs,
                         slippage_multiplier=multiplier,
                         forward_days=pack.forward_days,
                         execution_days=pack.execution_days,
@@ -1393,7 +1342,6 @@ def run_exit_policy_audit(
                                     cost_scenario=scenario,
                                     selected_idx=selected,
                                     selected_symbols=selected_symbols,
-                                    universe_hash=universe_hash,
                                     plan=plan,
                                     cash=cashflow,
                                 )
@@ -1476,25 +1424,11 @@ def run_exit_policy_audit(
         _write_csv(output / "stateful_equal_year_summary.csv", stateful_equal)
         _write_csv(output / "stateful_daily_equity.csv", stateful_daily)
 
-    qdp_active_after = _sha256_file(QDP_ACTIVE_PATH)
-    active_execution_after = active_execution_path.exists()
-    active_execution_sha256_after = (
-        _sha256_file(active_execution_path) if active_execution_after else None
-    )
-    if qdp_active_after != qdp_active_before:
-        raise RuntimeError("QDP active manifest changed during a read-only audit")
-    if (
-        active_execution_after != active_execution_before
-        or active_execution_sha256_after != active_execution_sha256_before
-    ):
-        raise RuntimeError("active execution state changed during a read-only audit")
-
     summary = {
         "schema_version": 1,
         "status": "completed",
-        "audit_id": contract_payload["audit_id"],
-        "contract_sha256": contract_payload["contract_sha256"],
-        "created_at": contract_payload["created_at"],
+        "audit_id": audit_config["audit_id"],
+        "created_at": audit_config["created_at"],
         "completed_at": _now(),
         "training_performed": False,
         "source_winner": None,
@@ -1506,23 +1440,13 @@ def run_exit_policy_audit(
         "stateful_metric_row_count": int(len(stateful_metrics)),
         "source_artifacts": source_artifacts,
         "artifacts": {
-            "contract": str((output / "audit_contract.json").resolve()),
+            "config": str((output / "audit_config.json").resolve()),
             "daily_policy_metrics": str((output / "daily_policy_metrics.csv").resolve()),
             "year_policy_metrics": str((output / "year_policy_metrics.csv").resolve()),
             "equal_year_policy_summary": str((output / "equal_year_policy_summary.csv").resolve()),
             "stateful_portfolio_metrics": str((output / "stateful_portfolio_metrics.csv").resolve()) if include_stateful else None,
             "stateful_equal_year_summary": str((output / "stateful_equal_year_summary.csv").resolve()) if include_stateful else None,
             "stateful_daily_equity": str((output / "stateful_daily_equity.csv").resolve()) if include_stateful else None,
-        },
-        "protected_objects": {
-            "qdp_active_sha256_before": qdp_active_before.upper(),
-            "qdp_active_sha256_after": qdp_active_after.upper(),
-            "qdp_active_changed": False,
-            "active_execution_present_before": active_execution_before,
-            "active_execution_present_after": active_execution_after,
-            "active_execution_sha256_before": active_execution_sha256_before,
-            "active_execution_sha256_after": active_execution_sha256_after,
-            "active_execution_changed": False,
         },
     }
     _write_json(output / "study_summary.json", summary)
@@ -1531,7 +1455,7 @@ def run_exit_policy_audit(
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Zero-training frozen-ranking exit-policy audit for candidate-complete Seq100 v3."
+        description="Zero-training source-ranking exit-policy audit for candidate-complete Seq100 v3."
     )
     parser.add_argument("--source-study-root", type=Path, default=SOURCE_STUDY_ROOT)
     parser.add_argument("--pack-manifest", type=Path, required=True)

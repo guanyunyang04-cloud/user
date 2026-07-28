@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from daily_research.path_policy.seq100_candidate_execution import (
-    parse_execution_cost_contract,
+    parse_execution_costs,
 )
 from daily_research.path_policy.seq100_finite_capital_backtest import (
     BacktestMarket,
@@ -24,10 +24,9 @@ from daily_research.path_policy.seq100_finite_capital_backtest import (
 
 
 def _contract():
-    return parse_execution_cost_contract(
+    return parse_execution_costs(
         {
-            "execution_cost_contract": {
-                "contract": "a_share_round_trip_cashflow_v1",
+            "execution_costs": {
                 "lot_size": 100,
                 "commission_bps": 3.0,
                 "minimum_commission_cny": 5.0,
@@ -56,7 +55,7 @@ def _market(*, symbol_count: int = 3, date_count: int = 100) -> BacktestMarket:
         exit_close_raw=close_price,
         exit_sellable=np.ones((date_count, symbol_count), dtype=bool),
         entry_filled=np.ones((date_count, symbol_count), dtype=bool),
-        contract=_contract(),
+        costs=_contract(),
         terminal_recovery_fraction=0.25,
         forward_days=60,
         execution_days=80,
@@ -209,7 +208,7 @@ def test_low_price_terminal_writeoff_never_overdraws_cash() -> None:
         exit_close_raw=np.full((100, 1), 0.36, dtype=np.float32),
         exit_sellable=np.zeros((100, 1), dtype=bool),
         entry_filled=base.entry_filled,
-        contract=base.contract,
+        costs=base.costs,
         terminal_recovery_fraction=0.0,
         forward_days=60,
         execution_days=80,
@@ -464,7 +463,7 @@ def test_next_open_failure_does_not_trigger_ranked_replacement() -> None:
         exit_close_raw=base.exit_close_raw,
         exit_sellable=base.exit_sellable,
         entry_filled=entry_filled,
-        contract=base.contract,
+        costs=base.costs,
         terminal_recovery_fraction=base.terminal_recovery_fraction,
         forward_days=base.forward_days,
         execution_days=base.execution_days,
@@ -509,12 +508,8 @@ def test_winner_selection_applies_strict_autonomous_fallback_and_budget_gate(
     root = tmp_path / "account"
     jobs_root = root / "jobs"
     jobs_root.mkdir(parents=True)
-    contract_sha = "a" * 64
-    (root / "contract.json").write_text(
-        json.dumps({"contract_sha256": contract_sha, "job_count": 4148}),
-        encoding="utf-8",
-    )
     count = 0
+    configured_jobs = []
     for profile in profiles:
         profile_base = {
             "V2C-P0": 0.10,
@@ -550,9 +545,9 @@ def test_winner_selection_applies_strict_autonomous_fallback_and_budget_gate(
                         for year in (2023, 2024, 2025)
                     ]
                     payload = {
-                        "contract_sha256": contract_sha,
+                        "status": "completed",
                         "job_id": f"job_{count}",
-                        "resolved_job": {
+                        "job": {
                             "profile": profile,
                             "top_k": top_k,
                             "slots": slots,
@@ -575,10 +570,17 @@ def test_winner_selection_applies_strict_autonomous_fallback_and_budget_gate(
                         },
                         "annual_metrics": annual,
                     }
+                    configured_jobs.append(
+                        {"job_id": f"job_{count}", **payload["job"]}
+                    )
                     (jobs_root / f"job_{count}.json").write_text(
                         json.dumps(payload), encoding="utf-8"
                     )
     assert count == 4148
+    (root / "config.json").write_text(
+        json.dumps({"job_count": 4148, "jobs": configured_jobs}),
+        encoding="utf-8",
+    )
 
     result = select_study_winner(
         account_output_root=root,

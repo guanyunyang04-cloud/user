@@ -11,7 +11,7 @@ from daily_research.path_policy import seq100_signal_quality as signal_quality
 
 ARCHIVED_STUDY_PATH = (
     learnability.WORKSPACE_ROOT
-    / "daily_research/research_records/seq100/seq100_path_label_learnability_v1/contract.json"
+    / "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json"
 )
 
 
@@ -19,12 +19,12 @@ def _load_archived_study() -> dict[str, object]:
     return learnability.load_study(ARCHIVED_STUDY_PATH)
 
 
-def test_load_study_freezes_2026_and_contract_hash() -> None:
+def test_load_study_keeps_scientific_configuration() -> None:
     study = _load_archived_study()
 
     assert study["study_id"] == learnability.STUDY_ID
-    assert study["contract"]["scientific_firewall"]["forbidden_years"] == [2026]
-    assert study["contract"]["protocol"]["horizons"] == [5, 10, 20, 40, 60]
+    assert study["folds"]["maximum_outcome_date"] == "2025-12-31"
+    assert study["folds"]["horizons"] == [5, 10, 20, 40, 60]
 
 
 def test_horizon_purge_uses_actual_dependency_and_date_weights_are_equal() -> None:
@@ -64,29 +64,31 @@ def test_horizon_purge_uses_actual_dependency_and_date_weights_are_equal() -> No
     assert totals == pytest.approx([2.0, 2.0, 2.0])
 
 
-def test_2026_firewall_rejects_any_future_outcome() -> None:
+def test_outcome_boundary_rejects_any_later_outcome() -> None:
     calendar = np.asarray(["2025-12-31", "2026-01-05"])
     dates = np.asarray([0, 1], dtype=np.int32)
     labels = np.asarray([[0.1], [np.nan]], dtype=np.float32)
     states = np.asarray([[2], [-1]], dtype=np.int8)
     entry = np.asarray([1, -1], dtype=np.int8)
 
-    assert learnability.assert_2026_firewall(
+    assert learnability.validate_outcome_boundary(
         candidate_date_idx=dates,
         date_values=calendar,
         labels=labels,
         states=states,
         entry_fill=entry,
-    ) == {"post_2025_candidate_count": 1}
+        maximum_outcome_date="2025-12-31",
+    ) == {"post_boundary_candidate_count": 1}
 
     labels[1, 0] = 0.0
-    with pytest.raises(ValueError, match="2026 candidate has a numeric path label"):
-        learnability.assert_2026_firewall(
+    with pytest.raises(ValueError, match="post-boundary candidate"):
+        learnability.validate_outcome_boundary(
             candidate_date_idx=dates,
             date_values=calendar,
             labels=labels,
             states=states,
             entry_fill=entry,
+            maximum_outcome_date="2025-12-31",
         )
 
 
@@ -183,9 +185,9 @@ def test_mechanical_decision_selects_only_predeclared_qualified_family() -> None
         for horizon in learnability.HORIZONS
         for year in learnability.FOLD_YEARS
     ]
-    contract = _load_archived_study()["contract"]["decision"]
+    decision_config = _load_archived_study()["decision"]
 
-    decision = learnability.decide_from_results(results, contract)
+    decision = learnability.decide_from_results(results, decision_config)
 
     assert decision["verdict"] == "learn_upside_opportunity_then_manage_realized_path"
     assert decision["primary_target"] == "mfe"

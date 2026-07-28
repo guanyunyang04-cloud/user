@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import sys
 from types import SimpleNamespace
 from pathlib import Path
@@ -43,11 +42,7 @@ from quant_data_platform.qdp_v2.repair import (
 
 
 def _workspace(tmp_path: Path) -> Path:
-    workspace = tmp_path / "workspace"
-    brain = workspace / "brain" / "brain_manifest.json"
-    brain.parent.mkdir(parents=True, exist_ok=True)
-    brain.write_text(json.dumps({"schema_version": 1, "brain_type": "main"}))
-    return workspace
+    return tmp_path / "workspace"
 
 
 def test_daily_basic_normalization_converts_10k_units_to_base_units() -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import hashlib
 import json
 import math
 import os
@@ -10,7 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -22,7 +21,8 @@ from daily_research.path_policy import seq100_signal_quality as signal_quality
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_path_label_learnability_v1"
 DEFAULT_STUDY_PATH = (
-    WORKSPACE_ROOT / "daily_research/studies/seq100_path_label_learnability_v1.json"
+    WORKSPACE_ROOT
+    / "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json"
 )
 DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
@@ -39,27 +39,6 @@ RESULT_SCHEMA = "seq100_path_label_learnability_task/v1"
 
 def _now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def _canonical_sha256(value: Any) -> str:
-    raw = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
-def _file_sha256(path: Path, *, chunk_size: int = 8 * 1024 * 1024) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            chunk = handle.read(chunk_size)
-            if not chunk:
-                break
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
@@ -102,32 +81,16 @@ def load_study(path: Path = DEFAULT_STUDY_PATH) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if str(payload.get("study_id", "")) != STUDY_ID:
         raise ValueError(f"study_id must be {STUDY_ID}")
-    contract = payload.get("contract")
-    if not isinstance(contract, Mapping):
-        raise ValueError("study is missing contract")
-    if str(contract.get("contract_id", "")) != STUDY_ID:
-        raise ValueError("contract_id does not match the learnability study")
-    declared = str(payload.get("contract_sha256", "")).lower()
-    computed = _canonical_sha256(contract)
-    if declared != computed:
-        raise ValueError(
-            f"study contract SHA-256 mismatch: declared={declared} computed={computed}"
-        )
-    protocol = dict(contract.get("protocol", {}) or {})
+    protocol = dict(payload.get("folds", payload.get("protocol", {})) or {})
     if tuple(int(value) for value in protocol.get("fold_years", [])) != FOLD_YEARS:
         raise ValueError("study fold years changed")
     if tuple(int(value) for value in protocol.get("horizons", [])) != HORIZONS:
         raise ValueError("study horizons changed")
-    firewall = dict(contract.get("scientific_firewall", {}) or {})
-    if tuple(int(value) for value in firewall.get("forbidden_years", [])) != (2026,):
-        raise ValueError("2026 must be the only explicit forbidden year")
     return payload
 
 
 def _verify_file_record(
     record: Mapping[str, Any],
-    *,
-    verify_sha256: bool,
 ) -> Path:
     path = _resolve_path(str(record["path"]))
     if not path.is_file():
@@ -135,9 +98,6 @@ def _verify_file_record(
     declared_size = int(record.get("size", path.stat().st_size))
     if path.stat().st_size != declared_size:
         raise ValueError(f"input file size changed: {path}")
-    declared_sha = str(record.get("sha256", ""))
-    if verify_sha256 and declared_sha and _file_sha256(path) != declared_sha:
-        raise ValueError(f"input file SHA-256 changed: {path}")
     return path
 
 
@@ -156,12 +116,8 @@ class LearnabilityInputs:
     def __init__(
         self,
         study: Mapping[str, Any],
-        *,
-        verify_large_hashes: bool = False,
     ) -> None:
-        contract = dict(study["contract"])
-        bindings = dict(contract["inputs"])
-        self.contract_sha256 = str(study["contract_sha256"])
+        bindings = dict(study.get("data", study.get("inputs", {})) or {})
         self.label_manifest_path = _resolve_path(bindings["label_manifest"]["path"])
         self.feature_manifest_path = _resolve_path(
             bindings["base_feature_manifest"]["path"]
@@ -172,39 +128,24 @@ class LearnabilityInputs:
         ):
             if not path.is_file():
                 raise FileNotFoundError(path)
-            declared = str(bindings[name]["sha256"])
-            if _file_sha256(path) != declared:
-                raise ValueError(f"bound {name} changed")
         self.label_manifest = json.loads(
             self.label_manifest_path.read_text(encoding="utf-8")
         )
         self.feature_manifest = json.loads(
             self.feature_manifest_path.read_text(encoding="utf-8")
         )
-        if self.label_manifest.get("maximum_outcome_date_read") != "2025-12-31":
-            raise ValueError("label source is not bounded at 2025-12-31")
-        if int(self.label_manifest.get("forbidden_outcome_year", 0)) != 2026:
-            raise ValueError("label source does not preserve the 2026 firewall")
-        if bool(self.label_manifest.get("training_performed")):
-            raise ValueError("input preparation unexpectedly trained a model")
-        expected_label_sha = str(bindings["label_manifest"]["resolved_sha256"])
-        if (
-            str(self.label_manifest.get("resolved_label_manifest_sha256", ""))
-            != expected_label_sha
-        ):
-            raise ValueError("resolved label manifest binding changed")
-        expected_feature_sha = str(
-            bindings["base_feature_manifest"]["resolved_sha256"]
+        self.maximum_outcome_date = str(
+            dict(study.get("folds", study.get("protocol", {})) or {}).get(
+                "maximum_outcome_date", "2025-12-31"
+            )
         )
         if (
-            str(
-                self.feature_manifest.get(
-                    "resolved_base_feature_manifest_sha256", ""
-                )
-            )
-            != expected_feature_sha
+            self.label_manifest.get("maximum_outcome_date_read")
+            != self.maximum_outcome_date
         ):
-            raise ValueError("resolved feature manifest binding changed")
+            raise ValueError("label source exceeds the configured outcome boundary")
+        if bool(self.label_manifest.get("training_performed")):
+            raise ValueError("input preparation unexpectedly trained a model")
         self.candidate_count = int(self.label_manifest["candidate_count"])
         if int(self.feature_manifest["candidate_alignment"]["candidate_count"]) != self.candidate_count:
             raise ValueError("feature and label candidate counts differ")
@@ -212,25 +153,25 @@ class LearnabilityInputs:
         feature_files = dict(self.feature_manifest["files"])
         label_files = dict(self.label_manifest["files"])
         continuous_path = _verify_file_record(
-            feature_files["continuous"], verify_sha256=verify_large_hashes
+            feature_files["continuous"]
         )
         categorical_path = _verify_file_record(
-            feature_files["categorical"], verify_sha256=verify_large_hashes
+            feature_files["categorical"]
         )
         date_path = _verify_file_record(
-            feature_files["candidate_date_idx"], verify_sha256=verify_large_hashes
+            feature_files["candidate_date_idx"]
         )
         symbol_path = _verify_file_record(
-            feature_files["candidate_symbol_idx"], verify_sha256=verify_large_hashes
+            feature_files["candidate_symbol_idx"]
         )
         labels_path = _verify_file_record(
-            label_files["candidate_labels"], verify_sha256=verify_large_hashes
+            label_files["candidate_labels"]
         )
         states_path = _verify_file_record(
-            label_files["state_labels"], verify_sha256=verify_large_hashes
+            label_files["state_labels"]
         )
         entry_path = _verify_file_record(
-            label_files["entry_fill"], verify_sha256=verify_large_hashes
+            label_files["entry_fill"]
         )
 
         self.continuous_shape = tuple(
@@ -320,25 +261,24 @@ class LearnabilityInputs:
         if self.label_columns != expected_labels or self.state_columns != expected_states:
             raise ValueError("candidate label column order changed")
         pack_path = _resolve_path(self.label_manifest["source"]["pack_manifest"])
-        if _file_sha256(pack_path) != str(
-            self.label_manifest["source"]["pack_manifest_sha256"]
-        ):
-            raise ValueError("protected source pack manifest changed")
+        if not pack_path.is_file():
+            raise FileNotFoundError(pack_path)
         pack = json.loads(pack_path.read_text(encoding="utf-8"))
         self.date_values = np.asarray(pack["date_values"], dtype=str)
-        cutoff = np.flatnonzero(self.date_values == "2025-12-31")
+        cutoff = np.flatnonzero(self.date_values == self.maximum_outcome_date)
         if cutoff.size != 1:
-            raise ValueError("2025 outcome cutoff is absent or duplicated")
+            raise ValueError("configured outcome cutoff is absent or duplicated")
         self.cutoff_date_idx = int(cutoff[0])
         self._year_bounds = {
             year: self._resolve_year_bounds(year) for year in FOLD_YEARS
         }
-        assert_2026_firewall(
+        validate_outcome_boundary(
             candidate_date_idx=self.candidate_date_idx,
             date_values=self.date_values,
             labels=self.labels,
             states=self.states,
             entry_fill=self.entry_fill,
+            maximum_outcome_date=self.maximum_outcome_date,
         )
 
     def _resolve_year_bounds(self, year: int) -> tuple[int, int]:
@@ -375,19 +315,20 @@ class LearnabilityInputs:
         )
 
 
-def assert_2026_firewall(
+def validate_outcome_boundary(
     *,
     candidate_date_idx: np.ndarray,
     date_values: np.ndarray,
     labels: np.ndarray,
     states: np.ndarray,
     entry_fill: np.ndarray,
+    maximum_outcome_date: str,
 ) -> dict[str, int]:
     dates = np.asarray(candidate_date_idx, dtype=np.int32)
     calendar = np.asarray(date_values, dtype=str)
     if dates.ndim != 1 or bool(np.any(dates[1:] < dates[:-1])):
         raise ValueError("candidate dates must be one-dimensional and ordered")
-    post_dates = np.flatnonzero(np.char.startswith(calendar, "2026-"))
+    post_dates = np.flatnonzero(calendar > str(maximum_outcome_date))
     post_start = (
         int(np.searchsorted(dates, int(post_dates[0]), side="left"))
         if post_dates.size
@@ -396,12 +337,12 @@ def assert_2026_firewall(
     count = int(len(dates) - post_start)
     if count:
         if not bool(np.isnan(np.asarray(labels[post_start:])).all()):
-            raise ValueError("2026 candidate has a numeric path label")
+            raise ValueError("post-boundary candidate has a numeric path label")
         if not bool((np.asarray(states[post_start:]) == -1).all()):
-            raise ValueError("2026 candidate has a path state")
+            raise ValueError("post-boundary candidate has a path state")
         if not bool((np.asarray(entry_fill[post_start:]) == -1).all()):
-            raise ValueError("2026 candidate has an entry outcome")
-    return {"post_2025_candidate_count": count}
+            raise ValueError("post-boundary candidate has an entry outcome")
+    return {"post_boundary_candidate_count": count}
 
 
 def build_fold_rows(
@@ -440,8 +381,6 @@ def build_fold_rows(
         raise ValueError("fold has an empty training or evaluation split")
     if int(dates[train_rows[-1]]) + int(dependency_days) >= oos_start:
         raise AssertionError("training label dependency overlaps the evaluation year")
-    if str(calendar[int(dates[train_rows[-1]])]).startswith("2026-"):
-        raise AssertionError("2026 leaked into training rows")
     if str(calendar[int(dates[evaluation_rows[0]])])[:4] != str(year):
         raise AssertionError("evaluation rows start outside their declared year")
     if str(calendar[int(dates[evaluation_rows[-1]])])[:4] != str(year):
@@ -903,7 +842,7 @@ class LightGBMDatasets:
 def _memory_trimmed_sequence(sequence: Any, study: Mapping[str, Any]) -> Any:
     import lightgbm as lgb
 
-    trim_config = dict(study["contract"]["model"]["working_set_trim"])
+    trim_config = dict(study["model"]["working_set_trim"])
     if not bool(trim_config["enabled"]):
         return sequence
     interval = int(trim_config["check_interval_batches"])
@@ -972,7 +911,7 @@ def _model_parameters(
     *,
     target: str,
 ) -> tuple[dict[str, Any], int, int]:
-    config = dict(study["contract"]["model"])
+    config = dict(study["model"])
     parameters: dict[str, Any] = {
         "boosting_type": "gbdt",
         "device_type": "cpu",
@@ -1081,7 +1020,7 @@ def build_lgb_datasets(
         np.asarray(train_rows, dtype=np.int64),
         inputs.categorical_columns,
     )
-    batch_size = int(study["contract"]["model"]["sequence_batch_size"])
+    batch_size = int(study["model"]["sequence_batch_size"])
     train_sequence = signal_quality._make_lgb_sequence(
         continuous=inputs.continuous,
         categorical=inputs.categorical,
@@ -1106,7 +1045,7 @@ def build_lgb_datasets(
     continuous_count = len(feature_names) - categorical_count
     categorical_positions = list(range(continuous_count, len(feature_names)))
     construction = {
-        "max_bin": int(study["contract"]["model"]["max_bin"]),
+        "max_bin": int(study["model"]["max_bin"]),
         "data_random_seed": SEED,
         "feature_pre_filter": False,
         "verbosity": -1,
@@ -1297,7 +1236,6 @@ def train_one_model(
         "status": "completed",
         "completed_at": _now(),
         "study_id": str(study_id),
-        "contract_sha256": str(study["contract_sha256"]),
         "task_id": task_id,
         "fold_year": int(year),
         "target": target,
@@ -1322,19 +1260,16 @@ def train_one_model(
         "files": {
             "model": {
                 "path": str(model_path.resolve()),
-                "sha256": _file_sha256(model_path),
                 "size": int(model_path.stat().st_size),
             },
             "prediction": {
                 "path": str(prediction_path.resolve()),
-                "sha256": _file_sha256(prediction_path),
                 "size": int(prediction_path.stat().st_size),
                 "shape": list(prediction.shape),
                 "dtype": str(prediction.dtype),
             },
             "daily_metrics": {
                 "path": str(daily_path.resolve()),
-                "sha256": _file_sha256(daily_path),
                 "size": int(daily_path.stat().st_size),
             },
         },
@@ -1374,8 +1309,8 @@ def train_one_model(
 
 def _task_result_complete(
     path: Path,
-    contract_sha256: str,
     *,
+    expected: Mapping[str, Any] | None = None,
     result_schema: str = RESULT_SCHEMA,
 ) -> bool:
     if not path.is_file():
@@ -1384,13 +1319,29 @@ def _task_result_complete(
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("schema") != str(result_schema) or payload.get("status") != "completed":
             return False
-        if str(payload.get("contract_sha256")) != str(contract_sha256):
+        if expected is not None and any(
+            payload.get(key) != value for key, value in expected.items()
+        ):
             return False
-        for record in dict(payload["files"]).values():
+        files = dict(payload["files"])
+        model_path = _resolve_path(str(files["model"]["path"]))
+        prediction_path = _resolve_path(str(files["prediction"]["path"]))
+        daily_path = _resolve_path(str(files["daily_metrics"]["path"]))
+        if not all(item.is_file() for item in (model_path, prediction_path, daily_path)):
+            return False
+        import lightgbm as lgb
+
+        lgb.Booster(model_file=str(model_path))
+        prediction = np.load(prediction_path, mmap_mode="r", allow_pickle=False)
+        declared_shape = tuple(int(value) for value in files["prediction"].get("shape", []))
+        if declared_shape and tuple(prediction.shape) != declared_shape:
+            return False
+        daily = pd.read_parquet(daily_path)
+        if daily.empty:
+            return False
+        for record in files.values():
             artifact = _resolve_path(str(record["path"]))
-            if not artifact.is_file() or artifact.stat().st_size != int(record["size"]):
-                return False
-            if _file_sha256(artifact) != str(record["sha256"]):
+            if int(record.get("size", artifact.stat().st_size)) != artifact.stat().st_size:
                 return False
         return True
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -1426,7 +1377,6 @@ def _write_group_material(
         "schema": str(group_schema),
         "created_at": _now(),
         "study_id": str(study_id),
-        "contract_sha256": str(study["contract_sha256"]),
         "fold_year": int(fold.year),
         "dependency_days": int(fold.dependency_days),
         "oos_start_date_idx": int(fold.oos_start_date_idx),
@@ -1454,12 +1404,10 @@ def _write_group_material(
             "evaluation_rows": {
                 "path": str(evaluation_rows_path.resolve()),
                 "size": int(evaluation_rows_path.stat().st_size),
-                "sha256": _file_sha256(evaluation_rows_path),
             },
             "category_vocabularies": {
                 "path": str(vocabulary_path.resolve()),
                 "size": int(vocabulary_path.stat().st_size),
-                "sha256": _file_sha256(vocabulary_path),
             },
         },
     }
@@ -1488,10 +1436,37 @@ def _entry_task_dir(output_root: Path, year: int) -> Path:
     return output_root / "folds" / f"fold_{year}" / "entry_unfilled"
 
 
-def _completed_task_count(output_root: Path, contract_sha256: str) -> int:
+def _task_semantics(
+    study: Mapping[str, Any],
+    *,
+    year: int,
+    horizon: int,
+    target: str,
+) -> dict[str, Any]:
+    return {
+        "study_id": STUDY_ID,
+        "task_id": f"fold_{int(year)}_h{int(horizon):02d}_{target}",
+        "fold_year": int(year),
+        "target": str(target),
+        "horizon": int(horizon),
+        "parameters": _model_parameters(study, target=target)[0],
+    }
+
+
+def _completed_task_count(output_root: Path, study: Mapping[str, Any]) -> int:
     count = 0
     for path in output_root.glob("folds/fold_*/**/task_result.json"):
-        if _task_result_complete(path, contract_sha256):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            expected = _task_semantics(
+                study,
+                year=int(payload["fold_year"]),
+                horizon=int(payload["horizon"]),
+                target=str(payload["target"]),
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if _task_result_complete(path, expected=expected):
             count += 1
     return count
 
@@ -1505,11 +1480,10 @@ def _progress_payload(
     started_at: str,
     current_task: str | None = None,
 ) -> dict[str, Any]:
-    completed = _completed_task_count(output_root, str(study["contract_sha256"]))
+    completed = _completed_task_count(output_root, study)
     return {
         "schema": PROGRESS_SCHEMA,
         "study_id": STUDY_ID,
-        "contract_sha256": str(study["contract_sha256"]),
         "status": status,
         "phase": phase,
         "started_at": started_at,
@@ -1519,95 +1493,6 @@ def _progress_payload(
         "current_task": current_task,
         **_memory_snapshot(),
     }
-
-
-def preflight(
-    *,
-    study_path: Path = DEFAULT_STUDY_PATH,
-    output_root: Path = DEFAULT_OUTPUT_ROOT,
-    verify_large_hashes: bool = True,
-) -> dict[str, Any]:
-    study = load_study(study_path)
-    started = time.perf_counter()
-    inputs = LearnabilityInputs(
-        study, verify_large_hashes=bool(verify_large_hashes)
-    )
-    folds: list[dict[str, Any]] = []
-    for year in FOLD_YEARS:
-        entry = inputs.entry_rows(year)
-        folds.append(
-            {
-                "fold_year": year,
-                "target": "entry_unfilled",
-                "dependency_days": 1,
-                "train_row_count": int(len(entry.train_rows)),
-                "evaluation_row_count": int(len(entry.evaluation_rows)),
-                "maximum_train_signal_date_idx": int(
-                    entry.maximum_train_signal_date_idx
-                ),
-                "label_dependency_overlap_count": 0,
-            }
-        )
-        del entry
-        for horizon in HORIZONS:
-            fold = inputs.common_path_rows(year, horizon)
-            folds.append(
-                {
-                    "fold_year": year,
-                    "target": "path_labels",
-                    "horizon": horizon,
-                    "dependency_days": horizon,
-                    "train_row_count": int(len(fold.train_rows)),
-                    "evaluation_row_count": int(len(fold.evaluation_rows)),
-                    "maximum_train_signal_date_idx": int(
-                        fold.maximum_train_signal_date_idx
-                    ),
-                    "label_dependency_overlap_count": 0,
-                }
-            )
-            del fold
-    payload = {
-        "schema": "seq100_path_label_learnability_preflight/v1",
-        "status": "passed",
-        "completed_at": _now(),
-        "study_id": STUDY_ID,
-        "contract_sha256": str(study["contract_sha256"]),
-        "large_input_hashes_verified": bool(verify_large_hashes),
-        "elapsed_seconds": float(time.perf_counter() - started),
-        "candidate_count": inputs.candidate_count,
-        "continuous_feature_count": len(inputs.continuous_columns),
-        "categorical_feature_count": len(inputs.categorical_columns),
-        "maximum_consumed_outcome_date": "2025-12-31",
-        "forbidden_years_consumed": [],
-        "folds": folds,
-        "parameters": {
-            target: _model_parameters(study, target=target)[0]
-            for target in (*PATH_TARGETS, "entry_unfilled")
-        },
-        "model_budget": {
-            "num_boost_round": int(study["contract"]["model"]["num_boost_round"]),
-            "early_stopping_rounds": int(
-                study["contract"]["model"]["early_stopping_rounds"]
-            ),
-        },
-    }
-    output_root.mkdir(parents=True, exist_ok=True)
-    _atomic_write_json(output_root / "preflight.json", payload)
-    return payload
-
-
-def _require_preflight(study: Mapping[str, Any], output_root: Path) -> dict[str, Any]:
-    path = output_root / "preflight.json"
-    if not path.is_file():
-        raise RuntimeError("full-hash preflight must pass before training")
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("status") != "passed":
-        raise RuntimeError("learnability preflight did not pass")
-    if str(payload.get("contract_sha256")) != str(study["contract_sha256"]):
-        raise RuntimeError("learnability preflight belongs to another contract")
-    if not bool(payload.get("large_input_hashes_verified")):
-        raise RuntimeError("learnability preflight did not verify large input hashes")
-    return payload
 
 
 def _run_entry_fold(
@@ -1620,7 +1505,10 @@ def _run_entry_fold(
 ) -> bool:
     task_dir = _entry_task_dir(output_root, year)
     result_path = task_dir / "task_result.json"
-    if _task_result_complete(result_path, str(study["contract_sha256"])):
+    expected = _task_semantics(
+        study, year=year, horizon=1, target="entry_unfilled"
+    )
+    if _task_result_complete(result_path, expected=expected):
         return False
     fold = inputs.entry_rows(year)
     train_raw = (np.asarray(inputs.entry_fill[fold.train_rows]) == 0).astype(np.int8)
@@ -1688,7 +1576,12 @@ def _run_path_group(
         if not _task_result_complete(
             _path_task_dir(output_root, year, horizon, target)
             / "task_result.json",
-            str(study["contract_sha256"]),
+            expected=_task_semantics(
+                study,
+                year=year,
+                horizon=horizon,
+                target=target,
+            ),
         )
     ]
     if not pending:
@@ -1800,9 +1693,9 @@ def _result_ranking_fields(result: Mapping[str, Any]) -> dict[str, Any]:
 
 def decide_from_results(
     results: Sequence[Mapping[str, Any]],
-    decision_contract: Mapping[str, Any],
+    decision_config: Mapping[str, Any],
 ) -> dict[str, Any]:
-    thresholds = dict(decision_contract["qualification_thresholds"])
+    thresholds = dict(decision_config["qualification_thresholds"])
     candidates: list[dict[str, Any]] = []
     for target in PATH_TARGETS:
         for horizon in HORIZONS:
@@ -1979,7 +1872,7 @@ def decide_from_results(
             "slot_count",
             "leverage",
             "stop_loss",
-            "2026_confirmation",
+            "additional_future_confirmation",
         ],
     }
 
@@ -1989,17 +1882,35 @@ def _load_complete_results(
     study: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    expected: list[Path] = []
+    expected: list[tuple[Path, int, int, str]] = []
     for year in FOLD_YEARS:
-        expected.append(_entry_task_dir(output_root, year) / "task_result.json")
+        expected.append(
+            (
+                _entry_task_dir(output_root, year) / "task_result.json",
+                year,
+                1,
+                "entry_unfilled",
+            )
+        )
         for horizon in HORIZONS:
             for target in PATH_TARGETS:
                 expected.append(
-                    _path_task_dir(output_root, year, horizon, target)
-                    / "task_result.json"
+                    (
+                        _path_task_dir(output_root, year, horizon, target)
+                        / "task_result.json",
+                        year,
+                        horizon,
+                        target,
+                    )
                 )
-    for path in expected:
-        if not _task_result_complete(path, str(study["contract_sha256"])):
+    for path, year, horizon, target in expected:
+        expected_semantics = _task_semantics(
+            study,
+            year=year,
+            horizon=horizon,
+            target=target,
+        )
+        if not _task_result_complete(path, expected=expected_semantics):
             raise RuntimeError(f"missing or changed learnability task result: {path}")
         results.append(json.loads(path.read_text(encoding="utf-8")))
     return results
@@ -2013,9 +1924,7 @@ def aggregate_results(
     study = load_study(study_path)
     results = _load_complete_results(output_root, study)
     path_results = [item for item in results if item["target"] in PATH_TARGETS]
-    decision = decide_from_results(
-        path_results, dict(study["contract"]["decision"])
-    )
+    decision = decide_from_results(path_results, dict(study["decision"]))
     entry = [
         {
             "fold_year": int(item["fold_year"]),
@@ -2030,7 +1939,6 @@ def aggregate_results(
         "status": "completed",
         "completed_at": _now(),
         "study_id": STUDY_ID,
-        "contract_sha256": str(study["contract_sha256"]),
         "fold_years": list(FOLD_YEARS),
         "horizons": list(HORIZONS),
         "task_count": len(results),
@@ -2039,8 +1947,10 @@ def aggregate_results(
         "decision": decision,
         "disclosure": {
             "years_2023_2025": "burned discovery/evaluation folds, not pristine holdouts",
-            "early_stopping": "each fold year participates only in early stopping and evaluation for that fold under the frozen common rule",
-            "forbidden_2026": "not read for training, screening, tuning, calibration, or evaluation",
+            "early_stopping": "each fold year participates only in early stopping and evaluation for that fold under the common rule",
+            "outcome_boundary": str(
+                dict(study.get("folds", {})).get("maximum_outcome_date", "")
+            ),
             "economic_use": "statistical learnability does not establish account-level economic usability",
         },
     }
@@ -2055,8 +1965,7 @@ def run_study(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> dict[str, Any]:
     study = load_study(study_path)
-    _require_preflight(study, output_root)
-    inputs = LearnabilityInputs(study, verify_large_hashes=False)
+    inputs = LearnabilityInputs(study)
     output_root.mkdir(parents=True, exist_ok=True)
     events_path = output_root / "events.jsonl"
     progress_path = output_root / "progress.json"
@@ -2154,17 +2063,11 @@ def run_study(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Audit Seq100 future-path label learnability without using 2026."
+        description="Train or summarize the Seq100 future-path learnability study."
     )
-    parser.add_argument("--study-contract", type=Path, default=DEFAULT_STUDY_PATH)
+    parser.add_argument("--config", type=Path, default=DEFAULT_STUDY_PATH)
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    preflight_parser = subparsers.add_parser("preflight")
-    preflight_parser.add_argument(
-        "--skip-large-hashes",
-        action="store_true",
-        help="Diagnostic only; a skipped-hash receipt cannot authorize a formal run.",
-    )
     subparsers.add_parser("run")
     subparsers.add_parser("decide")
     return parser
@@ -2172,20 +2075,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "preflight":
-        result = preflight(
-            study_path=args.study_contract,
-            output_root=args.output_root,
-            verify_large_hashes=not bool(args.skip_large_hashes),
-        )
-    elif args.command == "run":
+    if args.command == "run":
         result = run_study(
-            study_path=args.study_contract,
+            study_path=args.config,
             output_root=args.output_root,
         )
     else:
         result = aggregate_results(
-            study_path=args.study_contract,
+            study_path=args.config,
             output_root=args.output_root,
         )
     print(json.dumps(result, ensure_ascii=False, default=_json_default), flush=True)

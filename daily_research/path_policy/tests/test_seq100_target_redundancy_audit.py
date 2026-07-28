@@ -7,26 +7,13 @@ from daily_research.path_policy import seq100_short_horizon_target_reaudit as so
 from daily_research.path_policy import seq100_target_redundancy_audit as audit
 
 
-def test_load_study_freezes_recent_folds_and_2026_firewall() -> None:
-    archived_contract = (
-        audit.WORKSPACE_ROOT
-        / "daily_research/research_records/seq100"
-        / audit.STUDY_ID
-        / "contract.json"
-    )
-    contract_path = (
-        audit.DEFAULT_STUDY_PATH
-        if audit.DEFAULT_STUDY_PATH.exists()
-        else archived_contract
-    )
-    study = audit.load_study(contract_path)
+def test_load_study_keeps_scientific_schedule_without_training() -> None:
+    study = audit.load_study()
 
-    assert study["contract_sha256"] == audit._canonical_json_sha256(
-        study["contract"]
-    )
-    assert study["contract"]["protocol"]["fold_years"] == [2023, 2024, 2025]
-    assert study["contract"]["protocol"]["new_booster_count"] == 0
-    assert study["contract"]["scientific_firewall"]["forbidden_years"] == [2026]
+    assert study["folds"]["fold_years"] == [2023, 2024, 2025]
+    assert study["folds"]["mfe_horizons"] == [5, 10, 20, 40]
+    assert study["folds"]["state_horizons"] == [3, 5, 10, 20]
+    assert study["model"]["train_new_boosters"] is False
 
 
 def test_orthogonalization_preserves_independent_target_score() -> None:
