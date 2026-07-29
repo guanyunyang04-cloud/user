@@ -69,6 +69,38 @@ Retained result:
 
 - `daily_research/research_records/seq100/seq100_post_entry_ab_v1/result.json`
 
+## MFE capacity stability result
+
+`seq100_mfe_capacity_stability_audit_v1` tested whether one fixed tree count
+could replace the volatile prior-year early-stopping counts for the two frozen
+MFE heads. Capacity was selected only from complete no-early-stopping curves at
+the 2019-2022 rolling origins; 2023-2025 remained decision folds. Eight curve
+boosters and six fixed-capacity outer boosters completed, and no 2026 outcome
+was read.
+
+- The four-origin one-standard-error rule selected 32 trees for
+  `mfe_10 + turnover_cost_proxy` and 16 trees for
+  `mfe_20 + breakout_retest_levels`.
+- Both fixed capacities failed the preregistered 2023-2025 adoption gates.
+  D10 Rank-IC deltas were `-0.00592/-0.03989/-0.01704`; Top-5 MFE deltas were
+  `-0.00096/-0.00675/-0.00436`.
+- D20 improved in 2023 when 16 trees replaced the old 8-tree model, but failed
+  in 2024-2025. Rank-IC deltas were `+0.01233/-0.03694/-0.03481`; Top-5 MFE
+  deltas were `+0.00357/-0.01825/-0.00631`, and the endpoint-return path
+  guardrail failed.
+- Full no-early-stopping minima already varied materially across 2019-2022:
+  D10 `23/152/43/86`, D20 `4/15/79/41`. The instability is therefore not
+  explained solely by the patience value.
+
+Do not adopt the tested global fixed capacities and do not rebuild the current
+OOS MFE contract. This result rejects one fixed count across years; it does not
+prove that the existing baseline-head, immediately-prior-year early-stopping
+rule is the best possible capacity policy.
+
+Retained result:
+
+- `daily_research/research_records/seq100/seq100_mfe_capacity_stability_audit_v1/result.json`
+
 ## Current decision
 
 Do not build a general independent post-entry model from the tested entry-memory
@@ -81,4 +113,6 @@ No score fusion, exit threshold, switching value, cost buffer, holding period,
 slot count, leverage, stop loss, account policy, or reinforcement-learning
 policy has been selected. The planned hold-versus-switch value study is not
 entered because primary risk B did not pass. There is no active training process;
-the next research direction requires an explicit new user decision.
+the next research direction requires an explicit new user decision. The current
+MFE contract retains its existing per-year adaptive tree counts because the
+tested pre-2023 global fixed alternatives were materially worse.

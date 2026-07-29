@@ -1,0 +1,393 @@
+{
+  "schema": "seq100_mfe_capacity_stability_summary/v1",
+  "status": "completed_capacity_stability_audit",
+  "completed_at": "2026-07-29T20:24:12+08:00",
+  "study_id": "seq100_mfe_capacity_stability_audit_v1",
+  "scope": {
+    "capacity_selection_years": [
+      2019,
+      2020,
+      2021,
+      2022
+    ],
+    "decision_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "horizons": [
+      10,
+      20
+    ],
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "selection_task_count": 8,
+    "outer_task_count": 6,
+    "forbidden_2026_row_count": 0
+  },
+  "evidence": {
+    "10": {
+      "horizon": 10,
+      "name": "turnover_cost_proxy",
+      "families": [
+        "turnover_cost_proxy"
+      ],
+      "capacity_selection": {
+        "horizon": 10,
+        "name": "turnover_cost_proxy",
+        "families": [
+          "turnover_cost_proxy"
+        ],
+        "selection_years": [
+          2019,
+          2020,
+          2021,
+          2022
+        ],
+        "iteration_grid": [
+          4,
+          8,
+          16,
+          32,
+          48,
+          64,
+          96,
+          128,
+          192,
+          256,
+          384,
+          512
+        ],
+        "aggregate_minimizer": 32,
+        "minimum_mean_normalized_regret": 0.0008489172839724057,
+        "standard_error_at_minimizer": 0.0003489899472689718,
+        "one_standard_error_threshold": 0.0011979072312413774,
+        "selected_iteration": 32,
+        "curve_sources": [
+          {
+            "task_id": "mfe10_2019_capacity_curve",
+            "fold_year": 2019,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2019/h10/turnover_cost_proxy/task_result.json",
+              "size": 3360,
+              "sha256": "a1f909aa086d6eef5d8409a41aeb5a4d09bc7879b1414941b1b3b89e1ca29ac1"
+            },
+            "full_curve_minimum": 23
+          },
+          {
+            "task_id": "mfe10_2020_capacity_curve",
+            "fold_year": 2020,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2020/h10/turnover_cost_proxy/task_result.json",
+              "size": 3364,
+              "sha256": "247b579f66307e4b3c97b6f127fbe0d318f1c368c4bbaee0439d695e931d73cd"
+            },
+            "full_curve_minimum": 152
+          },
+          {
+            "task_id": "mfe10_2021_capacity_curve",
+            "fold_year": 2021,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2021/h10/turnover_cost_proxy/task_result.json",
+              "size": 3362,
+              "sha256": "0ce25a8560b946bef81c9f64d4dfd028a935e2dd4efde80fb577c1c0edce1464"
+            },
+            "full_curve_minimum": 43
+          },
+          {
+            "task_id": "mfe10_2022_capacity_curve",
+            "fold_year": 2022,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2022/h10/turnover_cost_proxy/task_result.json",
+              "size": 3362,
+              "sha256": "57adb2d7f75cdb597690df31d2c993e43c92a4e390d340366e454e1afcb7a2a4"
+            },
+            "full_curve_minimum": 86
+          }
+        ],
+        "grid_summary": {
+          "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_selection/h10_grid_summary.parquet",
+          "size": 9410,
+          "sha256": "06bfdbeb5bfbe6d474cfc8a35e7c64999197741e3917458431a98ef57144d385"
+        }
+      },
+      "adaptive_iterations_2023_2024_2025": [
+        74,
+        230,
+        436
+      ],
+      "fixed_capacity_gate": {
+        "passed": false,
+        "checks": {
+          "median_relative_mae_harm": 0.014747057667558794,
+          "worst_relative_mae_harm": 0.026894649972198037,
+          "worst_rank_ic_delta": -0.03989362999856692,
+          "median_top5_mfe_delta": -0.0043570523697289395,
+          "nonmaterial_top5_years": 1,
+          "path_guardrail_rejected": false
+        },
+        "relative_mae_harm_2023_2024_2025": [
+          0.026894649972198037,
+          0.014747057667558794,
+          -0.0018648696185527003
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          -0.0059190104298905925,
+          -0.03989362999856692,
+          -0.017042746528309904
+        ],
+        "top5_mfe_delta_2023_2024_2025": [
+          -0.0009628422159828977,
+          -0.006745735559195988,
+          -0.0043570523697289395
+        ]
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              0.0003626834101982858,
+              0.0018077428428265455,
+              0.000571782348866868
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              -0.0004337947633460781,
+              -0.004153498315212433,
+              -0.0028953260864552953
+            ],
+            "significant_harm_years": 1,
+            "median_absolute_harm": 0.0028953260864552953,
+            "rejected": false
+          }
+        }
+      },
+      "contract_change": {
+        "required": false,
+        "materially_changed_years": [
+          2024,
+          2025
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.9653083279614237,
+          0.8510318094487523,
+          0.8576126635018948
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.8018416004864898,
+          0.4764800204262581,
+          0.4687305751318013
+        ]
+      }
+    },
+    "20": {
+      "horizon": 20,
+      "name": "breakout_retest_levels",
+      "families": [
+        "breakout_retest_levels"
+      ],
+      "capacity_selection": {
+        "horizon": 20,
+        "name": "breakout_retest_levels",
+        "families": [
+          "breakout_retest_levels"
+        ],
+        "selection_years": [
+          2019,
+          2020,
+          2021,
+          2022
+        ],
+        "iteration_grid": [
+          4,
+          8,
+          16,
+          32,
+          48,
+          64,
+          96,
+          128,
+          192,
+          256,
+          384,
+          512
+        ],
+        "aggregate_minimizer": 16,
+        "minimum_mean_normalized_regret": 0.0025792896172985302,
+        "standard_error_at_minimizer": 0.0012710366636677413,
+        "one_standard_error_threshold": 0.0038503262809662714,
+        "selected_iteration": 16,
+        "curve_sources": [
+          {
+            "task_id": "mfe20_2019_capacity_curve",
+            "fold_year": 2019,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2019/h20/breakout_retest_levels/task_result.json",
+              "size": 3379,
+              "sha256": "d739ab87ce43817554f36fcf2d1432d32ccb84de9df99bf4f7bba78fd74f6018"
+            },
+            "full_curve_minimum": 4
+          },
+          {
+            "task_id": "mfe20_2020_capacity_curve",
+            "fold_year": 2020,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2020/h20/breakout_retest_levels/task_result.json",
+              "size": 3376,
+              "sha256": "ed660234ddd0091d374ab55ddad8cecda3c24ee386f69ad3a64ca7a477bd4682"
+            },
+            "full_curve_minimum": 15
+          },
+          {
+            "task_id": "mfe20_2021_capacity_curve",
+            "fold_year": 2021,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2021/h20/breakout_retest_levels/task_result.json",
+              "size": 3378,
+              "sha256": "bdbddee34533060ed5add91e4747f61ad4ecd0613693f7eb67102d6f30c51457"
+            },
+            "full_curve_minimum": 79
+          },
+          {
+            "task_id": "mfe20_2022_capacity_curve",
+            "fold_year": 2022,
+            "result": {
+              "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2022/h20/breakout_retest_levels/task_result.json",
+              "size": 3377,
+              "sha256": "34d1c087e63697dbe23088a009663bca5950ca9047753eb351fc4bae13656efd"
+            },
+            "full_curve_minimum": 41
+          }
+        ],
+        "grid_summary": {
+          "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_selection/h20_grid_summary.parquet",
+          "size": 9410,
+          "sha256": "df5dc7dc997daaeaf492da10ba378adbdeac924abb3617d92355457e7b967a9a"
+        }
+      },
+      "adaptive_iterations_2023_2024_2025": [
+        8,
+        148,
+        390
+      ],
+      "fixed_capacity_gate": {
+        "passed": false,
+        "checks": {
+          "median_relative_mae_harm": -0.00691720031498233,
+          "worst_relative_mae_harm": 0.019653074941603066,
+          "worst_rank_ic_delta": -0.03694186779903831,
+          "median_top5_mfe_delta": -0.006310115988111275,
+          "nonmaterial_top5_years": 1,
+          "path_guardrail_rejected": true
+        },
+        "relative_mae_harm_2023_2024_2025": [
+          -0.017744166916754178,
+          0.019653074941603066,
+          -0.00691720031498233
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.012333815752443173,
+          -0.03694186779903831,
+          -0.03480582472742732
+        ],
+        "top5_mfe_delta_2023_2024_2025": [
+          0.0035737554626464225,
+          -0.018245363565541097,
+          -0.006310115988111275
+        ]
+      },
+      "path_guardrail": {
+        "rejected": true,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              -0.003272688326066853,
+              -4.9645821106939694e-05,
+              0.003690121701733769
+            ],
+            "significant_harm_years": 1,
+            "median_absolute_harm": 4.9645821106939694e-05,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              -0.005441442216441136,
+              -0.016369694127201746,
+              0.0011775270807129815
+            ],
+            "significant_harm_years": 2,
+            "median_absolute_harm": 0.005441442216441136,
+            "rejected": true
+          }
+        }
+      },
+      "contract_change": {
+        "required": false,
+        "materially_changed_years": [
+          2023,
+          2024,
+          2025
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.9335001369902196,
+          0.7932166687816539,
+          0.8012740939509163
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.5466503142382537,
+          0.25792521680424013,
+          0.28342289511124813
+        ]
+      }
+    }
+  },
+  "decision": {
+    "status": "completed_capacity_stability_audit",
+    "final_mfe_heads": {
+      "10": {
+        "name": "turnover_cost_proxy",
+        "capacity_policy": "existing_prior_year_adaptive",
+        "fixed_iteration": null,
+        "requires_oos_contract_rebuild": false
+      },
+      "20": {
+        "name": "breakout_retest_levels",
+        "capacity_policy": "existing_prior_year_adaptive",
+        "fixed_iteration": null,
+        "requires_oos_contract_rebuild": false
+      }
+    },
+    "any_fixed_capacity_adopted": false,
+    "requires_oos_mfe_contract_rebuild": false,
+    "rebuild_horizons": [],
+    "next_step": "retain_current_oos_mfe_contract",
+    "does_not_select": [
+      "feature_family",
+      "MFE objective",
+      "state or risk capacity",
+      "entry score fusion",
+      "holding model",
+      "exit rule",
+      "holding period",
+      "slot count",
+      "leverage",
+      "stop loss",
+      "account policy"
+    ]
+  },
+  "disclosure": {
+    "capacity_selection": "Only 2019-2022 rolling origins selected the fixed count; 2023-2025 outcomes were not used.",
+    "decision_fold_reuse": "owner-authorized repeatedly reused recent decision folds, not a pristine final holdout",
+    "top5": "Top 5% is a strong-candidate diagnostic, not a slot count.",
+    "2026": "No 2026 row, outcome, prediction, or metric was read."
+  },
+  "full_output": {
+    "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/summary.json",
+    "size": 289502,
+    "sha256": "249f43e7cef22b2db25b56465dc0543ce35e8756a63821020e9b80f0d448f48a"
+  }
+}

@@ -1,0 +1,94 @@
+{
+  "study_id": "seq100_mfe_capacity_stability_audit_v1",
+  "objective": "replace single-prior-year MFE tree selection with a bounded pre-2023 multi-origin fixed-capacity audit for the two frozen final heads",
+  "sources": {
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1"
+  },
+  "folds": {
+    "capacity_selection_years": [
+      2019,
+      2020,
+      2021,
+      2022
+    ],
+    "decision_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "maximum_outcome_date": "2025-12-31",
+    "decision_fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine final holdout",
+    "forbidden_outcome_year": 2026,
+    "purge_rule": "remove every training signal whose MFE label dependency reaches the evaluation year"
+  },
+  "heads": {
+    "10": {
+      "name": "turnover_cost_proxy",
+      "families": [
+        "turnover_cost_proxy"
+      ]
+    },
+    "20": {
+      "name": "breakout_retest_levels",
+      "families": [
+        "breakout_retest_levels"
+      ]
+    }
+  },
+  "capacity_selection": {
+    "iteration_grid": [
+      4,
+      8,
+      16,
+      32,
+      48,
+      64,
+      96,
+      128,
+      192,
+      256,
+      384,
+      512
+    ],
+    "maximum_iteration": 512,
+    "loss": "LightGBM date-equal validation Huber",
+    "fold_normalization": "loss / minimum grid loss in the same validation year - 1",
+    "aggregation": "equal mean across the four validation years",
+    "one_standard_error_rule": "select the smallest count whose mean normalized regret is no greater than the minimum mean plus the standard error at the aggregate minimizer",
+    "uses_decision_year_for_selection": false
+  },
+  "decision": {
+    "maximum_median_relative_mae_harm": 0.002,
+    "maximum_worst_relative_mae_harm": 0.005,
+    "minimum_worst_rank_ic_delta": -0.002,
+    "minimum_median_top5_mfe_delta": -0.001,
+    "minimum_nonmaterial_top5_years": 2,
+    "maximum_nonmaterial_top5_year_harm": 0.001,
+    "path_guardrail_minimum_harm_years": 2,
+    "path_guardrail_minimum_median_absolute_harm": 0.001,
+    "contract_rebuild_minimum_prediction_spearman": 0.95,
+    "contract_rebuild_minimum_top5_jaccard": 0.8
+  },
+  "model": {
+    "reuse_feature_study_parameters": true,
+    "hyperparameter_search": false,
+    "one_booster_process_at_a_time": true,
+    "selection_models_have_no_early_stopping": true,
+    "decision_models_use_the_pre_2023_fixed_count": true
+  },
+  "non_selections": [
+    "feature_family",
+    "MFE objective",
+    "state or risk capacity",
+    "entry score fusion",
+    "holding model",
+    "exit rule",
+    "holding period",
+    "slot count",
+    "leverage",
+    "stop loss",
+    "account policy"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1"
+}
