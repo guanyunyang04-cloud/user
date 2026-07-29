@@ -1,0 +1,174 @@
+{
+  "study_id": "seq100_post_entry_ab_v1",
+  "objective": "test whether original entry memory and realized D1/D3/D5 path improve holding-specific risk and state prediction beyond the current strict-OOS entry contract",
+  "sources": {
+    "entry_contract_config": "daily_research/studies/seq100_entry_contract_oos_v2.json",
+    "entry_contract_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "path_study_config": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json"
+  },
+  "folds": {
+    "test_years": [2023, 2024, 2025],
+    "inner_validation_year": "test year minus one",
+    "inner_train_end_year": "test year minus two",
+    "outer_refit": "all legal history before test year after a 10-trading-day target purge",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_outcome_year": 2026,
+    "date_weighting": "each landmark decision date has equal total target weight",
+    "fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine holdout"
+  },
+  "landmarks": {
+    "ages": [1, 3, 5],
+    "observation_time": "after landmark close",
+    "target_anchor": "next calendar trading day open after the landmark",
+    "population": "all actually filled original entries with a strict OOS entry contract; no survivor filter",
+    "primary_population": "all common-support rows",
+    "transfer_stratum": "entry_either_top5",
+    "top5_is_not_a_slot_rule": true,
+    "tradable_day_fraction": "sparse-event alert only, never a model input"
+  },
+  "features": {
+    "A": [
+      "current_mfe10_rank",
+      "current_mfe20_rank",
+      "current_state_low_rank",
+      "current_state_high_rank",
+      "current_risk10_rank",
+      "current_risk20_rank"
+    ],
+    "rank_change": [
+      "mfe10_rank_change",
+      "mfe20_rank_change",
+      "state_low_rank_change",
+      "state_high_rank_change",
+      "risk10_rank_change",
+      "risk20_rank_change"
+    ],
+    "D1_path": [
+      "entry_gap_return",
+      "entry_to_close_return",
+      "relative_turnover_last",
+      "relative_turnover_change"
+    ],
+    "D3_D5_path": [
+      "entry_gap_return",
+      "entry_to_close_return",
+      "realized_close_mfe",
+      "realized_close_mae",
+      "drawdown_from_realized_peak",
+      "last_close_return",
+      "realized_volatility",
+      "positive_day_fraction",
+      "path_efficiency",
+      "relative_turnover_mean",
+      "relative_turnover_last",
+      "relative_turnover_change"
+    ],
+    "dimension_count": {
+      "A": 6,
+      "B_D1": 16,
+      "B_D3": 24,
+      "B_D5": 24
+    },
+    "D1_forbidden_duplicates": [
+      "realized_close_mfe",
+      "realized_close_mae",
+      "drawdown_from_realized_peak",
+      "last_close_return",
+      "realized_volatility",
+      "positive_day_fraction",
+      "path_efficiency",
+      "relative_turnover_mean"
+    ]
+  },
+  "targets": {
+    "primary": {
+      "name": "pre_peak_mae_10",
+      "semantics": "minimum of zero and D1-to-best-future-MFE close returns from the landmark next-open anchor",
+      "objective": "LightGBM Huber"
+    },
+    "secondary": {
+      "name": "state_10",
+      "semantics": "through-2022 fixed-K3 state of future D1-D10 closes from the landmark next-open anchor",
+      "objective": "LightGBM multiclass"
+    },
+    "dependency_days": 10
+  },
+  "model": {
+    "library": "lightgbm",
+    "learning_rate": 0.03,
+    "num_boost_round": 1500,
+    "early_stopping_rounds": 100,
+    "num_leaves": 63,
+    "max_depth": 7,
+    "min_data_in_leaf": 10000,
+    "feature_fraction": 1.0,
+    "bagging_fraction": 1.0,
+    "bagging_freq": 0,
+    "lambda_l1": 0.0,
+    "lambda_l2": 10.0,
+    "max_bin": 255,
+    "huber_alpha": 0.9,
+    "deterministic": true,
+    "force_col_wise": true,
+    "num_threads": 8,
+    "histogram_pool_size_mb": 1024,
+    "sequence_batch_size": 65536,
+    "seed": 7,
+    "capacity_rule": "inner A selects tree count; outer A and B use identical parameters and tree count",
+    "formal_booster_count": {
+      "risk": 27,
+      "state": 36,
+      "total": 63
+    },
+    "one_booster_process_at_a_time": true
+  },
+  "calibration": {
+    "method": "single multiclass temperature",
+    "fit_population": "the immediately preceding complete inner-validation year only",
+    "separate_by": ["outer fold", "landmark age", "A/B variant"],
+    "raw_probability_permanently_retained": true,
+    "model_inputs_use": "raw probability date ranks",
+    "reported_scores": ["raw Brier", "calibrated Brier", "raw log loss", "calibrated log loss", "raw ECE", "calibrated ECE"],
+    "literal_probability_gate": "temperature calibration must improve proper scores in at least two test years; otherwise state remains a relative score"
+  },
+  "decision": {
+    "risk": {
+      "minimum_worst_year_rank_ic_delta": 0.003,
+      "minimum_positive_rank_ic_years": 3,
+      "minimum_hac_p_supported_years": 2,
+      "maximum_hac_p_value": 0.05,
+      "maximum_bh_q_value_across_9_age_year_tests": 0.10,
+      "minimum_mae_improvement_years": 2,
+      "maximum_worst_year_relative_mae_harm": 0.005,
+      "minimum_pr_auc_improvement_years": 2,
+      "maximum_worst_year_pr_auc_decline": 0.002,
+      "entry_either_top5_requires_three_positive_rank_ic_years": true
+    },
+    "state": {
+      "minimum_worst_year_ordinal_ic_delta": 0.002,
+      "minimum_positive_ordinal_ic_years": 3,
+      "minimum_calibrated_brier_improvement_years": 2,
+      "minimum_calibrated_logloss_improvement_years": 2,
+      "maximum_worst_year_relative_proper_score_harm": 0.005
+    },
+    "general_model": {
+      "minimum_passing_risk_ages": 2,
+      "nonpassing_age_material_rank_harm": -0.003,
+      "state_cannot_rescue_failed_risk": true
+    }
+  },
+  "non_selections": [
+    "entry_score_fusion",
+    "exit_threshold",
+    "switching_value",
+    "transaction_cost_buffer",
+    "holding_period",
+    "slot_count",
+    "leverage",
+    "stop_loss",
+    "account_policy",
+    "reinforcement_learning"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v1"
+}

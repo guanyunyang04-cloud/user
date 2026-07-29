@@ -1,0 +1,108 @@
+{
+  "study_id": "seq100_mfe_feature_union_audit_v1",
+  "objective": "test whether a small preregistered union of role-specific causal feature families improves the frozen D10 and D20 strong-candidate MFE heads",
+  "sources": {
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1"
+  },
+  "folds": {
+    "fold_years": [2023, 2024, 2025],
+    "maximum_outcome_date": "2025-12-31",
+    "fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine holdout",
+    "date_weighting": "each OOS signal date contributes equally",
+    "forbidden_outcome_year": 2026
+  },
+  "heads": {
+    "10": {
+      "incumbent": "turnover_cost_proxy",
+      "stage1": {
+        "turnover_cost_proxy__completed_week_month_context": [
+          "turnover_cost_proxy",
+          "completed_week_month_context"
+        ],
+        "turnover_cost_proxy__confirmed_swing_structure": [
+          "turnover_cost_proxy",
+          "confirmed_swing_structure"
+        ],
+        "turnover_cost_proxy__deterministic_noise": [
+          "turnover_cost_proxy",
+          "deterministic_noise"
+        ]
+      },
+      "stage2": {
+        "turnover_cost_proxy__completed_week_month_context__confirmed_swing_structure": [
+          "turnover_cost_proxy",
+          "completed_week_month_context",
+          "confirmed_swing_structure"
+        ]
+      }
+    },
+    "20": {
+      "incumbent": "breakout_retest_levels",
+      "stage1": {
+        "breakout_retest_levels__traditional_indicators": [
+          "breakout_retest_levels",
+          "traditional_indicators"
+        ],
+        "breakout_retest_levels__completed_week_month_context": [
+          "breakout_retest_levels",
+          "completed_week_month_context"
+        ],
+        "breakout_retest_levels__deterministic_noise": [
+          "breakout_retest_levels",
+          "deterministic_noise"
+        ]
+      },
+      "stage2": {
+        "breakout_retest_levels__traditional_indicators__completed_week_month_context": [
+          "breakout_retest_levels",
+          "traditional_indicators",
+          "completed_week_month_context"
+        ]
+      }
+    }
+  },
+  "model": {
+    "reuse_incumbent_iteration_count": true,
+    "hyperparameter_search": false,
+    "one_booster_process_at_a_time": true,
+    "union_materialization": false
+  },
+  "evaluation": {
+    "early_horizon_by_target": {"10": 5, "20": 10},
+    "top_fractions": [0.01, 0.05],
+    "tail_event": "within-date realized MFE top quintile",
+    "relationship_metrics": [
+      "daily prediction Spearman and Pearson",
+      "top 1% and 5% overlap and Jaccard",
+      "challenger-only minus incumbent-only path quality",
+      "reciprocal discrimination inside the other score's top 5%"
+    ],
+    "overlap_control": "Newey-West HAC with lag H-1",
+    "multiple_testing": "one-sided cross-year Stouffer followed by Benjamini-Hochberg across the four non-control stage-one unions"
+  },
+  "decision": {
+    "minimum_positive_top5_mfe_years": 3,
+    "minimum_positive_tail_hit_years": 2,
+    "minimum_worst_year_rank_ic_delta": -0.002,
+    "minimum_positive_exclusive_mfe_years": 2,
+    "maximum_top5_fdr_q_value": 0.10,
+    "path_guardrail_minimum_harm_years": 2,
+    "path_guardrail_minimum_median_absolute_harm": 0.001,
+    "stage2_requires_both_stage1_role_gates": true,
+    "near_tie_top5_delta": 0.0001,
+    "negative_control_must_not_pass_any_formal_gate": true
+  },
+  "non_selections": [
+    "new_output_coordinate",
+    "entry_score_fusion",
+    "holding_model",
+    "exit_rule",
+    "holding_period",
+    "slot_count",
+    "leverage",
+    "stop_loss",
+    "account_policy"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_feature_union_audit_v1"
+}

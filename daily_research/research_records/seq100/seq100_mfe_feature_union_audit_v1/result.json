@@ -1,0 +1,483 @@
+{
+  "schema": "seq100_mfe_feature_union_summary/v1",
+  "status": "completed_feature_union_audit",
+  "completed_at": "2026-07-29T16:21:06+08:00",
+  "study_id": "seq100_mfe_feature_union_audit_v1",
+  "scope": {
+    "fold_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "horizons": [
+      10,
+      20
+    ],
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "trained_task_count": 18,
+    "forbidden_2026_row_count": 0
+  },
+  "evidence": {
+    "h10:turnover_cost_proxy__completed_week_month_context": {
+      "variant": "turnover_cost_proxy__completed_week_month_context",
+      "horizon": 10,
+      "stage": "stage1",
+      "families": [
+        "turnover_cost_proxy",
+        "completed_week_month_context"
+      ],
+      "control": false,
+      "role_gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_mfe_years": 1,
+          "positive_tail_hit_years": 1,
+          "worst_year_rank_ic_delta": -0.0025097788622910114,
+          "positive_exclusive_mfe_years": 1
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          -0.00026415202028809637,
+          0.0013148595798229282,
+          -0.0005657962567966614
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          -0.002254381125176086,
+          0.002093535576330256,
+          -0.0004236988153068928
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.0021436246940243374,
+          0.000444139583798512,
+          -0.0025097788622910114
+        ],
+        "exclusive_mfe_delta_2023_2024_2025": [
+          -0.0016148658966872343,
+          0.006565039179981148,
+          -0.0020284205318997707
+        ]
+      },
+      "combined_top5_test": {
+        "z_statistic": 0.15157635534960925,
+        "p_value_one_sided": 0.439760541795879
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              0.0003551858229798181,
+              0.0007752919415679325,
+              -0.00021769747460003696
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.0005413644691374069,
+              0.0020360356502067706,
+              -0.0011039332319875738
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "added_feature_count": 53,
+      "top5_fdr_q_value": 0.6905554686264067,
+      "formal_pass": false
+    },
+    "h10:turnover_cost_proxy__confirmed_swing_structure": {
+      "variant": "turnover_cost_proxy__confirmed_swing_structure",
+      "horizon": 10,
+      "stage": "stage1",
+      "families": [
+        "turnover_cost_proxy",
+        "confirmed_swing_structure"
+      ],
+      "control": false,
+      "role_gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_mfe_years": 1,
+          "positive_tail_hit_years": 1,
+          "worst_year_rank_ic_delta": -0.0032463763612326966,
+          "positive_exclusive_mfe_years": 1
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          -3.4169023525358634e-05,
+          0.0011785582305135886,
+          -0.0004516321762028184
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          -0.0010438774321656326,
+          0.0035356729288914955,
+          -0.0031077280328789835
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          -0.00024027226988654075,
+          -0.0017693514847850669,
+          -0.0032463763612326966
+        ],
+        "exclusive_mfe_delta_2023_2024_2025": [
+          -0.0015377187751106922,
+          0.005082385732814117,
+          -0.002570677154799258
+        ]
+      },
+      "combined_top5_test": {
+        "z_statistic": 0.26960518690555113,
+        "p_value_one_sided": 0.39373200474855663
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              5.559391767743576e-06,
+              -0.0004198540053080721,
+              0.0004576716678626974
+            ],
+            "significant_harm_years": 1,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              5.718519072761258e-05,
+              0.0006445193395877683,
+              0.00045769677638244445
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "added_feature_count": 29,
+      "top5_fdr_q_value": 0.6905554686264067,
+      "formal_pass": false
+    },
+    "h10:turnover_cost_proxy__deterministic_noise": {
+      "variant": "turnover_cost_proxy__deterministic_noise",
+      "horizon": 10,
+      "stage": "stage1",
+      "families": [
+        "turnover_cost_proxy",
+        "deterministic_noise"
+      ],
+      "control": true,
+      "role_gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_mfe_years": 0,
+          "positive_tail_hit_years": 0,
+          "worst_year_rank_ic_delta": 0.0,
+          "positive_exclusive_mfe_years": 0
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "exclusive_mfe_delta_2023_2024_2025": [
+          NaN,
+          NaN,
+          NaN
+        ]
+      },
+      "combined_top5_test": {
+        "z_statistic": 0.0,
+        "p_value_one_sided": 0.5
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "added_feature_count": 37,
+      "top5_fdr_q_value": NaN,
+      "formal_pass": false
+    },
+    "h20:breakout_retest_levels__traditional_indicators": {
+      "variant": "breakout_retest_levels__traditional_indicators",
+      "horizon": 20,
+      "stage": "stage1",
+      "families": [
+        "breakout_retest_levels",
+        "traditional_indicators"
+      ],
+      "control": false,
+      "role_gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_mfe_years": 1,
+          "positive_tail_hit_years": 2,
+          "worst_year_rank_ic_delta": 0.0,
+          "positive_exclusive_mfe_years": 1
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.0,
+          0.0009039260092724919,
+          -0.0006000779918402296
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.0,
+          0.0011184327256078602,
+          0.00043544815975185607
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.0,
+          0.000838496643309379,
+          0.0014138357603748876
+        ],
+        "exclusive_mfe_delta_2023_2024_2025": [
+          NaN,
+          0.0024992779857292194,
+          -0.0033043168505441263
+        ]
+      },
+      "combined_top5_test": {
+        "z_statistic": -0.044925367315196196,
+        "p_value_one_sided": 0.517916601469805
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              0.0,
+              4.327775031197158e-05,
+              -0.00022907525089742358
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.0,
+              0.0017382392881413146,
+              -0.000944033123357478
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "added_feature_count": 67,
+      "top5_fdr_q_value": 0.6905554686264067,
+      "formal_pass": false
+    },
+    "h20:breakout_retest_levels__completed_week_month_context": {
+      "variant": "breakout_retest_levels__completed_week_month_context",
+      "horizon": 20,
+      "stage": "stage1",
+      "families": [
+        "breakout_retest_levels",
+        "completed_week_month_context"
+      ],
+      "control": false,
+      "role_gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_mfe_years": 2,
+          "positive_tail_hit_years": 2,
+          "worst_year_rank_ic_delta": -0.0015175563202289887,
+          "positive_exclusive_mfe_years": 1
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.00012808545002623465,
+          -0.002297214243472129,
+          0.0005799193457951345
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.0009879412866137102,
+          -0.003247456759760599,
+          0.002161469236357082
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.011486820880980854,
+          -0.0015175563202289887,
+          -0.000316649831841833
+        ],
+        "exclusive_mfe_delta_2023_2024_2025": [
+          -0.017544033810611637,
+          -0.007695037921065362,
+          0.001871753513573659
+        ]
+      },
+      "combined_top5_test": {
+        "z_statistic": -0.6765100086877015,
+        "p_value_one_sided": 0.7506415531793926
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              0.0006562542137378836,
+              -8.687564179512132e-05,
+              0.0004325436940594761
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.0020096618910196667,
+              -0.00012557818252784423,
+              0.002149295382279342
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "added_feature_count": 88,
+      "top5_fdr_q_value": 0.7506415531793926,
+      "formal_pass": false
+    },
+    "h20:breakout_retest_levels__deterministic_noise": {
+      "variant": "breakout_retest_levels__deterministic_noise",
+      "horizon": 20,
+      "stage": "stage1",
+      "families": [
+        "breakout_retest_levels",
+        "deterministic_noise"
+      ],
+      "control": true,
+      "role_gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_mfe_years": 0,
+          "positive_tail_hit_years": 1,
+          "worst_year_rank_ic_delta": -0.00011986501884592561,
+          "positive_exclusive_mfe_years": 0
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.0,
+          0.0,
+          -0.0003006556482450648
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.0,
+          0.0,
+          1.4904365257887154e-06
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.0,
+          0.0,
+          -0.00011986501884592561
+        ],
+        "exclusive_mfe_delta_2023_2024_2025": [
+          NaN,
+          NaN,
+          -0.02002508518885037
+        ]
+      },
+      "combined_top5_test": {
+        "z_statistic": -0.8940288743981645,
+        "p_value_one_sided": 0.814346778834572
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              0.0,
+              0.0,
+              7.0037958538128466e-06
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.0,
+              0.0,
+              -0.0002591630498588524
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "added_feature_count": 72,
+      "top5_fdr_q_value": NaN,
+      "formal_pass": false
+    }
+  },
+  "decision": {
+    "status": "completed_feature_union_audit",
+    "stage2_eligible": {
+      "10": false,
+      "20": false
+    },
+    "negative_control_invalid": false,
+    "final_mfe_heads": {
+      "10": "turnover_cost_proxy",
+      "20": "breakout_retest_levels"
+    },
+    "entry_coordinate_count_changed": false,
+    "next_step": "build_strict_oos_entry_contract",
+    "does_not_select": [
+      "new_output_coordinate",
+      "entry_score_fusion",
+      "holding_model",
+      "exit_rule",
+      "holding_period",
+      "slot_count",
+      "leverage",
+      "stop_loss",
+      "account_policy"
+    ]
+  },
+  "disclosure": {
+    "fold_reuse": "owner-authorized repeatedly reused recent decision folds, not a pristine holdout",
+    "top5": "Top 5% is a strong-candidate diagnostic, not a slot count.",
+    "2026": "No 2026 row, outcome, prediction, or metric was read."
+  },
+  "full_output": {
+    "path": "daily_research/output/path_policy/studies/seq100_mfe_feature_union_audit_v1/summary.json",
+    "size": 699725,
+    "sha256": "8ec9496636d694162f79b3e391742727d748396584087168b4f23dd9005499bc"
+  }
+}
