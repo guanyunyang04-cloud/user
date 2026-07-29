@@ -1,0 +1,132 @@
+{
+  "study_id": "seq100_mfe_final_head_capacity_audit_v1",
+  "objective": "close LightGBM MFE capacity research by comparing final-head prior-year tuning with formal fixed-256 and fixed-512 challengers",
+  "sources": {
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "prior_capacity_study_config": "daily_research/studies/seq100_mfe_capacity_stability_audit_v1.json",
+    "prior_capacity_output_root": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1",
+    "entry_contract_v2_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+    "post_entry_v1_result": "daily_research/research_records/seq100/seq100_post_entry_ab_v1/result.json"
+  },
+  "folds": {
+    "model_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "new_tuning_model_years": [
+      2024,
+      2025
+    ],
+    "contract_rebuild_years": [
+      2020,
+      2021,
+      2022
+    ],
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_outcome_year": 2026,
+    "decision_fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine final holdout",
+    "tuning_rule": "the immediately preceding complete year with target-horizon purge",
+    "outer_rule": "all legal history before the model year with target-horizon purge",
+    "sample_weight": "each signal date has equal total target weight"
+  },
+  "heads": {
+    "10": {
+      "name": "turnover_cost_proxy",
+      "families": [
+        "turnover_cost_proxy"
+      ]
+    },
+    "20": {
+      "name": "breakout_retest_levels",
+      "families": [
+        "breakout_retest_levels"
+      ]
+    }
+  },
+  "policies": {
+    "baseline": "current_base_head_prior_year",
+    "formal_candidates": [
+      "final_head_prior_year",
+      "fixed_256",
+      "fixed_512"
+    ],
+    "fixed_iterations": {
+      "fixed_256": 256,
+      "fixed_512": 512
+    }
+  },
+  "tuning": {
+    "initial_maximum_iteration": 1500,
+    "extension_maximum_iteration": 2500,
+    "early_stopping_rounds": 100,
+    "reuse_model_year": 2023,
+    "reuse_validation_year": 2022,
+    "reuse_expected_iterations": {
+      "10": 86,
+      "20": 41
+    },
+    "unresolved_rule": "after the 2500-round search, fewer than 100 recorded rounds follow the best iteration"
+  },
+  "prefix_equivalence": {
+    "absolute_tolerance": 1e-07,
+    "relative_tolerance": 1e-06,
+    "minimum_daily_spearman": 0.999999
+  },
+  "decision": {
+    "minimum_positive_top5_years": 2,
+    "minimum_median_top5_mfe_delta": 0.0,
+    "minimum_worst_top5_mfe_delta": -0.001,
+    "maximum_top5_fdr_q_value": 0.1,
+    "minimum_worst_rank_ic_delta": -0.002,
+    "minimum_nonnegative_tail_hit_years": 2,
+    "maximum_median_relative_mae_harm": 0.002,
+    "maximum_worst_relative_mae_harm": 0.005,
+    "path_guardrail_minimum_harm_years": 2,
+    "path_guardrail_minimum_median_absolute_harm": 0.001,
+    "contract_rebuild_minimum_prediction_spearman": 0.95,
+    "contract_rebuild_minimum_top5_jaccard": 0.8,
+    "winner_order": [
+      "median_top5_mfe_delta",
+      "worst_top5_mfe_delta",
+      "median_rank_ic_delta",
+      "median_relative_mae_harm",
+      "median_iteration"
+    ]
+  },
+  "model": {
+    "reuse_feature_study_parameters": true,
+    "change_learning_rate": false,
+    "change_tree_shape": false,
+    "hyperparameter_search": false,
+    "one_booster_process_at_a_time": true,
+    "long_outer_minimum_iteration": 512
+  },
+  "contract_v3": {
+    "output_root": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3",
+    "research_record_root": "daily_research/research_records/seq100/seq100_entry_contract_oos_v3",
+    "replace_only_adopted_mfe_columns": true,
+    "reuse_v2_state_and_risk": true,
+    "post_entry_effect": "if v3 is materialized, seq100_post_entry_ab_v1 remains a v2-only result and must be revalidated before later holding research"
+  },
+  "non_selections": [
+    "MFE objective",
+    "feature family",
+    "learning rate",
+    "tree shape",
+    "state or risk capacity",
+    "deep model",
+    "reinforcement learning",
+    "entry score fusion",
+    "holding model",
+    "exit rule",
+    "switching rule",
+    "holding period",
+    "slot count",
+    "leverage",
+    "stop loss",
+    "account policy"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1"
+}

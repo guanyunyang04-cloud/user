@@ -1,0 +1,860 @@
+{
+  "schema": "seq100_mfe_final_head_capacity_summary/v1",
+  "status": "completed_final_head_capacity_audit",
+  "completed_at": "2026-07-30T01:36:36+08:00",
+  "study_id": "seq100_mfe_final_head_capacity_audit_v1",
+  "scope": {
+    "model_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "horizons": [
+      10,
+      20
+    ],
+    "formal_policy_count": 3,
+    "new_tuning_task_count": 4,
+    "long_outer_task_count": 6,
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "forbidden_2026_row_count": 0
+  },
+  "selection": {
+    "schema": "seq100_mfe_final_head_capacity_selection/v1",
+    "status": "completed",
+    "completed_at": "2026-07-29T23:25:07+08:00",
+    "study_id": "seq100_mfe_final_head_capacity_audit_v1",
+    "config_sha256": "6021d96e5e5c8d7356720e934a37d18ebf3cafa621d7c7517c1e4cd333966ac8",
+    "model_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "heads": {
+      "10": {
+        "horizon": 10,
+        "name": "turnover_cost_proxy",
+        "families": [
+          "turnover_cost_proxy"
+        ],
+        "years": {
+          "2023": {
+            "current_iteration": 74,
+            "final_head_iteration": 86,
+            "final_head_capacity_resolved": true,
+            "validation_year": 2022,
+            "final_head_source": {
+              "best_iteration": 86,
+              "capacity_resolved": true,
+              "validation_year": 2022,
+              "source": "reused_complete_final_head_curve",
+              "source_task_id": "mfe10_2022_capacity_curve",
+              "source_result": {
+                "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2022/h10/turnover_cost_proxy/task_result.json",
+                "size": 3362,
+                "sha256": "57adb2d7f75cdb597690df31d2c993e43c92a4e390d340366e454e1afcb7a2a4"
+              }
+            },
+            "current_source_task_id": "mfe10_2023_turnover_cost_proxy_outer"
+          },
+          "2024": {
+            "current_iteration": 230,
+            "final_head_iteration": 241,
+            "final_head_capacity_resolved": true,
+            "validation_year": 2023,
+            "final_head_source": {
+              "best_iteration": 241,
+              "capacity_resolved": true,
+              "validation_year": 2023,
+              "source": "new_final_head_prior_year_tuning",
+              "source_task_id": "mfe10_2024_final_head_tuning",
+              "source_result": {
+                "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/tuning/fold_2024/h10/turnover_cost_proxy/task_result.json",
+                "size": 7680,
+                "sha256": "8b7e0ade0085ebf924c7d816ade67601c51491601fc4137259758d8d090fe6b5"
+              }
+            },
+            "current_source_task_id": "mfe10_2024_turnover_cost_proxy_outer"
+          },
+          "2025": {
+            "current_iteration": 436,
+            "final_head_iteration": 728,
+            "final_head_capacity_resolved": true,
+            "validation_year": 2024,
+            "final_head_source": {
+              "best_iteration": 728,
+              "capacity_resolved": true,
+              "validation_year": 2024,
+              "source": "new_final_head_prior_year_tuning",
+              "source_task_id": "mfe10_2025_final_head_tuning",
+              "source_result": {
+                "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/tuning/fold_2025/h10/turnover_cost_proxy/task_result.json",
+                "size": 7682,
+                "sha256": "f642c914c65095f26db464ce28b5f7f71ffd0a8e25751bc44dadfae865fbad37"
+              }
+            },
+            "current_source_task_id": "mfe10_2025_turnover_cost_proxy_outer"
+          }
+        }
+      },
+      "20": {
+        "horizon": 20,
+        "name": "breakout_retest_levels",
+        "families": [
+          "breakout_retest_levels"
+        ],
+        "years": {
+          "2023": {
+            "current_iteration": 8,
+            "final_head_iteration": 41,
+            "final_head_capacity_resolved": true,
+            "validation_year": 2022,
+            "final_head_source": {
+              "best_iteration": 41,
+              "capacity_resolved": true,
+              "validation_year": 2022,
+              "source": "reused_complete_final_head_curve",
+              "source_task_id": "mfe20_2022_capacity_curve",
+              "source_result": {
+                "path": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1/capacity_curves/fold_2022/h20/breakout_retest_levels/task_result.json",
+                "size": 3377,
+                "sha256": "34d1c087e63697dbe23088a009663bca5950ca9047753eb351fc4bae13656efd"
+              }
+            },
+            "current_source_task_id": "mfe20_2023_breakout_retest_levels_outer"
+          },
+          "2024": {
+            "current_iteration": 148,
+            "final_head_iteration": 48,
+            "final_head_capacity_resolved": true,
+            "validation_year": 2023,
+            "final_head_source": {
+              "best_iteration": 48,
+              "capacity_resolved": true,
+              "validation_year": 2023,
+              "source": "new_final_head_prior_year_tuning",
+              "source_task_id": "mfe20_2024_final_head_tuning",
+              "source_result": {
+                "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/tuning/fold_2024/h20/breakout_retest_levels/task_result.json",
+                "size": 7698,
+                "sha256": "99798d0f5b3e32df6dc723d000e2d31296ee9beac8bd183efd5dc0eb2dfc2d0e"
+              }
+            },
+            "current_source_task_id": "mfe20_2024_breakout_retest_levels_outer"
+          },
+          "2025": {
+            "current_iteration": 390,
+            "final_head_iteration": 400,
+            "final_head_capacity_resolved": true,
+            "validation_year": 2024,
+            "final_head_source": {
+              "best_iteration": 400,
+              "capacity_resolved": true,
+              "validation_year": 2024,
+              "source": "new_final_head_prior_year_tuning",
+              "source_task_id": "mfe20_2025_final_head_tuning",
+              "source_result": {
+                "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/tuning/fold_2025/h20/breakout_retest_levels/task_result.json",
+                "size": 7689,
+                "sha256": "8faee86ca5b431ef507b32d5517f6dcae3fb34d1b7f9f247e0e9f48088174f8b"
+              }
+            },
+            "current_source_task_id": "mfe20_2025_breakout_retest_levels_outer"
+          }
+        }
+      }
+    },
+    "formal_candidates": [
+      "final_head_prior_year",
+      "fixed_256",
+      "fixed_512"
+    ],
+    "fixed_iterations": {
+      "fixed_256": 256,
+      "fixed_512": 512
+    }
+  },
+  "evidence": {
+    "h10:final_head_prior_year": {
+      "horizon": 10,
+      "name": "turnover_cost_proxy",
+      "families": [
+        "turnover_cost_proxy"
+      ],
+      "policy": "final_head_prior_year",
+      "combined_top5_test": {
+        "z_statistic": 0.8726169042445242,
+        "p_value_one_sided": 0.19143596177481087
+      },
+      "iterations_2023_2024_2025": [
+        86,
+        241,
+        728
+      ],
+      "baseline_iterations_2023_2024_2025": [
+        74,
+        230,
+        436
+      ],
+      "gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_years": 2,
+          "median_top5_mfe_delta": 9.357811449113961e-05,
+          "worst_top5_mfe_delta": -2.129948228801841e-05,
+          "top5_fdr_q_value": 0.229723154129773,
+          "worst_rank_ic_delta": 0.00018809835428143903,
+          "nonnegative_tail_hit_years": 2,
+          "median_relative_mae_harm": -0.0010499427400877392,
+          "worst_relative_mae_harm": 0.005190500407177945,
+          "path_guardrail_rejected": false,
+          "capacity_unresolved": false
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          -2.129948228801841e-05,
+          0.0002972886363892881,
+          9.357811449113961e-05
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.0004951816866426528,
+          0.00018809835428143903,
+          0.001111784816422704
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.00021816460908116294,
+          0.0007211843478725442,
+          -0.0012449612962722731
+        ],
+        "relative_mae_harm_2023_2024_2025": [
+          -0.005460339568155392,
+          -0.0010499427400877392,
+          0.005190500407177945
+        ]
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              -3.2382541846553455e-05,
+              -1.058634442247938e-05,
+              0.0013441655604844852
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 1.058634442247938e-05,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              -6.95437317046386e-05,
+              0.00047800957267581616,
+              0.0022548677863433704
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "relationship": {
+        "material": true,
+        "materially_changed_years": [
+          2025
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.9988820299951252,
+          0.9991411594881674,
+          0.981715415726663
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.9549496632860881,
+          0.9363174185135359,
+          0.7246695767503301
+        ]
+      }
+    },
+    "h10:fixed_256": {
+      "horizon": 10,
+      "name": "turnover_cost_proxy",
+      "families": [
+        "turnover_cost_proxy"
+      ],
+      "policy": "fixed_256",
+      "combined_top5_test": {
+        "z_statistic": 2.498258575928301,
+        "p_value_one_sided": 0.00624025605572223
+      },
+      "iterations_2023_2024_2025": [
+        256,
+        256,
+        256
+      ],
+      "baseline_iterations_2023_2024_2025": [
+        74,
+        230,
+        436
+      ],
+      "gate": {
+        "passed": true,
+        "checks": {
+          "positive_top5_years": 2,
+          "median_top5_mfe_delta": 0.0005111036426390856,
+          "worst_top5_mfe_delta": -8.975179582240884e-05,
+          "top5_fdr_q_value": 0.01872076816716669,
+          "worst_rank_ic_delta": -0.0015284049621686639,
+          "nonnegative_tail_hit_years": 2,
+          "median_relative_mae_harm": -0.0042005468945708335,
+          "worst_relative_mae_harm": -0.0005967497761436569,
+          "path_guardrail_rejected": false,
+          "capacity_unresolved": false
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.001248644104599159,
+          0.0005111036426390856,
+          -8.975179582240884e-05
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.008210687048823969,
+          0.000828327162170093,
+          -0.0015284049621686639
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.005459028373120999,
+          0.001067931534678069,
+          -0.0009477891877446248
+        ],
+        "relative_mae_harm_2023_2024_2025": [
+          -0.012586185949555295,
+          -0.0005967497761436569,
+          -0.0042005468945708335
+        ]
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              -5.6562461450138264e-05,
+              8.985853053569307e-06,
+              -0.0002841437458864774
+            ],
+            "significant_harm_years": 1,
+            "median_absolute_harm": 5.6562461450138264e-05,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.0005937249097652107,
+              0.0009242677235471942,
+              -0.0007905605713757488
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "relationship": {
+        "material": true,
+        "materially_changed_years": [
+          2023,
+          2025
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.9595166622865358,
+          0.9984481832126949,
+          0.9841449563304949
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.7157027618262688,
+          0.9130403659243229,
+          0.7553006274224744
+        ]
+      }
+    },
+    "h10:fixed_512": {
+      "horizon": 10,
+      "name": "turnover_cost_proxy",
+      "families": [
+        "turnover_cost_proxy"
+      ],
+      "policy": "fixed_512",
+      "combined_top5_test": {
+        "z_statistic": 2.683335847097539,
+        "p_value_one_sided": 0.003644587469258782
+      },
+      "iterations_2023_2024_2025": [
+        512,
+        512,
+        512
+      ],
+      "baseline_iterations_2023_2024_2025": [
+        74,
+        230,
+        436
+      ],
+      "gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_years": 3,
+          "median_top5_mfe_delta": 0.0013821620223402361,
+          "worst_top5_mfe_delta": 0.00018782394836623,
+          "top5_fdr_q_value": 0.01872076816716669,
+          "worst_rank_ic_delta": 0.00037372372855983395,
+          "nonnegative_tail_hit_years": 1,
+          "median_relative_mae_harm": -5.5753837819527696e-05,
+          "worst_relative_mae_harm": 0.0031462507757682445,
+          "path_guardrail_rejected": false,
+          "capacity_unresolved": false
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.002080548109237896,
+          0.0013821620223402361,
+          0.00018782394836623
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.007489426071995359,
+          0.00037372372855983395,
+          0.0005412054148084503
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.008151300254361966,
+          -0.002354669713281205,
+          -0.00025263890371225104
+        ],
+        "relative_mae_harm_2023_2024_2025": [
+          -0.02257602196328401,
+          -5.5753837819527696e-05,
+          0.0031462507757682445
+        ]
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              0.0004986503361335453,
+              0.0006299191958436503,
+              0.0002698230312371931
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.0028248768428471745,
+              0.0031317242368791077,
+              0.0004340820688517316
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "relationship": {
+        "material": true,
+        "materially_changed_years": [
+          2023,
+          2024
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.8974113277692932,
+          0.9617181705813712,
+          0.9970696273067284
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.5625307054831634,
+          0.6488744706871865,
+          0.883287750168138
+        ]
+      }
+    },
+    "h20:final_head_prior_year": {
+      "horizon": 20,
+      "name": "breakout_retest_levels",
+      "families": [
+        "breakout_retest_levels"
+      ],
+      "policy": "final_head_prior_year",
+      "combined_top5_test": {
+        "z_statistic": -0.5787684034474977,
+        "p_value_one_sided": 0.7186272731958109
+      },
+      "iterations_2023_2024_2025": [
+        41,
+        48,
+        400
+      ],
+      "baseline_iterations_2023_2024_2025": [
+        8,
+        148,
+        390
+      ],
+      "gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_years": 1,
+          "median_top5_mfe_delta": -6.598156121054425e-05,
+          "worst_top5_mfe_delta": -0.00622363153149951,
+          "top5_fdr_q_value": 0.7186272731958109,
+          "worst_rank_ic_delta": -0.014617538671583667,
+          "nonnegative_tail_hit_years": 1,
+          "median_relative_mae_harm": -0.00034814144592210106,
+          "worst_relative_mae_harm": 0.005026357516497937,
+          "path_guardrail_rejected": false,
+          "capacity_unresolved": false
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.006257422557357252,
+          -0.00622363153149951,
+          -6.598156121054425e-05
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.020850285489284224,
+          -0.014617538671583667,
+          -5.998761999942848e-05
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.028114690233994044,
+          -0.014167641933075794,
+          -0.00020667946570551124
+        ],
+        "relative_mae_harm_2023_2024_2025": [
+          -0.03157407140469892,
+          0.005026357516497937,
+          -0.00034814144592210106
+        ]
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              -0.00314447381101554,
+              -0.0008270675718003584,
+              -2.7542765402526966e-08
+            ],
+            "significant_harm_years": 1,
+            "median_absolute_harm": 0.0008270675718003584,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              -0.002379205009255822,
+              -0.00527192762986542,
+              0.00011269343179792294
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.002379205009255822,
+            "rejected": false
+          }
+        }
+      },
+      "relationship": {
+        "material": true,
+        "materially_changed_years": [
+          2023,
+          2024
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.8815994767138751,
+          0.9232380848943893,
+          0.9998012656922771
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.33707991178695557,
+          0.49057525565694887,
+          0.9628776938966892
+        ]
+      }
+    },
+    "h20:fixed_256": {
+      "horizon": 20,
+      "name": "breakout_retest_levels",
+      "families": [
+        "breakout_retest_levels"
+      ],
+      "policy": "fixed_256",
+      "combined_top5_test": {
+        "z_statistic": 1.7841856847825324,
+        "p_value_one_sided": 0.03719674882445311
+      },
+      "iterations_2023_2024_2025": [
+        256,
+        256,
+        256
+      ],
+      "baseline_iterations_2023_2024_2025": [
+        8,
+        148,
+        390
+      ],
+      "gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_years": 2,
+          "median_top5_mfe_delta": 0.0009163513755952821,
+          "worst_top5_mfe_delta": -0.00027857050634506837,
+          "top5_fdr_q_value": 0.056348509495868254,
+          "worst_rank_ic_delta": -0.002430883689049874,
+          "nonnegative_tail_hit_years": 1,
+          "median_relative_mae_harm": -0.00015107362130883928,
+          "worst_relative_mae_harm": 0.001084718334471546,
+          "path_guardrail_rejected": false,
+          "capacity_unresolved": false
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.011213115675226771,
+          0.0009163513755952821,
+          -0.00027857050634506837
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.03722308338659551,
+          0.004711364499630389,
+          -0.002430883689049874
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.0402401346253164,
+          -0.0017585948121499823,
+          -0.0014424369150444977
+        ],
+        "relative_mae_harm_2023_2024_2025": [
+          -0.026960977187913016,
+          0.001084718334471546,
+          -0.00015107362130883928
+        ]
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              -0.001907493946525849,
+              0.000501705640746172,
+              1.9614260128012635e-05
+            ],
+            "significant_harm_years": 1,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.006898537135553106,
+              0.003072599820411299,
+              -0.000731557909931656
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "relationship": {
+        "material": true,
+        "materially_changed_years": [
+          2023,
+          2024,
+          2025
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.7171331820021299,
+          0.9811452962001235,
+          0.9908994830951429
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.26317765234920687,
+          0.7238404901690566,
+          0.7913493197984341
+        ]
+      }
+    },
+    "h20:fixed_512": {
+      "horizon": 20,
+      "name": "breakout_retest_levels",
+      "families": [
+        "breakout_retest_levels"
+      ],
+      "policy": "fixed_512",
+      "combined_top5_test": {
+        "z_statistic": 1.7796616758641328,
+        "p_value_one_sided": 0.0375656729972455
+      },
+      "iterations_2023_2024_2025": [
+        512,
+        512,
+        512
+      ],
+      "baseline_iterations_2023_2024_2025": [
+        8,
+        148,
+        390
+      ],
+      "gate": {
+        "passed": false,
+        "checks": {
+          "positive_top5_years": 3,
+          "median_top5_mfe_delta": 0.0012124973968726633,
+          "worst_top5_mfe_delta": 0.00010271552589681872,
+          "top5_fdr_q_value": 0.056348509495868254,
+          "worst_rank_ic_delta": 0.001849121542098627,
+          "nonnegative_tail_hit_years": 2,
+          "median_relative_mae_harm": 0.0032013133217085876,
+          "worst_relative_mae_harm": 0.008366543020103423,
+          "path_guardrail_rejected": false,
+          "capacity_unresolved": false
+        },
+        "top5_mfe_delta_2023_2024_2025": [
+          0.010727884886989442,
+          0.0012124973968726633,
+          0.00010271552589681872
+        ],
+        "rank_ic_delta_2023_2024_2025": [
+          0.035678410373683966,
+          0.0066873344321941655,
+          0.001849121542098627
+        ],
+        "tail_hit_delta_2023_2024_2025": [
+          0.03420384438830839,
+          -0.00304338649455906,
+          0.00011083212812220795
+        ],
+        "relative_mae_harm_2023_2024_2025": [
+          -0.02762723541374046,
+          0.008366543020103423,
+          0.0032013133217085876
+        ]
+      },
+      "path_guardrail": {
+        "rejected": false,
+        "metrics": {
+          "top5_pre_peak_mae_mean": {
+            "delta_2023_2024_2025": [
+              -0.0006037678156494623,
+              0.0016868506153388764,
+              0.0003595029462959524
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          },
+          "top5_endpoint_return_mean": {
+            "delta_2023_2024_2025": [
+              0.010199522385959175,
+              0.006607637798618424,
+              0.0009290317213385084
+            ],
+            "significant_harm_years": 0,
+            "median_absolute_harm": 0.0,
+            "rejected": false
+          }
+        }
+      },
+      "relationship": {
+        "material": true,
+        "materially_changed_years": [
+          2023,
+          2024
+        ],
+        "prediction_spearman_2023_2024_2025": [
+          0.6442394018722726,
+          0.9373879405182326,
+          0.9944739295084843
+        ],
+        "top5_jaccard_2023_2024_2025": [
+          0.22701672104496756,
+          0.5712238635918435,
+          0.8228364544962815
+        ]
+      }
+    }
+  },
+  "decision": {
+    "status": "completed_final_head_capacity_audit",
+    "final_capacity_policies": {
+      "10": {
+        "head": "turnover_cost_proxy",
+        "policy": "fixed_256",
+        "adopted_challenger": true,
+        "contract_change": {
+          "material": true,
+          "materially_changed_years": [
+            2023,
+            2025
+          ],
+          "prediction_spearman_2023_2024_2025": [
+            0.9595166622865358,
+            0.9984481832126949,
+            0.9841449563304949
+          ],
+          "top5_jaccard_2023_2024_2025": [
+            0.7157027618262688,
+            0.9130403659243229,
+            0.7553006274224744
+          ]
+        }
+      },
+      "20": {
+        "head": "breakout_retest_levels",
+        "policy": "current_base_head_prior_year",
+        "adopted_challenger": false,
+        "contract_change": {
+          "material": false,
+          "materially_changed_years": [],
+          "status": "baseline_retained"
+        }
+      }
+    },
+    "lightgbm_capacity_research_closed": true,
+    "requires_entry_contract_v3": true,
+    "adopted_horizons": [
+      10
+    ],
+    "v3_material_trigger_horizons": [
+      10
+    ],
+    "v3_rebuild_horizons": [
+      10
+    ],
+    "entry_contract_status": "v3_rebuild_required",
+    "post_entry_ab_status": "v2_only_revalidation_required_before_future_holding_research",
+    "does_not_select": [
+      "MFE objective",
+      "feature family",
+      "learning rate",
+      "tree shape",
+      "state or risk capacity",
+      "deep model",
+      "reinforcement learning",
+      "entry score fusion",
+      "holding model",
+      "exit rule",
+      "switching rule",
+      "holding period",
+      "slot count",
+      "leverage",
+      "stop loss",
+      "account policy"
+    ],
+    "entry_contract_v3_status": "completed",
+    "entry_contract_active": "seq100_entry_contract_oos_v3",
+    "entry_contract_v3_manifest": {
+      "path": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3/contract_manifest.json",
+      "size": 8120,
+      "sha256": "72f36e18eec07e1e4bc1c3421a744fdb04af4b2581488c2e64bac076828ce17a"
+    }
+  },
+  "disclosure": {
+    "fold_reuse": "owner-authorized repeatedly reused recent decision folds, not a pristine final holdout",
+    "multiple_testing": "BH correction covers all six horizon-by-formal-policy tests.",
+    "top5": "Top 5% is a strong-candidate diagnostic, not a slot count.",
+    "model_change": "Only the capacity policy changed; features, objective, learning rate, tree shape, regularization, and folds remained fixed.",
+    "2026": "No 2026 row, outcome, prediction, or metric was read."
+  },
+  "full_output": {
+    "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/summary.json",
+    "size": 840956,
+    "sha256": "a3e58831eb3fb9add1b0e4c2910fbde1aabc623ccf534e0d94ef01ae7e74789d"
+  }
+}
