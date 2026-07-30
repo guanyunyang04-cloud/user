@@ -7,9 +7,9 @@ Updated: 2026-07-30
 Build a daily A-share main-board selector that keeps upside opportunity, path
 quality, and pre-peak adversity separate. Entry output structure is frozen,
 the supervised post-entry update challenge is finished, and the first
-continuous executable-account monetization audit is complete. No score fusion,
-deployment policy, holding period, stop, deep model, or reinforcement-learning
-policy has been selected.
+continuous executable-account monetization audit plus a true-label economic
+ceiling audit are complete. No score fusion, deployment policy, holding period,
+stop, deep model, or reinforcement-learning policy has been selected.
 
 ## Active entry contract
 
@@ -161,6 +161,55 @@ Retained result:
 
 - `daily_research/research_records/seq100/seq100_v4_economic_realizability_v1/result.json`
 
+## True-label economic ceiling
+
+`seq100_true_label_economic_ceiling_v1` deliberately replaced v4 predictions
+with realized future labels to answer whether the research targets themselves
+contain economically realizable opportunity. This is a hindsight ceiling, not
+an OOS strategy result.
+
+- Oracle book: 727 signal/mark dates, 2,239,539 candidates, 2,199,108 complete
+  D10 labels and 2,168,585 complete D20 labels.
+- Stored MFE labels were independently reconstructed from PIT future paths;
+  maximum reconstruction error was `0`.
+- It ran 864 finite-capital account tasks: true-label daily reranking, sale at
+  the first legal true-peak close, and sale at the first legal open after that
+  peak. All modes used the same costs, T+1, board lots, minimum commission,
+  trading masks, lifecycle handling, and continuous 2023-2025 account as the
+  v4 economic audit.
+- All 432 paired-cost configurations passed the pre-registered economic gates.
+  Every family/mode/exposure pair formed every possible stable slot or
+  slot-buffer region, and all 36 pairs also passed HAC/BH/bootstrap
+  confirmation.
+- Maximum relative cash/position conservation error was
+  `1.477e-15`; 2026 reads were zero.
+- Actual-label Top-5% mean MFE was `22.35%/28.21%/29.58%` for D10 and
+  `34.39%/44.15%/47.51%` for D20 in 2023/2024/2025. All six groups had a
+  positive approximate round-trip return after base costs.
+- Even the worst pre-registered configuration compounded positively under
+  stress costs. A relaxed exact single-slot interval ceiling produced
+  D10/D20 base-cost wealth multipliers around `1.68e31/4.08e30`.
+- True pre-peak-risk vetoes improved the economic ceiling in the daily mapping;
+  the true K3 state-low veto alone generally reduced it. This is evidence for
+  the risk coordinate's economic role, not proof that current risk predictions
+  are good enough.
+
+Formal conclusion:
+
+`mfe_direction_has_strong_executable_true_label_ceiling`
+
+The prior v4 conclusion remains unchanged: predicted v4 signals were not
+robustly monetized. The gap is therefore prediction/selection/realization, not
+an absence of profitable opportunity in the MFE labels. The astronomical
+hindsight compounding is not deployable: most oracle orders exceed the
+reported participation thresholds, and the frozen slippage model has no
+endogenous market impact. It establishes direction and loss budget, not
+capacity or live expected return.
+
+Retained result:
+
+- `daily_research/research_records/seq100/seq100_true_label_economic_ceiling_v1/result.json`
+
 ## Prior evidence retained
 
 - The bounded feature-union audit found no eligible union. Keep D10 turnover
@@ -176,14 +225,18 @@ Retained result:
 
 Use v4 as a frozen research signal contract and recompute its five coordinates
 daily. Do not create the rejected independent supervised LightGBM holding
-update heads. Do not select any of the three isolated profitable account cells
-or consume 2026.
+update heads. Do not select an oracle account as a policy, reinterpret its
+hindsight return as deployable performance, select any of the three isolated
+v4 profitable cells, or consume 2026.
 
-The next justified research step is a read-only failure-mechanism audit of the
-state/risk-veto neighborhood: separate opportunity realization, turnover/cost,
-limit/suspension/terminal-recovery, and exposure effects. Only a preregistered
-policy supported by a stable neighborhood may be frozen for 2026 or prospective
-validation. Do not reopen completed LightGBM capacity, feature-union, or
-five-target A/B searches without new evidence.
+The next justified research step is a candidate-aligned prediction-to-oracle
+gap audit. It should measure opportunity capture, true-label rank/selection
+overlap, realized peak capture, cost/turnover, trading blockage, lifecycle
+recovery, market exposure, and participation/capacity in one matched
+decomposition. This should determine whether the largest loss is in MFE
+prediction, the daily hold/switch mapping, peak realization, or execution
+capacity before changing model class or fitting another policy. Do not reopen
+completed LightGBM capacity, feature-union, or five-target A/B searches without
+new evidence.
 
 There is no active training process.

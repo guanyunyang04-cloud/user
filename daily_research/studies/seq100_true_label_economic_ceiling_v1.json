@@ -1,0 +1,149 @@
+{
+  "study_id": "seq100_true_label_economic_ceiling_v1",
+  "objective": "separate prediction error, daily reranking, peak realization, next-open execution and the global single-slot interval ceiling by replaying the frozen 2023-2025 account with true future labels",
+  "sources": {
+    "v4_economic_study": "daily_research/studies/seq100_v4_economic_realizability_v1.json",
+    "v4_signal_book_manifest": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
+    "v4_economic_result": "daily_research/research_records/seq100/seq100_v4_economic_realizability_v1/result.json",
+    "entry_contract_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+    "base_feature_manifest": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+    "label_manifest": "tmp/seq100_learnability_inputs/attempt_001/label_manifest.json",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
+  },
+  "period": {
+    "signal_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "continuous_account": true,
+    "annual_reset": false,
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "forbidden_year": 2026,
+    "mfe10_latest_complete_signal_date": "2025-12-17",
+    "mfe20_latest_complete_signal_date": "2025-12-03",
+    "incomplete_tail_semantics": "stop_new_oracle_decisions_after_each_target_cutoff_and_continue_marking_existing_positions_through_2025_12_31",
+    "oracle_role": "deliberate hindsight economic ceiling, not an OOS strategy result"
+  },
+  "oracle": {
+    "modes": [
+      "true_label_daily_rerank",
+      "true_label_peak_close_hold",
+      "true_label_post_peak_next_open_hold"
+    ],
+    "families": [
+      "mfe10_primary",
+      "mfe20_primary",
+      "dual_mfe_maximin",
+      "dual_mfe_state_veto",
+      "dual_mfe_risk_veto",
+      "dual_mfe_state_risk_veto"
+    ],
+    "exposure_modes": [
+      "target_full",
+      "strong_candidate_cash"
+    ],
+    "slot_counts": [
+      1,
+      3,
+      6,
+      12,
+      24,
+      48
+    ],
+    "daily_rerank_buffer_multipliers": [
+      0.0,
+      0.5,
+      1.0,
+      2.0
+    ],
+    "cost_scenarios": [
+      "base",
+      "stress"
+    ],
+    "mfe10_exit_horizon": 10,
+    "mfe20_and_dual_exit_horizon": 20,
+    "peak_tie_break": "first_legal_sellable_close_at_the_maximum",
+    "post_peak_exit": "request_sale_at_peak_close_and_execute_at_the_first_subsequent_legal_open",
+    "entry_fill_foresight": true,
+    "state_semantics": "true through-2022 fixed-K3 state_10 label used only by explicitly named oracle veto families",
+    "risk_semantics": "true pre_peak_mae_10/20 ranks, higher is safer",
+    "daily_rerank_expected_tasks": 576,
+    "scheduled_hold_expected_tasks": 288,
+    "expected_task_count": 864
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "equal_target_slots": true,
+    "daily_weight_rebalance": false,
+    "allow_pyramiding": false,
+    "allow_leverage": false,
+    "cash_interest_rate": 0.0,
+    "terminal_liquidation": false,
+    "terminal_exit_cost_accrual": true
+  },
+  "global_ceiling": {
+    "enabled": true,
+    "capacity": 1,
+    "mode": "weighted_interval_scheduling_on_true_peak_close_trades",
+    "objective": "maximize compounded proportional-cost wealth across non-overlapping label-native trades",
+    "cost_scenarios": [
+      "base",
+      "stress"
+    ],
+    "horizons": [
+      10,
+      20
+    ],
+    "board_lot_and_minimum_commission": "omitted_from_this_relaxed_upper_bound_and retained_in_all_account_oracles"
+  },
+  "decision": {
+    "minimum_consecutive_slot_band": 3,
+    "single_configuration_requires": [
+      "base and stress terminal accrued return above zero",
+      "base and stress terminal relative excess above zero",
+      "at least two positive absolute years under base costs",
+      "at least two positive excess years under base costs"
+    ],
+    "strong_executable_label_ceiling": "at least one family and exposure has a consecutive three-slot passing band in true_label_post_peak_next_open_hold",
+    "strong_label_native_ceiling": "at least one family and exposure has a consecutive three-slot passing band in true_label_peak_close_hold",
+    "daily_mapping_ceiling": "at least one family and exposure has the preregistered three-slot by two-buffer passing rectangle in true_label_daily_rerank"
+  },
+  "statistics": {
+    "minimum_positive_absolute_years": 2,
+    "minimum_positive_excess_years": 2,
+    "daily_rerank_slot_width": 3,
+    "daily_rerank_buffer_width": 2,
+    "scheduled_slot_width": 3,
+    "hac_maximum_lag": 20,
+    "maximum_hac_p_value": 0.05,
+    "bootstrap_block_length": 20,
+    "bootstrap_repetitions": 5000,
+    "bootstrap_seed": 7,
+    "bootstrap_lower_quantile": 0.10,
+    "maximum_bh_q_value": 0.10
+  },
+  "outputs": {
+    "output_dir": "daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1",
+    "record_dir": "daily_research/research_records/seq100/seq100_true_label_economic_ceiling_v1"
+  },
+  "interfaces": [
+    "--status",
+    "--prepare",
+    "--run-pending",
+    "--evaluate",
+    "--self-test"
+  ],
+  "non_selections": [
+    "deployment policy",
+    "single oracle winner",
+    "entry score fusion",
+    "fixed deployable holding period",
+    "stop loss",
+    "take profit",
+    "MA5 exit",
+    "deep model",
+    "reinforcement learning",
+    "2026 validation"
+  ]
+}

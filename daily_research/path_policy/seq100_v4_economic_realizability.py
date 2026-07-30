@@ -935,20 +935,31 @@ def _buy_position(
     allocation = min(float(available_cash), float(allocated_cash))
     slippage_rate = float(costs.slippage_bps) * float(slippage_multiplier) / 10_000.0
     fill_price = float(raw_open) * (1.0 + slippage_rate)
-    shares = int(
-        math.floor(allocation / (fill_price * costs.lot_size)) * costs.lot_size
-    )
-    while shares > 0:
-        fill_notional = shares * fill_price
+    maximum_lots = math.floor(allocation / (fill_price * costs.lot_size))
+
+    def cash_outflow_for_lots(lots: int) -> float:
+        fill_notional = int(lots) * int(costs.lot_size) * fill_price
         commission = max(
             float(costs.minimum_commission_cny),
             fill_notional * float(costs.commission_bps) / 10_000.0,
         )
         transfer = fill_notional * float(costs.transfer_fee_bps) / 10_000.0
-        cash_outflow = fill_notional + commission + transfer
-        if cash_outflow <= min(float(available_cash), allocation) + 1.0e-9:
-            break
-        shares -= int(costs.lot_size)
+        return float(fill_notional + commission + transfer)
+
+    cash_limit = min(float(available_cash), allocation)
+    if cash_outflow_for_lots(maximum_lots) <= cash_limit + 1.0e-9:
+        affordable_lots = maximum_lots
+    else:
+        lower = 0
+        upper = maximum_lots
+        while lower < upper:
+            middle = (lower + upper + 1) // 2
+            if cash_outflow_for_lots(middle) <= cash_limit + 1.0e-9:
+                lower = middle
+            else:
+                upper = middle - 1
+        affordable_lots = lower
+    shares = int(affordable_lots) * int(costs.lot_size)
     if shares <= 0:
         return None, {}
     gross_notional = float(shares) * float(raw_open)
@@ -1121,6 +1132,12 @@ def plan_orders(
 ) -> PendingOrders:
     selector_column = book.selector_column(spec.family)
     ordered = book.symbols_for_day(spec.family, day)
+    if len(ordered) == 0:
+        return PendingOrders(
+            signal_day=int(day),
+            sells=(),
+            unpaired_buys=(),
+        )
     gate_set = _daily_gate_set(
         book=book,
         spec=spec,
@@ -1210,7 +1227,7 @@ def plan_orders(
                 paired_buy_symbol_idx=candidate,
             )
         )
-    candidate_count = book.candidate_count(day)
+    candidate_count = len(ordered)
     buffer_value = replacement_buffer(
         multiplier=spec.buffer_multiplier,
         slot_count=spec.slot_count,
