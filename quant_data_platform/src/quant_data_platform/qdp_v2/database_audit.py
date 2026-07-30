@@ -11,8 +11,9 @@ import argparse
 import json
 import os
 import tempfile
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 import pandas as pd
 import pyarrow.parquet as pq
@@ -379,8 +380,9 @@ def audit_database(
     reports: list[dict[str, Any]] = []
     manifests: dict[str, DatasetManifest] = {}
     cross_checks: dict[str, Any] = {}
-    with _audit_temp_directory(workspace) as temp:
-        with open_guarded_duckdb(temp_directory=temp, threads=selected_threads) as con:
+    with _audit_temp_directory(workspace) as temp, open_guarded_duckdb(
+        temp_directory=temp, threads=selected_threads
+    ) as con:
             for domain, dataset_id in sorted(datasets.items()):
                 manifest = _active_manifest(root, dataset_id, domain)
                 manifests[domain] = manifest
@@ -415,7 +417,6 @@ def audit_database(
                             consistency,
                         )
                     )
-                coverage = float(consistency["complete_coverage_ratio"])
                 missing_days = int(consistency["missing_positive_daily_count"])
                 intraday_history_complete = bool(
                     dict(active.get("scope", {}) or {}).get(
@@ -2209,6 +2210,23 @@ def _auxiliary_semantics_check(
     )
     checks["industry_invalid_or_future_count"] = industry_invalid
     blocking += industry_invalid
+    industry_unknown = int(
+        con.execute(
+            f"SELECT count(*) FROM {industry} WHERE "
+            "lower(trim(industry)) IN ('unknown','unclassified') OR "
+            "industry_fill_method='unavailable'"
+        ).fetchone()[0]
+    )
+    checks["industry_unknown_rows_physical"] = industry_unknown
+    declared_unknown = manifests["industry_concept"].quality.get("unknown_industry_rows")
+    if declared_unknown is not None and int(declared_unknown) != industry_unknown:
+        checks["industry_unknown_manifest_mismatch"] = {
+            "declared": int(declared_unknown),
+            "physical": industry_unknown,
+        }
+        blocking += 1
+    else:
+        checks["industry_unknown_manifest_mismatch"] = None
 
     share = tables["share_capital"]
     share_invalid = int(
@@ -2240,7 +2258,7 @@ def _auxiliary_semantics_check(
         ).fetchone()[0]
     )
     valuation_nulls = con.execute(
-        f"SELECT count(*) FILTER(WHERE pe IS NULL), "
+        "SELECT count(*) FILTER(WHERE pe IS NULL), "
         "count(*) FILTER(WHERE pb IS NULL), "
         "count(*) FILTER(WHERE turnover_rate IS NULL) FROM " + valuation
     ).fetchone()
@@ -2312,7 +2330,7 @@ def _auxiliary_semantics_check(
 
     index = tables["index_constituents"]
     index_row = con.execute(
-        f"SELECT count(*) FILTER(WHERE try_cast(source_snapshot_date AS DATE)>"
+        "SELECT count(*) FILTER(WHERE try_cast(source_snapshot_date AS DATE)>"
         "try_cast(trade_date AS DATE)), min(trade_date), max(trade_date), "
         "max(source_snapshot_date), count(distinct index_symbol) FROM " + index
     ).fetchone()

@@ -16,7 +16,6 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from quant_data_platform.core.json_io import json_safe
@@ -38,6 +37,7 @@ from quant_data_platform.qdp_v2.manifest import (
 from quant_data_platform.qdp_v2.recent_market_repair import (
     INTRADAY_COLUMNS,
     INTRADAY_DOMAIN,
+    _validate_intraday_against_daily,
     _validate_intraday_frame,
     _write_final_parquet,
 )
@@ -59,8 +59,6 @@ API_FIELDS = (
     "vol",
     "amount",
 )
-VOLUME_SCALES = (1.0, 100.0, 0.01)
-AMOUNT_SCALES = (1.0, 1000.0, 0.001, 100.0, 0.01)
 
 
 class HistoricalIntradayRepairError(RuntimeError):
@@ -251,124 +249,24 @@ def _normalize_stk_mins(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
     return frame
 
 
-def _best_scale(
-    observed: pd.Series,
-    reference: pd.Series,
-    candidates: Sequence[float],
-) -> float:
-    left = pd.to_numeric(observed, errors="coerce").to_numpy(dtype="float64")
-    right = pd.to_numeric(reference, errors="coerce").to_numpy(dtype="float64")
-    valid = np.isfinite(left) & np.isfinite(right) & (left > 0) & (right > 0)
-    if not valid.any():
-        return 1.0
-    scores = {
-        float(scale): float(
-            np.median(
-                np.abs(
-                    np.log(
-                        np.maximum(left[valid] * float(scale), 1e-12)
-                        / np.maximum(right[valid], 1e-12)
-                    )
-                )
-            )
-        )
-        for scale in candidates
-    }
-    return min(scores, key=lambda item: (scores[item], abs(np.log(item))))
-
-
 def _validate_against_daily(
     frame: pd.DataFrame,
     reference: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    if frame.empty:
-        return frame, {
-            "accepted_day_count": 0,
-            "rejected_daily_consistency_day_count": 0,
+    output, unresolved, diagnostics = _validate_intraday_against_daily(
+        frame,
+        reference,
+        source_name="tushare_compatible_stk_mins_daily_validated",
+    )
+    rejection_counts = dict(diagnostics.get("rejection_counts", {}) or {})
+    diagnostics.update(
+        {
+            "rejected_daily_consistency_day_count": len(unresolved),
+            "rejected_volume_100x_day_count": int(
+                rejection_counts.get("volume_100x_anomaly", 0)
+            ),
         }
-    aggregate = (
-        frame.groupby(["symbol", "trade_date"], as_index=False)
-        .agg(
-            open=("open", "first"),
-            high=("high", "max"),
-            low=("low", "min"),
-            close=("close", "last"),
-            volume=("volume", "sum"),
-            amount=("amount", "sum"),
-        )
-        .merge(
-            reference,
-            on=["symbol", "trade_date"],
-            how="inner",
-            suffixes=("_five", "_day"),
-            validate="one_to_one",
-        )
     )
-    volume_scale = _best_scale(
-        aggregate["volume_five"],
-        aggregate["volume_day"],
-        VOLUME_SCALES,
-    )
-    amount_scale = _best_scale(
-        aggregate["amount_five"],
-        aggregate["amount_day"],
-        AMOUNT_SCALES,
-    )
-    frame = frame.copy()
-    frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce") * volume_scale
-    frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce") * amount_scale
-    for column in ("volume_five", "amount_five"):
-        scale = volume_scale if column == "volume_five" else amount_scale
-        aggregate[column] = aggregate[column] * scale
-    price_rel = np.column_stack(
-        [
-            (aggregate[f"{column}_five"] - aggregate[f"{column}_day"]).abs()
-            / aggregate[f"{column}_day"].abs().clip(lower=1.0)
-            for column in ("open", "high", "low", "close")
-        ]
-    ).max(axis=1)
-    volume_rel = (aggregate["volume_five"] - aggregate["volume_day"]).abs() / aggregate[
-        "volume_day"
-    ].abs().clip(lower=1.0)
-    amount_rel = (aggregate["amount_five"] - aggregate["amount_day"]).abs() / aggregate[
-        "amount_day"
-    ].abs().clip(lower=1.0)
-    volume_ratio = aggregate["volume_five"] / aggregate["volume_day"].replace(
-        0.0,
-        np.nan,
-    )
-    volume_100x = volume_ratio.between(95.0, 105.0) | volume_ratio.between(
-        0.0095,
-        0.0105,
-    )
-    accepted = (
-        (price_rel <= 0.02)
-        & ((volume_rel <= 0.05) | (amount_rel <= 0.05))
-        & ~volume_100x.fillna(False)
-    )
-    accepted_pairs = pd.MultiIndex.from_frame(
-        aggregate.loc[accepted, ["symbol", "trade_date"]]
-    )
-    frame_pairs = pd.MultiIndex.from_frame(frame[["symbol", "trade_date"]])
-    output = frame.loc[frame_pairs.isin(accepted_pairs)].copy()
-    diagnostics = {
-        "accepted_day_count": int(accepted.sum()),
-        "rejected_daily_consistency_day_count": int((~accepted).sum()),
-        "rejected_volume_100x_day_count": int(
-            volume_100x.fillna(False).sum()
-        ),
-        "volume_scale": float(volume_scale),
-        "amount_scale": float(amount_scale),
-        "maximum_accepted_price_relative_error": (
-            float(price_rel[accepted].max()) if accepted.any() else None
-        ),
-        "maximum_accepted_volume_relative_error": (
-            float(volume_rel[accepted].max()) if accepted.any() else None
-        ),
-        "maximum_accepted_amount_relative_error": (
-            float(amount_rel[accepted].max()) if accepted.any() else None
-        ),
-    }
     return output.reset_index(drop=True), diagnostics
 
 

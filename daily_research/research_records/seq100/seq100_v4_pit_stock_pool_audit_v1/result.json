@@ -1,0 +1,491 @@
+{
+  "schema": "seq100_v4_pit_stock_pool_audit/v1",
+  "status": "completed",
+  "study_id": "seq100_v4_pit_stock_pool_audit_v1",
+  "decision": {
+    "status": "evaluated",
+    "default_pool": "all_pit",
+    "pool_decision": "not_selected_by_single_configuration",
+    "minimum_candidate_gate": 480,
+    "minute_availability_is_membership_filter": false,
+    "forbidden_2026_row_count": 0,
+    "account_task_counts": {
+      "csi800_pit__global_rank_then_filter": 672,
+      "csi800_pit__filter_then_pool_rerank": 672,
+      "quality_liquidity_pit__global_rank_then_filter": 672,
+      "quality_liquidity_pit__filter_then_pool_rerank": 672
+    },
+    "all_pit_reuse": {
+      "all_pit__global_rank_then_filter": {
+        "source_root": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_economic_realizability_v1",
+        "source_signal_book": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_economic_realizability_v1\\signal_book\\manifest.json",
+        "source_study_sha256": "878cb84bc54f282927ff3cca6e5dd0c6c2f7ec060032b6f62c55db6cea3e340d",
+        "source_signal_sha256": "78797812a77f4066ea60b8f61b18feab2a7e2d7c32711b22c7d80776f6cc3175",
+        "task_count": 672,
+        "verified": true
+      },
+      "all_pit__filter_then_pool_rerank": {
+        "source_root": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_economic_realizability_v1",
+        "source_signal_book": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_economic_realizability_v1\\signal_book\\manifest.json",
+        "source_study_sha256": "878cb84bc54f282927ff3cca6e5dd0c6c2f7ec060032b6f62c55db6cea3e340d",
+        "source_signal_sha256": "78797812a77f4066ea60b8f61b18feab2a7e2d7c32711b22c7d80776f6cc3175",
+        "task_count": 672,
+        "verified": true
+      }
+    },
+    "account_decisions": {
+      "csi800_pit__global_rank_then_filter": {
+        "status": "completed",
+        "book_id": "csi800_pit__global_rank_then_filter",
+        "overall": "pool_not_monetized_by_preregistered_policy_surface",
+        "task_count": 672,
+        "robust_pair_count": 0,
+        "negative_control_invalid": false,
+        "accounting_invalid": false,
+        "single_policy_winner_selected": false,
+        "period": {
+          "years": [
+            2023,
+            2024,
+            2025
+          ],
+          "continuous_account": true,
+          "annual_reset": false,
+          "maximum_consumed_date": "2025-12-31",
+          "forbidden_2026_row_count": 0
+        },
+        "files": {
+          "task_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\task_metrics.parquet",
+            "size": 187734,
+            "sha256": "4518de2efc89b1cb45c57aafe39c876bdcf1181222663b3ae914157b3b32d3ea",
+            "row_count": 672
+          },
+          "annual_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\annual_metrics.parquet",
+            "size": 55038,
+            "sha256": "c69ae6f8c0fe25f6b6fb71c8ce005c54af30d376d780d59f68c00d8c4107085b",
+            "row_count": 2016
+          },
+          "configurations": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\configurations.parquet",
+            "size": 31486,
+            "sha256": "adece09d94ef0982ddd051573bf10ff59f8107ebca09ea25f6b391ecfb424480",
+            "row_count": 336
+          },
+          "family_statistics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\family_statistics.parquet",
+            "size": 14497,
+            "sha256": "557bdbbc250fb8f9f6614876d397804590e515895e6c05dc6d29c2cdb0be809b",
+            "row_count": 14
+          },
+          "family_daily_median_excess": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\family_daily_median_excess.parquet",
+            "size": 83021,
+            "sha256": "b9dd358e6a666ea8f716e7e45874f787440968a59aa51179ed0412bbb0c9ac46",
+            "row_count": 10178
+          },
+          "paired_comparisons": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\paired_comparisons.parquet",
+            "size": 173424,
+            "sha256": "f43c41f888cada34f1c1e719ac5bc405dc852fe1a3ee575ce50fe33c3a4c30fd",
+            "row_count": 1248
+          },
+          "decision": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\decision.json",
+            "size": 2779,
+            "sha256": "6673cd5b1066487e840d280ee7525563729cdabe542f1fb0b42cacfc2fde12ee"
+          }
+        }
+      },
+      "csi800_pit__filter_then_pool_rerank": {
+        "status": "completed",
+        "book_id": "csi800_pit__filter_then_pool_rerank",
+        "overall": "pool_not_monetized_by_preregistered_policy_surface",
+        "task_count": 672,
+        "robust_pair_count": 0,
+        "negative_control_invalid": false,
+        "accounting_invalid": false,
+        "single_policy_winner_selected": false,
+        "period": {
+          "years": [
+            2023,
+            2024,
+            2025
+          ],
+          "continuous_account": true,
+          "annual_reset": false,
+          "maximum_consumed_date": "2025-12-31",
+          "forbidden_2026_row_count": 0
+        },
+        "files": {
+          "task_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\task_metrics.parquet",
+            "size": 175942,
+            "sha256": "486be11e20a76aee115b3afc1bba860029394ea8df09960eb94ab866c8587329",
+            "row_count": 672
+          },
+          "annual_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\annual_metrics.parquet",
+            "size": 50718,
+            "sha256": "623ad9577a33964473925c2740587f2f1f6ead39d9ee428c2d1abee8e9cc8da0",
+            "row_count": 2016
+          },
+          "configurations": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\configurations.parquet",
+            "size": 29519,
+            "sha256": "eb3b3cc605630277fe4c2fa7ebf10f68b3b54ad59ba0b69c314ca26cffd8b17c",
+            "row_count": 336
+          },
+          "family_statistics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\family_statistics.parquet",
+            "size": 14474,
+            "sha256": "7e57af65a65161a677cd2066e32ebc9ab582112d6e9b9f5c4f41eb6735ff2f8f",
+            "row_count": 14
+          },
+          "family_daily_median_excess": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\family_daily_median_excess.parquet",
+            "size": 98846,
+            "sha256": "df6f92c3e60ea86fd61a57588661ad0345351210fd72e4eb16d6124cf9e95a9c",
+            "row_count": 10178
+          },
+          "paired_comparisons": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\paired_comparisons.parquet",
+            "size": 156790,
+            "sha256": "261e3f33a53f0ceb3039e02d57d7b1e293dd4c93cdf4687ba9fcb5ad247ee4cc",
+            "row_count": 1248
+          },
+          "decision": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\decision.json",
+            "size": 2779,
+            "sha256": "e7205f8429728fe242ddfce9f03f8752537fd1911eb4a6fb1c5f3a8988a3c1c4"
+          }
+        }
+      },
+      "quality_liquidity_pit__global_rank_then_filter": {
+        "status": "completed",
+        "book_id": "quality_liquidity_pit__global_rank_then_filter",
+        "overall": "pool_signal_exists_but_not_net_monetized",
+        "task_count": 672,
+        "robust_pair_count": 0,
+        "negative_control_invalid": false,
+        "accounting_invalid": false,
+        "single_policy_winner_selected": false,
+        "period": {
+          "years": [
+            2023,
+            2024,
+            2025
+          ],
+          "continuous_account": true,
+          "annual_reset": false,
+          "maximum_consumed_date": "2025-12-31",
+          "forbidden_2026_row_count": 0
+        },
+        "files": {
+          "task_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\task_metrics.parquet",
+            "size": 213598,
+            "sha256": "c4a9a3f3cebf2aba0aceb3d70daadc0627dca4f6ed9744cd8d36f52e86a2b728",
+            "row_count": 672
+          },
+          "annual_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\annual_metrics.parquet",
+            "size": 59176,
+            "sha256": "8103982b3d809a931797b10498df3b1d832efcb16ba5405d50db37feadacbe5e",
+            "row_count": 2016
+          },
+          "configurations": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\configurations.parquet",
+            "size": 33448,
+            "sha256": "28f9669055fb343b8b436e107d805c1e42aa6281750d143b87768edfa60ff871",
+            "row_count": 336
+          },
+          "family_statistics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\family_statistics.parquet",
+            "size": 16628,
+            "sha256": "88529f399296fd5a47314314472694bad43b4b238c7a30ef965976c1ad23ea31",
+            "row_count": 14
+          },
+          "family_daily_median_excess": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\family_daily_median_excess.parquet",
+            "size": 100070,
+            "sha256": "6598cb2f70a1fc354b10fd911d456435a7a5c1bfefac22be088cc2d1b752ad79",
+            "row_count": 10178
+          },
+          "paired_comparisons": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\paired_comparisons.parquet",
+            "size": 180729,
+            "sha256": "9aaebaf44089e7356a96ac95cb3eee381f0644c9b0732352d12f0fb2963c789c",
+            "row_count": 1248
+          },
+          "decision": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\decision.json",
+            "size": 2847,
+            "sha256": "bd3a6e9c46ab665c17542873109dec186e623ea76e4ff0317725fb905537b4c9"
+          }
+        }
+      },
+      "quality_liquidity_pit__filter_then_pool_rerank": {
+        "status": "completed",
+        "book_id": "quality_liquidity_pit__filter_then_pool_rerank",
+        "overall": "pool_signal_exists_but_not_net_monetized",
+        "task_count": 672,
+        "robust_pair_count": 0,
+        "negative_control_invalid": false,
+        "accounting_invalid": false,
+        "single_policy_winner_selected": false,
+        "period": {
+          "years": [
+            2023,
+            2024,
+            2025
+          ],
+          "continuous_account": true,
+          "annual_reset": false,
+          "maximum_consumed_date": "2025-12-31",
+          "forbidden_2026_row_count": 0
+        },
+        "files": {
+          "task_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\task_metrics.parquet",
+            "size": 192934,
+            "sha256": "84451cea42bd8f5b4713e3d537b40469476ce43b7964999020d6bd4166fa0fb2",
+            "row_count": 672
+          },
+          "annual_metrics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\annual_metrics.parquet",
+            "size": 54175,
+            "sha256": "90a60ae7f47eeaa13df2e7b91aa6f7dd949790e5b87ef39244232d30f892d9cf",
+            "row_count": 2016
+          },
+          "configurations": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\configurations.parquet",
+            "size": 31042,
+            "sha256": "46b4e5ee27cbfd5d6b44d31d8079ef3ab1863d6a78e89446f8e97fcb8573a35c",
+            "row_count": 336
+          },
+          "family_statistics": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\family_statistics.parquet",
+            "size": 15512,
+            "sha256": "81c32500d9506576daaf7f3572bb4e0796914d9a41e802e97225375c405a74d6",
+            "row_count": 14
+          },
+          "family_daily_median_excess": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\family_daily_median_excess.parquet",
+            "size": 100176,
+            "sha256": "6f87ab424347b1f5376370c330a380aa3f1cd78c16e00b2d5f3373ab65d315ea",
+            "row_count": 10178
+          },
+          "paired_comparisons": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\paired_comparisons.parquet",
+            "size": 165924,
+            "sha256": "092337a3e8ed984ef344e59370ac6099e217003f691f3cf03dd03628b86e9c9f",
+            "row_count": 1248
+          },
+          "decision": {
+            "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\decision.json",
+            "size": 2847,
+            "sha256": "298b66fd9829ddd42699f734224ac4b88285adbba5e526f0c338234e8f011e64"
+          }
+        }
+      }
+    },
+    "prediction_metrics": {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\prediction_metrics.parquet",
+      "sha256": "a15106f9882005126464144c35a82570096195560cd58116c13e225cdf988c86",
+      "row_count": 36
+    }
+  },
+  "files": {
+    "manifest": {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\manifest.json",
+      "size": 3421,
+      "sha256": "be18e0704e2f1ffd3ff8d5e2e10c396af3429d9e671572ffff66a95cb3155fe3"
+    },
+    "prediction_metrics": {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\prediction_metrics.parquet",
+      "size": 8853,
+      "sha256": "a15106f9882005126464144c35a82570096195560cd58116c13e225cdf988c86"
+    },
+    "decision": {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\decision.json",
+      "size": 15786,
+      "sha256": "5f6cb3218bdbd150d1ae704daf37cd3a7a1bf8516edc33143ed5bcfd052f413e"
+    },
+    "account_evaluations": {
+      "csi800_pit__global_rank_then_filter": {
+        "task_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\task_metrics.parquet",
+          "size": 187734,
+          "sha256": "4518de2efc89b1cb45c57aafe39c876bdcf1181222663b3ae914157b3b32d3ea",
+          "row_count": 672
+        },
+        "annual_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\annual_metrics.parquet",
+          "size": 55038,
+          "sha256": "c69ae6f8c0fe25f6b6fb71c8ce005c54af30d376d780d59f68c00d8c4107085b",
+          "row_count": 2016
+        },
+        "configurations": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\configurations.parquet",
+          "size": 31486,
+          "sha256": "adece09d94ef0982ddd051573bf10ff59f8107ebca09ea25f6b391ecfb424480",
+          "row_count": 336
+        },
+        "family_statistics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\family_statistics.parquet",
+          "size": 14497,
+          "sha256": "557bdbbc250fb8f9f6614876d397804590e515895e6c05dc6d29c2cdb0be809b",
+          "row_count": 14
+        },
+        "family_daily_median_excess": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\family_daily_median_excess.parquet",
+          "size": 83021,
+          "sha256": "b9dd358e6a666ea8f716e7e45874f787440968a59aa51179ed0412bbb0c9ac46",
+          "row_count": 10178
+        },
+        "paired_comparisons": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\paired_comparisons.parquet",
+          "size": 173424,
+          "sha256": "f43c41f888cada34f1c1e719ac5bc405dc852fe1a3ee575ce50fe33c3a4c30fd",
+          "row_count": 1248
+        },
+        "decision": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__global_rank_then_filter\\decision.json",
+          "size": 2779,
+          "sha256": "6673cd5b1066487e840d280ee7525563729cdabe542f1fb0b42cacfc2fde12ee"
+        }
+      },
+      "csi800_pit__filter_then_pool_rerank": {
+        "task_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\task_metrics.parquet",
+          "size": 175942,
+          "sha256": "486be11e20a76aee115b3afc1bba860029394ea8df09960eb94ab866c8587329",
+          "row_count": 672
+        },
+        "annual_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\annual_metrics.parquet",
+          "size": 50718,
+          "sha256": "623ad9577a33964473925c2740587f2f1f6ead39d9ee428c2d1abee8e9cc8da0",
+          "row_count": 2016
+        },
+        "configurations": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\configurations.parquet",
+          "size": 29519,
+          "sha256": "eb3b3cc605630277fe4c2fa7ebf10f68b3b54ad59ba0b69c314ca26cffd8b17c",
+          "row_count": 336
+        },
+        "family_statistics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\family_statistics.parquet",
+          "size": 14474,
+          "sha256": "7e57af65a65161a677cd2066e32ebc9ab582112d6e9b9f5c4f41eb6735ff2f8f",
+          "row_count": 14
+        },
+        "family_daily_median_excess": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\family_daily_median_excess.parquet",
+          "size": 98846,
+          "sha256": "df6f92c3e60ea86fd61a57588661ad0345351210fd72e4eb16d6124cf9e95a9c",
+          "row_count": 10178
+        },
+        "paired_comparisons": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\paired_comparisons.parquet",
+          "size": 156790,
+          "sha256": "261e3f33a53f0ceb3039e02d57d7b1e293dd4c93cdf4687ba9fcb5ad247ee4cc",
+          "row_count": 1248
+        },
+        "decision": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\csi800_pit__filter_then_pool_rerank\\decision.json",
+          "size": 2779,
+          "sha256": "e7205f8429728fe242ddfce9f03f8752537fd1911eb4a6fb1c5f3a8988a3c1c4"
+        }
+      },
+      "quality_liquidity_pit__global_rank_then_filter": {
+        "task_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\task_metrics.parquet",
+          "size": 213598,
+          "sha256": "c4a9a3f3cebf2aba0aceb3d70daadc0627dca4f6ed9744cd8d36f52e86a2b728",
+          "row_count": 672
+        },
+        "annual_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\annual_metrics.parquet",
+          "size": 59176,
+          "sha256": "8103982b3d809a931797b10498df3b1d832efcb16ba5405d50db37feadacbe5e",
+          "row_count": 2016
+        },
+        "configurations": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\configurations.parquet",
+          "size": 33448,
+          "sha256": "28f9669055fb343b8b436e107d805c1e42aa6281750d143b87768edfa60ff871",
+          "row_count": 336
+        },
+        "family_statistics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\family_statistics.parquet",
+          "size": 16628,
+          "sha256": "88529f399296fd5a47314314472694bad43b4b238c7a30ef965976c1ad23ea31",
+          "row_count": 14
+        },
+        "family_daily_median_excess": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\family_daily_median_excess.parquet",
+          "size": 100070,
+          "sha256": "6598cb2f70a1fc354b10fd911d456435a7a5c1bfefac22be088cc2d1b752ad79",
+          "row_count": 10178
+        },
+        "paired_comparisons": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\paired_comparisons.parquet",
+          "size": 180729,
+          "sha256": "9aaebaf44089e7356a96ac95cb3eee381f0644c9b0732352d12f0fb2963c789c",
+          "row_count": 1248
+        },
+        "decision": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__global_rank_then_filter\\decision.json",
+          "size": 2847,
+          "sha256": "bd3a6e9c46ab665c17542873109dec186e623ea76e4ff0317725fb905537b4c9"
+        }
+      },
+      "quality_liquidity_pit__filter_then_pool_rerank": {
+        "task_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\task_metrics.parquet",
+          "size": 192934,
+          "sha256": "84451cea42bd8f5b4713e3d537b40469476ce43b7964999020d6bd4166fa0fb2",
+          "row_count": 672
+        },
+        "annual_metrics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\annual_metrics.parquet",
+          "size": 54175,
+          "sha256": "90a60ae7f47eeaa13df2e7b91aa6f7dd949790e5b87ef39244232d30f892d9cf",
+          "row_count": 2016
+        },
+        "configurations": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\configurations.parquet",
+          "size": 31042,
+          "sha256": "46b4e5ee27cbfd5d6b44d31d8079ef3ab1863d6a78e89446f8e97fcb8573a35c",
+          "row_count": 336
+        },
+        "family_statistics": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\family_statistics.parquet",
+          "size": 15512,
+          "sha256": "81c32500d9506576daaf7f3572bb4e0796914d9a41e802e97225375c405a74d6",
+          "row_count": 14
+        },
+        "family_daily_median_excess": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\family_daily_median_excess.parquet",
+          "size": 100176,
+          "sha256": "6f87ab424347b1f5376370c330a380aa3f1cd78c16e00b2d5f3373ab65d315ea",
+          "row_count": 10178
+        },
+        "paired_comparisons": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\paired_comparisons.parquet",
+          "size": 165924,
+          "sha256": "092337a3e8ed984ef344e59370ac6099e217003f691f3cf03dd03628b86e9c9f",
+          "row_count": 1248
+        },
+        "decision": {
+          "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_v4_pit_stock_pool_audit_v1\\evaluation\\accounts\\quality_liquidity_pit__filter_then_pool_rerank\\decision.json",
+          "size": 2847,
+          "sha256": "298b66fd9829ddd42699f734224ac4b88285adbba5e526f0c338234e8f011e64"
+        }
+      }
+    }
+  }
+}

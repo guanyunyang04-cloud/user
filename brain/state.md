@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-07-30
+Updated: 2026-07-31
 
 ## Objective
 
@@ -14,24 +14,29 @@ reinforcement-learning policy has been selected.
 
 ## Current QDP data state
 
-The 2026-07-30 incremental QDP repair preserved the existing dataset IDs and
+The 2026-07-31 incremental QDP repair preserved the existing dataset IDs and
 changed only defective metadata/tables or missing rows. The active catalog now
-contains 16 domains and passes the full deep audit with zero errors. The only
-remaining warning is explicit, source-unavailable historical 5-minute
-coverage; missing intraday history is not an eligibility rule.
+contains 16 domains and passes the full deep audit with `status=ok` and zero
+blocking errors. The only finding is the expected medium-severity warning for
+explicit historical 5-minute gaps; missing intraday history is not an
+eligibility rule.
 
-- `market_intraday_5m`: 456,012,480 rows. Historical repair appended
-  16,955,712 rows covering 353,244 stock-days, then corrected ten isolated
-  provider rows whose volume was exactly 100 times the daily reference.
-  Canonical positive-daily coverage is 93.0266% through 2026-07-21:
-  9,500,260 complete stock-days and 712,157 explicit missing stock-days.
+- `market_intraday_5m`: 466,317,792 rows. The BaoStock historical repair
+  accepted 214,694 independently validated stock-days (10,305,312 bars) from
+  the 215,028 requested 2020-2025 gaps; 334 remain explicitly missing. The
+  residual rejection counts are 134 price mismatches, 184 volume/amount
+  mismatches, 7 incomplete days, 2 invalid numeric/OHLC days, and 7 provider
+  empty days. Canonical positive-daily coverage is now 95.1288% through
+  2026-07-21: 9,714,954 complete stock-days and 497,463 explicit missing
+  stock-days. The manifest and full physical audit now use the same counters.
 - The three dated PIT index histories (`000016.SH`, `000300.SH`, `000905.SH`)
   were rebuilt from 200 snapshots and now contain 3,159,561 rows, including
   historical members that later delisted or changed ticker. Latest independent
   snapshot Jaccard is 1.0 for all three.
 - `industry_concept` retains raw historic labels and adds normalized taxonomy
-  fields. It has 84 modern coded industries, 18 section codes, and only 759
-  explicit `Unknown/unavailable` rows out of 10,212,710.
+  fields. It has 84 modern coded industries, 18 section codes; the metadata
+  repair resolved 507 dated rows and correctly retains 252 unresolved
+  `Unknown/unavailable` rows out of 10,212,710.
 - Optional PIT event domains were added: `financial_quarterly` has 175,885
   rows and `performance_forecast` has 77,711 rows. Event time is announcement
   date; feature use must lag publication by one day.
@@ -52,8 +57,12 @@ minute availability itself must never filter the universe.
 
 Retained audit artifacts:
 
-- `quant_data_platform/data/qdp_v2/audits/database_audit_20260730T145902+0000.json`
+- `quant_data_platform/data/qdp_v2/audits/database_audit_20260730T194231+0000.json`
 - `quant_data_platform/data/qdp_v2/audits/pool_coverage_audit_v1.json`
+
+The local PIT metadata repair filled 8,602,631 empty `universe_snapshot.list_date`
+values from the canonical identity mapping without changing non-empty values,
+rows, keys, or schema. Future listing dates remain zero.
 
 ## Active entry contract
 
@@ -341,3 +350,31 @@ not reopen completed LightGBM capacity, feature-union, or five-target A/B
 searches without new evidence.
 
 There is no active training process.
+
+## PIT stock-pool audit
+
+`seq100_v4_pit_stock_pool_audit_v1` was prepared and evaluated without model
+training or 2026 reads. It contains the all-market baseline, dated CSI300 union
+CSI500, and a PIT quality/liquidity pool. Both global-rank-then-filter and
+filter-then-pool-rerank books were built; all-pit books are numerically
+equivalent to the frozen economic signal book. The quality pool uses only
+signal-date status, listing age, trailing liquidity, float market value, and
+announcement-lagged financial quality. Minute availability is not a membership
+condition.
+
+- Candidate rows: 2,239,539 over 727 signal dates.
+- CSI800: about 628-662 candidates/day, 20.5-21.6% retention; full-market
+  true-Top-5 retention is about 11-13%, so it fails the 50% opportunity gate.
+- Quality/liquidity: about 1,695-1,697 candidates/day, 55.1-55.4% retention;
+  full-market true-Top-5 retention is about 48-55% and falls below the gate in
+  2024.
+- All four new books completed 672/672 account tasks (2,688 total). Each was
+  evaluated with the existing 672-task policy surface, annual/monthly ledgers,
+  HAC, contiguous-rectangle, BH, and moving-block bootstrap diagnostics.
+- CSI800 produced no robust net rectangle. The quality pool has isolated/gross
+  economic cells but no robust net rectangle. No pool is adopted; `all_pit`
+  remains the default baseline. Negative controls and accounting checks pass.
+
+Retained result:
+
+- `daily_research/research_records/seq100/seq100_v4_pit_stock_pool_audit_v1/result.json`

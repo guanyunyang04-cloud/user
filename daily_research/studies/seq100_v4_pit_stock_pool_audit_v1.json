@@ -1,0 +1,56 @@
+{
+  "study_id": "seq100_v4_pit_stock_pool_audit_v1",
+  "objective": "Audit PIT stock-pool membership and reranking for the frozen Seq100 v4 contract without retraining models.",
+  "period": {
+    "years": [2023, 2024, 2025],
+    "maximum_consumed_date": "2025-12-31",
+    "forbidden_year": 2026,
+    "uses_future_status_for_membership": false,
+    "uses_2020_2022_policy_outcomes": false
+  },
+  "pool_definition": {
+    "all_pit": "all v4 candidate rows on the signal date",
+    "csi800_pit": "all_pit intersect dated CSI300 and CSI500 membership",
+    "quality_liquidity_pit": "PIT status, listing age, 20-day liquidity, float market value, dated financial quality",
+    "minute_availability_is_membership_filter": false,
+    "financial_publish_date_rule": "publish_date < signal_date",
+    "quality_metric_count": 6,
+    "quality_metric_minimum_non_null": 3
+  },
+  "ranking": {
+    "modes": ["global_rank_then_filter", "filter_then_pool_rerank"],
+    "physical_columns": [
+      "mfe_10",
+      "mfe_20",
+      "state_low_10",
+      "state_mid_10",
+      "state_high_10",
+      "pre_peak_mae_10",
+      "pre_peak_mae_20"
+    ],
+    "dual_mfe": "rank of the minimum of the two in-pool MFE ranks"
+  },
+  "sources": {
+    "economic_study": "daily_research/studies/seq100_v4_economic_realizability_v1.json",
+    "entry_contract": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+    "oracle_book": "daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json"
+  },
+  "account_replay": {
+    "reuse_all_pit_tasks": true,
+    "new_book_task_count": 2688,
+    "slot_counts": [1, 3, 6, 12, 24, 48],
+    "buffer_multipliers": [0.0, 0.5, 1.0, 2.0],
+    "cost_scenarios": ["base", "stress"],
+    "exposure_modes": ["target_full", "strong_candidate_cash"],
+    "families": [
+      "mfe10_primary",
+      "mfe20_primary",
+      "dual_mfe_maximin",
+      "dual_mfe_state_veto",
+      "dual_mfe_risk_veto",
+      "dual_mfe_state_risk_veto",
+      "deterministic_noise"
+    ]
+  },
+  "interfaces": ["--status", "--prepare", "--run-pending", "--evaluate", "--self-test"]
+}

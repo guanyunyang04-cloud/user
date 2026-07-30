@@ -9,6 +9,7 @@ repair API remains the single manifest commit point.
 """
 
 import argparse
+import hashlib
 import io
 import json
 import multiprocessing
@@ -16,11 +17,12 @@ import os
 import threading
 import time
 import uuid
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Self
 
 import numpy as np
 import pandas as pd
@@ -34,8 +36,8 @@ from quant_data_platform.qdp_v2.duckdb_resources import (
     DEFAULT_LOW_MEMORY_SECONDS,
     DEFAULT_MEMORY_FLOOR_BYTES,
     DEFAULT_POLL_SECONDS,
-    DuckDbMemoryFloorError,
     LOW_MEMORY_REASON,
+    DuckDbMemoryFloorError,
     open_guarded_duckdb,
 )
 from quant_data_platform.qdp_v2.manifest import (
@@ -47,7 +49,20 @@ from quant_data_platform.qdp_v2.manifest import (
     read_dataset_manifest,
     resolve_manifest_path,
 )
-from quant_data_platform.qdp_v2.repair import bulk_append_active_shards_from_parquet
+from quant_data_platform.qdp_v2.repair import (
+    bulk_append_active_shards_from_parquet,
+    update_active_manifest_metadata,
+)
+from quant_data_platform.qdp_v2.status import active_dataset_map
+
+# The historical Tushare repair has a stricter cross-source check than the
+# recent provider path.  Keep the actual comparison in this module so every
+# intraday provider uses the same daily OHLCV contract.
+DAILY_PRICE_RELATIVE_TOLERANCE = 0.02
+DAILY_VOLUME_RELATIVE_TOLERANCE = 0.05
+DAILY_AMOUNT_RELATIVE_TOLERANCE = 0.05
+VOLUME_UNIT_SCALES = (1.0, 100.0, 0.01)
+AMOUNT_UNIT_SCALES = (1.0, 1000.0, 0.001, 100.0, 0.01)
 
 
 REPAIR_VERSION = 1
@@ -128,7 +143,7 @@ class _SystemMemoryGuard:
         self._low_since: float | None = None
         self.minimum_available_bytes: int | None = None
 
-    def __enter__(self) -> "_SystemMemoryGuard":
+    def __enter__(self) -> Self:
         self._thread = threading.Thread(
             target=self._run,
             name="qdp-recent-repair-memory-guard",
@@ -137,7 +152,7 @@ class _SystemMemoryGuard:
         self._thread.start()
         return self
 
-    def __exit__(self, *_: Any) -> None:
+    def __exit__(self, *_: object) -> None:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
@@ -250,7 +265,7 @@ class _DirectBaostockSession:
         try:
             with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
                 bs.logout()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110 - provider logout is best effort
             pass
 
 
@@ -374,7 +389,7 @@ def run_recent_intraday_repair(
     )
     wanted: dict[str, tuple[str, ...]] = {}
     for symbol, trade_date in pairs:
-        wanted.setdefault(symbol, tuple())
+        wanted.setdefault(symbol, ())
         wanted[symbol] = (*wanted[symbol], trade_date)
     runtime = _runtime_root(workspace) / _run_directory("mootdx_5m", start, end)
     state = _load_or_initialize_state(
@@ -452,14 +467,24 @@ def run_baostock_intraday_repair(
     for symbol, trade_date in pairs:
         wanted[symbol] = (*wanted.get(symbol, ()), trade_date)
     runtime = _runtime_root(workspace) / _run_directory("baostock_5m", start, end)
+    daily_reference_paths = _build_baostock_daily_reference(
+        inputs,
+        wanted=wanted,
+        runtime=runtime,
+    )
     state = _load_or_initialize_state(
         runtime,
         kind="baostock_intraday_5m",
         start_date=start,
         end_date=end,
         task_count=len(pairs),
+        input_hash=_pairs_sha256(pairs),
         resume=resume,
     )
+    state["input_dataset_ids"] = {
+        key: value.dataset_id for key, value in inputs.items()
+    }
+    state["requested_pairs_sha256"] = _pairs_sha256(pairs)
     if state.get("status") == "applied":
         return state
     with _SystemMemoryGuard() as guard:
@@ -467,6 +492,7 @@ def run_baostock_intraday_repair(
             runtime=runtime,
             state=state,
             wanted=wanted,
+            daily_reference_paths=daily_reference_paths,
             workers=int(workers),
             guard=guard,
         )
@@ -478,9 +504,127 @@ def run_baostock_intraday_repair(
             reason=f"fill complete missing 5m stock-days from BaoStock {start}..{end}",
             workspace=workspace,
         )
+        current_quality = _active_intraday_quality(workspace)
+        positive_daily = int(
+            current_quality.get("canonical_positive_daily_count", 0) or 0
+        )
+        complete_before = int(
+            current_quality.get("canonical_complete_positive_daily_count", 0) or 0
+        )
+        accepted_days = int(state.get("accepted_day_count", 0) or 0)
+        complete_after = min(positive_daily, complete_before + accepted_days)
+        state["manifest_metadata"] = update_active_manifest_metadata(
+            INTRADAY_DOMAIN,
+            reason="record validated historical BaoStock intraday repair",
+            workspace_root=workspace,
+            source_updates={
+                "historical_repair_provider": "baostock",
+                "historical_repair_source": "baostock_history_daily_validated",
+                "historical_repair_date_range": f"{start}..{end}",
+                "historical_repair_rejection_counts": dict(
+                    state.get("rejection_counts", {}) or {}
+                ),
+            },
+            quality_updates={
+                "scope": "point_in_time_historical_mainboard_with_partial_intraday_coverage",
+                "permanent_exclusions": {
+                    "applied": False,
+                    "reason": "historical intraday availability is not an eligibility filter",
+                },
+                "missing_history_is_not_an_eligibility_filter": True,
+                "intraday_5m_restored_for_historical_symbols": int(
+                    state.get("accepted_day_count", 0) or 0
+                ),
+                "historical_baostock_recovered_positive_days": int(
+                    state.get("accepted_day_count", 0) or 0
+                ),
+                "historical_baostock_residual_positive_days": int(
+                    state.get("unresolved_day_count", 0) or 0
+                ),
+                "historical_baostock_rejection_counts": dict(
+                    state.get("rejection_counts", {}) or {}
+                ),
+                "canonical_complete_positive_daily_count": complete_after,
+                "canonical_complete_coverage_ratio": (
+                    float(complete_after / positive_daily) if positive_daily else 1.0
+                ),
+                "historical_missing_positive_days_after": max(
+                    0, positive_daily - complete_after
+                ),
+            },
+        )
         state["minimum_available_bytes"] = guard.minimum_available_bytes
         atomic_write_json(runtime / "state.json", state)
     return state
+
+
+def _active_intraday_quality(workspace: Path) -> dict[str, Any]:
+    """Read current intraday counters before appending a validated bundle."""
+    root = qdp_v2_root(workspace)
+    active = read_active_manifest(root)
+    datasets = active_dataset_map(active)
+    dataset_id = datasets.get(INTRADAY_DOMAIN)
+    if not dataset_id:
+        raise ValueError("active intraday dataset is missing")
+    manifest_path = dataset_manifest_for_id(root, dataset_id, INTRADAY_DOMAIN)
+    if manifest_path is None:
+        raise ValueError("active intraday manifest is missing")
+    return dict(read_dataset_manifest(manifest_path).quality)
+
+
+def _build_baostock_daily_reference(
+    inputs: Mapping[str, _DomainInput],
+    *,
+    wanted: Mapping[str, Sequence[str]],
+    runtime: Path,
+) -> dict[str, Path]:
+    """Materialize one daily-reference file per stable BaoStock bucket."""
+    runtime.mkdir(parents=True, exist_ok=True)
+    pairs = runtime / "requested_pairs.parquet"
+    pair_frame = pd.DataFrame(
+        [(symbol, date) for symbol, dates in wanted.items() for date in dates],
+        columns=["symbol", "trade_date"],
+    )
+    pair_frame.to_parquet(pairs, index=False, compression="zstd")
+    pairs.unlink(missing_ok=True)
+    pair_frame["bucket"] = pair_frame["symbol"].map(_stable_bucket)
+    references: dict[str, Path] = {}
+    for bucket in range(BUCKET_COUNT):
+        key = f"{bucket:02d}"
+        target = runtime / f"daily_reference_bucket_{key}.parquet"
+        temporary = target.with_suffix(".tmp.parquet")
+        bucket_pairs = runtime / f"requested_pairs_bucket_{key}.parquet"
+        pair_frame.loc[pair_frame["bucket"] == bucket, ["symbol", "trade_date"]].to_parquet(
+            bucket_pairs, index=False, compression="zstd"
+        )
+        with open_guarded_duckdb(
+            temp_directory=runtime / f"reference_spill_{key}", threads=2
+        ) as con:
+            con.execute(
+                f"""
+                COPY (
+                  SELECT upper(cast(d.symbol AS VARCHAR)) AS symbol,
+                         cast(d.trade_date AS VARCHAR) AS trade_date,
+                         try_cast(d.open AS DOUBLE) AS open,
+                         try_cast(d.high AS DOUBLE) AS high,
+                         try_cast(d.low AS DOUBLE) AS low,
+                         try_cast(d.close AS DOUBLE) AS close,
+                         try_cast(d.volume AS DOUBLE) AS volume,
+                         try_cast(d.amount AS DOUBLE) AS amount
+                  FROM read_parquet(?, union_by_name=true) d
+                  JOIN read_parquet(?) p
+                    ON upper(cast(d.symbol AS VARCHAR))=p.symbol
+                   AND cast(d.trade_date AS VARCHAR)=p.trade_date
+                  ORDER BY symbol, trade_date
+                ) TO '{str(temporary).replace("'", "''")}'
+                  (FORMAT PARQUET, COMPRESSION ZSTD)
+                """,
+                [_path_texts(inputs[DAILY_DOMAIN]), str(bucket_pairs)],
+            )
+        temporary.replace(target)
+        bucket_pairs.unlink(missing_ok=True)
+        references[key] = target
+    return references
 
 
 def _download_baostock_buckets(
@@ -488,6 +632,7 @@ def _download_baostock_buckets(
     runtime: Path,
     state: dict[str, Any],
     wanted: Mapping[str, Sequence[str]],
+    daily_reference_paths: Mapping[str, Path],
     workers: int,
     guard: _SystemMemoryGuard,
 ) -> dict[str, Any]:
@@ -502,14 +647,17 @@ def _download_baostock_buckets(
     for bucket in range(BUCKET_COUNT):
         key = f"{bucket:02d}"
         bucket_wanted = {
-            symbol: tuple(sorted(set(str(item) for item in dates)))
+            symbol: tuple(sorted({str(item) for item in dates}))
             for symbol, dates in wanted.items()
             if _stable_bucket(symbol) == bucket
         }
         previous = completed.get(key)
-        if isinstance(previous, dict) and previous.get("status") == "completed":
-            if _reused_bucket_is_valid(previous, runtime=runtime, wanted=bucket_wanted):
-                continue
+        if (
+            isinstance(previous, dict)
+            and previous.get("status") == "completed"
+            and _reused_bucket_is_valid(previous, runtime=runtime, wanted=bucket_wanted)
+        ):
+            continue
         pending.append(
             (
                 key,
@@ -530,6 +678,7 @@ def _download_baostock_buckets(
                     bucket_wanted,
                     progress_label=key,
                     bundle_path_text=str(bundle_path),
+                    daily_reference_path=str(daily_reference_paths[key]),
                     startup_delay_seconds=startup_delay,
                 ): key
                 for key, bucket_wanted, bundle_path, startup_delay in pending
@@ -537,7 +686,16 @@ def _download_baostock_buckets(
             for future in as_completed(futures):
                 key = futures[future]
                 guard.check(f"baostock_bucket_{key}_result")
-                completed[key] = future.result()
+                record = future.result()
+                reference_path = daily_reference_paths[key]
+                record["daily_reference_sha256"] = _file_sha256(reference_path)
+                record["requested_pairs_sha256"] = _pairs_sha256(
+                    tuple(
+                        (str(item[0]), str(item[1]))
+                        for item in list(record.get("requested_pairs", []) or [])
+                    )
+                )
+                completed[key] = record
                 state.update(
                     {
                         "status": "downloading",
@@ -577,6 +735,14 @@ def _download_baostock_buckets(
     state["provider_error_count"] = sum(
         int(item.get("provider_error_count", 0)) for item in completed.values()
     )
+    rejection_totals: dict[str, int] = {}
+    for item in completed.values():
+        for reason, count in dict(item.get("rejection_counts", {}) or {}).items():
+            rejection_totals[str(reason)] = rejection_totals.get(str(reason), 0) + int(count)
+    state["rejection_counts"] = rejection_totals
+    state["daily_reference_paths"] = {
+        key: str(path) for key, path in daily_reference_paths.items()
+    }
     state["updated_at"] = _utc_now()
     atomic_write_json(runtime / "state.json", state)
     return state
@@ -587,17 +753,23 @@ def _run_baostock_bucket_process(
     *,
     progress_label: str,
     bundle_path_text: str,
+    daily_reference_path: str,
     startup_delay_seconds: float = 0.0,
 ) -> dict[str, Any]:
     provider = _baostock_process_session(
         startup_delay_seconds=startup_delay_seconds,
     )
     with _SystemMemoryGuard() as guard:
-        frame, unresolved, errors = _fetch_baostock_bucket(
+        reference = pd.read_parquet(daily_reference_path)
+        reference = reference.loc[
+            reference["symbol"].astype(str).map(_stable_bucket).eq(int(progress_label))
+        ].copy()
+        frame, unresolved, errors, rejection_counts = _fetch_baostock_bucket(
             wanted,
             provider=provider,
             guard=guard,
             progress_label=progress_label,
+            daily_reference=reference,
         )
         bundle_path: Path | None = None
         if not frame.empty:
@@ -608,7 +780,7 @@ def _run_baostock_bucket_process(
             "symbol_count": len(wanted),
             "requested_day_count": sum(len(item) for item in wanted.values()),
             "accepted_day_count": int(len(frame) // 48),
-            "row_count": int(len(frame)),
+            "row_count": len(frame),
             "bundle_path": str(bundle_path) if bundle_path else "",
             "file_size": bundle_path.stat().st_size if bundle_path else 0,
             "requested_pairs": _requested_pairs(wanted),
@@ -618,6 +790,7 @@ def _run_baostock_bucket_process(
             ],
             "provider_error_count": len(errors),
             "provider_error_sample": errors[:10],
+            "rejection_counts": dict(rejection_counts),
             "minimum_available_bytes": guard.minimum_available_bytes,
         }
 
@@ -628,13 +801,15 @@ def _fetch_baostock_bucket(
     provider: _DirectBaostockSession,
     guard: _SystemMemoryGuard,
     progress_label: str,
-) -> tuple[pd.DataFrame, dict[tuple[str, str], str], list[dict[str, Any]]]:
+    daily_reference: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, dict[tuple[str, str], str], list[dict[str, Any]], dict[str, int]]:
     tasks = _baostock_tasks(wanted)
     if not tasks:
         return (
             pd.DataFrame(columns=INTRADAY_COLUMNS),
             {},
             [],
+            {},
         )
     accepted: list[pd.DataFrame] = []
     unresolved: dict[tuple[str, str], str] = {}
@@ -663,10 +838,10 @@ def _fetch_baostock_bucket(
                 task,
                 provider=provider,
             )
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - preserve provider failure state
             frame = pd.DataFrame(columns=INTRADAY_COLUMNS)
             task_unresolved = {
-                (task.symbol, trade_date): "baostock_task_exception"
+                (task.symbol, trade_date): "provider_error"
                 for trade_date in task.dates
             }
             task_errors = [
@@ -695,15 +870,25 @@ def _fetch_baostock_bucket(
                 ),
                 flush=True,
             )
+    rejection_counts: dict[str, int] = {}
     if accepted:
         combined = pd.concat(accepted, ignore_index=True, sort=False)
         keys = ["symbol", "trade_date", "bar_time"]
         if combined.duplicated(keys).any():
             raise RecentMarketRepairError("baostock_repair_duplicate_accepted_primary_key")
         combined = combined.sort_values(keys, kind="stable").reset_index(drop=True)
+        if daily_reference is not None and not combined.empty:
+            combined, daily_unresolved, _diagnostics = _validate_intraday_against_daily(
+                combined,
+                daily_reference,
+                source_name="baostock_history_daily_validated",
+            )
+            unresolved.update(daily_unresolved)
     else:
         combined = pd.DataFrame(columns=INTRADAY_COLUMNS)
-    return combined, unresolved, errors
+    for reason in unresolved.values():
+        rejection_counts[str(reason)] = rejection_counts.get(str(reason), 0) + 1
+    return combined, unresolved, errors, rejection_counts
 
 
 def _baostock_tasks(wanted: Mapping[str, Sequence[str]]) -> tuple[_BaostockTask, ...]:
@@ -731,7 +916,7 @@ def _fetch_baostock_task(
         try:
             result_data = client.fetch(task)
             break
-        except BaseException as exc:
+        except BaseException as exc:  # noqa: BLE001 - retry/provider boundary
             errors.append(
                 {
                     "symbol": task.symbol,
@@ -749,8 +934,156 @@ def _fetch_baostock_task(
         result_data,
         {task.symbol: task.dates},
         source_name="baostock",
+        detailed_reasons=True,
     )
+    if not frame.empty or not result_data.empty:
+        return frame, unresolved, errors
+    reason = "provider_error" if errors else "provider_empty"
+    unresolved = {
+        (task.symbol, trade_date): reason for trade_date in task.dates
+    }
     return frame, unresolved, errors
+
+
+def _best_scale(observed: pd.Series, reference: pd.Series, candidates: Sequence[float]) -> float:
+    left = pd.to_numeric(observed, errors="coerce").to_numpy(dtype="float64")
+    right = pd.to_numeric(reference, errors="coerce").to_numpy(dtype="float64")
+    valid = np.isfinite(left) & np.isfinite(right) & (left > 0) & (right > 0)
+    if not valid.any():
+        return 1.0
+    scores = {
+        float(scale): float(
+            np.median(
+                np.abs(
+                    np.log(
+                        np.maximum(left[valid] * float(scale), 1e-12)
+                        / np.maximum(right[valid], 1e-12)
+                    )
+                )
+            )
+        )
+        for scale in candidates
+    }
+    return min(scores, key=lambda item: (scores[item], abs(np.log(item))))
+
+
+def _validate_intraday_against_daily(
+    frame: pd.DataFrame,
+    reference: pd.DataFrame,
+    *,
+    source_name: str = "validated_intraday",
+) -> tuple[pd.DataFrame, dict[tuple[str, str], str], dict[str, Any]]:
+    """Validate complete intraday days against one bucket-wide daily scale.
+
+    A provider's volume and amount units are selected once from the whole
+    bucket.  This prevents a per-symbol scale choice from silently accepting
+    incompatible provider units.
+    """
+    if frame is None or frame.empty:
+        return (
+            pd.DataFrame(columns=INTRADAY_COLUMNS),
+            {},
+            {"rejection_counts": {}, "accepted_day_count": 0},
+        )
+    aggregate = (
+        frame.groupby(["symbol", "trade_date"], as_index=False)
+        .agg(
+            open=("open", "first"),
+            high=("high", "max"),
+            low=("low", "min"),
+            close=("close", "last"),
+            volume=("volume", "sum"),
+            amount=("amount", "sum"),
+        )
+    )
+    ref = reference.copy()
+    ref["symbol"] = ref["symbol"].astype(str).str.upper()
+    ref["trade_date"] = ref["trade_date"].astype(str).str.slice(0, 10)
+    aggregate = aggregate.merge(
+        ref,
+        on=["symbol", "trade_date"],
+        how="left",
+        suffixes=("_five", "_day"),
+        validate="one_to_one",
+    )
+    volume_scale = _best_scale(
+        aggregate["volume_five"], aggregate["volume_day"], VOLUME_UNIT_SCALES
+    )
+    amount_scale = _best_scale(
+        aggregate["amount_five"], aggregate["amount_day"], AMOUNT_UNIT_SCALES
+    )
+    price_rel = np.full(len(aggregate), np.inf, dtype="float64")
+    volume_rel = np.full(len(aggregate), np.inf, dtype="float64")
+    amount_rel = np.full(len(aggregate), np.inf, dtype="float64")
+    reference_present = aggregate["open_day"].notna().to_numpy(dtype=bool)
+    if reference_present.any():
+        price_rel[reference_present] = np.column_stack(
+            [
+                (
+                    aggregate.loc[reference_present, f"{column}_five"].to_numpy(dtype="float64")
+                    - aggregate.loc[reference_present, f"{column}_day"].to_numpy(dtype="float64")
+                ).__abs__()
+                / aggregate.loc[reference_present, f"{column}_day"].abs().clip(lower=1.0).to_numpy(dtype="float64")
+                for column in ("open", "high", "low", "close")
+            ]
+        ).max(axis=1)
+        volume_rel[reference_present] = (
+            (aggregate.loc[reference_present, "volume_five"] * volume_scale)
+            .sub(aggregate.loc[reference_present, "volume_day"])
+            .abs()
+            .to_numpy(dtype="float64")
+            / aggregate.loc[reference_present, "volume_day"].abs().clip(lower=1.0).to_numpy(dtype="float64")
+        )
+        amount_rel[reference_present] = (
+            (aggregate.loc[reference_present, "amount_five"] * amount_scale)
+            .sub(aggregate.loc[reference_present, "amount_day"])
+            .abs()
+            .to_numpy(dtype="float64")
+            / aggregate.loc[reference_present, "amount_day"].abs().clip(lower=1.0).to_numpy(dtype="float64")
+        )
+    volume_ratio = (
+        aggregate["volume_five"] * volume_scale
+    ) / aggregate["volume_day"].replace(0.0, np.nan)
+    volume_100x = volume_ratio.between(95.0, 105.0) | volume_ratio.between(0.0095, 0.0105)
+    accepted = (
+        reference_present
+        & (price_rel <= DAILY_PRICE_RELATIVE_TOLERANCE)
+        & ((volume_rel <= DAILY_VOLUME_RELATIVE_TOLERANCE) | (amount_rel <= DAILY_AMOUNT_RELATIVE_TOLERANCE))
+        & ~volume_100x.fillna(False).to_numpy(dtype=bool)
+    )
+    unresolved: dict[tuple[str, str], str] = {}
+    rejection_counts: dict[str, int] = {}
+    for index, row in aggregate.iterrows():
+        pair = (str(row["symbol"]), str(row["trade_date"]))
+        if accepted[index]:
+            continue
+        if not reference_present[index]:
+            reason = "missing_daily_reference"
+        elif bool(volume_100x.iloc[index]):
+            reason = "volume_100x_anomaly"
+        elif price_rel[index] > DAILY_PRICE_RELATIVE_TOLERANCE:
+            reason = "daily_price_mismatch"
+        else:
+            reason = "daily_volume_and_amount_mismatch"
+        unresolved[pair] = reason
+        rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+    accepted_pairs = pd.MultiIndex.from_frame(
+        aggregate.loc[accepted, ["symbol", "trade_date"]]
+    )
+    frame_pairs = pd.MultiIndex.from_frame(frame[["symbol", "trade_date"]])
+    output = frame.loc[frame_pairs.isin(accepted_pairs)].copy()
+    output["volume"] = pd.to_numeric(output["volume"], errors="coerce") * volume_scale
+    output["amount"] = pd.to_numeric(output["amount"], errors="coerce") * amount_scale
+    output["source"] = str(source_name)
+    return output.reset_index(drop=True), unresolved, {
+        "accepted_day_count": int(accepted.sum()),
+        "rejection_counts": rejection_counts,
+        "volume_scale": float(volume_scale),
+        "amount_scale": float(amount_scale),
+        "maximum_accepted_price_relative_error": float(price_rel[accepted].max()) if accepted.any() else None,
+        "maximum_accepted_volume_relative_error": float(volume_rel[accepted].max()) if accepted.any() else None,
+        "maximum_accepted_amount_relative_error": float(amount_rel[accepted].max()) if accepted.any() else None,
+    }
 
 
 def _download_buckets(
@@ -772,14 +1105,17 @@ def _download_buckets(
         key = f"{bucket:02d}"
         guard.check(f"bucket_{key}_start")
         bucket_wanted = {
-            symbol: tuple(sorted(set(str(item) for item in dates)))
+            symbol: tuple(sorted({str(item) for item in dates}))
             for symbol, dates in wanted.items()
             if _stable_bucket(symbol) == bucket
         }
         previous = completed.get(key)
-        if isinstance(previous, dict) and previous.get("status") == "completed":
-            if _reused_bucket_is_valid(previous, runtime=runtime, wanted=bucket_wanted):
-                continue
+        if (
+            isinstance(previous, dict)
+            and previous.get("status") == "completed"
+            and _reused_bucket_is_valid(previous, runtime=runtime, wanted=bucket_wanted)
+        ):
+            continue
         frame, unresolved, errors = _fetch_bucket(
             bucket_wanted,
             provider_domain=provider_domain,
@@ -800,7 +1136,7 @@ def _download_buckets(
             "accepted_day_count": int(
                 len(frame) if output_domain == DAILY_DOMAIN else len(frame) // 48
             ),
-            "row_count": int(len(frame)),
+            "row_count": len(frame),
             "bundle_path": str(bundle_path) if bundle_path else "",
             "file_size": bundle_path.stat().st_size if bundle_path else 0,
             "requested_pairs": _requested_pairs(bucket_wanted),
@@ -892,7 +1228,7 @@ def _fetch_bucket(
                 guard.check(f"provider_round_{attempt}_result")
                 try:
                     frame, errors = future.result()
-                except BaseException as exc:
+                except BaseException as exc:  # noqa: BLE001 - retain worker failure
                     all_errors.append(
                         {
                             "code": "chunk_fetch_error",
@@ -1004,11 +1340,13 @@ def _validate_intraday_frame(
     wanted: Mapping[str, Sequence[str]],
     *,
     source_name: str = "mootdx_online",
+    detailed_reasons: bool = False,
 ) -> tuple[pd.DataFrame, dict[tuple[str, str], str]]:
     wanted_pairs = {(symbol, str(date)) for symbol, dates in wanted.items() for date in dates}
     if frame is None or frame.empty:
         return pd.DataFrame(columns=INTRADAY_COLUMNS), {
-            item: "missing_provider_day" for item in wanted_pairs
+            item: ("provider_empty" if detailed_reasons else "missing_provider_day")
+            for item in wanted_pairs
         }
     data = frame.copy()
     data["symbol"] = data["symbol"].astype(str).str.upper()
@@ -1021,7 +1359,8 @@ def _validate_intraday_frame(
     data = data.loc[pair_index.isin(pd.MultiIndex.from_tuples(sorted(wanted_pairs)))].copy()
     if data.empty:
         return pd.DataFrame(columns=INTRADAY_COLUMNS), {
-            item: "missing_provider_day" for item in wanted_pairs
+            item: ("provider_empty" if detailed_reasons else "missing_provider_day")
+            for item in wanted_pairs
         }
     numeric, row_valid = _numeric_validity(data)
     data.loc[:, list(NUMERIC_COLUMNS)] = numeric
@@ -1052,10 +1391,33 @@ def _validate_intraday_frame(
     out["source"] = str(source_name)
     out["adjusted_flag"] = "none"
     out = out.loc[:, INTRADAY_COLUMNS].reset_index(drop=True)
-    unresolved = {
-        pair: "missing_or_invalid_complete_48_bar_day"
-        for pair in wanted_pairs - valid_pairs
-    }
+    unresolved: dict[tuple[str, str], str] = {}
+    if detailed_reasons:
+        for pair in sorted(wanted_pairs - valid_pairs):
+            pair_rows = data.loc[
+                (data["symbol"] == pair[0]) & (data["trade_date"] == pair[1])
+            ]
+            if pair_rows.empty:
+                reason = "provider_empty"
+            elif len(pair_rows) != 48:
+                reason = "incomplete_48_bars"
+            elif pair_rows["bar_time"].nunique() != 48 or not bool(
+                pair_rows["_expected_time"].all()
+            ):
+                reason = "unexpected_bar_time"
+            elif not bool(pair_rows["_row_valid"].all()) or (
+                float(pair_rows["volume"].sum()) == 0.0
+                and float(pair_rows["amount"].sum()) == 0.0
+            ):
+                reason = "invalid_numeric_or_ohlc"
+            else:
+                reason = "incomplete_48_bars"
+            unresolved[pair] = reason
+    else:
+        unresolved = {
+            pair: "missing_or_invalid_complete_48_bar_day"
+            for pair in wanted_pairs - valid_pairs
+        }
     return out, unresolved
 
 
@@ -1318,6 +1680,7 @@ def _load_or_initialize_state(
     start_date: str,
     end_date: str,
     task_count: int,
+    input_hash: str = "",
     resume: bool,
 ) -> dict[str, Any]:
     runtime.mkdir(parents=True, exist_ok=True)
@@ -1336,7 +1699,11 @@ def _load_or_initialize_state(
             raise RecentMarketRepairError(
                 f"recent_repair_state_parameters_mismatch:{observed!r}!={expected!r}"
             )
+        if input_hash and str(state.get("input_hash", "")) not in {"", input_hash}:
+            raise RecentMarketRepairError("recent_repair_state_input_hash_mismatch")
         state["task_count"] = int(task_count)
+        if input_hash:
+            state["input_hash"] = input_hash
         return state
     state = {
         "format_version": REPAIR_VERSION,
@@ -1345,6 +1712,7 @@ def _load_or_initialize_state(
         "start_date": start_date,
         "end_date": end_date,
         "task_count": int(task_count),
+        "input_hash": str(input_hash),
         "bucket_count": BUCKET_COUNT,
         "workers": DEFAULT_WORKERS,
         "buckets": {},
@@ -1353,6 +1721,21 @@ def _load_or_initialize_state(
     }
     atomic_write_json(state_path, state)
     return state
+
+
+def _pairs_sha256(pairs: Sequence[tuple[str, str]]) -> str:
+    digest = hashlib.sha256()
+    for symbol, trade_date in pairs:
+        digest.update(f"{symbol}\t{trade_date}\n".encode())
+    return digest.hexdigest()
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _reused_bucket_is_valid(
@@ -1371,7 +1754,7 @@ def _reused_bucket_is_valid(
         return False
     try:
         parquet = pq.ParquetFile(path)
-    except Exception:
+    except Exception:  # noqa: BLE001 - malformed parquet is a rejected bundle
         return False
     return (
         int(parquet.metadata.num_rows) == int(record.get("row_count", 0))
