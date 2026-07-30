@@ -1,0 +1,209 @@
+{
+  "study_id": "seq100_post_entry_ab_v2",
+  "objective": "test whether entry memory and realized D1/D3/D5 paths improve five remaining-opportunity, risk, and state targets beyond daily recomputation of the strict v4 entry contract",
+  "sources": {
+    "entry_contract_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+    "entry_contract_config": "daily_research/studies/seq100_entry_fixed_capacity_audit_v1.json",
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "path_study_config": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
+    "post_entry_v1_config": "daily_research/studies/seq100_post_entry_ab_v1.json",
+    "post_entry_v1_output_root": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v1",
+    "capacity_decision": "daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1/decision.json"
+  },
+  "folds": {
+    "test_years": [2023, 2024, 2025],
+    "outer_refit": "all legal landmark history before the test year with target-specific purge",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_outcome_year": 2026,
+    "date_weighting": "each landmark decision date has equal total target weight",
+    "fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine final holdout",
+    "no_inner_validation_year": true
+  },
+  "landmarks": {
+    "ages": [1, 3, 5],
+    "observation_time": "after landmark close",
+    "target_anchor": "next legal observed open after the landmark",
+    "population": "all actually filled original entries with a strict OOS v4 entry contract; no survivor filter",
+    "primary_population": "all target-specific B-complete common-support rows",
+    "transfer_stratum": "entry_either_top5",
+    "top5_is_not_a_slot_rule": true,
+    "tradable_day_fraction": "sparse-event alert only, never a model input",
+    "reuse_v1": "stable entry/current row keys and realized price/turnover path columns only; all v4 ranks, rank changes, transfer strata, and targets are rebuilt"
+  },
+  "features": {
+    "A": [
+      "current_mfe10_rank",
+      "current_mfe20_rank",
+      "current_state_low_rank",
+      "current_state_high_rank",
+      "current_risk10_rank",
+      "current_risk20_rank"
+    ],
+    "rank_change": [
+      "mfe10_rank_change",
+      "mfe20_rank_change",
+      "state_low_rank_change",
+      "state_high_rank_change",
+      "risk10_rank_change",
+      "risk20_rank_change"
+    ],
+    "D1_path": [
+      "entry_gap_return",
+      "entry_to_close_return",
+      "relative_turnover_last",
+      "relative_turnover_change"
+    ],
+    "D3_D5_path": [
+      "entry_gap_return",
+      "entry_to_close_return",
+      "realized_close_mfe",
+      "realized_close_mae",
+      "drawdown_from_realized_peak",
+      "last_close_return",
+      "realized_volatility",
+      "positive_day_fraction",
+      "path_efficiency",
+      "relative_turnover_mean",
+      "relative_turnover_last",
+      "relative_turnover_change"
+    ],
+    "dimension_count": {
+      "A": 6,
+      "B_D1": 16,
+      "B_D3": 24,
+      "B_D5": 24
+    },
+    "D1_forbidden_duplicates": [
+      "realized_close_mfe",
+      "realized_close_mae",
+      "drawdown_from_realized_peak",
+      "last_close_return",
+      "realized_volatility",
+      "positive_day_fraction",
+      "path_efficiency",
+      "relative_turnover_mean"
+    ]
+  },
+  "targets": {
+    "mfe_10": {
+      "physical_name": "remaining_mfe_10",
+      "source": "matched_mfe_10",
+      "semantics": "from landmark next-open anchor, maximum legal sell-close return across D2-D10",
+      "objective": "huber",
+      "dependency_days": 10
+    },
+    "mfe_20": {
+      "physical_name": "remaining_mfe_20",
+      "source": "matched_mfe_20",
+      "semantics": "from landmark next-open anchor, maximum legal sell-close return across D2-D20",
+      "objective": "huber",
+      "dependency_days": 20
+    },
+    "risk_10": {
+      "physical_name": "remaining_pre_peak_mae_10",
+      "source": "pre_peak_mae_10",
+      "semantics": "from landmark next-open anchor, minimum of zero and D1-to-D10 returns before the D1-D10 peak",
+      "objective": "huber",
+      "dependency_days": 10
+    },
+    "risk_20": {
+      "physical_name": "remaining_pre_peak_mae_20",
+      "source": "pre_peak_mae_20",
+      "semantics": "from landmark next-open anchor, minimum of zero and D1-to-D20 returns before the D1-D20 peak",
+      "objective": "huber",
+      "dependency_days": 20
+    },
+    "state_10": {
+      "physical_name": "remaining_state_10",
+      "source": "state_10",
+      "semantics": "through-2022 frozen-K3 state of D1-D10 closes from the landmark next-open anchor",
+      "objective": "multiclass",
+      "dependency_days": 10,
+      "probability_semantics": "relative state score, not literal stable probability"
+    }
+  },
+  "model": {
+    "library": "lightgbm",
+    "learning_rate": 0.03,
+    "num_leaves": 63,
+    "max_depth": 7,
+    "min_data_in_leaf": 10000,
+    "feature_fraction": 1.0,
+    "bagging_fraction": 1.0,
+    "bagging_freq": 0,
+    "lambda_l1": 0.0,
+    "lambda_l2": 10.0,
+    "max_bin": 255,
+    "huber_alpha": 0.9,
+    "deterministic": true,
+    "force_col_wise": true,
+    "num_threads": 8,
+    "histogram_pool_size_mb": 1024,
+    "sequence_batch_size": 65536,
+    "seed": 7,
+    "capacity_rule": "frozen target-specific capacity from the 2020-2022 A-only audit; uniform across D1/D3/D5",
+    "formal_booster_count": 90,
+    "one_booster_process_at_a_time": true
+  },
+  "decision": {
+    "mfe": {
+      "minimum_worst_year_rank_ic_delta": 0.002,
+      "minimum_positive_rank_ic_years": 3,
+      "minimum_positive_top5_mfe_years": 2,
+      "minimum_worst_year_top5_mfe_delta": -0.001,
+      "minimum_nonnegative_tail_hit_years": 2,
+      "maximum_worst_tail_hit_decline": 0.002,
+      "minimum_hac_supported_years": 2,
+      "maximum_hac_p_value": 0.05,
+      "maximum_bh_q_value_across_6_horizon_age_tests": 0.10,
+      "entry_top5_minimum_positive_rank_ic_years": 2,
+      "entry_top5_minimum_worst_rank_ic_delta": -0.002,
+      "maximum_worst_relative_mae_harm": 0.01,
+      "path_guardrail_minimum_harm_years": 2,
+      "path_guardrail_minimum_median_absolute_harm": 0.001
+    },
+    "risk": {
+      "minimum_worst_year_rank_ic_delta": 0.003,
+      "minimum_positive_rank_ic_years": 3,
+      "minimum_hac_supported_years": 2,
+      "maximum_hac_p_value": 0.05,
+      "maximum_bh_q_value_across_18_year_tests": 0.10,
+      "minimum_mae_improvement_years": 2,
+      "maximum_worst_relative_mae_harm": 0.005,
+      "minimum_pr_auc_improvement_years": 2,
+      "maximum_worst_pr_auc_decline": 0.002,
+      "entry_top5_requires_three_positive_rank_ic_years": true
+    },
+    "state": {
+      "minimum_worst_year_ordinal_ic_delta": 0.002,
+      "minimum_positive_ordinal_ic_years": 3,
+      "minimum_brier_improvement_years": 2,
+      "minimum_logloss_improvement_years": 2,
+      "maximum_worst_relative_proper_score_harm": 0.005,
+      "reject_probability_collapse": true
+    },
+    "general": {
+      "minimum_passing_ages": 2,
+      "nonpassing_age_material_rank_harm": -0.003,
+      "nonpassing_age_material_top5_harm": -0.001,
+      "one_age_only_is_not_generalized": true,
+      "coordinates_are_decided_independently": true
+    }
+  },
+  "non_selections": [
+    "entry score fusion",
+    "MFE value calibration",
+    "temperature calibration",
+    "exit threshold",
+    "switching value",
+    "transaction cost buffer",
+    "holding period",
+    "slot count",
+    "leverage",
+    "stop loss",
+    "account policy",
+    "deep model",
+    "reinforcement learning"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v2"
+}

@@ -1,0 +1,1323 @@
+{
+  "schema": "seq100_entry_fixed_capacity_summary/v1",
+  "status": "completed_entry_fixed_capacity_audit",
+  "completed_at": "2026-07-30T08:53:50+08:00",
+  "study_id": "seq100_entry_fixed_capacity_audit_v1",
+  "config_sha256": "aa51aa7fe0473dc3c385615ec69afbebe3be00af0cbc90f3329094d88c004cbb",
+  "mfe_fixed_512_diagnostics": [
+    {
+      "year": 2020,
+      "horizon": 10,
+      "fixed_rounds": 512,
+      "row_count": 670087,
+      "rank_ic": 0.13345159165319437,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.08409799188749492,
+      "top5_mfe": 0.07616827428472123,
+      "top1_mfe_lift": 0.03146899121634016,
+      "top5_mfe_lift": 0.023539273613566444,
+      "date_equal_mae": 0.0548740620404117,
+      "target_mean": 0.052629000683729416,
+      "prediction_mean": 0.04499615847550355,
+      "prediction_bias": -0.007632842208225868,
+      "top1_tail_rate": 0.36419753086419754,
+      "top5_tail_rate": 0.3320673770587066,
+      "top1_early_opportunity_share": 0.6207016276352901,
+      "top5_early_opportunity_share": 0.6136540628031838,
+      "top1_peak_day_mean": 5.599941211052322,
+      "top5_peak_day_mean": 5.692354895295109,
+      "top1_pre_peak_mae_mean": -0.03484366869522424,
+      "top5_pre_peak_mae_mean": -0.031054337304330996,
+      "top1_endpoint_return_mean": 0.006350653646723245,
+      "top5_endpoint_return_mean": 0.007986982289287788,
+      "top1_high_state_rate": 0.29556143445032335,
+      "top5_high_state_rate": 0.27650437589976984,
+      "source_task_id": "mfe10_2020_fixed512_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/tasks/mfe10_2020_fixed512_outer/task_result.json",
+        "size": 8420,
+        "sha256": "969d3f257a23cfddff2b3a476d1c9d7138b9fa42ee4564a4b81c558ad8d3e93e"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h10/fold_2020_daily.parquet",
+        "size": 67044,
+        "sha256": "29745e22761dad22747c97d253d28b2cf04bafe21996092d0d9f8c29d0f61b89"
+      }
+    },
+    {
+      "year": 2021,
+      "horizon": 10,
+      "fixed_rounds": 512,
+      "row_count": 694930,
+      "rank_ic": 0.14905157786673248,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.1065191702607943,
+      "top5_mfe": 0.08825955968753452,
+      "top1_mfe_lift": 0.05388735785458282,
+      "top5_mfe_lift": 0.03562774728132304,
+      "date_equal_mae": 0.056634943222038193,
+      "target_mean": 0.05263181239791854,
+      "prediction_mean": 0.06009228473889257,
+      "prediction_bias": 0.0074604723409740295,
+      "top1_tail_rate": 0.44790995154979824,
+      "top5_tail_rate": 0.3902528272022521,
+      "top1_early_opportunity_share": 0.6186901504985353,
+      "top5_early_opportunity_share": 0.6098265554182878,
+      "top1_peak_day_mean": 5.750671680620596,
+      "top5_peak_day_mean": 5.776753596129708,
+      "top1_pre_peak_mae_mean": -0.040702236308353575,
+      "top5_pre_peak_mae_mean": -0.034911077780641925,
+      "top1_endpoint_return_mean": 0.020089206211495375,
+      "top5_endpoint_return_mean": 0.015333134696624017,
+      "top1_high_state_rate": 0.3341391473575382,
+      "top5_high_state_rate": 0.30501355067938735,
+      "source_task_id": "mfe10_2021_fixed512_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/tasks/mfe10_2021_fixed512_outer/task_result.json",
+        "size": 8408,
+        "sha256": "4e4dfd2d746d4675a092f00b5e17446d8f0c53b79eed479a40140af326c4a345"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h10/fold_2021_daily.parquet",
+        "size": 70800,
+        "sha256": "ec24d5abe427db117cd8f85362998b3d78240816960f4f8909d71a04d1ee72ac"
+      }
+    },
+    {
+      "year": 2022,
+      "horizon": 10,
+      "fixed_rounds": 512,
+      "row_count": 725587,
+      "rank_ic": 0.11817920564103028,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.08389259057044286,
+      "top5_mfe": 0.07240190241259126,
+      "top1_mfe_lift": 0.035636656709842035,
+      "top5_mfe_lift": 0.02414596855199042,
+      "date_equal_mae": 0.05658985925753731,
+      "target_mean": 0.048255933882556105,
+      "prediction_mean": 0.062015918612118935,
+      "prediction_bias": 0.01375998472956283,
+      "top1_tail_rate": 0.40470541189016257,
+      "top5_tail_rate": 0.3504892237828927,
+      "top1_early_opportunity_share": 0.6410938548915386,
+      "top5_early_opportunity_share": 0.6334356229433402,
+      "top1_peak_day_mean": 5.446480938416422,
+      "top5_peak_day_mean": 5.500813485170008,
+      "top1_pre_peak_mae_mean": -0.04709337505713742,
+      "top5_pre_peak_mae_mean": -0.0385721657827093,
+      "top1_endpoint_return_mean": -0.015290961107975464,
+      "top5_endpoint_return_mean": -0.008608616334696513,
+      "top1_high_state_rate": 0.2828268017417577,
+      "top5_high_state_rate": 0.2626778991416705,
+      "source_task_id": "mfe10_2022_fixed512_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/tasks/mfe10_2022_fixed512_outer/task_result.json",
+        "size": 8412,
+        "sha256": "47ecc7a6044baeec8da4b9957004b80ead2e92e9c45c04cb9374c4fb9e225d0c"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h10/fold_2022_daily.parquet",
+        "size": 69407,
+        "sha256": "fd0280e0a83701b769da2e0ece0f143fa0157ddf3888a4d073f34a2ecc4a8652"
+      }
+    },
+    {
+      "year": 2023,
+      "horizon": 10,
+      "fixed_rounds": 512,
+      "row_count": 740593,
+      "rank_ic": 0.108785055356018,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.08357455534959418,
+      "top5_mfe": 0.06619317322810912,
+      "top1_mfe_lift": 0.048409871145220426,
+      "top5_mfe_lift": 0.03102848902373536,
+      "date_equal_mae": 0.03949825583514158,
+      "target_mean": 0.03516468417745152,
+      "prediction_mean": 0.03612627368079105,
+      "prediction_bias": 0.0009615895033395286,
+      "top1_tail_rate": 0.4722740602505998,
+      "top5_tail_rate": 0.40916024484523567,
+      "top1_early_opportunity_share": 0.6523581265409543,
+      "top5_early_opportunity_share": 0.6353578746101093,
+      "top1_peak_day_mean": 5.222607304718742,
+      "top5_peak_day_mean": 5.288487794728981,
+      "top1_pre_peak_mae_mean": -0.04307221595696398,
+      "top5_pre_peak_mae_mean": -0.03283111843658454,
+      "top1_endpoint_return_mean": -0.00977521645148507,
+      "top5_endpoint_return_mean": -0.006226999745063784,
+      "top1_high_state_rate": 0.2621967475339909,
+      "top5_high_state_rate": 0.2241960183490033,
+      "source_task_id": "mfe10_2023_long_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/outer/fold_2023/h10/turnover_cost_proxy/model.txt",
+        "size": 2872581,
+        "sha256": "5ed87f22dc7ef2632029caaca78f5db1eaf93482770df476cc1fe3500ce436a4"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h10/fold_2023_daily.parquet",
+        "size": 67798,
+        "sha256": "2fa5e56d26e541c83a120859b5e1d71dcde348099a4a2d4d656736c44f860795"
+      }
+    },
+    {
+      "year": 2024,
+      "horizon": 10,
+      "fixed_rounds": 512,
+      "row_count": 744571,
+      "rank_ic": 0.1249870550545991,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.09931808152336612,
+      "top5_mfe": 0.08666329468577087,
+      "top1_mfe_lift": 0.043182016919804105,
+      "top5_mfe_lift": 0.030527230082208878,
+      "date_equal_mae": 0.060983166021021294,
+      "target_mean": 0.056136064565551085,
+      "prediction_mean": 0.0496421202699456,
+      "prediction_bias": -0.006493944295605486,
+      "top1_tail_rate": 0.43009707215330806,
+      "top5_tail_rate": 0.36912899597714083,
+      "top1_early_opportunity_share": 0.6215863886864694,
+      "top5_early_opportunity_share": 0.6199421022636203,
+      "top1_peak_day_mean": 5.6668824587953015,
+      "top5_peak_day_mean": 5.617389572576126,
+      "top1_pre_peak_mae_mean": -0.04704781864431169,
+      "top5_pre_peak_mae_mean": -0.0390340778471331,
+      "top1_endpoint_return_mean": 0.001049966045216467,
+      "top5_endpoint_return_mean": 0.002019294291314,
+      "top1_high_state_rate": 0.31635607955525585,
+      "top5_high_state_rate": 0.29093929121743173,
+      "source_task_id": "mfe10_2024_long_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/outer/fold_2024/h10/turnover_cost_proxy/model.txt",
+        "size": 3004089,
+        "sha256": "477a94c26d94765c84c20fbee7c37ce1c2c6c6cfd1fb282653fd10a469cd9441"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h10/fold_2024_daily.parquet",
+        "size": 68770,
+        "sha256": "2c70207d519ed0f236e865569e990674b40b554905b12ac6214ee170af9ec79f"
+      }
+    },
+    {
+      "year": 2025,
+      "horizon": 10,
+      "fixed_rounds": 512,
+      "row_count": 713944,
+      "rank_ic": 0.16015517165497833,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.1002844854180807,
+      "top5_mfe": 0.08377701802192579,
+      "top1_mfe_lift": 0.05006772505378791,
+      "top5_mfe_lift": 0.03356025765763299,
+      "date_equal_mae": 0.04868130955720564,
+      "target_mean": 0.05021676034207881,
+      "prediction_mean": 0.045185506501088456,
+      "prediction_bias": -0.005031253840990353,
+      "top1_tail_rate": 0.4561816419770178,
+      "top5_tail_rate": 0.3944321893673681,
+      "top1_early_opportunity_share": 0.6397672678976962,
+      "top5_early_opportunity_share": 0.6232614240872303,
+      "top1_peak_day_mean": 5.555586321473072,
+      "top5_peak_day_mean": 5.676557551927877,
+      "top1_pre_peak_mae_mean": -0.04540141543880831,
+      "top5_pre_peak_mae_mean": -0.03625551595899204,
+      "top1_endpoint_return_mean": 0.0067933807787593555,
+      "top5_endpoint_return_mean": 0.009743647409090282,
+      "top1_high_state_rate": 0.3243804513360099,
+      "top5_high_state_rate": 0.2922320385520264,
+      "source_task_id": "mfe10_2025_long_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/outer/fold_2025/h10/turnover_cost_proxy/model.txt",
+        "size": 4277879,
+        "sha256": "8d23edef0eb36ed5317f7a01a37dd42e0bcd150d0288ac8603a4682d472203ae"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h10/fold_2025_daily.parquet",
+        "size": 65960,
+        "sha256": "a23974bc1201d89872d46dcb9e461a2fa4f4aeb364a303dbac468a3ff8a46977"
+      }
+    },
+    {
+      "year": 2020,
+      "horizon": 20,
+      "fixed_rounds": 512,
+      "row_count": 670176,
+      "rank_ic": 0.14304340278669178,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.12542821502329426,
+      "top5_mfe": 0.12002720725967955,
+      "top1_mfe_lift": 0.034934979291804065,
+      "top5_mfe_lift": 0.029533971528189373,
+      "date_equal_mae": 0.08119421302093587,
+      "target_mean": 0.0904932354216563,
+      "prediction_mean": 0.0697974094758942,
+      "prediction_bias": -0.020695825945762095,
+      "top1_tail_rate": 0.3318636096413874,
+      "top5_tail_rate": 0.304967255376817,
+      "top1_early_opportunity_share": 0.6215521754587893,
+      "top5_early_opportunity_share": 0.6210520977989064,
+      "top1_peak_day_mean": 9.944591416813639,
+      "top5_peak_day_mean": 10.178438526564348,
+      "top1_pre_peak_mae_mean": -0.04175497750660188,
+      "top5_pre_peak_mae_mean": -0.03907450671756877,
+      "top1_endpoint_return_mean": 0.00463894151486454,
+      "top5_endpoint_return_mean": 0.012694286454995998,
+      "top1_high_state_rate": 0.23059964726631396,
+      "top5_high_state_rate": 0.21811893975239707,
+      "source_task_id": "mfe20_2020_fixed512_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/tasks/mfe20_2020_fixed512_outer/task_result.json",
+        "size": 8429,
+        "sha256": "3a3ec5e628b657450832a057b470cf9d7326867004e6e9ccb6b6d175908bc1c9"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h20/fold_2020_daily.parquet",
+        "size": 66859,
+        "sha256": "20cd498d69c259c1df7dba00a2b30ad89bbdf295becb20c50d0dd2f499a4cdd4"
+      }
+    },
+    {
+      "year": 2021,
+      "horizon": 20,
+      "fixed_rounds": 512,
+      "row_count": 694998,
+      "rank_ic": 0.16096439971121157,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.1687402627781437,
+      "top5_mfe": 0.14341529929939387,
+      "top1_mfe_lift": 0.07762971800091652,
+      "top5_mfe_lift": 0.05230475452216672,
+      "date_equal_mae": 0.08376126111937773,
+      "target_mean": 0.09111054480178446,
+      "prediction_mean": 0.09683735747020633,
+      "prediction_bias": 0.005726812668421871,
+      "top1_tail_rate": 0.42939548744146444,
+      "top5_tail_rate": 0.37113804542954043,
+      "top1_early_opportunity_share": 0.6407191352100545,
+      "top5_early_opportunity_share": 0.6253537351733985,
+      "top1_peak_day_mean": 10.370428821450535,
+      "top5_peak_day_mean": 10.628271265705132,
+      "top1_pre_peak_mae_mean": -0.04654792420907497,
+      "top5_pre_peak_mae_mean": -0.04180812523058063,
+      "top1_endpoint_return_mean": 0.03917274485667635,
+      "top5_endpoint_return_mean": 0.032423206849058354,
+      "top1_high_state_rate": 0.2925273841621224,
+      "top5_high_state_rate": 0.2632802839983864,
+      "source_task_id": "mfe20_2021_fixed512_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/tasks/mfe20_2021_fixed512_outer/task_result.json",
+        "size": 8418,
+        "sha256": "4a15d2304d503b0ef119edb8dbc409cc6fa66271934849ab3eec539a48bc0df1"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h20/fold_2021_daily.parquet",
+        "size": 70350,
+        "sha256": "8955aea57cf621aebe2782ff200f577d4c6f0ca6d57ced7262d275177f665588"
+      }
+    },
+    {
+      "year": 2022,
+      "horizon": 20,
+      "fixed_rounds": 512,
+      "row_count": 725645,
+      "rank_ic": 0.11984617936522157,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.12382161470255484,
+      "top5_mfe": 0.1142935684887839,
+      "top1_mfe_lift": 0.04144036695934095,
+      "top5_mfe_lift": 0.031912320745569996,
+      "date_equal_mae": 0.0866075348261655,
+      "target_mean": 0.08238124776543315,
+      "prediction_mean": 0.10812073356902503,
+      "prediction_bias": 0.02573948580359188,
+      "top1_tail_rate": 0.36107704612103436,
+      "top5_tail_rate": 0.32745735215980476,
+      "top1_early_opportunity_share": 0.6763366314278142,
+      "top5_early_opportunity_share": 0.6660364034899391,
+      "top1_peak_day_mean": 9.503101395183508,
+      "top5_peak_day_mean": 9.838081829024857,
+      "top1_pre_peak_mae_mean": -0.0523241102671274,
+      "top5_pre_peak_mae_mean": -0.046148312402402594,
+      "top1_endpoint_return_mean": -0.01220141344714899,
+      "top5_endpoint_return_mean": -0.0032080286695368677,
+      "top1_high_state_rate": 0.21192126544032702,
+      "top5_high_state_rate": 0.20748706036012055,
+      "source_task_id": "mfe20_2022_fixed512_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/tasks/mfe20_2022_fixed512_outer/task_result.json",
+        "size": 8430,
+        "sha256": "05343c1325a6020da44af9851449480be489c02a3d6bad592f6ddd36324f1642"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h20/fold_2022_daily.parquet",
+        "size": 69385,
+        "sha256": "dfd3170bf82e93debe6d0a1d09fb5f09f581aa1629f20e91000e583173dd59c6"
+      }
+    },
+    {
+      "year": 2023,
+      "horizon": 20,
+      "fixed_rounds": 512,
+      "row_count": 740635,
+      "rank_ic": 0.13262712456914685,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.13369727958574987,
+      "top5_mfe": 0.10505912538127636,
+      "top1_mfe_lift": 0.07498911968964862,
+      "top5_mfe_lift": 0.046350965485175144,
+      "date_equal_mae": 0.06477803136158097,
+      "target_mean": 0.05870815981284794,
+      "prediction_mean": 0.07857588194903616,
+      "prediction_bias": 0.019867722136188218,
+      "top1_tail_rate": 0.4794721407624633,
+      "top5_tail_rate": 0.38905816719474084,
+      "top1_early_opportunity_share": 0.6740660289587851,
+      "top5_early_opportunity_share": 0.6569048069937204,
+      "top1_peak_day_mean": 9.358037856571583,
+      "top5_peak_day_mean": 9.471516961390952,
+      "top1_pre_peak_mae_mean": -0.04856787372568075,
+      "top5_pre_peak_mae_mean": -0.037787077650246914,
+      "top1_endpoint_return_mean": -0.001965648813223076,
+      "top5_endpoint_return_mean": -0.004079674594343067,
+      "top1_high_state_rate": 0.2047454012263396,
+      "top5_high_state_rate": 0.16705513773306235,
+      "source_task_id": "mfe20_2023_long_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/outer/fold_2023/h20/breakout_retest_levels/model.txt",
+        "size": 3342198,
+        "sha256": "e8b689b8c050be6c8d0b935ad007534a720f55a910c230341a4301b546e2dd45"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h20/fold_2023_daily.parquet",
+        "size": 67710,
+        "sha256": "80554de7e36e59c57fe745bd89ce6375bfd6783c0f4894799b659f02fb2fa9ea"
+      }
+    },
+    {
+      "year": 2024,
+      "horizon": 20,
+      "fixed_rounds": 512,
+      "row_count": 744632,
+      "rank_ic": 0.16311881728816316,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.18801836517462742,
+      "top5_mfe": 0.1536373137100778,
+      "top1_mfe_lift": 0.09117400745629514,
+      "top5_mfe_lift": 0.05679295599174556,
+      "date_equal_mae": 0.09040969874891798,
+      "target_mean": 0.09684435775117141,
+      "prediction_mean": 0.09187055262800681,
+      "prediction_bias": -0.004973805123164601,
+      "top1_tail_rate": 0.47277343688741824,
+      "top5_tail_rate": 0.38397056608791474,
+      "top1_early_opportunity_share": 0.6413829093813511,
+      "top5_early_opportunity_share": 0.6362853130202863,
+      "top1_peak_day_mean": 10.77459834240281,
+      "top5_peak_day_mean": 10.448257767125492,
+      "top1_pre_peak_mae_mean": -0.049503632369553685,
+      "top5_pre_peak_mae_mean": -0.046117031033931596,
+      "top1_endpoint_return_mean": 0.04936296274809538,
+      "top5_endpoint_return_mean": 0.029687341863551816,
+      "top1_high_state_rate": 0.330603750764502,
+      "top5_high_state_rate": 0.279077638800856,
+      "source_task_id": "mfe20_2024_long_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/outer/fold_2024/h20/breakout_retest_levels/model.txt",
+        "size": 3402797,
+        "sha256": "814858fa6f0f780b3b77b4e948cc15b27b7591d62a5bdf7aaa43fe8ea8694290"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h20/fold_2024_daily.parquet",
+        "size": 68463,
+        "sha256": "d0c8b719c806920374c8010d6fa66a7de60a8372b7dd72af8717e1309ef046f2"
+      }
+    },
+    {
+      "year": 2025,
+      "horizon": 20,
+      "fixed_rounds": 512,
+      "row_count": 683467,
+      "rank_ic": 0.20160710562382356,
+      "decile_spearman": 0.9999999999999999,
+      "top1_mfe": 0.15938019588026803,
+      "top5_mfe": 0.1354861378732865,
+      "top1_mfe_lift": 0.07099854472824788,
+      "top5_mfe_lift": 0.04710448672126635,
+      "date_equal_mae": 0.07701849581747643,
+      "target_mean": 0.08838165123596756,
+      "prediction_mean": 0.0869797165462654,
+      "prediction_bias": -0.00140193468970215,
+      "top1_tail_rate": 0.43165051352524225,
+      "top5_tail_rate": 0.3719607570809304,
+      "top1_early_opportunity_share": 0.6456379926110581,
+      "top5_early_opportunity_share": 0.6402753395983257,
+      "top1_peak_day_mean": 10.311586865326195,
+      "top5_peak_day_mean": 10.440852735470315,
+      "top1_pre_peak_mae_mean": -0.049426019967392903,
+      "top5_pre_peak_mae_mean": -0.041998983413096595,
+      "top1_endpoint_return_mean": 0.03339673351944841,
+      "top5_endpoint_return_mean": 0.02813503861067673,
+      "top1_high_state_rate": 0.29003327064950096,
+      "top5_high_state_rate": 0.2499813086832361,
+      "source_task_id": "mfe20_2025_long_outer",
+      "source_task_result": {
+        "path": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1/outer/fold_2025/h20/breakout_retest_levels/model.txt",
+        "size": 3453826,
+        "sha256": "391627651f6cd25202178aaa55b0b08c591d0b3f08c3e8183f9fc9f8783cfc1b"
+      },
+      "daily_metrics": {
+        "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/mfe/h20/fold_2025_daily.parquet",
+        "size": 64061,
+        "sha256": "4a032d0e0596661fa1e09729c36f27e567bbdf54225ab5c240d9182bad7b9f6c"
+      }
+    }
+  ],
+  "state_and_risk_safety_gates": {
+    "state_10": {
+      "passed": false,
+      "policy": "v3_time_consistent_adaptive",
+      "checks": {
+        "worst_decision_year_ordinal_ic_delta": -0.008112033919222274,
+        "median_decision_year_ordinal_ic_delta": 0.001940562417173092,
+        "nonnegative_high_state_top5_years": 2,
+        "worst_high_state_top5_delta": -0.007561144730431317,
+        "median_relative_brier_harm": 0.0030342426889601935,
+        "worst_relative_brier_harm": 0.00703046748019213,
+        "median_relative_logloss_harm": 0.0034514872597584977,
+        "worst_relative_logloss_harm": 0.004023221493447002,
+        "collapsed_years": [],
+        "historical_bad_years": [
+          2022
+        ]
+      },
+      "annual_ordinal_ic_delta": [
+        -0.008112033919222274,
+        0.001940562417173092,
+        0.016885938864631366
+      ],
+      "annual_high_state_top5_lift_delta": [
+        -0.007561144730431317,
+        0.0026690650073743784,
+        0.006873982587229182
+      ],
+      "annual_relative_brier_harm": [
+        0.0030342426889601935,
+        0.0002790972219608622,
+        0.00703046748019213
+      ],
+      "annual_relative_logloss_harm": [
+        0.0022900715389005803,
+        0.0034514872597584977,
+        0.004023221493447002
+      ],
+      "head": "state_10",
+      "fixed_rounds": 256,
+      "annual": [
+        {
+          "head": "state_10",
+          "target": "state",
+          "horizon": 10,
+          "year": 2020,
+          "adaptive_rounds": 6,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 243,
+            "maximum_lag": 9,
+            "mean": 0.0338844198606689,
+            "standard_error": 0.01217794326839759,
+            "t_statistic": 2.782441920927713,
+            "p_value_two_sided": 0.0053951520791760054
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 2018451
+          },
+          "ordinal_ic_delta": 0.0338844198606689,
+          "high_state_top5_lift_delta": -0.01347009904232763,
+          "relative_brier_harm": -0.040499971311436865,
+          "relative_logloss_harm": -0.03369075783114198,
+          "collapsed": false,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/state_10/fold_2020_paired_daily.parquet",
+            "size": 30923,
+            "sha256": "92da659c2210890ed905f779b49f09adb8972dda6d9a92ea93b465561b401ccf"
+          }
+        },
+        {
+          "head": "state_10",
+          "target": "state",
+          "horizon": 10,
+          "year": 2021,
+          "adaptive_rounds": 185,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 243,
+            "maximum_lag": 9,
+            "mean": 0.002541786890008157,
+            "standard_error": 0.0009004576414466013,
+            "t_statistic": 2.822772302675705,
+            "p_value_two_sided": 0.0047610371848917496
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 2090889
+          },
+          "ordinal_ic_delta": 0.002541786890008157,
+          "high_state_top5_lift_delta": -0.00076175820468381,
+          "relative_brier_harm": 0.0014026085999759303,
+          "relative_logloss_harm": 0.0018145276841447437,
+          "collapsed": false,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/state_10/fold_2021_paired_daily.parquet",
+            "size": 31776,
+            "sha256": "4364696e69077ee91739d2fd05f40e8af233e5a12d7bda7496abe2a2be2491dd"
+          }
+        },
+        {
+          "head": "state_10",
+          "target": "state",
+          "horizon": 10,
+          "year": 2022,
+          "adaptive_rounds": 65,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 9,
+            "mean": 0.0012702527435022402,
+            "standard_error": 0.010353121007344306,
+            "t_statistic": 0.12269273609389354,
+            "p_value_two_sided": 0.9023504161632283
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 2184963
+          },
+          "ordinal_ic_delta": 0.0012702527435022402,
+          "high_state_top5_lift_delta": -0.0019269799719421846,
+          "relative_brier_harm": 0.022189960756620705,
+          "relative_logloss_harm": 0.029159504575907623,
+          "collapsed": false,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/state_10/fold_2022_paired_daily.parquet",
+            "size": 31167,
+            "sha256": "dca9e15ae66ec40c10af9a646e66ef1d16bb04a6789f5cb7e9ea7e7039cba65d"
+          }
+        },
+        {
+          "head": "state_10",
+          "target": "state",
+          "horizon": 10,
+          "year": 2023,
+          "adaptive_rounds": 74,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 9,
+            "mean": -0.008112033919222274,
+            "standard_error": 0.0066855145237055625,
+            "t_statistic": -1.2133746610613956,
+            "p_value_two_sided": 0.22498660956819505
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 2227419
+          },
+          "ordinal_ic_delta": -0.008112033919222274,
+          "high_state_top5_lift_delta": -0.007561144730431317,
+          "relative_brier_harm": 0.0030342426889601935,
+          "relative_logloss_harm": 0.0022900715389005803,
+          "collapsed": false,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/state_10/fold_2023_paired_daily.parquet",
+            "size": 30716,
+            "sha256": "a3ee98831a82e47a4e38b35abf99f76aac1c8de37fd136b7f6a417563392562f"
+          }
+        },
+        {
+          "head": "state_10",
+          "target": "state",
+          "horizon": 10,
+          "year": 2024,
+          "adaptive_rounds": 140,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 9,
+            "mean": 0.001940562417173092,
+            "standard_error": 0.006282081523441342,
+            "t_statistic": 0.30890436711652963,
+            "p_value_two_sided": 0.7573942746927997
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 2248959
+          },
+          "ordinal_ic_delta": 0.001940562417173092,
+          "high_state_top5_lift_delta": 0.0026690650073743784,
+          "relative_brier_harm": 0.0002790972219608622,
+          "relative_logloss_harm": 0.0034514872597584977,
+          "collapsed": false,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/state_10/fold_2024_paired_daily.parquet",
+            "size": 31069,
+            "sha256": "6cb55c8a58a946de9105a81ab8c2ac304c9dca81e12e8c4001db01ece3d45905"
+          }
+        },
+        {
+          "head": "state_10",
+          "target": "state",
+          "horizon": 10,
+          "year": 2025,
+          "adaptive_rounds": 66,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 233,
+            "maximum_lag": 9,
+            "mean": 0.016885938864631366,
+            "standard_error": 0.006442390102962515,
+            "t_statistic": 2.621067429131063,
+            "p_value_two_sided": 0.008765492289770999
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 2242239
+          },
+          "ordinal_ic_delta": 0.016885938864631366,
+          "high_state_top5_lift_delta": 0.006873982587229182,
+          "relative_brier_harm": 0.00703046748019213,
+          "relative_logloss_harm": 0.004023221493447002,
+          "collapsed": false,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/state_10/fold_2025_paired_daily.parquet",
+            "size": 30011,
+            "sha256": "50c85139c08d356c60eb28eba7a5a094d6a3e86deeeb2bdaec104854e8f5463b"
+          }
+        }
+      ],
+      "combined_primary_harm_test": {
+        "z_statistic": -0.9686948496971513,
+        "p_value_one_sided_harm": 0.8336512684946031
+      },
+      "combined_primary_harm_bh_q_value": 0.9999416595070759
+    },
+    "risk_10": {
+      "passed": false,
+      "policy": "v3_time_consistent_adaptive",
+      "checks": {
+        "worst_decision_year_rank_ic_delta": -0.0043257890501572985,
+        "median_decision_year_rank_ic_delta": 0.0005656574126121115,
+        "median_relative_mae_harm": 0.0114983916968287,
+        "worst_relative_mae_harm": 0.03679787985647955,
+        "nonnegative_deep_adverse_pr_auc_years": 2,
+        "worst_deep_adverse_pr_auc_delta": -0.0028678755829480186,
+        "absolute_bias_worsened_all_decision_years": true,
+        "historical_bad_years": [
+          2020,
+          2021
+        ]
+      },
+      "annual_rank_ic_delta": [
+        -0.0043257890501572985,
+        0.0035904616935863954,
+        0.0005656574126121115
+      ],
+      "annual_relative_mae_harm": [
+        0.03679787985647955,
+        0.008494455453810687,
+        0.0114983916968287
+      ],
+      "annual_deep_adverse_pr_auc_delta": [
+        -0.0028678755829480186,
+        0.0026998849774718015,
+        0.0010491285385266279
+      ],
+      "annual_absolute_bias_harm": [
+        0.0006278436203389791,
+        0.00021845977154290837,
+        0.0003113973210175637
+      ],
+      "head": "risk_10",
+      "fixed_rounds": 256,
+      "annual": [
+        {
+          "head": "risk_10",
+          "target": "pre_peak_mae",
+          "horizon": 10,
+          "year": 2020,
+          "adaptive_rounds": 72,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 243,
+            "maximum_lag": 9,
+            "mean": 0.002776499943559536,
+            "standard_error": 0.0013781418643695966,
+            "t_statistic": 2.014669182718421,
+            "p_value_two_sided": 0.04393932326682263
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 672817
+          },
+          "rank_ic_delta": 0.002776499943559536,
+          "relative_mae_harm": 0.012556249130166525,
+          "deep_adverse_pr_auc_delta": 0.003156036800623753,
+          "absolute_bias_harm": 0.0001393965704299233,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_10/fold_2020_paired_daily.parquet",
+            "size": 38396,
+            "sha256": "b7b108e3330838bfd23506a83082cb672c997ec83c2cbc48bde2d6b5a0017c9b"
+          }
+        },
+        {
+          "head": "risk_10",
+          "target": "pre_peak_mae",
+          "horizon": 10,
+          "year": 2021,
+          "adaptive_rounds": 91,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 243,
+            "maximum_lag": 9,
+            "mean": -0.008641661951894686,
+            "standard_error": 0.003878905379239808,
+            "t_statistic": -2.227860983190131,
+            "p_value_two_sided": 0.025889786697888016
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 696963
+          },
+          "rank_ic_delta": -0.008641661951894686,
+          "relative_mae_harm": 0.007475049341302812,
+          "deep_adverse_pr_auc_delta": -0.005618034339937975,
+          "absolute_bias_harm": 0.0004581778608815223,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_10/fold_2021_paired_daily.parquet",
+            "size": 38442,
+            "sha256": "f69dfe3fcf05b6ccbc554f2e039880a2a95e65d68d2b897c7b6ed05557dbaa4b"
+          }
+        },
+        {
+          "head": "risk_10",
+          "target": "pre_peak_mae",
+          "horizon": 10,
+          "year": 2022,
+          "adaptive_rounds": 136,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 9,
+            "mean": 0.0015495071737337417,
+            "standard_error": 0.0006741781018690292,
+            "t_statistic": 2.2983647339449784,
+            "p_value_two_sided": 0.021541038930232615
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 728321
+          },
+          "rank_ic_delta": 0.0015495071737337417,
+          "relative_mae_harm": -0.0060525135613075445,
+          "deep_adverse_pr_auc_delta": 0.0011254361887507185,
+          "absolute_bias_harm": -0.00011637317977951497,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_10/fold_2022_paired_daily.parquet",
+            "size": 38282,
+            "sha256": "91e662d7748fb9a00660cd33a24ab795d45731fe3e03da8f236147aff3d4ca57"
+          }
+        },
+        {
+          "head": "risk_10",
+          "target": "pre_peak_mae",
+          "horizon": 10,
+          "year": 2023,
+          "adaptive_rounds": 102,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 9,
+            "mean": -0.0043257890501572985,
+            "standard_error": 0.0012908353611183199,
+            "t_statistic": -3.3511547486657287,
+            "p_value_two_sided": 0.000804753177386977
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 742473
+          },
+          "rank_ic_delta": -0.0043257890501572985,
+          "relative_mae_harm": 0.03679787985647955,
+          "deep_adverse_pr_auc_delta": -0.0028678755829480186,
+          "absolute_bias_harm": 0.0006278436203389791,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_10/fold_2023_paired_daily.parquet",
+            "size": 38323,
+            "sha256": "1a85f93aee9f3fb39bfb3df9e5a2c4e79fd796c705c7aa575c87c9a80856bcf2"
+          }
+        },
+        {
+          "head": "risk_10",
+          "target": "pre_peak_mae",
+          "horizon": 10,
+          "year": 2024,
+          "adaptive_rounds": 129,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 9,
+            "mean": 0.0035904616935863954,
+            "standard_error": 0.0013972002295420114,
+            "t_statistic": 2.5697545832520468,
+            "p_value_two_sided": 0.010177058346751866
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 749653
+          },
+          "rank_ic_delta": 0.0035904616935863954,
+          "relative_mae_harm": 0.008494455453810687,
+          "deep_adverse_pr_auc_delta": 0.0026998849774718015,
+          "absolute_bias_harm": 0.00021845977154290837,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_10/fold_2024_paired_daily.parquet",
+            "size": 38347,
+            "sha256": "0fc66720c80a82506cb5c7acd23e19e7c8389c68a61336479651444eacfa6795"
+          }
+        },
+        {
+          "head": "risk_10",
+          "target": "pre_peak_mae",
+          "horizon": 10,
+          "year": 2025,
+          "adaptive_rounds": 118,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 233,
+            "maximum_lag": 9,
+            "mean": 0.0005656574126121115,
+            "standard_error": 0.0008599680981962982,
+            "t_statistic": 0.657765577349351,
+            "p_value_two_sided": 0.510688776662864
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 747413
+          },
+          "rank_ic_delta": 0.0005656574126121115,
+          "relative_mae_harm": 0.0114983916968287,
+          "deep_adverse_pr_auc_delta": 0.0010491285385266279,
+          "absolute_bias_harm": 0.0003113973210175637,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_10/fold_2025_paired_daily.parquet",
+            "size": 37315,
+            "sha256": "4484f13d4db913b97a69f65d4f53ae6e53cd2ecf94a4ebbe4361923debe4b760"
+          }
+        }
+      ],
+      "combined_primary_harm_test": {
+        "z_statistic": 0.07900024070668206,
+        "p_value_one_sided_harm": 0.4685162158034915
+      },
+      "combined_primary_harm_bh_q_value": 0.9999416595070759
+    },
+    "risk_20": {
+      "passed": false,
+      "policy": "v3_time_consistent_adaptive",
+      "checks": {
+        "worst_decision_year_rank_ic_delta": 0.00011696643976165213,
+        "median_decision_year_rank_ic_delta": 0.0015906606316392377,
+        "median_relative_mae_harm": 0.00954353691624635,
+        "worst_relative_mae_harm": 0.013538486028023,
+        "nonnegative_deep_adverse_pr_auc_years": 3,
+        "worst_deep_adverse_pr_auc_delta": 5.931739699684101e-05,
+        "absolute_bias_worsened_all_decision_years": true,
+        "historical_bad_years": []
+      },
+      "annual_rank_ic_delta": [
+        0.00011696643976165213,
+        0.004473315631349454,
+        0.0015906606316392377
+      ],
+      "annual_relative_mae_harm": [
+        0.0002576601723954885,
+        0.013538486028023,
+        0.00954353691624635
+      ],
+      "annual_deep_adverse_pr_auc_delta": [
+        5.931739699684101e-05,
+        0.0034877087015351784,
+        0.0008875406032409816
+      ],
+      "annual_absolute_bias_harm": [
+        1.7364463400828427e-05,
+        0.0005976396052479781,
+        0.00035195985401188784
+      ],
+      "head": "risk_20",
+      "fixed_rounds": 256,
+      "annual": [
+        {
+          "head": "risk_20",
+          "target": "pre_peak_mae",
+          "horizon": 20,
+          "year": 2020,
+          "adaptive_rounds": 53,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 243,
+            "maximum_lag": 19,
+            "mean": 0.005140160828917371,
+            "standard_error": 0.001574722192339781,
+            "t_statistic": 3.264169930367164,
+            "p_value_two_sided": 0.0010978529813441488
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 672817
+          },
+          "rank_ic_delta": 0.005140160828917371,
+          "relative_mae_harm": 0.00312643089426997,
+          "deep_adverse_pr_auc_delta": 0.005328518034924229,
+          "absolute_bias_harm": 0.00022781208019212343,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_20/fold_2020_paired_daily.parquet",
+            "size": 38356,
+            "sha256": "425d60510a2ebdf5ed2f193523981b1b9299d65ed8f476fd8347e889547ff89b"
+          }
+        },
+        {
+          "head": "risk_20",
+          "target": "pre_peak_mae",
+          "horizon": 20,
+          "year": 2021,
+          "adaptive_rounds": 121,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 243,
+            "maximum_lag": 19,
+            "mean": 0.0011111576679985677,
+            "standard_error": 0.0008455390951159848,
+            "t_statistic": 1.314141089887922,
+            "p_value_two_sided": 0.18879872866514813
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 696963
+          },
+          "rank_ic_delta": 0.0011111576679985677,
+          "relative_mae_harm": 0.0029024629257763898,
+          "deep_adverse_pr_auc_delta": 0.00046206600961391607,
+          "absolute_bias_harm": 0.00029156867073993253,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_20/fold_2021_paired_daily.parquet",
+            "size": 38462,
+            "sha256": "4e4e19e1b1f34ef144d61b00a64980bf30a0c76cfb184ff5ddeb7c5fb300e4e6"
+          }
+        },
+        {
+          "head": "risk_20",
+          "target": "pre_peak_mae",
+          "horizon": 20,
+          "year": 2022,
+          "adaptive_rounds": 122,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 19,
+            "mean": 0.0021919840811260626,
+            "standard_error": 0.0007517849062278009,
+            "t_statistic": 2.915706424760092,
+            "p_value_two_sided": 0.003548842577392879
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 728321
+          },
+          "rank_ic_delta": 0.0021919840811260626,
+          "relative_mae_harm": -0.00502815338907134,
+          "deep_adverse_pr_auc_delta": 0.0014396096135722149,
+          "absolute_bias_harm": -0.00014002844094582518,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_20/fold_2022_paired_daily.parquet",
+            "size": 38279,
+            "sha256": "baed4f6cc5754229e78bad978b0e676f0a951e67ffac66e07bdf6198de7bf129"
+          }
+        },
+        {
+          "head": "risk_20",
+          "target": "pre_peak_mae",
+          "horizon": 20,
+          "year": 2023,
+          "adaptive_rounds": 250,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 19,
+            "mean": 0.00011696643976165213,
+            "standard_error": 7.433498722445013e-05,
+            "t_statistic": 1.5735045384278985,
+            "p_value_two_sided": 0.11560203827165945
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 742473
+          },
+          "rank_ic_delta": 0.00011696643976165213,
+          "relative_mae_harm": 0.0002576601723954885,
+          "deep_adverse_pr_auc_delta": 5.931739699684101e-05,
+          "absolute_bias_harm": 1.7364463400828427e-05,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_20/fold_2023_paired_daily.parquet",
+            "size": 38339,
+            "sha256": "b8680c2f3d576dea1c66bbdc9125148d306a5e4c8d3209b6e5c4343d3b9ce16e"
+          }
+        },
+        {
+          "head": "risk_20",
+          "target": "pre_peak_mae",
+          "horizon": 20,
+          "year": 2024,
+          "adaptive_rounds": 74,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 242,
+            "maximum_lag": 19,
+            "mean": 0.004473315631349454,
+            "standard_error": 0.0017481173952234585,
+            "t_statistic": 2.558933194974379,
+            "p_value_two_sided": 0.01049939158542944
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 749653
+          },
+          "rank_ic_delta": 0.004473315631349454,
+          "relative_mae_harm": 0.013538486028023,
+          "deep_adverse_pr_auc_delta": 0.0034877087015351784,
+          "absolute_bias_harm": 0.0005976396052479781,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_20/fold_2024_paired_daily.parquet",
+            "size": 38335,
+            "sha256": "1a6e3b27f9d83490b574c3cfd452afa95f6d3a914b9910d806e5f9c8458193e3"
+          }
+        },
+        {
+          "head": "risk_20",
+          "target": "pre_peak_mae",
+          "horizon": 20,
+          "year": 2025,
+          "adaptive_rounds": 170,
+          "fixed_rounds": 256,
+          "primary_delta_hac": {
+            "count": 223,
+            "maximum_lag": 19,
+            "mean": 0.0015906606316392377,
+            "standard_error": 0.0006224174479891696,
+            "t_statistic": 2.555617032874239,
+            "p_value_two_sided": 0.010599970896464963
+          },
+          "prefix_equivalence": {
+            "passed": true,
+            "finite_pattern_equal": true,
+            "allclose": true,
+            "maximum_absolute_error": 0.0,
+            "daily_spearman": 1.0,
+            "minimum_daily_spearman": 0.999999,
+            "finite_value_count": 747413
+          },
+          "rank_ic_delta": 0.0015906606316392377,
+          "relative_mae_harm": 0.00954353691624635,
+          "deep_adverse_pr_auc_delta": 0.0008875406032409816,
+          "absolute_bias_harm": 0.00035195985401188784,
+          "paired_daily": {
+            "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/evaluation/safety/risk_20/fold_2025_paired_daily.parquet",
+            "size": 36213,
+            "sha256": "5f72d6984114ced56fe90cfc955bb05af0579292ec66f50ea12ca2ed336864c7"
+          }
+        }
+      ],
+      "combined_primary_harm_test": {
+        "z_statistic": -3.8529966533997944,
+        "p_value_one_sided_harm": 0.999941659507076
+      },
+      "combined_primary_harm_bh_q_value": 0.9999416595070759
+    }
+  },
+  "decision": {
+    "status": "entry_fixed_capacity_policy_frozen",
+    "mfe": {
+      "mfe_10": {
+        "head": "turnover_cost_proxy",
+        "policy": "fixed_512",
+        "rounds": 512,
+        "rank_first": true,
+        "literal_expected_return": false,
+        "owner_utility_choice": true
+      },
+      "mfe_20": {
+        "head": "breakout_retest_levels",
+        "policy": "fixed_512",
+        "rounds": 512,
+        "rank_first": true,
+        "literal_expected_return": false,
+        "owner_utility_choice": true
+      }
+    },
+    "state_and_risk": {
+      "state_10": {
+        "policy": "v3_time_consistent_adaptive",
+        "rounds": null,
+        "passed_safety_gate": false
+      },
+      "risk_10": {
+        "policy": "v3_time_consistent_adaptive",
+        "rounds": null,
+        "passed_safety_gate": false
+      },
+      "risk_20": {
+        "policy": "v3_time_consistent_adaptive",
+        "rounds": null,
+        "passed_safety_gate": false
+      }
+    },
+    "next_step": "materialize_seq100_entry_contract_oos_v4",
+    "does_not_select": [
+      "MFE value calibration",
+      "feature family",
+      "learning rate",
+      "tree shape",
+      "entry score fusion",
+      "exit rule",
+      "switching rule",
+      "holding period",
+      "slot count",
+      "leverage",
+      "stop loss",
+      "account policy",
+      "deep model",
+      "reinforcement learning"
+    ]
+  },
+  "scope": {
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "forbidden_2026_row_count": 0,
+    "new_mfe_booster_count": 6,
+    "new_state_and_risk_booster_count": 18,
+    "total_new_booster_count": 24
+  },
+  "entry_contract_v4": {
+    "status": "completed",
+    "manifest": {
+      "path": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+      "size": 12772,
+      "sha256": "c2fd642d480e36692d70841eef056c1f28dc8f53aad30fc2a9e4bd170dc2eb55"
+    },
+    "candidate_count": 4337640,
+    "replaced_heads": [
+      "mfe_10",
+      "mfe_20"
+    ],
+    "retained_v3_heads": [
+      "state_10",
+      "risk_10",
+      "risk_20"
+    ]
+  },
+  "source_config": {
+    "path": "daily_research/studies/seq100_entry_fixed_capacity_audit_v1.json",
+    "size": 5444,
+    "sha256": "aa51aa7fe0473dc3c385615ec69afbebe3be00af0cbc90f3329094d88c004cbb"
+  },
+  "full_output": {
+    "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/summary.json",
+    "size": 54126,
+    "sha256": "e3cf4741a875e7e0762c7368111524d0e419f6e42c5250011519ffa1783d0de4"
+  }
+}

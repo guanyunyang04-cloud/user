@@ -1,0 +1,100 @@
+{
+  "study_id": "seq100_post_entry_capacity_audit_v1",
+  "objective": "select one A-only fixed LightGBM capacity per remaining target from 2021-2022 evidence, uniform across D1/D3/D5 and isolated from 2023-2025",
+  "sources": {
+    "post_entry_config": "daily_research/studies/seq100_post_entry_ab_v2.json",
+    "post_entry_output_root": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v2",
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json"
+  },
+  "folds": {
+    "selection_years": [2021, 2022],
+    "selection_protocol": {
+      "2021": "train 2020, evaluate 2021",
+      "2022": "train 2020-2021, evaluate 2022"
+    },
+    "maximum_selection_outcome_date": "2022-12-31",
+    "forbidden_decision_years": [2023, 2024, 2025, 2026],
+    "date_weighting": "each landmark decision date has equal total target weight"
+  },
+  "ages": [1, 3, 5],
+  "targets": ["mfe_10", "mfe_20", "risk_10", "risk_20", "state_10"],
+  "capacities": {
+    "mfe_10": [64, 128, 256, 512],
+    "mfe_20": [64, 128, 256, 512],
+    "risk_10": [32, 64, 128, 256],
+    "risk_20": [32, 64, 128, 256],
+    "state_10": [32, 64, 128, 256]
+  },
+  "reference_rounds": 64,
+  "model": {
+    "long_booster_count": 30,
+    "input_variant": "A",
+    "one_booster_process_at_a_time": true,
+    "capacity_uniform_across_ages": true,
+    "numerical_tie_tolerance": 1e-6
+  },
+  "gate": {
+    "mfe": {
+      "minimum_worst_rank_ic_delta_vs_64": -0.003,
+      "maximum_median_relative_mae_harm": 0.01,
+      "maximum_worst_relative_mae_harm": 0.02,
+      "path_guardrail_minimum_harm_units": 4,
+      "path_guardrail_minimum_median_absolute_harm": 0.001
+    },
+    "risk": {
+      "minimum_worst_rank_ic_delta_vs_64": -0.005,
+      "minimum_worst_deep_adverse_pr_auc_delta_vs_64": -0.005,
+      "maximum_median_relative_mae_harm": 0.01,
+      "maximum_worst_relative_mae_harm": 0.02
+    },
+    "state": {
+      "minimum_worst_ordinal_ic_delta_vs_64": -0.003,
+      "maximum_median_relative_brier_harm": 0.01,
+      "maximum_worst_relative_brier_harm": 0.02,
+      "maximum_median_relative_logloss_harm": 0.01,
+      "maximum_worst_relative_logloss_harm": 0.02,
+      "reject_probability_collapse": true
+    },
+    "reference_64_always_legal": true
+  },
+  "winner_order": {
+    "mfe": [
+      "median_top5_remaining_mfe",
+      "worst_top5_remaining_mfe",
+      "median_rank_ic",
+      "worst_rank_ic",
+      "smaller_capacity"
+    ],
+    "risk": [
+      "median_rank_ic",
+      "worst_rank_ic",
+      "median_deep_adverse_pr_auc",
+      "lower_median_mae",
+      "smaller_capacity"
+    ],
+    "state": [
+      "median_ordinal_ic",
+      "worst_ordinal_ic",
+      "lower_median_brier",
+      "lower_median_logloss",
+      "smaller_capacity"
+    ]
+  },
+  "uncertainty": {
+    "HAC": true,
+    "cross_unit_stouffer": true,
+    "does_not_override_deterministic_role_winner": true
+  },
+  "non_selections": [
+    "B path information",
+    "2023-2025 capacity tuning",
+    "age-specific capacity",
+    "entry score fusion",
+    "exit rule",
+    "switching rule",
+    "account policy",
+    "deep model",
+    "reinforcement learning"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1"
+}

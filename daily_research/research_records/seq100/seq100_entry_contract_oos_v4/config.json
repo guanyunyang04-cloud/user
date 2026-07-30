@@ -1,0 +1,23 @@
+{
+  "study_id": "seq100_entry_contract_oos_v4",
+  "source_capacity_study": "seq100_entry_fixed_capacity_audit_v1",
+  "source_capacity_config": {
+    "path": "daily_research/studies/seq100_entry_fixed_capacity_audit_v1.json",
+    "size": 5444,
+    "sha256": "aa51aa7fe0473dc3c385615ec69afbebe3be00af0cbc90f3329094d88c004cbb"
+  },
+  "source_capacity_decision": {
+    "path": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1/decision.json",
+    "size": 1340,
+    "sha256": "a979aef24cbb1108d575a89d82fecc69849b198dc1923ac5866ec1d56e1294fe"
+  },
+  "source_entry_contract_v3": {
+    "path": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3/contract_manifest.json",
+    "size": 8120,
+    "sha256": "72f36e18eec07e1e4bc1c3421a744fdb04af4b2581488c2e64bac076828ce17a"
+  },
+  "rank_first": true,
+  "literal_expected_return": false,
+  "maximum_outcome_date": "2025-12-31",
+  "forbidden_outcome_year": 2026
+}

@@ -1,0 +1,189 @@
+{
+  "study_id": "seq100_entry_fixed_capacity_audit_v1",
+  "objective": "freeze rank-first fixed-512 MFE heads, safety-gate fixed-256 state and risk heads, and materialize the strict 2020-2025 v4 entry contract",
+  "sources": {
+    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "entry_contract_v2_config": "daily_research/studies/seq100_entry_contract_oos_v2.json",
+    "entry_contract_v2_output_root": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2",
+    "entry_contract_v3_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3/contract_manifest.json",
+    "final_capacity_config": "daily_research/studies/seq100_mfe_final_head_capacity_audit_v1.json",
+    "final_capacity_output_root": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1"
+  },
+  "folds": {
+    "contract_years": [
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "decision_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "historical_guard_years": [
+      2020,
+      2021,
+      2022
+    ],
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_outcome_year": 2026,
+    "outer_rule": "all legal history before the model year with target-horizon purge",
+    "sample_weight": "each signal date has equal total target weight",
+    "decision_fold_role": "owner-authorized repeatedly reused recent decision folds, not a pristine final holdout"
+  },
+  "mfe": {
+    "fixed_rounds": 512,
+    "rank_first": true,
+    "literal_expected_return": false,
+    "early_horizon_by_target": {
+      "10": 5,
+      "20": 10
+    },
+    "heads": {
+      "10": {
+        "name": "turnover_cost_proxy",
+        "families": [
+          "turnover_cost_proxy"
+        ]
+      },
+      "20": {
+        "name": "breakout_retest_levels",
+        "families": [
+          "breakout_retest_levels"
+        ]
+      }
+    },
+    "train_years": [
+      2020,
+      2021,
+      2022
+    ],
+    "reuse_years": [
+      2023,
+      2024,
+      2025
+    ],
+    "booster_count": 6,
+    "adoption_is_owner_utility_choice": true
+  },
+  "state_and_risk": {
+    "fixed_rounds": 256,
+    "heads": {
+      "state_10": {
+        "target": "state",
+        "horizon": 10,
+        "columns": [
+          2,
+          3,
+          4
+        ]
+      },
+      "risk_10": {
+        "target": "pre_peak_mae",
+        "horizon": 10,
+        "columns": [
+          5
+        ]
+      },
+      "risk_20": {
+        "target": "pre_peak_mae",
+        "horizon": 20,
+        "columns": [
+          6
+        ]
+      }
+    },
+    "atlas_cutoff_by_test_year": {
+      "2020": 2019,
+      "2021": 2020,
+      "2022": 2021,
+      "2023": 2022,
+      "2024": 2022,
+      "2025": 2022
+    },
+    "booster_count": 18,
+    "state_internal_tree_multiplier": 3,
+    "raw_state_semantics": "relative state scores, not literal stable probabilities"
+  },
+  "prefix_equivalence": {
+    "absolute_tolerance": 1e-07,
+    "relative_tolerance": 1e-06,
+    "minimum_daily_spearman": 0.999999
+  },
+  "safety_gate": {
+    "state": {
+      "minimum_worst_decision_year_ordinal_ic_delta": -0.002,
+      "minimum_median_decision_year_ordinal_ic_delta": 0.0,
+      "minimum_nonnegative_high_state_top5_years": 2,
+      "maximum_worst_high_state_top5_decline": 0.005,
+      "maximum_median_relative_brier_harm": 0.002,
+      "maximum_worst_relative_brier_harm": 0.005,
+      "maximum_median_relative_logloss_harm": 0.002,
+      "maximum_worst_relative_logloss_harm": 0.005,
+      "historical_minimum_bad_years": 2,
+      "historical_bad_ordinal_ic_delta": -0.004,
+      "historical_bad_relative_proper_score_harm": 0.01
+    },
+    "risk": {
+      "minimum_worst_decision_year_rank_ic_delta": -0.003,
+      "minimum_median_decision_year_rank_ic_delta": 0.0,
+      "maximum_median_relative_mae_harm": 0.002,
+      "maximum_worst_relative_mae_harm": 0.005,
+      "minimum_nonnegative_deep_adverse_pr_auc_years": 2,
+      "maximum_worst_deep_adverse_pr_auc_decline": 0.002,
+      "prediction_absolute_bias_cannot_worsen_all_decision_years": true,
+      "historical_minimum_bad_years": 2,
+      "historical_bad_rank_ic_delta": -0.006,
+      "historical_bad_relative_mae_harm": 0.01,
+      "historical_bad_pr_auc_decline": 0.004
+    },
+    "harm_hac_maximum_lag_by_horizon": {
+      "10": 9,
+      "20": 19
+    },
+    "harm_bh_hypothesis_count": 3,
+    "significance_is_diagnostic_not_gate_override": true
+  },
+  "model": {
+    "reuse_existing_parameters": true,
+    "change_learning_rate": false,
+    "change_tree_shape": false,
+    "hyperparameter_search": false,
+    "one_booster_process_at_a_time": true
+  },
+  "contract_v4": {
+    "study_id": "seq100_entry_contract_oos_v4",
+    "output_root": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4",
+    "research_record_root": "daily_research/research_records/seq100/seq100_entry_contract_oos_v4",
+    "candidate_count": 4337640,
+    "replace_mfe_columns": [
+      0,
+      1
+    ],
+    "conditionally_replace_state_and_risk": true,
+    "regenerate_all_date_ranks": true,
+    "preserve_v2_and_v3": true,
+    "post_entry_v1_status": "v2_only_historical_evidence"
+  },
+  "non_selections": [
+    "MFE value calibration",
+    "feature family",
+    "learning rate",
+    "tree shape",
+    "entry score fusion",
+    "exit rule",
+    "switching rule",
+    "holding period",
+    "slot count",
+    "leverage",
+    "stop loss",
+    "account policy",
+    "deep model",
+    "reinforcement learning"
+  ],
+  "output_dir": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1"
+}

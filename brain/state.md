@@ -5,155 +5,137 @@ Updated: 2026-07-30
 ## Objective
 
 Build a daily A-share main-board selector that keeps upside opportunity, path
-quality, and pre-peak adversity separate. Entry-label research and the
-LightGBM MFE capacity closeout are complete enough to freeze a strict OOS
-contract. The existing matched-capacity post-entry challenge was run against
-the superseded v2 MFE contract and must be revalidated before it is used to
-decide the next holding-model stage.
+quality, and pre-peak adversity separate. Entry output structure is frozen and
+the first complete supervised post-entry update challenge is finished. No
+score fusion, exit, switching, cost buffer, holding period, account constraint,
+deep model, or reinforcement-learning policy has been selected.
 
-## Frozen entry contract
+## Active entry contract
 
-The bounded feature-union audit trained 18 stage-one boosters and read no 2026
-data. No union passed its preregistered role, FDR, and path guardrails; neither
-negative control passed and no three-family follow-up was eligible.
-
-- Keep base plus `turnover_cost_proxy` for `mfe_10`.
-- Keep base plus `breakout_retest_levels` for `mfe_20`.
-- Extra week/month, swing, and traditional-indicator families do not enter the
-  final heads.
-
-`seq100_entry_contract_oos_v3` is the active candidate-aligned 2020-2025
-stacking contract. It contains 4,337,640 rows and five output blocks:
-`mfe_10`, `mfe_20`, raw three-class `state_10`, `pre_peak_mae_10`, and
+`seq100_entry_contract_oos_v4` is the active candidate-aligned 2020-2025
+contract. It contains 4,337,640 rows and five logical output blocks:
+`mfe_10`, `mfe_20`, three-class `state_10`, `pre_peak_mae_10`, and
 `pre_peak_mae_20`.
 
-- v3 changes only `mfe_10`, whose final head now uses a fixed 256-tree policy
-  for every model year. D20 retains the existing base-head-prior-year capacity
-  policy.
-- Candidate row keys and the other six physical columns are byte-for-byte
-  unchanged from v2. No state or risk booster was retrained.
-- v2 remains a preserved historical contract, not the active contract.
+- `mfe_10`: base plus `turnover_cost_proxy`, fixed 512 boosting rounds.
+- `mfe_20`: base plus `breakout_retest_levels`, fixed 512 boosting rounds.
+- MFE is rank-first. Raw predictions are retained but are not literal expected
+  returns suitable for direct cost subtraction.
+- Raw state outputs remain relative state scores, not stable literal
+  probabilities.
+- Candidate rows are exactly equal to v3. Only the two MFE columns changed;
+  state/risk raw values and date ranks are byte-for-byte equal to v3.
+- v2 and v3 remain preserved historical contracts.
 
-- The rolling state atlases pass the formal stability gate. Adjacent ARI values
-  are `0.648/0.643/0.711`; centroid correlations are `0.983/0.981/0.999`.
-- Strict state predictions differ materially from the old discovery models, so
-  the new contract is authoritative. Risk predictions remain highly correlated.
-- Raw state outputs remain relative state scores/ranks unless a future
-  use-specific calibration study supports literal probabilities.
+The fixed-capacity entry audit trained 24 boosters. All 18 newly trained
+adaptive prefixes exactly reproduced v3: maximum absolute error `0` and minimum
+daily Spearman `1.0`. Fixed 256 failed the safety gate for all three auxiliary
+heads:
+
+- `state_10`: worst 2023-2025 ordinal-IC delta `-0.00811`; median Brier harm
+  `0.303%`.
+- `risk_10`: worst Rank-IC delta `-0.00433`; median MAE harm `1.150%`.
+- `risk_20`: Rank IC improved slightly, but median MAE harm was `0.954%` and
+  absolute bias worsened in all three years.
+
+Therefore v4 uses fixed 512 only for MFE; state/risk retain their strict,
+time-consistent adaptive capacities.
 
 Retained results:
 
-- `daily_research/research_records/seq100/seq100_mfe_feature_union_audit_v1/result.json`
-- `daily_research/research_records/seq100/seq100_entry_contract_oos_v2/result.json`
-- `daily_research/research_records/seq100/seq100_entry_contract_oos_v3/result.json`
+- `daily_research/research_records/seq100/seq100_entry_fixed_capacity_audit_v1/result.json`
+- `daily_research/research_records/seq100/seq100_entry_contract_oos_v4/result.json`
 
-## Matched-capacity post-entry result
+## Post-entry target capacities
 
-`seq100_post_entry_ab_v1` reconstructed all filled-entry landmarks without a
-survivor filter: 4.321M D1, 4.315M D3, and 4.309M D5 rows. It completed all 63
-boosters using identical B-complete A/B support, inner-A tree counts, a 10-day
-label purge, and 2023-2025 decision folds. No 2026 row or outcome was read.
+`seq100_post_entry_capacity_audit_v1` trained 30 long A-only boosters. Capacity
+selection used only:
 
-Primary `pre_peak_mae_10` challenger B failed at every age:
+- 2021: train 2020 and evaluate 2021.
+- 2022: train 2020-2021 and evaluate 2022.
 
-- D1 annual Rank-IC deltas were `-0.00049/+0.00104/-0.00021`.
-- D3 deltas were `-0.00005/+0.00302/-0.00174`.
-- D5 deltas were `+0.00065/+0.00311/-0.00155`.
-- Only the D3/D5 2024 gains survived the nine-test BH correction. Improvements
-  did not persist into 2025 or across all-sample and entry-top-5% strata.
+The maximum selection outcome date was 2022-12-30; no 2023-2025 evidence
+selected capacity. One capacity is shared across D1/D3/D5 for each target:
 
-Secondary `state_10` challenger B also failed every age. Its worst annual
-ordinal-IC deltas were `-0.00692` at D1, `-0.02090` at D3, and `-0.01961` at
-D5. Transported validation-year temperatures worsened Brier and log loss in all
-age/variant test sequences, so post-entry state outputs are relative scores, not
-stable calibrated probabilities.
+- `remaining_mfe_10 = 128` rounds.
+- `remaining_mfe_20 = 128` rounds.
+- `remaining_pre_peak_mae_10 = 32` rounds.
+- `remaining_pre_peak_mae_20 = 32` rounds.
+- `remaining_state_10 = 64` rounds.
 
-The earlier no-training audit was still useful: realized paths show localized
-risk associations, especially in 2024 and in some deep-adverse or strong-entry
-diagnostics. The formal challenge shows that these associations do not deliver
-stable incremental OOS prediction beyond daily recomputation at matched model
-capacity under v2. Because v3 materially changes D10 candidate selection, this
-result is retained as v2-only evidence and is not automatically transported to
-the active contract.
+The 32-round state candidate was rejected after category collapse in three
+selection units. The target-specific selection result is retained at:
 
-Retained result:
+- `daily_research/research_records/seq100/seq100_post_entry_capacity_audit_v1/result.json`
 
-- `daily_research/research_records/seq100/seq100_post_entry_ab_v1/result.json`
+## Complete v4 post-entry A/B result
 
-## MFE capacity stability result
+`seq100_post_entry_ab_v2` rebuilt v4-aligned D1/D3/D5 landmarks while reusing
+only v1 stable row keys and realized price/turnover paths. It recalculated all
+v4 entry/current ranks, six rank changes, entry-top-5% flags, and five targets.
 
-`seq100_mfe_capacity_stability_audit_v1` tested whether one fixed tree count
-could replace the volatile prior-year early-stopping counts for the two frozen
-MFE heads. Capacity was selected only from complete no-early-stopping curves at
-the 2019-2022 rolling origins; 2023-2025 remained decision folds. Eight curve
-boosters and six fixed-capacity outer boosters completed, and no 2026 outcome
-was read.
+- D1/D3/D5 cohorts: 4,320,911 / 4,314,805 / 4,308,702 filled entries.
+- No survivor filter.
+- Each target keeps its own common support; D20 completeness never removes a
+  legal D10/state row.
+- D1 uses only the four nonduplicated realized path fields.
+- All 45 target-age-year A/B splits have identical training and evaluation row
+  hashes, parameters, capacity, and date weights.
+- 90/90 formal boosters completed; no 2026 row or label was read.
 
-- The four-origin one-standard-error rule selected 32 trees for
-  `mfe_10 + turnover_cost_proxy` and 16 trees for
-  `mfe_20 + breakout_retest_levels`.
-- Both fixed capacities failed the preregistered 2023-2025 adoption gates.
-  D10 Rank-IC deltas were `-0.00592/-0.03989/-0.01704`; Top-5 MFE deltas were
-  `-0.00096/-0.00675/-0.00436`.
-- D20 improved in 2023 when 16 trees replaced the old 8-tree model, but failed
-  in 2024-2025. Rank-IC deltas were `+0.01233/-0.03694/-0.03481`; Top-5 MFE
-  deltas were `+0.00357/-0.01825/-0.00631`, and the endpoint-return path
-  guardrail failed.
-- Full no-early-stopping minima already varied materially across 2019-2022:
-  D10 `23/152/43/86`, D20 `4/15/79/41`. The instability is therefore not
-  explained solely by the patience value.
+No target passed at any age:
 
-That study's decision was not to adopt its 32/16-tree global capacities or
-rebuild v2. It rejected those particular fixed counts; it did not prove that
-the baseline-head, immediately-prior-year rule was optimal.
+- `remaining_mfe_10`: B-A Rank-IC was negative in all nine age-year cells.
+  D1 deltas were `-0.00254/-0.00639/-0.00818`; D3
+  `-0.00281/-0.01008/-0.01177`; D5
+  `-0.00294/-0.01136/-0.01415`.
+- `remaining_mfe_20`: B-A Rank-IC was also negative in all nine cells.
+  D1 deltas were `-0.00209/-0.00607/-0.00690`; D3
+  `-0.00174/-0.01003/-0.00901`; D5
+  `-0.00137/-0.01055/-0.01086`.
+- MFE B generally improved MAE but worsened ranking, Top-5 remaining MFE, and
+  tail hit. This means realized-path inputs regularized predictions toward
+  average magnitude while damaging the strong-opportunity role.
+- `risk_10/risk_20`: localized 2024 improvements did not persist into 2025;
+  no age had three positive Rank-IC years or FDR-supported stability.
+- `state_10`: Brier and log loss improved in every age-year cell, but ordinal
+  IC declined in every cell. D1 worst delta was `-0.01370`, D3 `-0.02375`, and
+  D5 `-0.02057`. Better class-frequency fit did not improve state ordering.
 
-Retained result:
+The formal conclusion is:
 
-- `daily_research/research_records/seq100/seq100_mfe_capacity_stability_audit_v1/result.json`
+`daily_recomputation_v4_sufficient_within_tested_supervised_LightGBM_scope`
 
-## Final-head capacity closeout
-
-`seq100_mfe_final_head_capacity_audit_v1` compared the current baseline-head
-prior-year counts with final-head prior-year tuning, fixed 256 trees, and fixed
-512 trees. It trained four new tuning boosters, six shared-prefix long outer
-boosters, and three conditional 2020-2022 D10 contract boosters. All six
-current-policy prefixes reproduced the old predictions exactly, and no 2026
-row or outcome was read.
-
-- Final-head prior-year counts were D10 `86/241/728` and D20 `41/48/400` for
-  2023-2025. All searches completed a full 100-round no-improvement interval;
-  none was unresolved.
-- D10 fixed 256 passed every formal gate. Its Top-5 MFE deltas were
-  `+0.00125/+0.00051/-0.00009`, the six-test BH-adjusted q-value was `0.0187`,
-  its worst Rank-IC delta was `-0.00153`, and MAE improved in all three years.
-- D10 fixed 512 failed because tail-hit lift declined in two years despite
-  improving Top-5 MFE in all three. Final-head prior-year tuning also failed.
-- All D20 challengers failed. Fixed 512 improved Top-5 MFE and Rank IC in all
-  three years but exceeded the preregistered MAE harm limits; fixed 256 and
-  final-head prior-year tuning were less stable.
-- Fixed 256 materially changed D10 candidate selection in 2023 and 2025, so
-  v3 was required. Its D10 Top-5 Jaccard versus v2 was
-  `0.716/0.913/0.755` in 2023-2025.
-
-LightGBM MFE capacity research is now closed. The deployment policy is D10
-fixed 256 and D20 current base-head-prior-year.
+This is a scoped rejection of the tested independent post-entry LightGBM
+updates, not proof that realized paths can never help a different model class.
+There is no opportunity, risk, state, or age-specific update head to carry into
+a hold-versus-switch value study.
 
 Retained result:
 
-- `daily_research/research_records/seq100/seq100_mfe_final_head_capacity_audit_v1/result.json`
+- `daily_research/research_records/seq100/seq100_post_entry_ab_v2/result.json`
+
+## Prior evidence retained
+
+- The bounded feature-union audit found no eligible union. Keep D10 turnover
+  and D20 breakout heads only.
+- Original Huber remains the MFE objective. LambdaRank improves broad Rank IC
+  but loses high-MFE Top 5%; tail-weighted Huber is biased and path-riskier.
+- Rolling state atlases passed stability gates, but K3 remains a stable
+  representation rather than proof of exactly three natural market states.
+- `seq100_post_entry_ab_v1` is retained as v2-only historical evidence. Its
+  risk/state rejection is now superseded by the broader v4 five-target result.
 
 ## Current decision
 
-Use `seq100_entry_contract_oos_v3` as the active five-block entry contract.
-Do not yet transport the v2-only post-entry rejection to v3: before future
-holding research, rerun or otherwise formally revalidate the D1/D3/D5 A/B
-challenge against the changed D10 coordinate. Until that revalidation, daily
-recomputation remains the operationally simplest baseline, not a newly proven
-v3 holding-model verdict.
+Use v4 and recompute its five entry coordinates daily for both new candidates
+and current holdings. Do not create an independent supervised LightGBM holding
+update model from the tested D1/D3/D5 entry-memory and realized-path fields.
 
-No score fusion, exit threshold, switching value, cost buffer, holding period,
-slot count, leverage, stop loss, account policy, or reinforcement-learning
-policy has been selected. The planned hold-versus-switch value study is not
-entered. There is no active training process. D10 uses fixed 256 trees; D20
-retains its existing per-year adaptive counts. Do not reopen LightGBM MFE
-capacity or train deep/reinforcement models without an explicit new decision.
+Do not enter the cost-adjusted hold-versus-switch study yet: no independent
+remaining-coordinate update head survived. A future explicit decision may test
+a materially different sequence/deep model or define a simpler strategy
+baseline, but should not reopen the completed LightGBM capacity, feature-union,
+or five-target A/B searches without new evidence.
+
+There is no active training process.
