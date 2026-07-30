@@ -1159,9 +1159,11 @@ def _process_buy(
         return cash, gross_cash, 0.0, 0.0, {}
     raw_open = float(book.raw_open[date_idx, symbol_idx])
     adjusted_open = float(book.adjusted_open[date_idx, symbol_idx])
-    allocation = min(
-        float(cash),
-        max(float(equity_open), 0.0) / int(spec.slot_count),
+    allocation = economic._position_allocation(
+        book=book,
+        spec=_internal_spec(spec),
+        cash=cash,
+        equity_open=equity_open,
     )
     position, details = economic._buy_position(
         available_cash=float(cash),

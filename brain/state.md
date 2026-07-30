@@ -8,8 +8,9 @@ Build a daily A-share main-board selector that keeps upside opportunity, path
 quality, and pre-peak adversity separate. Entry output structure is frozen,
 the supervised post-entry update challenge is finished, and the first
 continuous executable-account monetization audit plus a true-label economic
-ceiling audit are complete. No score fusion, deployment policy, holding period,
-stop, deep model, or reinforcement-learning policy has been selected.
+ceiling and candidate-aligned prediction-to-oracle loss audits are complete.
+No score fusion, deployment policy, holding period, stop, deep model, or
+reinforcement-learning policy has been selected.
 
 ## Active entry contract
 
@@ -210,6 +211,63 @@ Retained result:
 
 - `daily_research/research_records/seq100/seq100_true_label_economic_ceiling_v1/result.json`
 
+## Candidate-aligned prediction-to-oracle gap
+
+`seq100_prediction_oracle_gap_audit_v1` aligned every predicted and true
+coordinate on the same label-complete candidate support, disabled profit
+reinvestment, and capped each position at the initial CNY 1 million divided by
+the slot count. It ran 1,200 continuous 2023-2025 accounts: 816 daily-rerank,
+192 true-peak-close, and 192 first-legal-open-after-peak tasks.
+
+The predicted Top-5% captured only a minority of the oracle opportunity:
+
+- D10 Top-5% overlap was `18.30%/14.65%/15.32%` and mean true-MFE capture was
+  `28.83%/26.27%/27.51%` in 2023/2024/2025.
+- D20 overlap was `15.65%/14.41%/12.06%` and capture was
+  `30.08%/31.08%/27.88%`.
+- Broad MFE Rank IC improved through time while extreme overlap did not. The
+  binding prediction problem is strong-tail identification, not merely broad
+  cross-sectional ordering.
+
+Matched base-cost substitutions measured terminal-return change relative to
+the initial CNY 1 million; a delta of `1.0` is CNY 1 million or 100 percentage
+points:
+
+- perfect D10 MFE selection: median `+39.62`;
+- perfect D20 MFE selection: `+22.67`;
+- perfect dual-MFE selection: `+35.59`;
+- true post-peak-next-open exit with predicted dual entry: `+7.77`;
+- true risk conditional on true MFE: `+7.64`;
+- true state conditional on true MFE: `+1.24`;
+- true peak close versus first legal next open for true dual MFE: `+2.62`.
+
+The label-space economic direction is therefore strong even without
+reinvestment. Median base-cost dual-true-MFE daily reranking returned
+`+3,074%` with `231.5%` CAGR; adding true risk returned `+3,703%` with
+`252.9%` CAGR. Both had 36/36 positive cross-configuration-median months.
+Predicted dual entry combined with hindsight post-peak-next-open exit returned
+a median `+695%`; true dual entry with the same exit returned `+4,770%`.
+Stress costs did not change the oracle conclusion.
+
+This audit does not supersede the formal v4 policy-surface rejection. On the
+matched fixed-notional support, predicted state/risk veto variants often had
+positive absolute terminal returns, but this audit did not apply the prior
+benchmark-excess neighborhood gates and did not select a policy. Its purpose
+is loss attribution.
+
+Capacity remains material. The true strongest opportunities are less liquid
+than predicted top names. For daily true-dual-MFE accounts, the median share of
+filled orders above 0.1% of trailing median turnover fell from about `95.8%`
+at K=1 to `25.3%` at K=24 and `7.3%` at K=48. Oracle results are ceilings, not
+scalable live return estimates.
+
+All 1,200 accounts reconciled annual and monthly CNY P&L to terminal P&L.
+Maximum relative conservation error was `1.21e-14`; 2026 reads were zero.
+
+Retained result:
+
+- `daily_research/research_records/seq100/seq100_prediction_oracle_gap_audit_v1/result.json`
+
 ## Prior evidence retained
 
 - The bounded feature-union audit found no eligible union. Keep D10 turnover
@@ -229,14 +287,14 @@ update heads. Do not select an oracle account as a policy, reinterpret its
 hindsight return as deployable performance, select any of the three isolated
 v4 profitable cells, or consume 2026.
 
-The next justified research step is a candidate-aligned prediction-to-oracle
-gap audit. It should measure opportunity capture, true-label rank/selection
-overlap, realized peak capture, cost/turnover, trading blockage, lifecycle
-recovery, market exposure, and participation/capacity in one matched
-decomposition. This should determine whether the largest loss is in MFE
-prediction, the daily hold/switch mapping, peak realization, or execution
-capacity before changing model class or fitting another policy. Do not reopen
-completed LightGBM capacity, feature-union, or five-target A/B searches without
-new evidence.
+The largest measured loss is strong-tail MFE entry selection. Peak/exit
+realization and risk prediction are meaningful secondary losses; state
+prediction is a much smaller conditional loss. The next model research should
+therefore target candidate-aligned Top-1%/Top-5% opportunity capture rather
+than another broad-IC or calibration exercise, and keep a separate
+peak-realization challenge. A new model class is justified only if it is
+tested against frozen v4 on these matched tail and economic diagnostics. Do
+not reopen completed LightGBM capacity, feature-union, or five-target A/B
+searches without new evidence.
 
 There is no active training process.

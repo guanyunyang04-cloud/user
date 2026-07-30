@@ -1,0 +1,557 @@
+{
+  "schema": "seq100_prediction_oracle_gap_summary/v1",
+  "status": "completed",
+  "completed_at": "2026-07-30T16:17:10+08:00",
+  "study_id": "seq100_prediction_oracle_gap_audit_v1",
+  "study_config_sha256": "279715c6846b3257e0157dc2681239bba2b98f8c9111a57226c53453f7ebc052",
+  "task_count": 1200,
+  "annual_metric_count": 3600,
+  "monthly_metric_count": 43200,
+  "effect_comparison_count": 1008,
+  "period": {
+    "years": [
+      2023,
+      2024,
+      2025
+    ],
+    "continuous_account": true,
+    "annual_reset": false,
+    "maximum_consumed_outcome_date": "2025-12-31",
+    "forbidden_2026_row_count": 0
+  },
+  "gap_book": {
+    "day_count": 727,
+    "symbol_count": 3419,
+    "support": {
+      "D10_minimum": 0,
+      "D10_median": 3070.0,
+      "D10_maximum": 3107,
+      "D20_minimum": 0,
+      "D20_median": 3070.0,
+      "D20_maximum": 3107
+    },
+    "manifest": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/gap_book/manifest.json",
+      "size": 6146,
+      "sha256": "3f5b39e14f68ab4069846523ef834abbb8511b004af7a86bad3dbc75631e7467"
+    }
+  },
+  "decision": {
+    "status": "completed_without_policy_selection",
+    "overall": "MFE_prediction_is_a_material_economic_bottleneck",
+    "dominant_loss": {
+      "dominant_effect": "D10_entry_selection__post_peak_next_open",
+      "dominant_layer": "entry_selection_under_fixed_exit",
+      "ranked_base_cost_effects": [
+        {
+          "effect": "D10_entry_selection__post_peak_next_open",
+          "layer": "entry_selection_under_fixed_exit",
+          "median_terminal_return_delta": 46.41128039762593,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "dual_entry_selection__post_peak_next_open",
+          "layer": "entry_selection_under_fixed_exit",
+          "median_terminal_return_delta": 40.856768045991785,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "D10_MFE_prediction",
+          "layer": "MFE_prediction",
+          "median_terminal_return_delta": 39.62481713804796,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "dual_both_MFE_prediction",
+          "layer": "MFE_prediction",
+          "median_terminal_return_delta": 35.593860484180915,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "D20_entry_selection__post_peak_next_open",
+          "layer": "entry_selection_under_fixed_exit",
+          "median_terminal_return_delta": 32.61709784650034,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "D20_MFE_prediction",
+          "layer": "MFE_prediction",
+          "median_terminal_return_delta": 22.667527158847136,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "post_peak_exit_minus_daily__dual_predicted",
+          "layer": "exit_realization",
+          "median_terminal_return_delta": 7.765023635332592,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "risk_prediction_conditional_true_MFE",
+          "layer": "risk_prediction",
+          "median_terminal_return_delta": 7.642147767216269,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "joint_aux_prediction_conditional_true_MFE",
+          "layer": "joint_aux_prediction",
+          "median_terminal_return_delta": 5.428037526208023,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "peak_close_minus_post_open__dual_true_mfe",
+          "layer": "peak_to_next_open_realization",
+          "median_terminal_return_delta": 2.622344150343828,
+          "positive_fraction": 1.0
+        },
+        {
+          "effect": "state_prediction_conditional_true_MFE",
+          "layer": "state_prediction",
+          "median_terminal_return_delta": 1.2439567658973623,
+          "positive_fraction": 1.0
+        }
+      ]
+    },
+    "MFE_prediction_effects": {
+      "D10_MFE_prediction": {
+        "median_terminal_return_delta": 39.62481713804796,
+        "minimum_terminal_return_delta": 26.128413238141043,
+        "maximum_terminal_return_delta": 53.63009696259317,
+        "positive_fraction": 1.0
+      },
+      "D20_MFE_prediction": {
+        "median_terminal_return_delta": 22.667527158847136,
+        "minimum_terminal_return_delta": 16.61540448463829,
+        "maximum_terminal_return_delta": 29.931744736129087,
+        "positive_fraction": 1.0
+      },
+      "dual_both_MFE_prediction": {
+        "median_terminal_return_delta": 35.593860484180915,
+        "minimum_terminal_return_delta": 13.92308164045831,
+        "maximum_terminal_return_delta": 44.78301601106189,
+        "positive_fraction": 1.0
+      }
+    },
+    "risk_prediction_effect": {
+      "median_terminal_return_delta": 7.642147767216269,
+      "minimum_terminal_return_delta": 3.360587343305097,
+      "maximum_terminal_return_delta": 8.689647541798543,
+      "positive_fraction": 1.0
+    },
+    "state_prediction_effect": {
+      "median_terminal_return_delta": 1.2439567658973623,
+      "minimum_terminal_return_delta": 0.38585100915569015,
+      "maximum_terminal_return_delta": 1.9290751711507355,
+      "positive_fraction": 1.0
+    },
+    "predicted_dual_post_peak_exit_effect": {
+      "median_terminal_return_delta": 7.765023635332592,
+      "minimum_terminal_return_delta": 4.886305536869375,
+      "maximum_terminal_return_delta": 9.647031295616081,
+      "positive_fraction": 1.0
+    },
+    "true_dual_peak_to_next_open_loss": {
+      "median_terminal_return_delta": 2.622344150343828,
+      "minimum_terminal_return_delta": 1.3620077825122507,
+      "maximum_terminal_return_delta": 6.334092018711765,
+      "positive_fraction": 1.0
+    },
+    "opportunity_capture": [
+      {
+        "year": 2023,
+        "horizon": 10,
+        "rank_ic": 0.10878505529044256,
+        "top5_overlap": 0.1830019150039829,
+        "top5_true_mfe_capture_ratio": 0.2883136465367086,
+        "predicted_top5_true_mfe": 0.06619179979284097,
+        "oracle_top5_true_mfe": 0.22351810207454445,
+        "predicted_top5_peak_day": 5.288481268625583,
+        "oracle_top5_peak_day": 7.643015639171385
+      },
+      {
+        "year": 2024,
+        "horizon": 10,
+        "rank_ic": 0.1249870551625608,
+        "top5_overlap": 0.1465419825132364,
+        "top5_true_mfe_capture_ratio": 0.2626910041770907,
+        "predicted_top5_true_mfe": 0.08667294861821684,
+        "oracle_top5_true_mfe": 0.2821391071701477,
+        "predicted_top5_peak_day": 5.617210755421835,
+        "oracle_top5_peak_day": 7.585537896807956
+      },
+      {
+        "year": 2025,
+        "horizon": 10,
+        "rank_ic": 0.16015517159116344,
+        "top5_overlap": 0.15323424812561157,
+        "top5_true_mfe_capture_ratio": 0.27508613584158864,
+        "predicted_top5_true_mfe": 0.08377243903478429,
+        "oracle_top5_true_mfe": 0.29578157268814687,
+        "predicted_top5_peak_day": 5.676385835096958,
+        "oracle_top5_peak_day": 7.925330001112075
+      },
+      {
+        "year": 2023,
+        "horizon": 20,
+        "rank_ic": 0.13264808195577402,
+        "top5_overlap": 0.15647328448491624,
+        "top5_true_mfe_capture_ratio": 0.3007662828358629,
+        "predicted_top5_true_mfe": 0.10505364743125918,
+        "oracle_top5_true_mfe": 0.34394983837234544,
+        "predicted_top5_peak_day": 9.470721918746163,
+        "oracle_top5_peak_day": 14.501701849448855
+      },
+      {
+        "year": 2024,
+        "horizon": 20,
+        "rank_ic": 0.16315718937104678,
+        "top5_overlap": 0.1440502748504206,
+        "top5_true_mfe_capture_ratio": 0.31077424387177377,
+        "predicted_top5_true_mfe": 0.15372008653324098,
+        "oracle_top5_true_mfe": 0.44155753707313766,
+        "predicted_top5_peak_day": 10.446884056631859,
+        "oracle_top5_peak_day": 14.364895775742697
+      },
+      {
+        "year": 2025,
+        "horizon": 20,
+        "rank_ic": 0.20161330433327918,
+        "top5_overlap": 0.12056883619925739,
+        "top5_true_mfe_capture_ratio": 0.27881610891182335,
+        "predicted_top5_true_mfe": 0.13548947603121986,
+        "oracle_top5_true_mfe": 0.47516390652631124,
+        "predicted_top5_peak_day": 10.439621950687991,
+        "oracle_top5_peak_day": 15.270296256836748
+      }
+    ],
+    "accounting_invalid": false,
+    "fixed_notional_semantics": {
+      "starting_cash_cny": 1000000.0,
+      "position_budget": "starting_cash / slots",
+      "profits_reinvested": false
+    },
+    "single_policy_selected": false,
+    "interpretation_boundary": "true-source substitutions and true-peak exits are hindsight diagnostics; only all-predicted daily variants remain OOS signals"
+  },
+  "validation": {
+    "task_count_matches_preregistration": true,
+    "maximum_relative_conservation_error": 1.2112704893532521e-14,
+    "accounting_invalid": false,
+    "fixed_notional": true,
+    "profits_reinvested": false,
+    "single_policy_selected": false,
+    "no_model_training": true,
+    "forbidden_2026_row_count": 0
+  },
+  "files": {
+    "task_metrics": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/task_metrics.parquet",
+      "size": 355128,
+      "sha256": "15d1c1f301730676a21123e1f0fd023e05ab22245fcf8bc0fb92e0cc345099ca",
+      "row_count": 1200,
+      "columns": [
+        "mode",
+        "variant_id",
+        "exposure_mode",
+        "slot_count",
+        "buffer_multiplier",
+        "cost_scenario",
+        "task_id",
+        "net_cumulative_return",
+        "net_cagr",
+        "net_annualized_volatility",
+        "net_sharpe",
+        "net_sortino",
+        "maximum_drawdown",
+        "net_calmar",
+        "gross_cumulative_return",
+        "gross_cagr",
+        "gross_relative_excess_return",
+        "benchmark_ending_wealth",
+        "terminal_cost_accrued_return",
+        "terminal_cost_accrued_relative_excess_return",
+        "turnover_to_starting_cash",
+        "average_cash_fraction",
+        "maximum_cash_fraction",
+        "trade_attempt_count",
+        "filled_buy_count",
+        "filled_sell_count",
+        "failed_buy_count",
+        "failed_sell_count",
+        "buy_failure_rate",
+        "sell_failure_rate",
+        "delayed_sell_count",
+        "sell_delay_days_mean",
+        "sell_delay_days_p90",
+        "unresolved_blocked_sell_count",
+        "terminal_recovery_count",
+        "terminal_recovery_notional",
+        "holding_days_mean",
+        "holding_days_median",
+        "holding_days_p90",
+        "top5_absolute_pnl_contribution_fraction",
+        "maximum_conservation_error",
+        "total_cost",
+        "commission_cost",
+        "stamp_tax_cost",
+        "transfer_fee_cost",
+        "slippage_cost",
+        "participation_finite_order_count",
+        "fraction_above_0.001",
+        "fraction_above_0.005",
+        "fraction_above_0.01",
+        "positive_absolute_years",
+        "positive_excess_years",
+        "net_return_2023",
+        "net_return_2024",
+        "net_return_2025",
+        "excess_return_2023",
+        "excess_return_2024",
+        "excess_return_2025",
+        "net_terminal_pnl_cny",
+        "terminal_cost_accrued_pnl_cny",
+        "family",
+        "mfe10_source",
+        "mfe20_source",
+        "state_source",
+        "risk_source",
+        "variant_role",
+        "maximum_relative_conservation_error"
+      ]
+    },
+    "annual_metrics": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/annual_metrics.parquet",
+      "size": 196395,
+      "sha256": "40864843be8da980de4a76fdd966aeabd9cbc65ef4cc1d32d78ecd20e7e24bd1",
+      "row_count": 3600,
+      "columns": [
+        "mode",
+        "variant_id",
+        "exposure_mode",
+        "slot_count",
+        "buffer_multiplier",
+        "cost_scenario",
+        "task_id",
+        "year",
+        "net_return",
+        "benchmark_return",
+        "relative_excess_return",
+        "ending_equity",
+        "starting_equity",
+        "period_pnl_cny",
+        "period_pnl_on_initial_cash",
+        "cumulative_pnl_cny"
+      ]
+    },
+    "monthly_metrics": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/monthly_metrics.parquet",
+      "size": 2224631,
+      "sha256": "df2c6fcd27adb1e9415a4cd4e45bb6c2f34cd3977af948fc80bba66c9ed0c293",
+      "row_count": 43200,
+      "columns": [
+        "mode",
+        "variant_id",
+        "exposure_mode",
+        "slot_count",
+        "buffer_multiplier",
+        "cost_scenario",
+        "task_id",
+        "month",
+        "net_return",
+        "benchmark_return",
+        "relative_excess_return",
+        "ending_equity",
+        "starting_equity",
+        "period_pnl_cny",
+        "period_pnl_on_initial_cash",
+        "cumulative_pnl_cny"
+      ]
+    },
+    "candidate_daily": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/candidate_daily.parquet",
+      "size": 195628,
+      "sha256": "2b120ea0d2c2cb9b0ee10ae5b91ffc1e2e2672786a77ad86bcce05b7ebb1e8e8",
+      "row_count": 2908,
+      "columns": [
+        "signal_date",
+        "year",
+        "horizon",
+        "common_support_count",
+        "daily_rank_ic",
+        "risk_rank_ic",
+        "risk_rank_ic_inside_true_mfe_top5",
+        "state_ordinal_ic",
+        "state_ordinal_ic_inside_true_mfe_top5",
+        "fraction",
+        "predicted_count",
+        "true_count",
+        "intersection_count",
+        "overlap_over_smaller",
+        "jaccard",
+        "tail_hit_rate",
+        "predicted_top_true_mfe",
+        "oracle_top_true_mfe",
+        "opportunity_capture_ratio",
+        "predicted_top_peak_day",
+        "oracle_top_peak_day"
+      ]
+    },
+    "candidate_summary": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/candidate_summary.parquet",
+      "size": 14833,
+      "sha256": "31d46ffbd80482db1a87de854d101386585cc25d905a9a77a1ccfbf85a919e2e",
+      "row_count": 12,
+      "columns": [
+        "year",
+        "horizon",
+        "fraction",
+        "common_support_count",
+        "daily_rank_ic",
+        "risk_rank_ic",
+        "risk_rank_ic_inside_true_mfe_top5",
+        "state_ordinal_ic",
+        "state_ordinal_ic_inside_true_mfe_top5",
+        "predicted_count",
+        "true_count",
+        "intersection_count",
+        "overlap_over_smaller",
+        "jaccard",
+        "tail_hit_rate",
+        "predicted_top_true_mfe",
+        "oracle_top_true_mfe",
+        "opportunity_capture_ratio",
+        "predicted_top_peak_day",
+        "oracle_top_peak_day"
+      ]
+    },
+    "candidate_capacity": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/candidate_capacity_summary.parquet",
+      "size": 9475,
+      "sha256": "527bda083b905ab2e0c867f8c820e4e5d6af8761750812e161183e4dc63e26b9",
+      "row_count": 216,
+      "columns": [
+        "year",
+        "horizon",
+        "selector_source",
+        "slot_count",
+        "participation_threshold",
+        "trading_day_count",
+        "mean_eligible_fraction",
+        "median_eligible_fraction",
+        "mean_median_participation"
+      ]
+    },
+    "paired_effects": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/paired_effects.parquet",
+      "size": 88845,
+      "sha256": "789912a8f2ece2457c481a2db0401d1a570f82b02340cf77f35a45700541a346",
+      "row_count": 1008,
+      "columns": [
+        "effect",
+        "layer",
+        "left_task_id",
+        "right_task_id",
+        "left_mode",
+        "right_mode",
+        "left_variant",
+        "right_variant",
+        "exposure_mode",
+        "slot_count",
+        "buffer_multiplier",
+        "cost_scenario",
+        "terminal_return_delta",
+        "terminal_pnl_delta_cny",
+        "cagr_delta",
+        "maximum_drawdown_delta",
+        "turnover_delta",
+        "total_cost_delta",
+        "net_return_delta_2023",
+        "net_return_delta_2024",
+        "net_return_delta_2025"
+      ]
+    },
+    "effect_summary": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/effect_summary.parquet",
+      "size": 15980,
+      "sha256": "b84be08f03ac15514eed29bc95dc6a2a30f621e27383542650f435df8f55c1d5",
+      "row_count": 84,
+      "columns": [
+        "effect",
+        "layer",
+        "cost_scenario",
+        "comparison_count",
+        "median_terminal_return_delta",
+        "minimum_terminal_return_delta",
+        "maximum_terminal_return_delta",
+        "positive_fraction",
+        "median_terminal_pnl_delta_cny",
+        "median_cagr_delta",
+        "median_drawdown_delta",
+        "median_turnover_delta",
+        "median_total_cost_delta"
+      ]
+    },
+    "endpoint_summary": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/endpoint_summary.parquet",
+      "size": 17296,
+      "sha256": "2282fda0c8275791d6f0b921cc35bb7ed753caecdbcca6d126bd7e49a98cddb5",
+      "row_count": 66,
+      "columns": [
+        "mode",
+        "variant_id",
+        "cost_scenario",
+        "configuration_count",
+        "median_terminal_return",
+        "minimum_terminal_return",
+        "maximum_terminal_return",
+        "positive_terminal_fraction",
+        "median_cagr",
+        "median_maximum_drawdown",
+        "median_turnover",
+        "median_total_cost",
+        "median_holding_days",
+        "median_fraction_above_0p1",
+        "median_fraction_above_0p5",
+        "median_fraction_above_1p0"
+      ]
+    },
+    "task_capacity": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/task_capacity_summary.parquet",
+      "size": 15136,
+      "sha256": "65b03f1fb043f46d482c0f7ff450484df6ff4c00084bbe94b8f3cc96f31c139a",
+      "row_count": 396,
+      "columns": [
+        "mode",
+        "variant_id",
+        "slot_count",
+        "cost_scenario",
+        "task_count",
+        "median_filled_order_count",
+        "median_fraction_above_0p1",
+        "median_fraction_above_0p5",
+        "median_fraction_above_1p0"
+      ]
+    },
+    "decision": {
+      "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/decision.json",
+      "size": 7300,
+      "sha256": "badef934b92f46fcfac4a467d39b01a89984b8d9f5364808f7fe64d5036bb2bd"
+    }
+  },
+  "does_not_select": [
+    "deployment policy",
+    "score fusion",
+    "new model",
+    "exit threshold",
+    "holding period",
+    "slot count",
+    "buffer",
+    "leverage",
+    "stop loss",
+    "2026 validation"
+  ],
+  "full_output": {
+    "path": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1/evaluation/summary.json",
+    "size": 19189,
+    "sha256": "3efa3e093f858cd44ff3b10f84716dea2f174520312a7fd3fadb0ba7d377ce91"
+  }
+}

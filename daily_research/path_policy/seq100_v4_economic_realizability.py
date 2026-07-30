@@ -911,6 +911,31 @@ def _portfolio_value(
     return float(total)
 
 
+def _position_allocation(
+    *,
+    book: SignalBook,
+    spec: TaskSpec,
+    cash: float,
+    equity_open: float,
+) -> float:
+    custom = getattr(book, "position_allocation", None)
+    if callable(custom):
+        allocation = float(
+            custom(
+                spec=spec,
+                cash=float(cash),
+                equity_open=float(equity_open),
+            )
+        )
+        if not math.isfinite(allocation) or allocation < 0.0:
+            raise ValueError("custom position allocation is invalid")
+        return min(float(cash), allocation)
+    return min(
+        float(cash),
+        max(float(equity_open), 0.0) / int(spec.slot_count),
+    )
+
+
 def _buy_position(
     *,
     available_cash: float,
@@ -1076,7 +1101,12 @@ def _daily_gate_set(
     pool = np.asarray(ordered_symbols[:pool_count], dtype=np.int32)
     keep = np.ones(len(pool), dtype=bool)
     if use_state:
-        state_low = np.asarray(book.rank_panel[day, pool, 2], dtype=np.float64)
+        state_low = _rank_values(
+            book=book,
+            day=day,
+            symbols=pool,
+            column=2,
+        )
         state_order = np.lexsort((pool, state_low))
         retain_count = max(1, math.ceil(len(pool) * retention))
         state_keep = np.zeros(len(pool), dtype=bool)
@@ -1084,8 +1114,18 @@ def _daily_gate_set(
         keep &= state_keep
     if use_risk:
         safety = np.minimum(
-            np.asarray(book.rank_panel[day, pool, 5], dtype=np.float64),
-            np.asarray(book.rank_panel[day, pool, 6], dtype=np.float64),
+            _rank_values(
+                book=book,
+                day=day,
+                symbols=pool,
+                column=5,
+            ),
+            _rank_values(
+                book=book,
+                day=day,
+                symbols=pool,
+                column=6,
+            ),
         )
         risk_order = np.lexsort((pool, -safety))
         retain_count = max(1, math.ceil(len(pool) * retention))
@@ -1093,6 +1133,37 @@ def _daily_gate_set(
         risk_keep[risk_order[:retain_count]] = True
         keep &= risk_keep
     return {int(value) for value in pool[keep]}
+
+
+def _rank_values(
+    *,
+    book: SignalBook,
+    day: int,
+    symbols: np.ndarray,
+    column: int,
+) -> np.ndarray:
+    custom = getattr(book, "rank_values", None)
+    if callable(custom):
+        values = np.asarray(
+            custom(
+                day=int(day),
+                symbols=np.asarray(symbols, dtype=np.int32),
+                column=int(column),
+            ),
+            dtype=np.float64,
+        )
+    else:
+        values = np.asarray(
+            book.rank_panel[
+                int(day),
+                np.asarray(symbols, dtype=np.int32),
+                int(column),
+            ],
+            dtype=np.float64,
+        )
+    if values.shape != (len(symbols),):
+        raise ValueError("rank vector shape changed")
+    return values
 
 
 def _pair_gate_pass(
@@ -1590,9 +1661,11 @@ def simulate_task(
                     continue
                 raw_open = float(book.raw_open[date_idx, symbol_idx])
                 adjusted_open = float(adjusted_open_row[symbol_idx])
-                allocation = min(
-                    cash,
-                    max(equity_open, 0.0) / int(spec.slot_count),
+                allocation = _position_allocation(
+                    book=book,
+                    spec=spec,
+                    cash=cash,
+                    equity_open=equity_open,
                 )
                 position, details = _buy_position(
                     available_cash=cash,
