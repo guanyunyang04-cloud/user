@@ -5,10 +5,11 @@ Updated: 2026-07-30
 ## Objective
 
 Build a daily A-share main-board selector that keeps upside opportunity, path
-quality, and pre-peak adversity separate. Entry output structure is frozen and
-the first complete supervised post-entry update challenge is finished. No
-score fusion, exit, switching, cost buffer, holding period, account constraint,
-deep model, or reinforcement-learning policy has been selected.
+quality, and pre-peak adversity separate. Entry output structure is frozen,
+the supervised post-entry update challenge is finished, and the first
+continuous executable-account monetization audit is complete. No score fusion,
+deployment policy, holding period, stop, deep model, or reinforcement-learning
+policy has been selected.
 
 ## Active entry contract
 
@@ -115,6 +116,51 @@ Retained result:
 
 - `daily_research/research_records/seq100/seq100_post_entry_ab_v2/result.json`
 
+## v4 economic realizability result
+
+`seq100_v4_economic_realizability_v1` ran a continuous account from the first
+2023 v4 signal through 2025-12-31. It used only rolling-OOS v4 ranks and PIT
+execution data; 2020-2022 outcomes did not select policy parameters and no 2026
+row, price, label, or liquidation was read.
+
+- Signal book: 727 dates and 2,239,539 candidate rows.
+- Surface: 7 families including deterministic noise, 2 exposure modes, 6 slot
+  counts, 4 rank-width buffers, and 2 cost scenarios; 672/672 tasks completed.
+- All accounts were continuous across years. Raw-open execution, T+1, board
+  lots, minimum commission, the 2023-08-28 stamp-tax change, limit/suspension
+  failures, adjusted-ratio total-return marks, and pack terminal recovery were
+  enforced.
+- Maximum daily cash/position conservation error was `3.05e-08`; the negative
+  control did not pass; 2026 reads were zero.
+
+Formal conclusion:
+
+`v4_not_monetized_by_preregistered_policy_surface`
+
+No family/exposure pair formed the required contiguous `3 slots × 2 buffers`
+economic rectangle. Median daily excess was negative for all 12 formal
+hypotheses; no HAC/BH/bootstrap gate passed. There were three isolated economic
+cells, which are evidence of parameter fragility rather than deployable
+winners:
+
+- dual MFE + state/risk veto, target full, K=3, buffer=2:
+  base/stress terminal return `98.75%/68.31%`, excess `37.06%/16.07%`,
+  maximum drawdown `-33.87%`.
+- the same family at K=6, buffer=2:
+  `88.70%/57.97%`, excess `30.13%/8.94%`, drawdown `-33.97%`.
+- dual MFE + state veto, strong-candidate cash, K=12, buffer=1:
+  `57.41%/47.40%`, excess `8.55%/1.65%`, drawdown `-36.93%`.
+
+Ungated MFE10/MFE20 and dual-MFE policies did not convert learnable MFE into
+stable executable returns. State/risk vetoes materially improved the tested
+portfolio paths, but only in isolated neighborhoods. Lifecycle/exit blockage
+is economically material: 600 of 672 tasks encountered at least one terminal
+recovery, reinforcing that MFE opportunity is not itself realizable profit.
+
+Retained result:
+
+- `daily_research/research_records/seq100/seq100_v4_economic_realizability_v1/result.json`
+
 ## Prior evidence retained
 
 - The bounded feature-union audit found no eligible union. Keep D10 turnover
@@ -128,14 +174,16 @@ Retained result:
 
 ## Current decision
 
-Use v4 and recompute its five entry coordinates daily for both new candidates
-and current holdings. Do not create an independent supervised LightGBM holding
-update model from the tested D1/D3/D5 entry-memory and realized-path fields.
+Use v4 as a frozen research signal contract and recompute its five coordinates
+daily. Do not create the rejected independent supervised LightGBM holding
+update heads. Do not select any of the three isolated profitable account cells
+or consume 2026.
 
-Do not enter the cost-adjusted hold-versus-switch study yet: no independent
-remaining-coordinate update head survived. A future explicit decision may test
-a materially different sequence/deep model or define a simpler strategy
-baseline, but should not reopen the completed LightGBM capacity, feature-union,
-or five-target A/B searches without new evidence.
+The next justified research step is a read-only failure-mechanism audit of the
+state/risk-veto neighborhood: separate opportunity realization, turnover/cost,
+limit/suspension/terminal-recovery, and exposure effects. Only a preregistered
+policy supported by a stable neighborhood may be frozen for 2026 or prospective
+validation. Do not reopen completed LightGBM capacity, feature-union, or
+five-target A/B searches without new evidence.
 
 There is no active training process.

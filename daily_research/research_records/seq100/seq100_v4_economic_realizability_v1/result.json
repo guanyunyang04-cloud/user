@@ -1,0 +1,359 @@
+{
+  "schema": "seq100_v4_economic_summary/v1",
+  "status": "completed",
+  "completed_at": "2026-07-30T12:13:36+08:00",
+  "study_id": "seq100_v4_economic_realizability_v1",
+  "study_config_sha256": "878cb84bc54f282927ff3cca6e5dd0c6c2f7ec060032b6f62c55db6cea3e340d",
+  "entry_contract": "seq100_entry_contract_oos_v4",
+  "period": {
+    "years": [
+      2023,
+      2024,
+      2025
+    ],
+    "continuous_account": true,
+    "annual_reset": false,
+    "uses_2020_2022_policy_outcomes": false,
+    "maximum_consumed_date": "2025-12-31",
+    "forbidden_2026_row_count": 0
+  },
+  "task_count": 672,
+  "annual_metric_count": 2016,
+  "surface_slice_count": 72,
+  "paired_comparison_count": 1248,
+  "configuration_count": 336,
+  "family_hypothesis_count": 12,
+  "signal_book": {
+    "signal_date_count": 727,
+    "candidate_row_count": 2239539,
+    "manifest": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
+      "size": 4109,
+      "sha256": "a98f2b04242dfc7a62b534ba72d46f9bc2e6342659229946bbad1e2c69fa722e"
+    }
+  },
+  "decision": {
+    "status": "completed_without_policy_winner_selection",
+    "overall": "v4_not_monetized_by_preregistered_policy_surface",
+    "robust_family_exposure_pairs": [],
+    "robust_pair_count": 0,
+    "isolated_economic_configurations": [
+      {
+        "family": "dual_mfe_state_risk_veto",
+        "exposure_mode": "target_full",
+        "slot_count": 3,
+        "buffer_multiplier": 2.0,
+        "base_terminal_return": 0.9875107135223198,
+        "stress_terminal_return": 0.6830798060019565,
+        "base_terminal_excess": 0.37061600087823154,
+        "stress_terminal_excess": 0.16067606436849813,
+        "base_maximum_drawdown": -0.3386774560039909,
+        "base_turnover": 260.7825368861497
+      },
+      {
+        "family": "dual_mfe_state_risk_veto",
+        "exposure_mode": "target_full",
+        "slot_count": 6,
+        "buffer_multiplier": 2.0,
+        "base_terminal_return": 0.8870348113838109,
+        "stress_terminal_return": 0.5797101105645373,
+        "base_terminal_excess": 0.3013263722806301,
+        "stress_terminal_excess": 0.08939083425200378,
+        "base_maximum_drawdown": -0.3397037532091137,
+        "base_turnover": 300.7736497457799
+      },
+      {
+        "family": "dual_mfe_state_veto",
+        "exposure_mode": "strong_candidate_cash",
+        "slot_count": 12,
+        "buffer_multiplier": 1.0,
+        "base_terminal_return": 0.5740797079520321,
+        "stress_terminal_return": 0.47399068903230956,
+        "base_terminal_excess": 0.0855080275533624,
+        "stress_terminal_excess": 0.016485199193128963,
+        "base_maximum_drawdown": -0.3692788688483527,
+        "base_turnover": 157.55699086854375
+      }
+    ],
+    "isolated_economic_configuration_count": 3,
+    "negative_control_invalid": false,
+    "accounting_invalid": false,
+    "single_policy_winner_selected": false,
+    "policy_surface_role": "pre-registered 2023-2025 development-fold economic realizability; not a pristine final holdout",
+    "next_step": "do not select an isolated winner or consume 2026; diagnose why the state/risk-veto neighborhood is parameter-fragile and why ungated MFE opportunity is not converted into executable returns"
+  },
+  "families": [
+    {
+      "family": "mfe10_primary",
+      "exposure_mode": "target_full",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0030997604117986976,
+      "hac_p_value": 0.98879856878681,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.0049978082284756215
+    },
+    {
+      "family": "mfe10_primary",
+      "exposure_mode": "strong_candidate_cash",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0031463334055788538,
+      "hac_p_value": 0.9885830362743526,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.00507123140904666
+    },
+    {
+      "family": "mfe20_primary",
+      "exposure_mode": "target_full",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0015374249600267433,
+      "hac_p_value": 0.9675333048485069,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.002717768634970331
+    },
+    {
+      "family": "mfe20_primary",
+      "exposure_mode": "strong_candidate_cash",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0014954829695592378,
+      "hac_p_value": 0.9668001603004167,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.0026338563842974324
+    },
+    {
+      "family": "dual_mfe_maximin",
+      "exposure_mode": "target_full",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0024246655411587683,
+      "hac_p_value": 0.9897793687833568,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.0038814432432297164
+    },
+    {
+      "family": "dual_mfe_maximin",
+      "exposure_mode": "strong_candidate_cash",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.00236377006072222,
+      "hac_p_value": 0.9873874905947227,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.00384332991427026
+    },
+    {
+      "family": "dual_mfe_state_veto",
+      "exposure_mode": "target_full",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0010201983186360248,
+      "hac_p_value": 0.8863327644360488,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.0021157483512810916
+    },
+    {
+      "family": "dual_mfe_state_veto",
+      "exposure_mode": "strong_candidate_cash",
+      "family_status": "fragile_parameter_dependent",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 1,
+      "median_daily_excess_mean": -0.0005484418716053444,
+      "hac_p_value": 0.7640968419688646,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.001535964544087316
+    },
+    {
+      "family": "dual_mfe_risk_veto",
+      "exposure_mode": "target_full",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0012809078025738507,
+      "hac_p_value": 0.9729337505490228,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.002149703237368346
+    },
+    {
+      "family": "dual_mfe_risk_veto",
+      "exposure_mode": "strong_candidate_cash",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0006881796421378618,
+      "hac_p_value": 0.8650718646559373,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.001510287067295227
+    },
+    {
+      "family": "dual_mfe_state_risk_veto",
+      "exposure_mode": "target_full",
+      "family_status": "fragile_parameter_dependent",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 2,
+      "median_daily_excess_mean": -0.000863819338869026,
+      "hac_p_value": 0.9422178138366553,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.0015803144619967865
+    },
+    {
+      "family": "dual_mfe_state_risk_veto",
+      "exposure_mode": "strong_candidate_cash",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.000704059831537406,
+      "hac_p_value": 0.8978506405944819,
+      "bh_q_value": 0.9897793687833568,
+      "bootstrap_lower_90": -0.0014413625735104588
+    },
+    {
+      "family": "deterministic_noise",
+      "exposure_mode": "target_full",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0029429287618716066,
+      "hac_p_value": 1.0,
+      "bh_q_value": null,
+      "bootstrap_lower_90": -0.003196296567848698
+    },
+    {
+      "family": "deterministic_noise",
+      "exposure_mode": "strong_candidate_cash",
+      "family_status": "not_monetized_by_tested_daily_policy",
+      "robustly_monetizable": false,
+      "economic_rectangle_count": 0,
+      "base_rectangle_count": 0,
+      "gross_rectangle_count": 0,
+      "isolated_economic_cell_count": 0,
+      "median_daily_excess_mean": -0.0005175543397816386,
+      "hac_p_value": 0.8447051994298886,
+      "bh_q_value": null,
+      "bootstrap_lower_90": -0.0011897249178541814
+    }
+  ],
+  "validation": {
+    "task_count_matches_preregistration": true,
+    "maximum_conservation_error": 3.050081431865692e-08,
+    "negative_control_invalid": false,
+    "tasks_with_terminal_recovery": 600,
+    "maximum_terminal_recovery_count": 14,
+    "single_policy_winner_selected": false,
+    "no_model_training": true,
+    "forbidden_2026_row_count": 0
+  },
+  "files": {
+    "task_metrics": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/task_metrics.parquet",
+      "size": 201612,
+      "sha256": "8294eab10ad7c2252d5bc978230378581afa8bd5079cd16e565f686eac38791b",
+      "row_count": 672
+    },
+    "annual_metrics": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/annual_metrics.parquet",
+      "size": 53908,
+      "sha256": "4711186a55f8ceb0e7fe92033aeb5f8ec33ca2ea46cd980c145cef9a5e7f5886",
+      "row_count": 2016
+    },
+    "surface_slices": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/surface_slices.parquet",
+      "size": 15207,
+      "sha256": "442a704053bdb29101f951f8a8a845f10a163ab88362feee195994eeaeefede9",
+      "row_count": 72
+    },
+    "configurations": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/configurations.parquet",
+      "size": 31270,
+      "sha256": "304f9d30602208160db96ba4841550204c831acd073f00a3ee3845e358e4caab",
+      "row_count": 336
+    },
+    "family_statistics": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/family_statistics.parquet",
+      "size": 14506,
+      "sha256": "a2d9dc3bcb0018c19d7fd7e70f9cf57d9a64987d84892b9b9562c4409e5dfa1e",
+      "row_count": 14
+    },
+    "family_daily_median_excess": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/family_daily_median_excess.parquet",
+      "size": 92655,
+      "sha256": "6a0d17f635b0fa414d2a2e3f9f022d7bec37bf89e11a9ddf116582eb1658a0ec",
+      "row_count": 10178
+    },
+    "paired_comparisons": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/paired_comparisons.parquet",
+      "size": 166204,
+      "sha256": "0c3e9a0831789cf0e0eec0c75188df8f5bbf12f54e6ad88db39d2a95c1c0a112",
+      "row_count": 1248
+    },
+    "decision": {
+      "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/decision.json",
+      "size": 2124,
+      "sha256": "9b09019ffa73411c86de6c01ca6d1841e2d811a5e7070b8b2648c052c986ccaf"
+    }
+  },
+  "does_not_select": [
+    "single winning policy",
+    "MFE raw value calibration",
+    "entry score linear fusion",
+    "fixed holding period",
+    "stop loss",
+    "take profit",
+    "MA5 exit",
+    "deep model",
+    "reinforcement learning",
+    "2026 final validation"
+  ],
+  "full_output": {
+    "path": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/evaluation/summary.json",
+    "size": 13933,
+    "sha256": "97b6008fdc430d23dbff0229a59cf7723cae6872163b89e15fcb533d48cff9c9"
+  }
+}

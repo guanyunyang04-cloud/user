@@ -1,0 +1,128 @@
+{
+    "study_id": "seq100_v4_economic_realizability_v1",
+    "objective": "test whether the frozen rank-first v4 entry contract can produce robust net economic value in a continuous 2023-2025 executable account without selecting a single policy winner",
+    "sources": {
+        "entry_contract_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+        "base_feature_manifest": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+        "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+        "post_entry_result": "daily_research/research_records/seq100/seq100_post_entry_ab_v2/result.json"
+    },
+    "period": {
+        "signal_years": [2023, 2024, 2025],
+        "first_signal_rule": "first v4 signal close in 2023",
+        "last_execution_date": "2025-12-31",
+        "continuous_account": true,
+        "annual_reset": false,
+        "policy_reselection": false,
+        "maximum_consumed_date": "2025-12-31",
+        "forbidden_year": 2026,
+        "fold_role": "owner-authorized repeatedly reused development decision folds, not a pristine final holdout",
+        "uses_2020_2022_policy_outcomes": false
+    },
+    "account": {
+        "starting_cash_cny": 1000000.0,
+        "slot_counts": [1, 3, 6, 12, 24, 48],
+        "equal_target_slots": true,
+        "daily_weight_rebalance": false,
+        "allow_pyramiding": false,
+        "allow_leverage": false,
+        "cash_interest_rate": 0.0,
+        "board_lot": 100,
+        "terminal_liquidation": false,
+        "terminal_exit_cost_accrual": true
+    },
+    "policies": {
+        "formal_families": [
+            "mfe10_primary",
+            "mfe20_primary",
+            "dual_mfe_maximin",
+            "dual_mfe_state_veto",
+            "dual_mfe_risk_veto",
+            "dual_mfe_state_risk_veto"
+        ],
+        "negative_control": "deterministic_noise",
+        "exposure_modes": ["target_full", "strong_candidate_cash"],
+        "buffer_multipliers": [0.0, 0.5, 1.0, 2.0],
+        "buffer_formula": "multiplier * slot_count / max(candidate_count - 1, 1)",
+        "strong_entry_rank": 0.99,
+        "strong_retention_rank": 0.95,
+        "auxiliary_top_fraction": 0.05,
+        "auxiliary_retention_fraction": 0.80,
+        "auxiliary_pair_tolerance": 0.20,
+        "dual_score": "daily rank of min(mfe10_rank, mfe20_rank)",
+        "state_veto": "lower state_low_rank is safer",
+        "risk_veto": "higher min(risk10_rank, risk20_rank) is safer",
+        "auxiliary_veto_never_forces_exit": true,
+        "same_open_replacement_after_failed_buy": false,
+        "tie_break": "ascending symbol_idx",
+        "noise_seeds": [701, 1701]
+    },
+    "execution": {
+        "decision_time": "signal date close",
+        "execution_time": "next trading date open",
+        "sell_before_buy": true,
+        "failed_sell_cancels_paired_buy": true,
+        "failed_buy_retains_cash": true,
+        "t_plus_one": true,
+        "terminal_missing_lifecycle": "apply pack precommitted recovery fraction on 2025-12-31 without reading 2026",
+        "cost_scenarios": {"base": 1.0, "stress": 2.0},
+        "expected_pack_costs": {
+            "lot_size": 100,
+            "commission_bps": 3.0,
+            "minimum_commission_cny": 5.0,
+            "transfer_fee_bps": 0.1,
+            "slippage_bps": 7.0,
+            "stress_slippage_multiplier": 2.0,
+            "stamp_tax_schedule": [
+                {"effective_date": "1900-01-01", "stamp_tax_bps": 10.0},
+                {"effective_date": "2023-08-28", "stamp_tax_bps": 5.0}
+            ]
+        },
+        "valuation": "raw open execution with adjusted-price-ratio total-return-equivalent holding ledger",
+        "amount_participation_thresholds": [0.001, 0.005, 0.01]
+    },
+    "benchmark": {
+        "name": "pit_mainboard_equal_weight_adjusted_close",
+        "membership": "previous signal close v4 candidate universe",
+        "missing_next_price": "pack terminal recovery fraction",
+        "cash_return": 0.0
+    },
+    "statistics": {
+        "hac_maximum_lag": 20,
+        "bootstrap_block_length": 20,
+        "bootstrap_repetitions": 5000,
+        "bootstrap_seed": 7,
+        "bootstrap_lower_quantile": 0.10,
+        "family_hypothesis_count": 12,
+        "maximum_hac_p_value": 0.05,
+        "maximum_bh_q_value": 0.10,
+        "robust_rectangle_slot_width": 3,
+        "robust_rectangle_buffer_width": 2,
+        "minimum_positive_absolute_years": 2,
+        "minimum_positive_excess_years": 2
+    },
+    "outputs": {
+        "output_dir": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1",
+        "record_dir": "daily_research/research_records/seq100/seq100_v4_economic_realizability_v1",
+        "expected_task_count": 672
+    },
+    "interfaces": [
+        "--status",
+        "--prepare",
+        "--run-pending",
+        "--evaluate",
+        "--self-test"
+    ],
+    "non_selections": [
+        "single winning policy",
+        "MFE raw value calibration",
+        "entry score linear fusion",
+        "fixed holding period",
+        "stop loss",
+        "take profit",
+        "MA5 exit",
+        "deep model",
+        "reinforcement learning",
+        "2026 final validation"
+    ]
+}
