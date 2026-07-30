@@ -5,13 +5,12 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-
 from quant_data_platform.core.paths import workspace_root
 from quant_data_platform.qdp_v2.audit import audit_active
 from quant_data_platform.qdp_v2.check import run_check
 from quant_data_platform.qdp_v2.database_audit import (
-    REQUIRED_DOMAINS,
     EXPECTED_BAR_TIMES,
+    REQUIRED_DOMAINS,
     _active_manifest,
     _audit_temp_directory,
     _bar_day_check,
@@ -118,7 +117,9 @@ def _write_domain(
     return resolved_id
 
 
-def _write_active(root: Path, datasets: dict[str, str], as_of: str = "2026-01-05") -> None:
+def _write_active(
+    root: Path, datasets: dict[str, str], as_of: str = "2026-01-05"
+) -> None:
     write_active_manifest(
         root,
         {
@@ -182,7 +183,9 @@ def test_status_reads_active_and_dataset_manifests(tmp_path: Path) -> None:
     assert payload["datasets"]["market_daily_raw"]["existing_shards"] == 1
 
 
-def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path) -> None:
+def test_composite_manifest_keeps_cross_dataset_shards_reachable(
+    tmp_path: Path,
+) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
     old_id = _write_domain(
@@ -207,12 +210,7 @@ def test_composite_manifest_keeps_cross_dataset_shards_reachable(tmp_path: Path)
     )
     new_id = "market_daily_raw__composite"
     new_shard = (
-        root
-        / "datasets"
-        / "market_daily_raw"
-        / new_id
-        / "shards"
-        / "restore.parquet"
+        root / "datasets" / "market_daily_raw" / new_id / "shards" / "restore.parquet"
     )
     _write_parquet(
         new_shard,
@@ -286,7 +284,12 @@ def test_audit_and_gc_use_manifests(tmp_path: Path) -> None:
     orphan_dir.mkdir(parents=True, exist_ok=True)
     _write_json(
         orphan_dir / "dataset.json",
-        {"dataset_id": "valuation__orphan", "domain": "valuation", "shards": [], "row_count": 0},
+        {
+            "dataset_id": "valuation__orphan",
+            "domain": "valuation",
+            "shards": [],
+            "row_count": 0,
+        },
     )
     _write_active(root, {"trading_calendar": active_id})
 
@@ -294,7 +297,9 @@ def test_audit_and_gc_use_manifests(tmp_path: Path) -> None:
     dry = lake_gc(workspace_root=workspace, with_size=True)
     deleted = lake_gc(workspace_root=workspace, delete=True, yes=True)
 
-    assert any(item["dataset_id"] == "valuation__orphan" for item in dry["unreferenced"])
+    assert any(
+        item["dataset_id"] == "valuation__orphan" for item in dry["unreferenced"]
+    )
     assert any(item["dataset_id"] == "valuation__orphan" for item in deleted["deleted"])
 
 
@@ -320,7 +325,9 @@ def test_gc_can_explicitly_remove_workspace_local_runtime(tmp_path: Path) -> Non
     assert not runtime_file.parent.exists()
 
 
-def test_quick_check_reads_schema_without_comparing_footer_row_counts(tmp_path: Path) -> None:
+def test_quick_check_reads_schema_without_comparing_footer_row_counts(
+    tmp_path: Path,
+) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
     dataset_id = _write_domain(
@@ -362,7 +369,14 @@ def test_latest_key_check_accepts_aligned_complete_48_bar_day(tmp_path: Path) ->
     datasets["trading_calendar"] = _write_domain(
         root,
         "trading_calendar",
-        pd.DataFrame({"trade_date": [date], "is_open": [True], "exchange": ["SSE"], "source": ["unit"]}),
+        pd.DataFrame(
+            {
+                "trade_date": [date],
+                "is_open": [True],
+                "exchange": ["SSE"],
+                "source": ["unit"],
+            }
+        ),
         contract="qdp_v2_trading_calendar_v1",
         primary_key=["trade_date", "exchange"],
     )
@@ -560,8 +574,12 @@ def test_full_audit_reports_duplicate_primary_keys(tmp_path: Path) -> None:
     )
 
     assert payload["status"] == "needs_attention"
-    assert any(item["code"] == "primary_key_duplicate_rows" for item in payload["findings"])
-    report = next(item for item in payload["datasets"] if item["domain"] == "market_daily_raw")
+    assert any(
+        item["code"] == "primary_key_duplicate_rows" for item in payload["findings"]
+    )
+    report = next(
+        item for item in payload["datasets"] if item["domain"] == "market_daily_raw"
+    )
     assert report["checks"]["primary_key"]["duplicate_rows"] == 1
 
 
@@ -640,9 +658,9 @@ def test_full_audit_reports_symbol_lifecycle_effectivity_as_high(
     lifecycle = payload["cross_dataset_checks"]["symbol_lifecycle_effectivity"]
     assert lifecycle["status"] == "needs_repair"
     assert lifecycle["outside_effective_interval_rows"] == 1
-    assert lifecycle["domains"]["market_daily_raw"][
-        "outside_effective_interval_rows"
-    ] == 1
+    assert (
+        lifecycle["domains"]["market_daily_raw"]["outside_effective_interval_rows"] == 1
+    )
 
 
 def test_intraday_overlapping_date_shards_verify_actual_keys(tmp_path: Path) -> None:
@@ -694,6 +712,80 @@ def test_intraday_overlapping_date_shards_verify_actual_keys(tmp_path: Path) -> 
     assert disjoint["cross_shard_duplicate_rows"] == 0
     assert duplicate["status"] == "error"
     assert duplicate["cross_shard_duplicate_rows"] == 1
+
+
+def test_intraday_physical_order_follows_declared_primary_key(tmp_path: Path) -> None:
+    path = tmp_path / "date_first.parquet"
+    _write_parquet(
+        path,
+        pd.DataFrame(
+            {
+                "trade_date": ["2026-01-05", "2026-01-06"],
+                "symbol": ["600000.SH", "000001.SZ"],
+                "bar_time": ["09:35:00", "09:35:00"],
+            }
+        ),
+    )
+    entry = ShardManifestEntry(
+        path=path.as_posix(),
+        row_count=2,
+        start_date="2026-01-05",
+        end_date="2026-01-06",
+        file_size=path.stat().st_size,
+    )
+    legacy_path = tmp_path / "symbol_first.parquet"
+    _write_parquet(
+        legacy_path,
+        pd.DataFrame(
+            {
+                "trade_date": ["2026-01-06", "2026-01-05"],
+                "symbol": ["000001.SZ", "600000.SH"],
+                "bar_time": ["09:35:00", "09:35:00"],
+            }
+        ),
+    )
+    legacy_entry = ShardManifestEntry(
+        path=legacy_path.as_posix(),
+        row_count=2,
+        start_date="2026-01-05",
+        end_date="2026-01-06",
+        file_size=legacy_path.stat().st_size,
+    )
+
+    with open_guarded_duckdb(
+        temp_directory=tmp_path / "date-first-spill",
+        threads=1,
+        memory_sampler=lambda: 8 * 1024**3,
+    ) as con:
+        result = _ordered_intraday_primary_key_check(
+            con,
+            [path],
+            [entry],
+            ["trade_date", "symbol", "bar_time"],
+            5,
+        )
+        legacy = _ordered_intraday_primary_key_check(
+            con,
+            [legacy_path],
+            [legacy_entry],
+            ["trade_date", "symbol", "bar_time"],
+            5,
+        )
+
+    assert result["status"] == "ok"
+    assert result["physical_order_violation_rows"] == 0
+    assert result["declared_primary_key_order"] == [
+        "trade_date",
+        "symbol",
+        "bar_time",
+    ]
+    assert result["observed_physical_key_orders"] == {
+        "trade_date>symbol>bar_time": 1
+    }
+    assert legacy["status"] == "ok"
+    assert legacy["observed_physical_key_orders"] == {
+        "symbol>trade_date>bar_time": 1
+    }
 
 
 def test_bar_day_check_aggregates_independent_date_shards(tmp_path: Path) -> None:
@@ -784,6 +876,101 @@ def test_cross_frequency_check_rejects_100x_intraday_volume(tmp_path: Path) -> N
     assert result["invalid_day_count"] == 1
 
 
+def test_cross_frequency_check_scans_overlapping_symbol_shards_once(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    date = "2026-01-05"
+    symbols = ["600000.SH", "000001.SZ"]
+    daily_id = _write_domain(
+        root,
+        "market_daily_raw",
+        pd.DataFrame(
+            {
+                "symbol": symbols,
+                "trade_date": [date, date],
+                "open": [10.0, 20.0],
+                "high": [10.2, 20.2],
+                "low": [9.8, 19.8],
+                "close": [10.1, 20.1],
+                "volume": [4800.0, 4800.0],
+                "amount": [48_000.0, 96_000.0],
+            }
+        ),
+        contract="unit",
+        primary_key=["trade_date", "symbol"],
+    )
+    five_id = "market_intraday_5m__overlapping_symbol_shards"
+    shard_dir = root / "datasets" / "market_intraday_5m" / five_id / "shards"
+    entries: list[ShardManifestEntry] = []
+    for number, (symbol, price) in enumerate(zip(symbols, (10.0, 20.0), strict=True)):
+        path = shard_dir / f"part-{number}.parquet"
+        _write_parquet(
+            path,
+            pd.DataFrame(
+                {
+                    "symbol": [symbol] * 48,
+                    "trade_date": [date] * 48,
+                    "bar_time": EXPECTED_BAR_TIMES,
+                    "open": [price] * 48,
+                    "high": [price + 0.2] * 48,
+                    "low": [price - 0.2] * 48,
+                    "close": [price + 0.1] * 48,
+                    "volume": [100.0] * 48,
+                    "amount": [price * 100.0] * 48,
+                }
+            ),
+        )
+        entries.append(
+            ShardManifestEntry(
+                path=str(path.relative_to(root)).replace("\\", "/"),
+                row_count=48,
+                start_date=date,
+                end_date=date,
+            )
+        )
+    import pyarrow.parquet as pq
+
+    write_dataset_manifest(
+        root,
+        DatasetManifest(
+            dataset_id=five_id,
+            domain="market_intraday_5m",
+            layer="raw",
+            frequency="5m",
+            contract_version="unit",
+            primary_key=["trade_date", "symbol", "bar_time"],
+            start_date=date,
+            end_date=date,
+            row_count=96,
+            shards=entries,
+            source={"provider": "unit"},
+            quality={},
+            schema=_manifest_schema_from_arrow(pq.read_schema(root / entries[0].path)),
+        ),
+    )
+
+    with open_guarded_duckdb(
+        temp_directory=workspace / "overlap-five-spill",
+        threads=1,
+        memory_sampler=lambda: 8 * 1024**3,
+        total_memory_sampler=lambda: 16 * 1024**3,
+    ) as con:
+        result = _daily_intraday_consistency_check(
+            con,
+            root=root,
+            daily=_active_manifest(root, daily_id, "market_daily_raw"),
+            intraday=_active_manifest(root, five_id, "market_intraday_5m"),
+            sample_limit=5,
+        )
+
+    assert result["positive_daily_count"] == 2
+    assert result["complete_positive_daily_count"] == 2
+    assert result["missing_positive_daily_count"] == 0
+    assert result["invalid_day_count"] == 0
+
+
 def test_cross_frequency_check_resolves_intraday_ticker_lifecycle(
     tmp_path: Path,
 ) -> None:
@@ -870,7 +1057,9 @@ def test_cross_frequency_check_resolves_intraday_ticker_lifecycle(
     assert result["invalid_day_count"] == 0
 
 
-def test_status_daily_semantics_detects_both_mismatch_directions(tmp_path: Path) -> None:
+def test_status_daily_semantics_detects_both_mismatch_directions(
+    tmp_path: Path,
+) -> None:
     status_path = tmp_path / "status.parquet"
     daily_path = tmp_path / "daily.parquet"
     date = "2026-01-05"
@@ -915,7 +1104,9 @@ def test_status_daily_semantics_detects_both_mismatch_directions(tmp_path: Path)
     assert result["null_suspension_flag_count"] == 0
 
 
-def test_factor_semantics_separates_short_pollution_from_long_gap(tmp_path: Path) -> None:
+def test_factor_semantics_separates_short_pollution_from_long_gap(
+    tmp_path: Path,
+) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
     daily = pd.DataFrame(

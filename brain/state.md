@@ -12,6 +12,49 @@ ceiling and candidate-aligned prediction-to-oracle loss audits are complete.
 No score fusion, deployment policy, holding period, stop, deep model, or
 reinforcement-learning policy has been selected.
 
+## Current QDP data state
+
+The 2026-07-30 incremental QDP repair preserved the existing dataset IDs and
+changed only defective metadata/tables or missing rows. The active catalog now
+contains 16 domains and passes the full deep audit with zero errors. The only
+remaining warning is explicit, source-unavailable historical 5-minute
+coverage; missing intraday history is not an eligibility rule.
+
+- `market_intraday_5m`: 456,012,480 rows. Historical repair appended
+  16,955,712 rows covering 353,244 stock-days, then corrected ten isolated
+  provider rows whose volume was exactly 100 times the daily reference.
+  Canonical positive-daily coverage is 93.0266% through 2026-07-21:
+  9,500,260 complete stock-days and 712,157 explicit missing stock-days.
+- The three dated PIT index histories (`000016.SH`, `000300.SH`, `000905.SH`)
+  were rebuilt from 200 snapshots and now contain 3,159,561 rows, including
+  historical members that later delisted or changed ticker. Latest independent
+  snapshot Jaccard is 1.0 for all three.
+- `industry_concept` retains raw historic labels and adds normalized taxonomy
+  fields. It has 84 modern coded industries, 18 section codes, and only 759
+  explicit `Unknown/unavailable` rows out of 10,212,710.
+- Optional PIT event domains were added: `financial_quarterly` has 175,885
+  rows and `performance_forecast` has 77,711 rows. Event time is announcement
+  date; feature use must lag publication by one day.
+- Existing valuation already contains PE, PB, market value, float market
+  value, and turnover. The new financial domain adds ROE, margins, growth,
+  EPS, leverage, liquidity, turnover, and operating-cash-flow-per-share
+  fields. Absolute revenue/profit was left null where no safely aligned
+  statement source was fetched.
+- The source credential was process-local and was not written to code,
+  manifests, logs, or Brain.
+
+The pool coverage audit through 2025 reports complete 48-bar 5-minute coverage
+of 92.79% for all positive daily rows, 93.77% for the same-day
+non-ST/non-suspended/non-delisted pool, and 94.66% for the dated union of
+SSE50/CSI300/CSI500. In 2023/2024/2025 the three-index union reaches
+98.98%/99.48%/99.90%. This supports a PIT index-pool research challenger, but
+minute availability itself must never filter the universe.
+
+Retained audit artifacts:
+
+- `quant_data_platform/data/qdp_v2/audits/database_audit_20260730T145902+0000.json`
+- `quant_data_platform/data/qdp_v2/audits/pool_coverage_audit_v1.json`
+
 ## Active entry contract
 
 `seq100_entry_contract_oos_v4` is the active candidate-aligned 2020-2025

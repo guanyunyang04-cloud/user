@@ -22,8 +22,8 @@ from quant_data_platform.qdp_v2.audit import VALUATION_REQUIRED_COLUMNS, audit_a
 from quant_data_platform.qdp_v2.auxiliary_update import AUXILIARY_DOMAINS
 from quant_data_platform.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quant_data_platform.qdp_v2.manifest import (
-    DatasetManifest,
     EXPECTED_BAR_TIMES,
+    DatasetManifest,
     ShardManifestEntry,
     atomic_write_json,
     dataset_manifest_for_id,
@@ -40,7 +40,6 @@ from quant_data_platform.qdp_v2.pit_history import (
 )
 from quant_data_platform.qdp_v2.repair import _sql_literal
 from quant_data_platform.qdp_v2.status import active_dataset_map
-
 
 # Optional low-frequency tables remain useful, but their temporary staleness
 # must not make the daily market store unusable.
@@ -172,9 +171,8 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-def audit_latest_keys(
-    *, workspace_root: str | Path | None = None
-) -> dict[str, Any]:
+
+def audit_latest_keys(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     """Check only the newest daily partition and overlapping 5m shards."""
 
     root = qdp_v2_root(workspace_root)
@@ -373,7 +371,9 @@ def audit_database(
             )
         )
 
-    selected_threads = int(threads or {"safe": 2, "balanced": 4, "fast": 8}.get(runtime, 4))
+    selected_threads = int(
+        threads or {"safe": 2, "balanced": 4, "fast": 8}.get(runtime, 4)
+    )
     selected_threads = max(1, min(selected_threads, os.cpu_count() or 1))
     workspace = Path(workspace_root or Path.cwd()).resolve()
     reports: list[dict[str, Any]] = []
@@ -570,10 +570,14 @@ def audit_database(
     lifecycle_domains = tuple(
         domain for domain in LIFECYCLE_NORMALIZE_DOMAINS if domain in datasets
     )
-    if deep and lifecycle_domains and {
-        "security_identity",
-        "symbol_history",
-    }.issubset(datasets):
+    if (
+        deep
+        and lifecycle_domains
+        and {
+            "security_identity",
+            "symbol_history",
+        }.issubset(datasets)
+    ):
         try:
             lifecycle = audit_symbol_lifecycle_effectivity(
                 workspace_root=workspace,
@@ -661,14 +665,18 @@ def _audit_dataset(
     sample_limit: int,
     skip_primary_key: bool,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    all_paths = [resolve_manifest_path(item.path, root=root) for item in manifest.shards]
+    all_paths = [
+        resolve_manifest_path(item.path, root=root) for item in manifest.shards
+    ]
     paths = all_paths[:max_shards] if max_shards else all_paths
     entries = list(manifest.shards[:max_shards] if max_shards else manifest.shards)
     findings: list[dict[str, Any]] = []
     columns: list[str] = []
     if paths:
         columns = list(pq.read_schema(paths[0]).names)
-    missing_columns = sorted(set(REQUIRED_COLUMNS.get(manifest.domain, ())).difference(columns))
+    missing_columns = sorted(
+        set(REQUIRED_COLUMNS.get(manifest.domain, ())).difference(columns)
+    )
     if missing_columns:
         findings.append(
             _finding(
@@ -705,7 +713,13 @@ def _audit_dataset(
             checks["primary_key"] = pk
             if int(pk["null_key_rows"]) > 0:
                 findings.append(
-                    _finding("high", "primary_key", manifest.domain, "primary_key_null_rows", pk)
+                    _finding(
+                        "high",
+                        "primary_key",
+                        manifest.domain,
+                        "primary_key_null_rows",
+                        pk,
+                    )
                 )
             if int(pk["duplicate_rows"]) > 0:
                 findings.append(
@@ -722,28 +736,48 @@ def _audit_dataset(
             checks["ohlc"] = ohlc
             if int(ohlc["invalid_rows"]) > 0:
                 findings.append(
-                    _finding("high", "ohlc", manifest.domain, "invalid_ohlcv_rows", ohlc)
+                    _finding(
+                        "high", "ohlc", manifest.domain, "invalid_ohlcv_rows", ohlc
+                    )
                 )
         if manifest.domain == "market_intraday_5m":
             bars = _bar_day_check(con, paths, sample_limit)
             checks["bar_days"] = bars
             if int(bars["invalid_day_count"]) > 0:
                 findings.append(
-                    _finding("high", "bar_contract", manifest.domain, "invalid_48_bar_days", bars)
+                    _finding(
+                        "high",
+                        "bar_contract",
+                        manifest.domain,
+                        "invalid_48_bar_days",
+                        bars,
+                    )
                 )
         if manifest.domain == "adjust_factor":
             factor = _factor_check(con, paths, sample_limit)
             checks["factor"] = factor
             if int(factor["invalid_rows"]) > 0:
                 findings.append(
-                    _finding("high", "factor", manifest.domain, "invalid_adjust_factor_rows", factor)
+                    _finding(
+                        "high",
+                        "factor",
+                        manifest.domain,
+                        "invalid_adjust_factor_rows",
+                        factor,
+                    )
                 )
         if manifest.domain == "symbol_history":
             identity = _symbol_history_check(con, paths, sample_limit)
             checks["identity_intervals"] = identity
             if int(identity["overlap_count"]) > 0:
                 findings.append(
-                    _finding("high", "identity", manifest.domain, "symbol_history_interval_overlap", identity)
+                    _finding(
+                        "high",
+                        "identity",
+                        manifest.domain,
+                        "symbol_history_interval_overlap",
+                        identity,
+                    )
                 )
 
     return (
@@ -787,16 +821,22 @@ def _primary_key_check(
             [_path_texts(paths)],
         ).fetchone()[0]
     )
-    examples = con.execute(
-        f"""
+    examples = (
+        con.execute(
+            f"""
         SELECT {keys}, count(*) AS rows
         FROM read_parquet(?, union_by_name=true)
         GROUP BY {keys}
         HAVING count(*) > 1
         LIMIT {int(sample_limit)}
         """,
-        [_path_texts(paths)],
-    ).fetchdf().to_dict("records") if duplicate_rows else []
+            [_path_texts(paths)],
+        )
+        .fetchdf()
+        .to_dict("records")
+        if duplicate_rows
+        else []
+    )
     return {
         "status": "ok" if not null_count and not duplicate_rows else "error",
         "null_key_rows": null_count,
@@ -818,54 +858,106 @@ def _ordered_intraday_primary_key_check(
             "null_key_rows": 0,
             "duplicate_rows": 1,
             "range_overlap_count": 0,
-            "examples": [{"reason": "unexpected_intraday_primary_key", "primary_key": list(primary_key)}],
+            "examples": [
+                {
+                    "reason": "unexpected_intraday_primary_key",
+                    "primary_key": list(primary_key),
+                }
+            ],
             "method": "partitioned_physical_order",
         }
-    invalid_predicate = """
-      prior_symbol IS NOT NULL AND (
-        symbol < prior_symbol
-        OR (symbol = prior_symbol AND trade_date < prior_date)
-        OR (symbol = prior_symbol AND trade_date = prior_date AND bar_time <= prior_time)
-      )
-    """
-    ordered_cte = """
+    key_order = [str(item) for item in primary_key]
+    prior_names = {
+        "symbol": "prior_symbol",
+        "trade_date": "prior_date",
+        "bar_time": "prior_time",
+    }
+
+    def invalid_for(order: Sequence[str]) -> str:
+        comparisons: list[str] = []
+        for index, key in enumerate(order):
+            prefix = " AND ".join(
+                f"{earlier}={prior_names[earlier]}"
+                for earlier in order[:index]
+            )
+            operator = "<=" if index == len(order) - 1 else "<"
+            comparison = f"{key}{operator}{prior_names[key]}"
+            comparisons.append(
+                f"({prefix} AND {comparison})"
+                if prefix
+                else f"({comparison})"
+            )
+        return (
+            f"{prior_names[order[0]]} IS NOT NULL AND ("
+            + " OR ".join(comparisons)
+            + ")"
+        )
+
+    candidate_orders = [key_order]
+    legacy_order = ["symbol", "trade_date", "bar_time"]
+    if legacy_order != key_order:
+        candidate_orders.append(legacy_order)
+    invalid_predicates = [invalid_for(item) for item in candidate_orders]
+    selected = ",\n               ".join(
+        f"cast({key} AS VARCHAR) AS {key}" for key in key_order
+    )
+    lagged = ",\n               ".join(
+        f"lag(cast({key} AS VARCHAR)) OVER () AS {prior_names[key]}"
+        for key in key_order
+    )
+    ordered_cte = f"""
       WITH ordered AS (
-        SELECT cast(symbol AS VARCHAR) AS symbol,
-               cast(trade_date AS VARCHAR) AS trade_date,
-               cast(bar_time AS VARCHAR) AS bar_time,
-               lag(cast(symbol AS VARCHAR)) OVER () AS prior_symbol,
-               lag(cast(trade_date AS VARCHAR)) OVER () AS prior_date,
-               lag(cast(bar_time AS VARCHAR)) OVER () AS prior_time
+        SELECT {selected},
+               {lagged}
         FROM read_parquet(?, union_by_name=true)
       )
     """
+    null_predicate = " OR ".join(f"{key} IS NULL" for key in key_order)
     null_count = 0
     invalid_count = 0
     examples: list[dict[str, Any]] = []
+    observed_orders: dict[str, int] = {}
     for path in paths:
+        count_expressions = ",\n                     ".join(
+            f"coalesce(sum(CASE WHEN {predicate} THEN 1 ELSE 0 END),0)"
+            for predicate in invalid_predicates
+        )
         row = con.execute(
             ordered_cte
             + f"""
-              SELECT coalesce(sum(CASE WHEN symbol IS NULL OR trade_date IS NULL OR bar_time IS NULL THEN 1 ELSE 0 END),0),
-                     coalesce(sum(CASE WHEN {invalid_predicate} THEN 1 ELSE 0 END),0)
+              SELECT coalesce(sum(CASE WHEN {null_predicate} THEN 1 ELSE 0 END),0),
+                     {count_expressions}
               FROM ordered
             """,
             [[str(path)]],
         ).fetchone()
         null_count += int(row[0] or 0)
-        shard_invalid = int(row[1] or 0)
+        candidate_counts = [int(item or 0) for item in row[1:]]
+        chosen_index = min(
+            range(len(candidate_counts)),
+            key=lambda item: (candidate_counts[item], item),
+        )
+        chosen_order = candidate_orders[chosen_index]
+        chosen_key = ">".join(chosen_order)
+        observed_orders[chosen_key] = observed_orders.get(chosen_key, 0) + 1
+        shard_invalid = candidate_counts[chosen_index]
         invalid_count += shard_invalid
         remaining = max(0, int(sample_limit) - len(examples))
         if shard_invalid and remaining:
-            rows = con.execute(
-                ordered_cte
-                + f"""
+            invalid_predicate = invalid_predicates[chosen_index]
+            rows = (
+                con.execute(
+                    ordered_cte
+                    + f"""
                   SELECT symbol,trade_date,bar_time,prior_symbol,prior_date,prior_time
                   FROM ordered WHERE {invalid_predicate}
                   LIMIT {remaining}
                 """,
-                [[str(path)]],
-            ).fetchdf().to_dict("records")
+                    [[str(path)]],
+                )
+                .fetchdf()
+                .to_dict("records")
+            )
             for item in rows:
                 item["shard"] = str(path)
             examples.extend(rows)
@@ -894,7 +986,9 @@ def _ordered_intraday_primary_key_check(
     cross_shard_duplicates = 0
     verified_pair_count = 0
     for left, right in overlapping_pairs:
-        common_symbols = sorted(symbol_sets[left[0]].intersection(symbol_sets[right[0]]))
+        common_symbols = sorted(
+            symbol_sets[left[0]].intersection(symbol_sets[right[0]])
+        )
         if not common_symbols:
             continue
         verified_pair_count += 1
@@ -932,8 +1026,9 @@ def _ordered_intraday_primary_key_check(
             cross_shard_duplicates += duplicate_count
             remaining = max(0, int(sample_limit) - len(examples))
             if duplicate_count and remaining:
-                rows = con.execute(
-                    """
+                rows = (
+                    con.execute(
+                        """
                     SELECT cast(l.symbol AS VARCHAR) AS symbol,
                            cast(l.trade_date AS VARCHAR) AS trade_date,
                            cast(l.bar_time AS VARCHAR) AS bar_time
@@ -948,16 +1043,19 @@ def _ordered_intraday_primary_key_check(
                       AND cast(r.trade_date AS VARCHAR) BETWEEN ? AND ?
                     LIMIT ?
                     """,
-                    [
-                        [str(left[3])],
-                        [str(right[3])],
-                        overlap_start,
-                        overlap_end,
-                        overlap_start,
-                        overlap_end,
-                        remaining,
-                    ],
-                ).fetchdf().to_dict("records")
+                        [
+                            [str(left[3])],
+                            [str(right[3])],
+                            overlap_start,
+                            overlap_end,
+                            overlap_start,
+                            overlap_end,
+                            remaining,
+                        ],
+                    )
+                    .fetchdf()
+                    .to_dict("records")
+                )
                 for row in rows:
                     row["left_shard"] = str(left[3])
                     row["right_shard"] = str(right[3])
@@ -973,6 +1071,9 @@ def _ordered_intraday_primary_key_check(
         "range_overlap_count": range_overlap_count,
         "verified_overlap_pair_count": verified_pair_count,
         "cross_shard_duplicate_rows": cross_shard_duplicates,
+        "physical_order_violation_rows": invalid_count,
+        "declared_primary_key_order": key_order,
+        "observed_physical_key_orders": observed_orders,
         "examples": examples,
         "method": "partitioned_physical_order+verified_cross_shard_keys",
     }
@@ -999,19 +1100,31 @@ def _ohlc_check(con: Any, paths: Sequence[Path], sample_limit: int) -> dict[str,
             [_path_texts(paths)],
         ).fetchone()[0]
     )
-    examples = con.execute(
-        f"""
+    examples = (
+        con.execute(
+            f"""
         SELECT symbol, trade_date, open, high, low, close, volume, amount
         FROM read_parquet(?, union_by_name=true)
         WHERE {predicate}
         LIMIT {int(sample_limit)}
         """,
-        [_path_texts(paths)],
-    ).fetchdf().to_dict("records") if invalid else []
-    return {"status": "ok" if not invalid else "error", "invalid_rows": invalid, "examples": examples}
+            [_path_texts(paths)],
+        )
+        .fetchdf()
+        .to_dict("records")
+        if invalid
+        else []
+    )
+    return {
+        "status": "ok" if not invalid else "error",
+        "invalid_rows": invalid,
+        "examples": examples,
+    }
 
 
-def _bar_day_check(con: Any, paths: Sequence[Path], sample_limit: int) -> dict[str, Any]:
+def _bar_day_check(
+    con: Any, paths: Sequence[Path], sample_limit: int
+) -> dict[str, Any]:
     times = ",".join(_sql_literal(item) for item in EXPECTED_BAR_TIMES)
     query = f"""
       SELECT symbol, trade_date,
@@ -1035,14 +1148,22 @@ def _bar_day_check(con: Any, paths: Sequence[Path], sample_limit: int) -> dict[s
         invalid += shard_invalid
         remaining = max(0, int(sample_limit) - len(examples))
         if shard_invalid and remaining:
-            rows = con.execute(
-                f"SELECT * FROM ({query}) LIMIT {remaining}",
-                params,
-            ).fetchdf().to_dict("records")
+            rows = (
+                con.execute(
+                    f"SELECT * FROM ({query}) LIMIT {remaining}",
+                    params,
+                )
+                .fetchdf()
+                .to_dict("records")
+            )
             for row in rows:
                 row["shard"] = str(path)
             examples.extend(rows)
-    return {"status": "ok" if not invalid else "error", "invalid_day_count": invalid, "examples": examples}
+    return {
+        "status": "ok" if not invalid else "error",
+        "invalid_day_count": invalid,
+        "examples": examples,
+    }
 
 
 def _factor_check(con: Any, paths: Sequence[Path], sample_limit: int) -> dict[str, Any]:
@@ -1053,14 +1174,26 @@ def _factor_check(con: Any, paths: Sequence[Path], sample_limit: int) -> dict[st
             [_path_texts(paths)],
         ).fetchone()[0]
     )
-    examples = con.execute(
-        f"SELECT symbol, trade_date, adjust_factor FROM read_parquet(?, union_by_name=true) WHERE {predicate} LIMIT {int(sample_limit)}",
-        [_path_texts(paths)],
-    ).fetchdf().to_dict("records") if invalid else []
-    return {"status": "ok" if not invalid else "error", "invalid_rows": invalid, "examples": examples}
+    examples = (
+        con.execute(
+            f"SELECT symbol, trade_date, adjust_factor FROM read_parquet(?, union_by_name=true) WHERE {predicate} LIMIT {int(sample_limit)}",
+            [_path_texts(paths)],
+        )
+        .fetchdf()
+        .to_dict("records")
+        if invalid
+        else []
+    )
+    return {
+        "status": "ok" if not invalid else "error",
+        "invalid_rows": invalid,
+        "examples": examples,
+    }
 
 
-def _symbol_history_check(con: Any, paths: Sequence[Path], sample_limit: int) -> dict[str, Any]:
+def _symbol_history_check(
+    con: Any, paths: Sequence[Path], sample_limit: int
+) -> dict[str, Any]:
     overlap_query = """
       SELECT a.security_id, a.symbol AS left_symbol, b.symbol AS right_symbol,
              a.effective_from AS left_from, a.effective_to AS left_to,
@@ -1074,11 +1207,23 @@ def _symbol_history_check(con: Any, paths: Sequence[Path], sample_limit: int) ->
        AND cast(b.effective_from AS VARCHAR) <= cast(a.effective_to AS VARCHAR)
     """
     params = [_path_texts(paths), _path_texts(paths)]
-    count = int(con.execute(f"SELECT count(*) FROM ({overlap_query})", params).fetchone()[0])
-    examples = con.execute(
-        f"SELECT * FROM ({overlap_query}) LIMIT {int(sample_limit)}", params
-    ).fetchdf().to_dict("records") if count else []
-    return {"status": "ok" if not count else "error", "overlap_count": count, "examples": examples}
+    count = int(
+        con.execute(f"SELECT count(*) FROM ({overlap_query})", params).fetchone()[0]
+    )
+    examples = (
+        con.execute(
+            f"SELECT * FROM ({overlap_query}) LIMIT {int(sample_limit)}", params
+        )
+        .fetchdf()
+        .to_dict("records")
+        if count
+        else []
+    )
+    return {
+        "status": "ok" if not count else "error",
+        "overlap_count": count,
+        "examples": examples,
+    }
 
 
 def _latest_5m_stats(
@@ -1089,7 +1234,12 @@ def _latest_5m_stats(
     trade_date: str,
 ) -> dict[str, Any]:
     times = ",".join(_sql_literal(item) for item in EXPECTED_BAR_TIMES)
-    params = [_path_texts(intraday_paths), trade_date, _path_texts(daily_paths), trade_date]
+    params = [
+        _path_texts(intraday_paths),
+        trade_date,
+        _path_texts(daily_paths),
+        trade_date,
+    ]
     row = con.execute(
         f"""
         WITH five AS (
@@ -1187,9 +1337,10 @@ def _status_daily_partition_check(
     remaining = max(0, int(sample_limit))
     examples: list[dict[str, Any]] = []
     if remaining and (int(row[1] or 0) or int(row[2] or 0)):
-        examples = con.execute(
-            base
-            + f"""
+        examples = (
+            con.execute(
+                base
+                + f"""
               SELECT symbol,trade_date,old_suspended,expected_suspended,daily_volume,
                      CASE
                        WHEN old_suspended IS NULL THEN 'null_suspension_flag'
@@ -1205,8 +1356,11 @@ def _status_daily_partition_check(
               ORDER BY trade_date,symbol
               LIMIT {remaining}
             """,
-            params,
-        ).fetchdf().to_dict("records")
+                params,
+            )
+            .fetchdf()
+            .to_dict("records")
+        )
     return {
         "status_row_count": int(row[0] or 0),
         "null_suspension_flag_count": int(row[1] or 0),
@@ -1297,162 +1451,166 @@ def _daily_intraday_consistency_check(
         "invalid_day_count": 0,
     }
     examples: list[dict[str, Any]] = []
-    daily_entries = [
-        (resolve_manifest_path(item.path, root=root), item) for item in daily.shards
+    intraday_entries = [
+        (resolve_manifest_path(item.path, root=root), item) for item in intraday.shards
     ]
+    if not intraday_entries:
+        raise ValueError("intraday_consistency_shards_missing")
+    starts = [str(item.start_date or "") for _, item in intraday_entries]
+    ends = [str(item.end_date or "") for _, item in intraday_entries]
+    if any(not item for item in starts + ends):
+        raise ValueError("intraday_consistency_shard_range_missing")
+    start_date = min(starts)
+    end_date = max(ends)
+    daily_paths = [
+        resolve_manifest_path(item.path, root=root)
+        for item in daily.shards
+        if (
+            (not item.start_date or str(item.start_date) <= end_date)
+            and (not item.end_date or str(item.end_date) >= start_date)
+        )
+    ]
+    if not daily_paths:
+        raise ValueError(f"intraday_consistency_daily_paths_missing:{start_date}")
+    intraday_paths = [str(path) for path, _ in intraday_entries]
     history_paths = (
         [str(resolve_manifest_path(item.path, root=root)) for item in history.shards]
         if history is not None
         else []
     )
-    for intraday_entry in intraday.shards:
-        start_date = str(intraday_entry.start_date or "")
-        end_date = str(intraday_entry.end_date or "")
-        if not start_date or not end_date:
-            raise ValueError("intraday_consistency_shard_range_missing")
-        intraday_path = resolve_manifest_path(intraday_entry.path, root=root)
-        daily_paths = [
-            path
-            for path, entry in daily_entries
-            if (
-                (not entry.start_date or str(entry.start_date) <= end_date)
-                and (not entry.end_date or str(entry.end_date) >= start_date)
-            )
-        ]
-        if not daily_paths:
-            raise ValueError(f"intraday_consistency_daily_paths_missing:{start_date}")
-        five_source = """
-          five_source AS (
-            SELECT upper(cast(symbol AS VARCHAR)) AS source_symbol,
-                   cast(trade_date AS VARCHAR) AS trade_date,
-                   count(*) AS bars,
-                   arg_min(try_cast(open AS DOUBLE),cast(bar_time AS VARCHAR)) AS open,
-                   max(try_cast(high AS DOUBLE)) AS high,
-                   min(try_cast(low AS DOUBLE)) AS low,
-                   arg_max(try_cast(close AS DOUBLE),cast(bar_time AS VARCHAR)) AS close,
-                   sum(try_cast(volume AS DOUBLE)) AS volume,
-                   sum(try_cast(amount AS DOUBLE)) AS amount
-            FROM read_parquet(?, union_by_name=true)
-            GROUP BY source_symbol,trade_date
-          )
-        """
-        if history_paths:
-            five_tables = (
-                """
-                  lifecycle_history AS (
-                    SELECT cast(security_id AS VARCHAR) AS security_id,
-                           upper(cast(symbol AS VARCHAR)) AS symbol,
-                           cast(effective_from AS VARCHAR) AS effective_from,
-                           cast(effective_to AS VARCHAR) AS effective_to
-                    FROM read_parquet(?, union_by_name=true)
-                  ), lifecycle_multi_ids AS (
-                    SELECT security_id FROM lifecycle_history
-                    GROUP BY security_id HAVING count(DISTINCT symbol)>1
-                  ), lifecycle AS (
-                    SELECT h.* FROM lifecycle_history h
-                    JOIN lifecycle_multi_ids m USING(security_id)
-                  ),
-                """
-                + five_source
-                + """,
-                  five_mapped AS (
-                    SELECT coalesce(target.symbol,f.source_symbol) AS canonical_symbol,
-                           f.*
-                    FROM five_source f
-                    LEFT JOIN lifecycle source
-                      ON f.source_symbol=source.symbol
-                    LEFT JOIN lifecycle target
-                      ON source.security_id=target.security_id
-                     AND f.trade_date BETWEEN target.effective_from AND target.effective_to
-                  ), five AS (
-                    SELECT canonical_symbol AS symbol,trade_date,bars,open,high,low,
-                           close,volume,amount
-                    FROM five_mapped
-                    QUALIFY row_number() OVER(
-                      PARTITION BY canonical_symbol,trade_date
-                      ORDER BY CASE WHEN source_symbol=canonical_symbol THEN 0 ELSE 1 END,
-                               source_symbol
-                    )=1
-                  )
-                """
-            )
-            five_params: list[Any] = [history_paths, [str(intraday_path)]]
-        else:
-            five_tables = (
-                five_source
-                + """,
-                  five AS (
-                    SELECT source_symbol AS symbol,trade_date,bars,open,high,low,
-                           close,volume,amount
-                    FROM five_source
-                  )
-                """
-            )
-            five_params = [[str(intraday_path)]]
-        joined = f"""
-          WITH {five_tables}, day AS (
-            SELECT cast(symbol AS VARCHAR) AS symbol,
-                   cast(trade_date AS VARCHAR) AS trade_date,
-                   try_cast(open AS DOUBLE) AS open,
-                   try_cast(high AS DOUBLE) AS high,
-                   try_cast(low AS DOUBLE) AS low,
-                   try_cast(close AS DOUBLE) AS close,
-                   try_cast(volume AS DOUBLE) AS volume,
-                   try_cast(amount AS DOUBLE) AS amount
-            FROM read_parquet(?, union_by_name=true)
-            WHERE cast(trade_date AS VARCHAR) BETWEEN ? AND ?
-          ), joined AS (
-            SELECT coalesce(d.symbol,f.symbol) AS symbol,
-                   coalesce(d.trade_date,f.trade_date) AS trade_date,
-                   d.open AS dopen,d.high AS dhigh,d.low AS dlow,d.close AS dclose,
-                   d.volume AS dvolume,d.amount AS damount,
-                   f.bars,f.open AS fopen,f.high AS fhigh,f.low AS flow,f.close AS fclose,
-                   f.volume AS fvolume,f.amount AS famount,
-                   CASE WHEN d.volume>0 THEN abs(f.volume-d.volume)/greatest(abs(d.volume),1) END AS volume_rel,
-                   CASE WHEN d.amount>0 THEN abs(f.amount-d.amount)/greatest(abs(d.amount),1) END AS amount_rel,
-                   CASE WHEN d.volume>0 THEN f.volume/d.volume END AS volume_ratio,
-                   greatest(
-                     abs(f.open-d.open)/greatest(abs(d.open),1),
-                     abs(f.high-d.high)/greatest(abs(d.high),1),
-                     abs(f.low-d.low)/greatest(abs(d.low),1),
-                     abs(f.close-d.close)/greatest(abs(d.close),1)
-                   ) AS price_rel
-            FROM day d FULL OUTER JOIN five f USING(symbol,trade_date)
-          )
-        """
-        params = [
-            *five_params,
-            [str(path) for path in daily_paths],
-            start_date,
-            end_date,
-        ]
-        row = con.execute(
-            joined
-            + """
-              SELECT
-                count(*) FILTER (WHERE dvolume>0) AS positive_daily,
-                count(*) FILTER (WHERE dvolume>0 AND bars=48) AS complete_positive,
-                count(*) FILTER (WHERE dvolume>0 AND bars IS NULL) AS missing_positive,
-                count(*) FILTER (WHERE dvolume IS NULL AND bars IS NOT NULL) AS missing_daily,
-                count(*) FILTER (WHERE coalesce(dvolume,0)<=0 AND bars IS NOT NULL) AS suspended_nonzero,
-                count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND price_rel>0.10) AS price_mismatch,
-                count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND volume_rel>0.05 AND amount_rel>0.05) AS flow_mismatch,
-                count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND (volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105)) AS volume_100x,
-                count(*) FILTER (WHERE bars IS NOT NULL AND (
-                  dvolume IS NULL OR coalesce(dvolume,0)<=0 OR price_rel>0.10
-                  OR (volume_rel>0.05 AND amount_rel>0.05)
-                  OR volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105
-                )) AS invalid_days
-              FROM joined
-            """,
-            params,
-        ).fetchone()
-        keys = list(totals)
-        for key, value in zip(keys, row, strict=True):
-            totals[key] += int(value or 0)
-        remaining = max(0, int(sample_limit) - len(examples))
-        if remaining and (int(row[2] or 0) or int(row[8] or 0)):
-            sample = con.execute(
+    five_source = """
+      five_source AS (
+        SELECT upper(cast(symbol AS VARCHAR)) AS source_symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               count(*) AS bars,
+               arg_min(try_cast(open AS DOUBLE),cast(bar_time AS VARCHAR)) AS open,
+               max(try_cast(high AS DOUBLE)) AS high,
+               min(try_cast(low AS DOUBLE)) AS low,
+               arg_max(try_cast(close AS DOUBLE),cast(bar_time AS VARCHAR)) AS close,
+               sum(try_cast(volume AS DOUBLE)) AS volume,
+               sum(try_cast(amount AS DOUBLE)) AS amount
+        FROM read_parquet(?, union_by_name=true)
+        GROUP BY source_symbol,trade_date
+      )
+    """
+    if history_paths:
+        five_tables = (
+            """
+              lifecycle_history AS (
+                SELECT cast(security_id AS VARCHAR) AS security_id,
+                       upper(cast(symbol AS VARCHAR)) AS symbol,
+                       cast(effective_from AS VARCHAR) AS effective_from,
+                       cast(effective_to AS VARCHAR) AS effective_to
+                FROM read_parquet(?, union_by_name=true)
+              ), lifecycle_multi_ids AS (
+                SELECT security_id FROM lifecycle_history
+                GROUP BY security_id HAVING count(DISTINCT symbol)>1
+              ), lifecycle AS (
+                SELECT h.* FROM lifecycle_history h
+                JOIN lifecycle_multi_ids m USING(security_id)
+              ),
+            """
+            + five_source
+            + """,
+              five_mapped AS (
+                SELECT coalesce(target.symbol,f.source_symbol) AS canonical_symbol,
+                       f.*
+                FROM five_source f
+                LEFT JOIN lifecycle source
+                  ON f.source_symbol=source.symbol
+                LEFT JOIN lifecycle target
+                  ON source.security_id=target.security_id
+                 AND f.trade_date BETWEEN target.effective_from AND target.effective_to
+              ), five AS (
+                SELECT canonical_symbol AS symbol,trade_date,bars,open,high,low,
+                       close,volume,amount
+                FROM five_mapped
+                QUALIFY row_number() OVER(
+                  PARTITION BY canonical_symbol,trade_date
+                  ORDER BY CASE WHEN source_symbol=canonical_symbol THEN 0 ELSE 1 END,
+                           source_symbol
+                )=1
+              )
+            """
+        )
+        five_params: list[Any] = [history_paths, intraday_paths]
+    else:
+        five_tables = (
+            five_source
+            + """,
+              five AS (
+                SELECT source_symbol AS symbol,trade_date,bars,open,high,low,
+                       close,volume,amount
+                FROM five_source
+              )
+            """
+        )
+        five_params = [intraday_paths]
+    joined = f"""
+      WITH {five_tables}, day AS (
+        SELECT cast(symbol AS VARCHAR) AS symbol,
+               cast(trade_date AS VARCHAR) AS trade_date,
+               try_cast(open AS DOUBLE) AS open,
+               try_cast(high AS DOUBLE) AS high,
+               try_cast(low AS DOUBLE) AS low,
+               try_cast(close AS DOUBLE) AS close,
+               try_cast(volume AS DOUBLE) AS volume,
+               try_cast(amount AS DOUBLE) AS amount
+        FROM read_parquet(?, union_by_name=true)
+        WHERE cast(trade_date AS VARCHAR) BETWEEN ? AND ?
+      ), joined AS (
+        SELECT coalesce(d.symbol,f.symbol) AS symbol,
+               coalesce(d.trade_date,f.trade_date) AS trade_date,
+               d.open AS dopen,d.high AS dhigh,d.low AS dlow,d.close AS dclose,
+               d.volume AS dvolume,d.amount AS damount,
+               f.bars,f.open AS fopen,f.high AS fhigh,f.low AS flow,f.close AS fclose,
+               f.volume AS fvolume,f.amount AS famount,
+               CASE WHEN d.volume>0 THEN abs(f.volume-d.volume)/greatest(abs(d.volume),1) END AS volume_rel,
+               CASE WHEN d.amount>0 THEN abs(f.amount-d.amount)/greatest(abs(d.amount),1) END AS amount_rel,
+               CASE WHEN d.volume>0 THEN f.volume/d.volume END AS volume_ratio,
+               greatest(
+                 abs(f.open-d.open)/greatest(abs(d.open),1),
+                 abs(f.high-d.high)/greatest(abs(d.high),1),
+                 abs(f.low-d.low)/greatest(abs(d.low),1),
+                 abs(f.close-d.close)/greatest(abs(d.close),1)
+               ) AS price_rel
+        FROM day d FULL OUTER JOIN five f USING(symbol,trade_date)
+      )
+    """
+    params = [
+        *five_params,
+        [str(path) for path in daily_paths],
+        start_date,
+        end_date,
+    ]
+    row = con.execute(
+        joined
+        + """
+          SELECT
+            count(*) FILTER (WHERE dvolume>0) AS positive_daily,
+            count(*) FILTER (WHERE dvolume>0 AND bars=48) AS complete_positive,
+            count(*) FILTER (WHERE dvolume>0 AND bars IS NULL) AS missing_positive,
+            count(*) FILTER (WHERE dvolume IS NULL AND bars IS NOT NULL) AS missing_daily,
+            count(*) FILTER (WHERE coalesce(dvolume,0)<=0 AND bars IS NOT NULL) AS suspended_nonzero,
+            count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND price_rel>0.10) AS price_mismatch,
+            count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND volume_rel>0.05 AND amount_rel>0.05) AS flow_mismatch,
+            count(*) FILTER (WHERE dvolume>0 AND bars IS NOT NULL AND (volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105)) AS volume_100x,
+            count(*) FILTER (WHERE bars IS NOT NULL AND (
+              dvolume IS NULL OR coalesce(dvolume,0)<=0 OR price_rel>0.10
+              OR (volume_rel>0.05 AND amount_rel>0.05)
+              OR volume_ratio BETWEEN 95 AND 105 OR volume_ratio BETWEEN 0.0095 AND 0.0105
+            )) AS invalid_days
+          FROM joined
+        """,
+        params,
+    ).fetchone()
+    keys = list(totals)
+    for key, value in zip(keys, row, strict=True):
+        totals[key] = int(value or 0)
+    remaining = max(0, int(sample_limit) - len(examples))
+    if remaining and (int(row[2] or 0) or int(row[8] or 0)):
+        examples.extend(
+            con.execute(
                 joined
                 + f"""
                   SELECT symbol,trade_date,bars,dvolume,fvolume,damount,famount,
@@ -1475,8 +1633,10 @@ def _daily_intraday_consistency_check(
                   LIMIT {remaining}
                 """,
                 params,
-            ).fetchdf().to_dict("records")
-            examples.extend(sample)
+            )
+            .fetchdf()
+            .to_dict("records")
+        )
     positive = totals["positive_daily_count"]
     complete = totals["complete_positive_daily_count"]
     return {
@@ -1495,8 +1655,12 @@ def _factor_semantic_check(
     factor: DatasetManifest,
     sample_limit: int,
 ) -> dict[str, Any]:
-    daily_paths = [str(resolve_manifest_path(item.path, root=root)) for item in daily.shards]
-    factor_paths = [str(resolve_manifest_path(item.path, root=root)) for item in factor.shards]
+    daily_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in daily.shards
+    ]
+    factor_paths = [
+        str(resolve_manifest_path(item.path, root=root)) for item in factor.shards
+    ]
     base = """
       WITH factors AS (
         SELECT cast(symbol AS VARCHAR) AS symbol,
@@ -1557,9 +1721,10 @@ def _factor_semantic_check(
     ).fetchone()[0]
     examples = []
     if int(row[1] or 0):
-        examples = con.execute(
-            base
-            + f"""
+        examples = (
+            con.execute(
+                base
+                + f"""
               SELECT symbol,trade_date,gap_days,factor_ratio,raw_open_ratio,adjusted_open_ratio
               FROM changes
               WHERE (adjusted_open_ratio<0.70 OR adjusted_open_ratio>1.30)
@@ -1567,13 +1732,17 @@ def _factor_semantic_check(
               ORDER BY abs(adjusted_open_ratio-1) DESC
               LIMIT {int(sample_limit)}
             """,
-            params,
-        ).fetchdf().to_dict("records")
+                params,
+            )
+            .fetchdf()
+            .to_dict("records")
+        )
     raw_examples = []
     if int(row[2] or 0):
-        raw_examples = con.execute(
-            base
-            + f"""
+        raw_examples = (
+            con.execute(
+                base
+                + f"""
               SELECT symbol,trade_date,gap_days,factor_ratio,raw_open_ratio,adjusted_open_ratio
               FROM changes
               WHERE (adjusted_open_ratio<0.70 OR adjusted_open_ratio>1.30)
@@ -1581,8 +1750,11 @@ def _factor_semantic_check(
               ORDER BY abs(adjusted_open_ratio-1) DESC
               LIMIT {int(sample_limit)}
             """,
-            params,
-        ).fetchdf().to_dict("records")
+                params,
+            )
+            .fetchdf()
+            .to_dict("records")
+        )
     return {
         "status": "ok" if not int(row[1] or 0) and not int(excessive or 0) else "error",
         "factor_change_count": int(row[0] or 0),
@@ -1624,11 +1796,15 @@ def _except_count(
 def _active_manifest(root: Path, dataset_id: str, domain: str) -> DatasetManifest:
     path = dataset_manifest_for_id(root, dataset_id, domain)
     if path is None:
-        raise FileNotFoundError(f"active_dataset_manifest_missing:{domain}:{dataset_id}")
+        raise FileNotFoundError(
+            f"active_dataset_manifest_missing:{domain}:{dataset_id}"
+        )
     return read_dataset_manifest(path)
 
 
-def _paths_for_date(root: Path, manifest: DatasetManifest, trade_date: str) -> tuple[Path, ...]:
+def _paths_for_date(
+    root: Path, manifest: DatasetManifest, trade_date: str
+) -> tuple[Path, ...]:
     return tuple(
         resolve_manifest_path(item.path, root=root)
         for item in manifest.shards
@@ -1679,19 +1855,27 @@ def _identity_history_consistency_check(
     orphan_history = int(row[0] or 0)
     identity_without_history = int(row[1] or 0)
     symbol_conflicts = int(row[2] or 0)
-    examples = con.execute(
-        sql
-        + f"""
+    examples = (
+        con.execute(
+            sql
+            + f"""
         SELECT 'orphan_history' AS reason,h.security_id,h.symbol
         FROM histories h ANTI JOIN identities i USING(security_id)
         LIMIT {int(sample_limit)}
         """,
-        [identity_paths, history_paths],
-    ).fetchdf().to_dict("records") if orphan_history else []
+            [identity_paths, history_paths],
+        )
+        .fetchdf()
+        .to_dict("records")
+        if orphan_history
+        else []
+    )
     return {
         "status": (
             "ok"
-            if not orphan_history and not identity_without_history and not symbol_conflicts
+            if not orphan_history
+            and not identity_without_history
+            and not symbol_conflicts
             else "error"
         ),
         "orphan_symbol_history_count": orphan_history,
@@ -1758,16 +1942,20 @@ def _long_suspension_check(
         """,
         params,
     ).fetchone()
-    examples = con.execute(
-        base
-        + f"""
+    examples = (
+        con.execute(
+            base
+            + f"""
         SELECT symbol,start_date,end_date,suspended_open_days,
                cast(has_reopen_break AS BOOLEAN) AS continuity_break
         FROM runs ORDER BY suspended_open_days DESC,symbol,start_date
         LIMIT {int(sample_limit)}
         """,
-        params,
-    ).fetchdf().to_dict("records")
+            params,
+        )
+        .fetchdf()
+        .to_dict("records")
+    )
     return {
         "status": "ok",
         "minimum_suspended_open_days": int(minimum_open_days),
@@ -1913,9 +2101,10 @@ def _reopen_discontinuity_check(
         """,
         params,
     ).fetchone()
-    examples = con.execute(
-        base
-        + f"""
+    examples = (
+        con.execute(
+            base
+            + f"""
         SELECT symbol,prior_trade_date,trade_date,raw_open_ratio,factor_ratio,
                adjusted_open_ratio,intervening_open_days,covered_status_days,
                suspended_status_days,classification
@@ -1924,8 +2113,11 @@ def _reopen_discontinuity_check(
                  symbol,trade_date
         LIMIT {int(sample_limit)}
         """,
-        params,
-    ).fetchdf().to_dict("records")
+            params,
+        )
+        .fetchdf()
+        .to_dict("records")
+    )
     return {
         "status": "ok" if not int(row[4] or 0) else "error",
         "raw_discontinuity_count": int(row[0] or 0),
@@ -2173,13 +2365,9 @@ def _auxiliary_semantics_check(
         checked = str(source.get("checked_through", "") or "")
         if checked != target:
             watermark_errors.append(f"{domain}:{checked or 'missing'}")
-        validation_status = str(
-            source.get("secondary_validation_status", "") or ""
-        )
+        validation_status = str(source.get("secondary_validation_status", "") or "")
         if validation_status not in {"ok", "not_comparable"}:
-            secondary_status_errors.append(
-                f"{domain}:{validation_status or 'missing'}"
-            )
+            secondary_status_errors.append(f"{domain}:{validation_status or 'missing'}")
         secondary_mismatches += int(
             source.get("secondary_material_mismatch_count", 0) or 0
         )
@@ -2187,9 +2375,7 @@ def _auxiliary_semantics_check(
     checks["secondary_validation_status_errors"] = secondary_status_errors
     checks["secondary_material_mismatch_count"] = secondary_mismatches
     blocking += (
-        len(watermark_errors)
-        + len(secondary_status_errors)
-        + secondary_mismatches
+        len(watermark_errors) + len(secondary_status_errors) + secondary_mismatches
     )
     return {
         "status": "ok" if blocking == 0 else "needs_attention",
@@ -2229,7 +2415,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
         description="Run structural and row-level checks on the current QDP tables.",
     )
     parser.add_argument("--workspace-root", default="")
-    parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
+    parser.add_argument(
+        "--runtime", default="balanced", choices=("safe", "balanced", "fast")
+    )
     parser.add_argument("--threads", type=int, default=0)
     parser.add_argument("--max-shards", type=int, default=0)
     parser.add_argument("--sample-limit", type=int, default=20)

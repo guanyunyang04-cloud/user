@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import sys
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import duckdb
 import pandas as pd
 import pyarrow.parquet as pq
-
 from quant_data_platform.qdp_v2 import auxiliary_tail_update, auxiliary_update
 from quant_data_platform.qdp_v2.audit import _manifest_contract_findings
 from quant_data_platform.qdp_v2.auxiliary_tail_update import (
@@ -17,17 +16,27 @@ from quant_data_platform.qdp_v2.auxiliary_tail_update import (
 )
 from quant_data_platform.qdp_v2.auxiliary_update import (
     _baostock_snapshot_worker,
-    _normalize_daily_basic,
     _normalize_cninfo_dividend,
     _normalize_cninfo_industry_history,
     _normalize_comparison_text,
+    _normalize_daily_basic,
     _normalize_dividend,
     _normalize_industry_comparison,
     _normalize_name_intervals,
     _valuation_secondary_policy,
 )
 from quant_data_platform.qdp_v2.baostock_update import _valuation_frame
+from quant_data_platform.qdp_v2.fundamental_update import (
+    _normalize_financial,
+    _normalize_forecast,
+)
+from quant_data_platform.qdp_v2.historical_intraday_repair import (
+    _normalize_stk_mins,
+    _six_month_chunks,
+    _validate_against_daily,
+)
 from quant_data_platform.qdp_v2.manifest import (
+    EXPECTED_BAR_TIMES,
     DatasetManifest,
     ShardManifestEntry,
     qdp_v2_root,
@@ -38,6 +47,9 @@ from quant_data_platform.qdp_v2.manifest import (
 from quant_data_platform.qdp_v2.repair import (
     replace_active_table_from_parquet,
     update_active_manifest_metadata,
+)
+from quant_data_platform.domains.contracts import (
+    normalize_financial_quarterly_frame,
 )
 
 
@@ -68,6 +80,161 @@ def test_daily_basic_normalization_converts_10k_units_to_base_units() -> None:
     assert result["float_share"] == 1_002_500.0
     assert result["total_mv"] == 12_350_000.0
     assert result["circ_mv"] == 10_025_000.0
+
+
+def test_historical_stk_mins_normalization_and_daily_unit_reconciliation() -> None:
+    date = "2020-01-02"
+    raw = pd.DataFrame(
+        {
+            "ts_code": ["600000.SH"] * 48,
+            "trade_time": [
+                f"{date} {item[:2]}:{item[2:4]}:00" for item in EXPECTED_BAR_TIMES
+            ],
+            "open": [10.0] * 48,
+            "high": [10.0] * 48,
+            "low": [10.0] * 48,
+            "close": [10.0] * 48,
+            "vol": [1.0] * 48,
+            "amount": [1000.0] * 48,
+        }
+    )
+    normalized = _normalize_stk_mins(raw, "600000.SH")
+    reference = pd.DataFrame(
+        {
+            "symbol": ["600000.SH"],
+            "trade_date": [date],
+            "open": [10.0],
+            "high": [10.0],
+            "low": [10.0],
+            "close": [10.0],
+            "volume": [4800.0],
+            "amount": [48_000.0],
+        }
+    )
+
+    accepted, diagnostics = _validate_against_daily(normalized, reference)
+
+    assert len(accepted) == 48
+    assert diagnostics["accepted_day_count"] == 1
+    assert diagnostics["volume_scale"] == 100.0
+    assert diagnostics["amount_scale"] == 1.0
+    assert accepted["volume"].sum() == 4800.0
+
+
+def test_historical_intraday_rejects_isolated_100x_volume_anomaly() -> None:
+    dates = ["2020-01-02", "2020-01-03", "2020-01-06"]
+    rows: list[dict[str, object]] = []
+    for date in dates:
+        per_bar_volume = 10_000.0 if date == dates[-1] else 100.0
+        for bar_time in EXPECTED_BAR_TIMES:
+            rows.append(
+                {
+                    "symbol": "600000.SH",
+                    "trade_date": date,
+                    "bar_time": bar_time,
+                    "open": 10.0,
+                    "high": 10.0,
+                    "low": 10.0,
+                    "close": 10.0,
+                    "volume": per_bar_volume,
+                    "amount": 1_000.0,
+                }
+            )
+    reference = pd.DataFrame(
+        {
+            "symbol": ["600000.SH"] * 3,
+            "trade_date": dates,
+            "open": [10.0] * 3,
+            "high": [10.0] * 3,
+            "low": [10.0] * 3,
+            "close": [10.0] * 3,
+            "volume": [4_800.0] * 3,
+            "amount": [48_000.0] * 3,
+        }
+    )
+
+    accepted, diagnostics = _validate_against_daily(pd.DataFrame(rows), reference)
+
+    assert len(accepted) == 96
+    assert accepted["trade_date"].unique().tolist() == dates[:2]
+    assert diagnostics["volume_scale"] == 1.0
+    assert diagnostics["accepted_day_count"] == 2
+    assert diagnostics["rejected_daily_consistency_day_count"] == 1
+    assert diagnostics["rejected_volume_100x_day_count"] == 1
+
+
+def test_historical_intraday_chunks_never_span_more_than_six_calendar_months() -> None:
+    assert _six_month_chunks(
+        ("2020-01", "2020-02", "2020-06", "2020-07", "2022-01")
+    ) == [
+        ("2020-01", "2020-02", "2020-06"),
+        ("2020-07",),
+        ("2022-01",),
+    ]
+
+
+def test_fundamental_events_use_announcement_dates_and_mainboard_identity() -> None:
+    financial = _normalize_financial(
+        pd.DataFrame(
+            {
+                "ts_code": ["600000.SH", "300001.SZ"],
+                "ann_date": ["20240430", "20240430"],
+                "end_date": ["20240331", "20240331"],
+                "roe": [4.0, 8.0],
+                "eps": [0.2, 0.4],
+                "update_flag": [1, 1],
+            }
+        ),
+        identity_symbols={"600000.SH"},
+        target_date="2024-12-31",
+    )
+    forecast = _normalize_forecast(
+        pd.DataFrame(
+            {
+                "ts_code": ["600000.SH"],
+                "ann_date": ["20240320"],
+                "end_date": ["20240331"],
+                "type": ["预增"],
+                "p_change_min": [20.0],
+                "p_change_max": [30.0],
+                "net_profit_min": [100.0],
+                "net_profit_max": [120.0],
+            }
+        ),
+        identity_symbols={"600000.SH"},
+        target_date="2024-12-31",
+    )
+
+    assert financial[["symbol", "trade_date", "report_date"]].to_dict(
+        "records"
+    ) == [
+        {
+            "symbol": "600000.SH",
+            "trade_date": "2024-04-30",
+            "report_date": "2024-03-31",
+        }
+    ]
+    assert forecast.loc[0, "trade_date"] == "2024-03-20"
+    assert forecast.loc[0, "report_date"] == "2024-03-31"
+    assert forecast.loc[0, "lag_policy"] == "publish_date_plus_1d_in_features"
+
+
+def test_financial_contract_never_treats_share_count_as_revenue_or_cash_flow() -> None:
+    result = normalize_financial_quarterly_frame(
+        pd.DataFrame(
+            {
+                "code": ["sh.600000"],
+                "statDate": ["2024-03-31"],
+                "pubDate": ["2024-04-30"],
+                "totalShare": [1_000_000.0],
+                "CAToAsset": [0.25],
+            }
+        ),
+        source="baostock",
+    )
+
+    assert pd.isna(result.loc[0, "revenue"])
+    assert pd.isna(result.loc[0, "cash_flow_ps"])
 
 
 def test_baostock_core_valuation_cache_reuses_bulk_fields() -> None:
@@ -339,9 +506,7 @@ def test_cninfo_share_change_never_backfills_future_announcement() -> None:
         target_date="2010-08-10",
     )
 
-    assert result[["source_date", "total_share", "float_share"]].to_dict(
-        "records"
-    ) == [
+    assert result[["source_date", "total_share", "float_share"]].to_dict("records") == [
         {
             "source_date": "2010-08-10",
             "total_share": 1_000_000.0,
@@ -415,13 +580,14 @@ def test_index_tail_dates_casts_parquet_dates_before_max(
     calendar = tmp_path / "calendar.parquet"
     with duckdb.connect() as con:
         con.execute("CREATE TABLE current_index(trade_date CHAR(10))")
-        con.execute(
-            "INSERT INTO current_index VALUES ('2026-07-15'), ('2026-07-16')"
-        )
+        con.execute("INSERT INTO current_index VALUES ('2026-07-15'), ('2026-07-16')")
         con.execute("COPY current_index TO ? (FORMAT PARQUET)", [str(current)])
-        assert con.execute(
-            "SELECT max(trade_date) FROM read_parquet(?)", [str(current)]
-        ).fetchone()[0] == "2026-07-"
+        assert (
+            con.execute(
+                "SELECT max(trade_date) FROM read_parquet(?)", [str(current)]
+            ).fetchone()[0]
+            == "2026-07-"
+        )
     pd.DataFrame(
         {
             "trade_date": [
@@ -438,9 +604,7 @@ def test_index_tail_dates_casts_parquet_dates_before_max(
     monkeypatch.setattr(
         auxiliary_tail_update,
         "_paths",
-        lambda ctx, domain: [
-            current if domain == "index_constituents" else calendar
-        ],
+        lambda ctx, domain: [current if domain == "index_constituents" else calendar],
     )
     ctx = SimpleNamespace(
         runtime=tmp_path / "runtime",
@@ -502,7 +666,9 @@ def test_replace_active_table_allows_schema_and_primary_key_migration(
             "datasets": {"industry_concept": dataset_id},
         },
     )
-    prepared = workspace / "quant_data_platform" / "data" / "qdp_runtime" / "prepared.parquet"
+    prepared = (
+        workspace / "quant_data_platform" / "data" / "qdp_runtime" / "prepared.parquet"
+    )
     prepared.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(
         {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -37,7 +38,6 @@ from quant_data_platform.qdp_v2.repair import (
     update_active_manifest_metadata,
 )
 from quant_data_platform.qdp_v2.status import active_dataset_map
-
 
 AUXILIARY_DOMAINS = (
     "industry_concept",
@@ -140,10 +140,8 @@ class _TushareClient:
                 last_error = f"{type(exc).__name__}:{str(exc)[:300]}"
                 if attempt + 1 >= max(1, int(retries)):
                     break
-                time.sleep(min(2 ** attempt, 8))
-        raise AuxiliaryUpdateError(
-            f"tushare_request_failed:{api_name}:{last_error}"
-        )
+                time.sleep(min(2**attempt, 8))
+        raise AuxiliaryUpdateError(f"tushare_request_failed:{api_name}:{last_error}")
 
 
 def _resolve_tushare_token() -> str:
@@ -189,9 +187,7 @@ def _context(
         qdp_paths(workspace).data_dir / "qdp_runtime" / "auxiliary_repair"
     ).resolve()
     runtime.mkdir(parents=True, exist_ok=True)
-    os.environ["QDP_MOOTDX_LAST_GOOD_PATH"] = str(
-        runtime / "mootdx_last_good_5m.json"
-    )
+    os.environ["QDP_MOOTDX_LAST_GOOD_PATH"] = str(runtime / "mootdx_last_good_5m.json")
     return AuxiliaryContext(
         workspace=workspace,
         root=root,
@@ -207,6 +203,44 @@ def _manifest(root: Path, datasets: Mapping[str, str], domain: str) -> Any:
     if path is None:
         raise AuxiliaryUpdateError(f"active_dataset_manifest_missing:{domain}")
     return read_dataset_manifest(path)
+
+
+def _identity_scope_signature(ctx: AuxiliaryContext) -> str:
+    manifest = _manifest(ctx.root, ctx.datasets, "security_identity")
+    payload = {
+        "dataset_id": manifest.dataset_id,
+        "row_count": int(manifest.row_count),
+        "start_date": manifest.start_date,
+        "end_date": manifest.end_date,
+        "shards": [
+            {
+                "path": item.path,
+                "row_count": int(item.row_count),
+                "start_date": item.start_date,
+                "end_date": item.end_date,
+                "file_size": int(item.file_size),
+            }
+            for item in manifest.shards
+        ],
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _identity_dependent_repair_required(
+    ctx: AuxiliaryContext,
+    domain: str,
+) -> bool:
+    if domain not in {"industry_concept", "index_constituents"}:
+        return False
+    manifest = _manifest(ctx.root, ctx.datasets, domain)
+    recorded = str(dict(manifest.source or {}).get("identity_scope_signature", ""))
+    return recorded != _identity_scope_signature(ctx)
 
 
 def _paths(ctx: AuxiliaryContext, domain: str) -> list[Path]:
@@ -285,6 +319,36 @@ def _replace_domain(
         for key, value in validation.items()
         if str(key).startswith("secondary_")
     }
+    identity_dependent = domain in {"industry_concept", "index_constituents"}
+    scope_updates = (
+        {
+            "scope": "point_in_time_historical_mainboard",
+            "survivorship_policy": ("include_when_listed_then_apply_same_day_status"),
+            "identity_scope_signature": _identity_scope_signature(ctx),
+        }
+        if identity_dependent
+        else {}
+    )
+    quality_scope_updates = (
+        {
+            "scope": "point_in_time_historical_mainboard",
+            "survivorship_bias_free_mainboard_daily": True,
+        }
+        if identity_dependent
+        else {}
+    )
+    if domain == "index_constituents":
+        quality_scope_updates.update(
+            {
+                "permanent_exclusions_applied": False,
+                "permanent_exclusions": {
+                    "applied": False,
+                    "reason": (
+                        "historical membership follows dated published index snapshots"
+                    ),
+                },
+            }
+        )
     result = replace_active_table_from_parquet(
         domain,
         prepared,
@@ -294,11 +358,10 @@ def _replace_domain(
         contract_version=contract_version,
         source_updates={
             **validation_source_updates,
+            **scope_updates,
             "checked_through": ctx.target_date,
             "source_contract": source_contract,
-            "missing_daily_keys": (
-                0 if domain in DAILY_AUXILIARY_DOMAINS else None
-            ),
+            "missing_daily_keys": (0 if domain in DAILY_AUXILIARY_DOMAINS else None),
             "secondary_validation_at": utc_now(),
             "secondary_compared_count": int(
                 validation.get("secondary_compared_count", 0) or 0
@@ -309,6 +372,7 @@ def _replace_domain(
             ),
         },
         quality_updates={
+            **quality_scope_updates,
             "strict_point_in_time": True,
             "future_source_dates": 0,
         },
@@ -337,6 +401,9 @@ def plan_auxiliary_update(
                 "row_count": manifest.row_count,
                 "checked_through": str(
                     dict(manifest.source or {}).get("checked_through", "")
+                ),
+                "identity_scope_refresh_required": (
+                    _identity_dependent_repair_required(ctx, domain)
                 ),
             }
             if domain in DAILY_AUXILIARY_DOMAINS:
@@ -443,7 +510,9 @@ def _baostock_snapshot_worker(
                                     {
                                         "symbol": code,
                                         "snapshot_query_date": str(trade_date),
-                                        "industry": str(row.get("industry", "") or "").strip(),
+                                        "industry": str(
+                                            row.get("industry", "") or ""
+                                        ).strip(),
                                         "industry_standard": str(
                                             row.get("industryClassification", "")
                                             or "证监会行业分类"
@@ -497,9 +566,7 @@ def _baostock_snapshot_worker(
                         raise ValueError(f"unsupported_baostock_snapshot_kind:{kind}")
                     frame = pd.DataFrame(date_rows, columns=columns)
                     output = destination / _baostock_snapshot_part_name(trade_date)
-                    temporary = output.with_name(
-                        f".{output.name}.{os.getpid()}.tmp"
-                    )
+                    temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
                     temporary.unlink(missing_ok=True)
                     try:
                         frame.to_parquet(
@@ -518,8 +585,9 @@ def _baostock_snapshot_worker(
                     if attempt == 2:
                         failures.append(str(trade_date))
                     else:
-                        with redirect_stdout(io.StringIO()), redirect_stderr(
-                            io.StringIO()
+                        with (
+                            redirect_stdout(io.StringIO()),
+                            redirect_stderr(io.StringIO()),
                         ):
                             try:
                                 bs.logout()
@@ -615,7 +683,7 @@ def _external_with_retry(call: Any, *, label: str, retries: int = 3) -> Any:
         except Exception as exc:
             last_error = f"{type(exc).__name__}:{str(exc)[:200]}"
             if attempt + 1 < max(1, int(retries)):
-                time.sleep(min(2 ** attempt, 4))
+                time.sleep(min(2**attempt, 4))
     raise AuxiliaryUpdateError(
         f"secondary_validation_request_failed:{label}:{last_error}"
     )
@@ -653,9 +721,7 @@ def validate_industry_secondary(ctx: AuxiliaryContext) -> dict[str, Any]:
         )
         secondary = ""
         if isinstance(profile, pd.DataFrame) and not profile.empty:
-            secondary = _normalize_comparison_text(
-                profile.iloc[-1].get("所属行业", "")
-            )
+            secondary = _normalize_comparison_text(profile.iloc[-1].get("所属行业", ""))
         if not secondary:
             changes = _external_with_retry(
                 lambda: ak.stock_industry_change_cninfo(
@@ -777,17 +843,12 @@ def validate_share_capital_secondary(ctx: AuxiliaryContext) -> dict[str, Any]:
         if isinstance(frame, pd.DataFrame) and not frame.empty:
             data = frame.copy()
             if "变动日期" in data:
-                data["变动日期"] = pd.to_datetime(
-                    data["变动日期"], errors="coerce"
-                )
-                data = data.loc[
-                    data["变动日期"].le(pd.Timestamp(ctx.target_date))
-                ]
+                data["变动日期"] = pd.to_datetime(data["变动日期"], errors="coerce")
+                data = data.loc[data["变动日期"].le(pd.Timestamp(ctx.target_date))]
             if "公告日期" in data:
                 announcement = pd.to_datetime(data["公告日期"], errors="coerce")
                 data = data.loc[
-                    announcement.isna()
-                    | announcement.le(pd.Timestamp(ctx.target_date))
+                    announcement.isna() | announcement.le(pd.Timestamp(ctx.target_date))
                 ]
             if not data.empty:
                 if "变动日期" in data:
@@ -897,9 +958,7 @@ def validate_index_secondary(ctx: AuxiliaryContext) -> dict[str, Any]:
         ).fetchdf()
         allowed = {
             str(item[0])
-            for item in con.execute(
-                f"SELECT current_symbol FROM {identity}"
-            ).fetchall()
+            for item in con.execute(f"SELECT current_symbol FROM {identity}").fetchall()
         }
     shutil.rmtree(ctx.runtime / "index_secondary_spill", ignore_errors=True)
 
@@ -913,9 +972,7 @@ def validate_index_secondary(ctx: AuxiliaryContext) -> dict[str, Any]:
             label=f"index_constituents:{index_symbol}",
         )
         if not isinstance(official, pd.DataFrame) or official.empty:
-            raise AuxiliaryUpdateError(
-                f"index_secondary_empty:{index_symbol}"
-            )
+            raise AuxiliaryUpdateError(f"index_secondary_empty:{index_symbol}")
         official_members: set[str] = set()
         for row in official.itertuples(index=False):
             payload = row._asdict()
@@ -962,8 +1019,7 @@ def validate_index_secondary(ctx: AuxiliaryContext) -> dict[str, Any]:
         raise AuxiliaryUpdateError(
             "index_secondary_jaccard_failed:"
             + ",".join(
-                f"{symbol}={comparisons[symbol]['jaccard']:.6f}"
-                for symbol in failed
+                f"{symbol}={comparisons[symbol]['jaccard']:.6f}" for symbol in failed
             )
         )
     metadata = update_active_manifest_metadata(
@@ -1067,6 +1123,8 @@ def _industry_query_dates(ctx: AuxiliaryContext) -> list[str]:
                        AS first_source_date
               FROM {current}
               WHERE coalesce(trim(industry), '')<>''
+                AND lower(trim(industry)) NOT IN ('unknown', 'unclassified')
+                AND coalesce(industry_fill_method, '')<>'unavailable'
                 AND coalesce(original_source, '')<>
                     'qdp_v2_industry_initial_bfill'
                 AND try_cast(
@@ -1115,16 +1173,14 @@ def _normalize_cninfo_industry_history(
         "证监会行业分类", regex=False
     )
     data = data.loc[csrc].copy()
-    data["source_date"] = pd.to_datetime(
-        data["变更日期"], errors="coerce"
-    ).dt.strftime("%Y-%m-%d")
+    data["source_date"] = pd.to_datetime(data["变更日期"], errors="coerce").dt.strftime(
+        "%Y-%m-%d"
+    )
     data["industry"] = data["行业大类"].fillna("").astype(str).str.strip()
     data["symbol"] = str(symbol).upper()
     data["industry_standard"] = "证监会行业分类"
     data["source"] = "akshare_cninfo_csrc_industry_history"
-    data["priority"] = code.map(
-        {"008001": 3, "008021": 2, "008009": 1}
-    ).fillna(0)
+    data["priority"] = code.map({"008001": 3, "008021": 2, "008009": 1}).fillna(0)
     return (
         data.loc[
             data["source_date"].notna()
@@ -1276,6 +1332,8 @@ def repair_industry(ctx: AuxiliaryContext) -> dict[str, Any]:
              '证监会行业分类' AS industry_standard, 2 AS priority
       FROM {current}
       WHERE coalesce(trim(industry), '') <> ''
+        AND lower(trim(industry)) NOT IN ('unknown', 'unclassified')
+        AND coalesce(industry_fill_method, '') <> 'unavailable'
         AND coalesce(original_source, '') <> 'qdp_v2_industry_initial_bfill'
         AND try_cast(coalesce(nullif(industry_source_date, ''), trade_date) AS DATE)
             <= try_cast(trade_date AS DATE)
@@ -1297,20 +1355,53 @@ def repair_industry(ctx: AuxiliaryContext) -> dict[str, Any]:
         PARTITION BY symbol, source_date ORDER BY priority DESC
       ) = 1
     ), resolved AS (
-      SELECT d.symbol, d.trade_date, c.industry, c.source,
-             c.industry AS original_industry,
-             c.source AS original_source,
-             CASE WHEN c.source_date=d.trade_date THEN 'direct_snapshot'
-                  ELSE 'prior_ffill' END AS industry_fill_method,
-             c.source_date AS industry_source_date,
-             coalesce(nullif(c.industry_standard, ''), '证监会行业分类') AS industry_standard
+      SELECT d.symbol, d.trade_date,
+             coalesce(c.industry, f.industry, 'Unknown') AS industry,
+             coalesce(c.source, f.source, 'pit_history_industry_unavailable')
+               AS source,
+             coalesce(c.industry, f.original_industry, f.industry, 'Unknown')
+               AS original_industry,
+             coalesce(c.source, f.original_source, f.source,
+                      'pit_history_industry_unavailable') AS original_source,
+             CASE
+               WHEN c.symbol IS NOT NULL AND c.source_date=d.trade_date
+                 THEN 'direct_snapshot'
+               WHEN c.symbol IS NOT NULL THEN 'prior_ffill'
+               ELSE 'unavailable'
+             END AS industry_fill_method,
+             coalesce(c.source_date, f.industry_source_date, d.trade_date)
+               AS industry_source_date,
+             coalesce(nullif(c.industry_standard, ''),
+                      nullif(f.industry_standard, ''), 'Unclassified')
+               AS industry_standard
       FROM (SELECT * FROM {daily} WHERE trade_date <= '{ctx.target_date}') d
       ASOF LEFT JOIN dedup c
         ON d.symbol=c.symbol AND d.trade_date>=c.source_date
+      LEFT JOIN {current} f
+        ON d.symbol=f.symbol AND d.trade_date=f.trade_date
     )
-    SELECT symbol, trade_date, industry, source, original_industry,
-           original_source, industry_fill_method, industry_source_date,
-           industry_standard
+    SELECT symbol, trade_date, industry,
+           nullif(regexp_extract(industry, '^([A-Z][0-9]{{2}})', 1), '')
+             AS industry_code,
+           CASE
+             WHEN regexp_matches(industry, '^[A-Z][0-9]{{2}}')
+               THEN regexp_replace(industry, '^[A-Z][0-9]{{2}}', '')
+             ELSE industry
+           END AS industry_name,
+           CASE
+             WHEN lower(industry) IN ('unknown', 'unclassified')
+               THEN 'unclassified'
+             WHEN regexp_matches(industry, '^[A-Z][0-9]{{2}}')
+               THEN 'csrc_coded'
+             ELSE 'csrc_uncoded_historical_label'
+           END AS industry_taxonomy_version,
+           CASE
+             WHEN regexp_matches(industry, '^[A-Z][0-9]{{2}}')
+               THEN substr(industry, 1, 1)
+             ELSE NULL
+           END AS industry_section_code,
+           source, original_industry, original_source, industry_fill_method,
+           industry_source_date, industry_standard
     FROM resolved
     WHERE industry IS NOT NULL
     ORDER BY trade_date, symbol
@@ -1333,7 +1424,11 @@ def repair_industry(ctx: AuxiliaryContext) -> dict[str, Any]:
             con.execute(
                 f"SELECT count(*) FROM {produced} WHERE "
                 "industry IS NULL OR trim(industry)='' OR "
-                "industry_fill_method NOT IN ('direct_snapshot','prior_ffill') OR "
+                "industry_name IS NULL OR trim(industry_name)='' OR "
+                "industry_taxonomy_version NOT IN ("
+                "'unclassified','csrc_coded','csrc_uncoded_historical_label') OR "
+                "industry_fill_method NOT IN "
+                "('direct_snapshot','prior_ffill','unavailable') OR "
                 "try_cast(industry_source_date AS DATE)>try_cast(trade_date AS DATE)"
             ).fetchone()[0]
         )
@@ -1347,8 +1442,11 @@ def repair_industry(ctx: AuxiliaryContext) -> dict[str, Any]:
         domain="industry_concept",
         prepared=prepared,
         primary_key=("trade_date", "symbol"),
-        contract_version="qdp_v2_industry_strict_pit_v6",
-        source_contract="baostock snapshots; direct or past-only asof fill",
+        contract_version="qdp_v2_industry_strict_pit_v7",
+        source_contract=(
+            "BaoStock/CNInfo dated snapshots with past-only asof fill; raw "
+            "historical labels are preserved alongside non-retroactive taxonomy fields"
+        ),
         validation={
             "secondary_compared_count": 0,
             "secondary_material_mismatch_count": 0,
@@ -1518,9 +1616,7 @@ def _normalize_name_intervals(
     data["start_date"] = _tushare_date_series(data, "start_date")
     data["end_date"] = _tushare_date_series(data, "end_date")
     data["announcement_date"] = _tushare_date_series(data, "ann_date")
-    data["change_reason"] = (
-        data["change_reason"].fillna("").astype(str).str.strip()
-    )
+    data["change_reason"] = data["change_reason"].fillna("").astype(str).str.strip()
     data["source"] = "tushare_namechange_intervals"
     valid = (
         data["symbol"].str.match(r"^\d{6}\.(SH|SZ)$", na=False)
@@ -1539,9 +1635,7 @@ def _normalize_name_intervals(
 def _fetch_name_change_parts(ctx: AuxiliaryContext) -> list[Path]:
     token = _resolve_tushare_token()
     if not token:
-        raise AuxiliaryUpdateError(
-            "tushare_token_required_for_name_change_repair"
-        )
+        raise AuxiliaryUpdateError("tushare_token_required_for_name_change_repair")
     output_dir = ctx.runtime / "name_change_parts"
     output_dir.mkdir(parents=True, exist_ok=True)
     client = _TushareClient(token)
@@ -1666,7 +1760,7 @@ def repair_name_change(ctx: AuxiliaryContext) -> dict[str, Any]:
             ).fetchone()[0]
         )
         latest_row = con.execute(
-                f"""
+            f"""
                 WITH latest_interval AS (
                   SELECT symbol, name
                   FROM {intervals}
@@ -1704,7 +1798,7 @@ def repair_name_change(ctx: AuxiliaryContext) -> dict[str, Any]:
                 LEFT JOIN first_universe f USING(symbol)
                 LEFT JOIN latest_event e USING(symbol)
                 """
-            ).fetchone()
+        ).fetchone()
         latest_missing = int(latest_row[0] or 0)
         latest_mismatch = int(latest_row[1] or 0)
         compared = int(latest_row[2] or 0)
@@ -1939,9 +2033,7 @@ def _fetch_daily_basic_parts(
         )
         frame = _normalize_daily_basic(raw, trade_date)
         if frame.empty:
-            raise AuxiliaryUpdateError(
-                f"tushare_daily_basic_empty:{trade_date}"
-            )
+            raise AuxiliaryUpdateError(f"tushare_daily_basic_empty:{trade_date}")
         temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
         temporary.unlink(missing_ok=True)
         try:
@@ -2007,17 +2099,14 @@ def _fetch_cninfo_share_fallback_parts(
 
     outputs: list[Path] = []
     with ThreadPoolExecutor(max_workers=SECONDARY_VALIDATION_WORKERS) as pool:
-        futures = {
-            pool.submit(fetch_one, symbol): symbol for symbol in unique_symbols
-        }
+        futures = {pool.submit(fetch_one, symbol): symbol for symbol in unique_symbols}
         for future in as_completed(futures):
             symbol = futures[future]
             try:
                 outputs.append(future.result())
             except Exception as exc:
                 raise AuxiliaryUpdateError(
-                    f"cninfo_share_fallback_failed:{symbol}:"
-                    f"{type(exc).__name__}:{exc}"
+                    f"cninfo_share_fallback_failed:{symbol}:{type(exc).__name__}:{exc}"
                 ) from exc
     return sorted(outputs)
 
@@ -2044,9 +2133,7 @@ def _repair_legacy_cninfo_share_rows(
     current: str,
     symbols: Sequence[str],
 ) -> tuple[dict[str, Any], list[Path]]:
-    expected_rows = int(
-        _manifest(ctx.root, ctx.datasets, "share_capital").row_count
-    )
+    expected_rows = int(_manifest(ctx.root, ctx.datasets, "share_capital").row_count)
     fallback_parts = _fetch_cninfo_share_fallback_parts(ctx, symbols)
     fallback = _scan_sql(fallback_parts)
     prepared = ctx.runtime / "share_capital.prepared.parquet"
@@ -2130,9 +2217,7 @@ def _repair_legacy_cninfo_share_rows(
             "secondary_validation_status": "pending_cninfo_share_sample",
         },
     )
-    shutil.rmtree(
-        ctx.runtime / "cninfo_share_fallback_parts", ignore_errors=True
-    )
+    shutil.rmtree(ctx.runtime / "cninfo_share_fallback_parts", ignore_errors=True)
     return (
         {
             **result,
@@ -2235,10 +2320,14 @@ def repair_share_capital(
             [ctx.target_date],
         ).fetchdf()
     shutil.rmtree(ctx.runtime / "share_fallback_plan_spill", ignore_errors=True)
-    fallback_parts = _fetch_cninfo_share_fallback_parts(
-        ctx,
-        unresolved["symbol"].astype(str).tolist(),
-    ) if not unresolved.empty else []
+    fallback_parts = (
+        _fetch_cninfo_share_fallback_parts(
+            ctx,
+            unresolved["symbol"].astype(str).tolist(),
+        )
+        if not unresolved.empty
+        else []
+    )
     fallback = _scan_sql(fallback_parts) if fallback_parts else ""
     sql = f"""
     WITH {candidate_ctes(fallback)}, resolved AS (
@@ -2325,12 +2414,8 @@ def repair_share_capital(
             fallback_candidate_count = int(
                 con.execute(f"SELECT count(*) FROM {fallback}").fetchone()[0]
             )
-        shutil.rmtree(
-            ctx.runtime / "share_fallback_count_spill", ignore_errors=True
-        )
-    shutil.rmtree(
-        ctx.runtime / "cninfo_share_fallback_parts", ignore_errors=True
-    )
+        shutil.rmtree(ctx.runtime / "share_fallback_count_spill", ignore_errors=True)
+    shutil.rmtree(ctx.runtime / "cninfo_share_fallback_parts", ignore_errors=True)
     return (
         {
             **result,
@@ -2354,8 +2439,7 @@ def _valuation_secondary_policy(
     not_comparable_metrics = ("pe", "pb")
     mismatch_rates = {
         metric: (
-            int(mismatch_counts.get(metric, 0))
-            / int(comparison_counts.get(metric, 0))
+            int(mismatch_counts.get(metric, 0)) / int(comparison_counts.get(metric, 0))
             if int(comparison_counts.get(metric, 0)) > 0
             else 1.0
         )
@@ -2368,8 +2452,7 @@ def _valuation_secondary_policy(
         if ratio is not None
         and int(comparison_counts.get(metric, 0)) >= 50
         and any(
-            abs(float(ratio) / factor - 1.0) <= 0.05
-            for factor in suspicious_factors
+            abs(float(ratio) / factor - 1.0) <= 0.05 for factor in suspicious_factors
         )
     ]
     central_ratio_errors = [
@@ -2382,8 +2465,7 @@ def _valuation_secondary_policy(
     comparable_failures = [
         metric
         for metric in comparable_metrics
-        if int(comparison_counts.get(metric, 0)) <= 0
-        or mismatch_rates[metric] > 0.01
+        if int(comparison_counts.get(metric, 0)) <= 0 or mismatch_rates[metric] > 0.01
     ]
     return {
         "secondary_validation_status": "not_comparable",
@@ -2759,7 +2841,9 @@ def _current_symbols(ctx: AuxiliaryContext) -> list[str]:
 def _tushare_date_series(frame: pd.DataFrame, column: str) -> pd.Series:
     raw = frame.get(column, pd.Series(index=frame.index, dtype=object))
     text = raw.fillna("").astype(str).str.replace("-", "", regex=False).str.slice(0, 8)
-    return pd.to_datetime(text, format="%Y%m%d", errors="coerce").dt.strftime("%Y-%m-%d")
+    return pd.to_datetime(text, format="%Y%m%d", errors="coerce").dt.strftime(
+        "%Y-%m-%d"
+    )
 
 
 def _normalize_dividend(frame: pd.DataFrame, *, target_date: str) -> pd.DataFrame:
@@ -2767,7 +2851,9 @@ def _normalize_dividend(frame: pd.DataFrame, *, target_date: str) -> pd.DataFram
     for column in DIVIDEND_FIELDS:
         if column not in data.columns:
             data[column] = np.nan
-    data = data.loc[data["div_proc"].fillna("").astype(str).str.strip().eq("实施")].copy()
+    data = data.loc[
+        data["div_proc"].fillna("").astype(str).str.strip().eq("实施")
+    ].copy()
     data["symbol"] = data["ts_code"].fillna("").astype(str).str.upper()
     data["announcement_date"] = _tushare_date_series(data, "ann_date").fillna(
         _tushare_date_series(data, "imp_ann_date")
@@ -2776,9 +2862,12 @@ def _normalize_dividend(frame: pd.DataFrame, *, target_date: str) -> pd.DataFram
     data["trade_date"] = data["ex_date"]
     data["record_date"] = _tushare_date_series(data, "record_date")
     data["dividend_pay_date"] = _tushare_date_series(data, "pay_date")
-    cash = pd.to_numeric(data["cash_div_tax"], errors="coerce").fillna(
-        pd.to_numeric(data["cash_div"], errors="coerce")
-    ).fillna(0.0) * 10.0
+    cash = (
+        pd.to_numeric(data["cash_div_tax"], errors="coerce")
+        .fillna(pd.to_numeric(data["cash_div"], errors="coerce"))
+        .fillna(0.0)
+        * 10.0
+    )
     bonus = pd.to_numeric(data["stk_bo_rate"], errors="coerce").fillna(0.0) * 10.0
     transfer = pd.to_numeric(data["stk_co_rate"], errors="coerce").fillna(0.0) * 10.0
     combined_stock = pd.to_numeric(data["stk_div"], errors="coerce").fillna(0.0) * 10.0
@@ -2818,9 +2907,7 @@ def _normalize_dividend(frame: pd.DataFrame, *, target_date: str) -> pd.DataFram
 def _fetch_dividend_parts(ctx: AuxiliaryContext) -> list[Path]:
     token = _resolve_tushare_token()
     if not token:
-        raise AuxiliaryUpdateError(
-            "tushare_token_required_for_corporate_action_repair"
-        )
+        raise AuxiliaryUpdateError("tushare_token_required_for_corporate_action_repair")
     output_dir = ctx.runtime / "dividend_parts"
     output_dir.mkdir(parents=True, exist_ok=True)
     client = _TushareClient(token)
@@ -2858,8 +2945,7 @@ def _fetch_dividend_parts(ctx: AuxiliaryContext) -> list[Path]:
                 outputs.append(future.result())
             except Exception as exc:
                 raise AuxiliaryUpdateError(
-                    f"dividend_partition_failed:{symbol}:"
-                    f"{type(exc).__name__}:{exc}"
+                    f"dividend_partition_failed:{symbol}:{type(exc).__name__}:{exc}"
                 ) from exc
             completed += 1
             if completed % 200 == 0:
@@ -2889,9 +2975,7 @@ def _mootdx_corporate_validation_worker(
     try:
         for symbol in symbols:
             path = destination / f"mootdx_{symbol.replace('.', '_')}.parquet"
-            if _valid_parquet_columns(
-                path, MOOTDX_CORPORATE_VALIDATION_COLUMNS
-            ):
+            if _valid_parquet_columns(path, MOOTDX_CORPORATE_VALIDATION_COLUMNS):
                 completed += 1
                 continue
             path.unlink(missing_ok=True)
@@ -2910,9 +2994,7 @@ def _mootdx_corporate_validation_worker(
                 continue
             frame = result.data.copy()
             if frame.empty:
-                frame = pd.DataFrame(
-                    columns=MOOTDX_CORPORATE_VALIDATION_COLUMNS
-                )
+                frame = pd.DataFrame(columns=MOOTDX_CORPORATE_VALIDATION_COLUMNS)
             else:
                 frame["cash_dividend_per_10"] = pd.to_numeric(
                     frame["cash_dividend_per_10"], errors="coerce"
@@ -2945,15 +3027,12 @@ def _fetch_mootdx_corporate_validation_parts(
     output_dir = ctx.runtime / "mootdx_corporate_validation_parts"
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = [
-        output_dir / f"mootdx_{symbol.replace('.', '_')}.parquet"
-        for symbol in symbols
+        output_dir / f"mootdx_{symbol.replace('.', '_')}.parquet" for symbol in symbols
     ]
     pending = [
         symbol
         for symbol, path in zip(symbols, outputs, strict=True)
-        if not _valid_parquet_columns(
-            path, MOOTDX_CORPORATE_VALIDATION_COLUMNS
-        )
+        if not _valid_parquet_columns(path, MOOTDX_CORPORATE_VALIDATION_COLUMNS)
     ]
     chunks = _split_evenly(pending, BAOSTOCK_WORKERS)
     failures: list[str] = []
@@ -2979,9 +3058,7 @@ def _fetch_mootdx_corporate_validation_parts(
     incomplete = [
         symbol
         for symbol, path in zip(symbols, outputs, strict=True)
-        if not _valid_parquet_columns(
-            path, MOOTDX_CORPORATE_VALIDATION_COLUMNS
-        )
+        if not _valid_parquet_columns(path, MOOTDX_CORPORATE_VALIDATION_COLUMNS)
     ]
     if incomplete:
         raise AuxiliaryUpdateError(
@@ -3086,9 +3163,9 @@ def _normalize_cninfo_dividend(
     data["announcement_date"] = pd.to_datetime(
         data["实施方案公告日期"], errors="coerce"
     ).dt.strftime("%Y-%m-%d")
-    data["ex_date"] = pd.to_datetime(
-        data["除权日"], errors="coerce"
-    ).dt.strftime("%Y-%m-%d")
+    data["ex_date"] = pd.to_datetime(data["除权日"], errors="coerce").dt.strftime(
+        "%Y-%m-%d"
+    )
     data["trade_date"] = data["ex_date"]
     data["record_date"] = pd.to_datetime(
         data["股权登记日"], errors="coerce"
@@ -3109,9 +3186,7 @@ def _normalize_cninfo_dividend(
         ["cash_stock", "stock", "cash"],
         default="",
     )
-    data["description"] = (
-        data["实施方案分红说明"].fillna("").astype(str).str.strip()
-    )
+    data["description"] = data["实施方案分红说明"].fillna("").astype(str).str.strip()
     data["source"] = "akshare_cninfo_dividend_validation"
     return (
         data.loc[
@@ -3231,19 +3306,19 @@ def validate_corporate_actions_secondary(
         primary_column: str,
         secondary_column: str,
     ) -> pd.Series:
-        primary_value = pd.to_numeric(
-            frame[primary_column], errors="coerce"
-        ).fillna(0.0)
+        primary_value = pd.to_numeric(frame[primary_column], errors="coerce").fillna(
+            0.0
+        )
         secondary_value = pd.to_numeric(
             frame[secondary_column], errors="coerce"
         ).fillna(0.0)
-        return (primary_value - secondary_value).abs().gt(
-            np.maximum(secondary_value.abs() * 0.05, 0.05)
+        return (
+            (primary_value - secondary_value)
+            .abs()
+            .gt(np.maximum(secondary_value.abs() * 0.05, 0.05))
         )
 
-    cninfo_amount_mismatch = pd.Series(
-        False, index=common_cninfo.index, dtype=bool
-    )
+    cninfo_amount_mismatch = pd.Series(False, index=common_cninfo.index, dtype=bool)
     for metric in (
         "cash_dividend_per_10",
         "bonus_share_per_10",
@@ -3256,9 +3331,7 @@ def validate_corporate_actions_secondary(
         )
     cninfo_amount_mismatch_count = int(cninfo_amount_mismatch.sum())
     cninfo_amount_mismatch_rate = (
-        cninfo_amount_mismatch_count / len(common_cninfo)
-        if len(common_cninfo)
-        else 1.0
+        cninfo_amount_mismatch_count / len(common_cninfo) if len(common_cninfo) else 1.0
     )
 
     common_mootdx = primary_frame.merge(
@@ -3310,9 +3383,7 @@ def validate_corporate_actions_secondary(
             "secondary_cninfo_amount_mismatch_rate": round(
                 cninfo_amount_mismatch_rate, 8
             ),
-            "secondary_mootdx_cash_mismatch_rate": round(
-                mootdx_cash_mismatch_rate, 8
-            ),
+            "secondary_mootdx_cash_mismatch_rate": round(mootdx_cash_mismatch_rate, 8),
             "secondary_raw_mismatch_count": raw_mismatches,
         },
     )
@@ -3357,9 +3428,7 @@ def _validate_auxiliary_domains(
         else:
             manifest = _manifest(ctx.root, ctx.datasets, domain)
             status = str(
-                dict(manifest.source or {}).get(
-                    "secondary_validation_status", ""
-                )
+                dict(manifest.source or {}).get("secondary_validation_status", "")
             )
             if status not in {"ok", "not_comparable"}:
                 raise AuxiliaryUpdateError(
@@ -3395,6 +3464,7 @@ def run_auxiliary_repair(
     as_of_date: str,
     workspace_root: str | Path | None = None,
     domains: Sequence[str] = AUXILIARY_DOMAINS,
+    force: bool = False,
 ) -> dict[str, Any]:
     ctx = _context(as_of_date=as_of_date, workspace_root=workspace_root)
     selected = tuple(str(item) for item in domains)
@@ -3421,16 +3491,24 @@ def run_auxiliary_repair(
         for domain in selected:
             manifest = _manifest(ctx.root, ctx.datasets, domain)
             checked = str(dict(manifest.source or {}).get("checked_through", ""))
-            source_contract = str(dict(manifest.source or {}).get("source_contract", ""))
+            source_contract = str(
+                dict(manifest.source or {}).get("source_contract", "")
+            )
             requires_repair = False
             if domain == "share_capital":
                 requires_repair = bool(_legacy_cninfo_share_symbols(ctx))
             elif domain == "valuation":
                 requires_repair = _valuation_market_cap_error_count(ctx) > 0
+            elif domain in {"industry_concept", "index_constituents"}:
+                requires_repair = _identity_dependent_repair_required(
+                    ctx,
+                    domain,
+                )
             if (
                 checked == ctx.target_date
                 and "strict" in source_contract.lower()
                 and not requires_repair
+                and not force
             ):
                 state["completed"][domain] = {
                     "status": "already_current",
@@ -3499,13 +3577,13 @@ def run_auxiliary_update(
     stale: list[str] = []
     for domain in AUXILIARY_DOMAINS:
         manifest = _manifest(ctx.root, ctx.datasets, domain)
-        if str(dict(manifest.source or {}).get("checked_through", "")) != ctx.target_date:
+        if str(
+            dict(manifest.source or {}).get("checked_through", "")
+        ) != ctx.target_date or _identity_dependent_repair_required(ctx, domain):
             stale.append(domain)
     if not stale:
         if baostock_valuation_cache_path is not None:
-            Path(baostock_valuation_cache_path).resolve().unlink(
-                missing_ok=True
-            )
+            Path(baostock_valuation_cache_path).resolve().unlink(missing_ok=True)
         return {
             "status": "current",
             "as_of_date": ctx.target_date,
@@ -3532,6 +3610,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--as-of-date", required=True)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
+    parser.add_argument("--force", action="store_true")
     parser.add_argument("--domains", default=",".join(AUXILIARY_DOMAINS))
     parser.add_argument("--json", action="store_true")
     return parser
@@ -3541,9 +3620,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     workspace = str(args.workspace_root or "") or None
     domains = tuple(
-        item.strip()
-        for item in str(args.domains).split(",")
-        if item.strip()
+        item.strip() for item in str(args.domains).split(",") if item.strip()
     )
     if args.dry_run and args.validate_only:
         raise ValueError("dry_run_and_validate_only_are_mutually_exclusive")
@@ -3563,14 +3640,20 @@ def main(argv: list[str] | None = None) -> int:
             as_of_date=str(args.as_of_date),
             workspace_root=workspace,
             domains=domains,
+            force=bool(args.force),
         )
     )
     print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
-    return 0 if payload.get("status") in {
-        "planned",
-        "repaired",
-        "validated",
-    } else 2
+    return (
+        0
+        if payload.get("status")
+        in {
+            "planned",
+            "repaired",
+            "validated",
+        }
+        else 2
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover

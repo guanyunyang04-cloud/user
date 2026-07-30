@@ -1324,11 +1324,15 @@ def normalize_financial_quarterly_frame(frame: pd.DataFrame, *, source: str, req
     _rename_first(data, "revenue_yoy", ("YOYIncome", "YOYRevenue", "revenueGrowRate", "revenue_yoy", "营业收入同比增长率"))
     _rename_first(data, "eps", ("epsTTM", "eps", "每股收益"))
     _rename_first(data, "net_profit", ("netProfit", "net_profit", "归属母公司股东的净利润"))
-    _rename_first(data, "revenue", ("totalShare", "revenue", "营业总收入"))
+    _rename_first(data, "revenue", ("revenue", "totalRevenue", "营业总收入"))
     _rename_first(data, "asset_turnover", ("NRTurnRatio", "asset_turnover", "总资产周转率"))
     _rename_first(data, "debt_to_asset", ("liabilityToAsset", "debt_to_asset", "资产负债率"))
     _rename_first(data, "current_ratio", ("currentRatio", "current_ratio", "流动比率"))
-    _rename_first(data, "cash_flow_ps", ("CAToAsset", "cash_flow_ps", "每股经营现金流"))
+    _rename_first(
+        data,
+        "cash_flow_ps",
+        ("cashFlowPS", "ocfps", "cash_flow_ps", "每股经营现金流"),
+    )
     _require_core_columns(data, DataDomain.FINANCIAL_QUARTERLY, {"symbol", "report_date"}, require_columns=require_columns)
     data = _ensure_report_domain_columns(data, DataDomain.FINANCIAL_QUARTERLY, provider=provider)
     numeric_columns = [
@@ -1376,7 +1380,16 @@ def normalize_performance_express_frame(frame: pd.DataFrame, *, source: str, req
     _rename_first(data, "eps", ("performanceExpressEPSDiluted", "performanceExpressEPSBasic", "eps", "EPS", "每股收益"))
     _rename_first(data, "roe", ("performanceExpressROEWa", "roe", "ROE", "净资产收益率"))
     _rename_first(data, "net_profit", ("performanceExpressNetProfit", "netProfit", "net_profit", "归属母公司股东的净利润"))
-    _rename_first(data, "revenue", ("performanceExpressTotalIncome", "totalShare", "revenue", "营业总收入"))
+    _rename_first(
+        data,
+        "revenue",
+        (
+            "performanceExpressTotalIncome",
+            "totalRevenue",
+            "revenue",
+            "营业总收入",
+        ),
+    )
     _rename_first(data, "total_assets", ("performanceExpressTotalAsset", "totalAssets", "total_assets", "总资产"))
     _require_core_columns(data, DataDomain.PERFORMANCE_EXPRESS, {"symbol", "report_date", "publish_date"}, require_columns=require_columns)
     data = _ensure_report_domain_columns(data, DataDomain.PERFORMANCE_EXPRESS, provider=provider)
