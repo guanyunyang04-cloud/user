@@ -415,7 +415,11 @@ def _report_rc_page_path(workspace: Path, year: int, offset: int) -> Path:
 
 
 def _next_report_offset(row_count: int, offset: int) -> int | None:
-    return int(offset) + REPORT_RC_PAGE_SIZE if int(row_count) == REPORT_RC_PAGE_SIZE else None
+    return (
+        int(offset) + REPORT_RC_PAGE_SIZE
+        if int(row_count) == REPORT_RC_PAGE_SIZE
+        else None
+    )
 
 
 def _report_year_source_coverage(
@@ -547,7 +551,9 @@ def download_tushare_reports(
                 state["status"] = "downloading_tushare_reports"
                 state["tushare_report_rc"] = {
                     "status": "completed"
-                    if all(item["status"] == "completed" for item in year_state.values())
+                    if all(
+                        item["status"] == "completed" for item in year_state.values()
+                    )
                     else "downloading",
                     "maximum_workers": workers,
                     "page_size": REPORT_RC_PAGE_SIZE,
@@ -628,11 +634,7 @@ def _download_symbol_files(
     allow_failures: bool,
 ) -> dict[str, Any]:
     state = _read_state(workspace)
-    completed = {
-        symbol
-        for symbol in symbols
-        if path_for(workspace, symbol).is_file()
-    }
+    completed = {symbol for symbol in symbols if path_for(workspace, symbol).is_file()}
     failures: dict[str, str] = {}
     pending = [symbol for symbol in symbols if symbol not in completed]
     workers = min(max(1, int(max_workers)), MAX_WORKERS)
@@ -677,9 +679,7 @@ def _download_symbol_files(
     }
     _write_state(workspace, state)
     if failures and not allow_failures:
-        raise ResearchEventUpdateError(
-            f"{state_key}_incomplete:{len(failures)}"
-        )
+        raise ResearchEventUpdateError(f"{state_key}_incomplete:{len(failures)}")
     return dict(state[state_key])
 
 
@@ -731,9 +731,7 @@ def _normalize_tushare_report_year(
     data["title"] = data.get("report_title", "").fillna("").astype(str)
     data["institution"] = data.get("org_name", "").fillna("").astype(str)
     data["normalized_title"] = data["title"].map(_normalized_text)
-    data["normalized_institution"] = data["institution"].map(
-        _normalized_institution
-    )
+    data["normalized_institution"] = data["institution"].map(_normalized_institution)
     data["source_report_key"] = [
         _report_source_key(*values)
         for values in zip(
@@ -748,15 +746,19 @@ def _normalize_tushare_report_year(
         & data["normalized_institution"].ne("")
     )
     data = data.loc[valid].reset_index(drop=True)
-    data["feature_available_date"] = _next_open_date(
-        data["source_date"], open_dates
-    )
+    data["feature_available_date"] = _next_open_date(data["source_date"], open_dates)
     report_rows: list[dict[str, Any]] = []
     for source_key, group in data.groupby("source_report_key", sort=True):
         analysts = [_text(item) for item in group.get("author_name", []) if _text(item)]
         disagreements = any(
             group[column].dropna().astype(str).nunique() > 1
-            for column in ("report_title", "org_name", "rating", "min_price", "max_price")
+            for column in (
+                "report_title",
+                "org_name",
+                "rating",
+                "min_price",
+                "max_price",
+            )
             if column in group
         )
         report_rows.append(
@@ -789,9 +791,7 @@ def _normalize_tushare_report_year(
                 "pdf_pages": math.nan,
                 "source_disagreement": bool(disagreements),
                 "identity_conflict_reason": (
-                    "analyst_union"
-                    if len(set(analysts)) > 1 and len(group) > 1
-                    else ""
+                    "analyst_union" if len(set(analysts)) > 1 and len(group) > 1 else ""
                 ),
                 "source": "tushare_report_rc",
             }
@@ -846,13 +846,13 @@ def _normalize_tushare_report_year(
         "symbol_count": int(reports["symbol"].nunique()),
         "institution_count": int(reports["institution"].nunique()),
         "analyst_count": len(
-                {
-                    name
-                    for value in reports["analyst"]
-                    for name in str(value).split(";")
-                    if name
-                }
-            ),
+            {
+                name
+                for value in reports["analyst"]
+                for name in str(value).split(";")
+                if name
+            }
+        ),
         "earliest_report_date": str(reports["source_date"].min()),
         "latest_report_date": str(reports["source_date"].max()),
         "field_nonnull_rate": {
@@ -880,18 +880,14 @@ def _normalize_eastmoney_reports(
     institution = data.get("orgName", data.get("orgSName", ""))
     data["institution"] = institution.fillna("").astype(str)
     data["normalized_title"] = data["title"].map(_normalized_text)
-    data["normalized_institution"] = data["institution"].map(
-        _normalized_institution
-    )
+    data["normalized_institution"] = data["institution"].map(_normalized_institution)
     data["source_report_key"] = [
         _report_source_key(*values)
         for values in zip(
             data["symbol"], data["source_date"], data["title"], data["institution"]
         )
     ]
-    data["feature_available_date"] = _next_open_date(
-        data["source_date"], open_dates
-    )
+    data["feature_available_date"] = _next_open_date(data["source_date"], open_dates)
     valid = (
         data["source_date"].between(REPORT_EASTMONEY_START, END_DATE)
         & data["normalized_title"].ne("")
@@ -902,8 +898,12 @@ def _normalize_eastmoney_reports(
     for source_key, group in data.groupby("source_report_key", sort=True):
         analysts: set[str] = set()
         for value in group.get("researcher", []):
-            analysts.update(item.strip() for item in _text(value).split(",") if item.strip())
-        info_codes = [_text(value) for value in group.get("infoCode", []) if _text(value)]
+            analysts.update(
+                item.strip() for item in _text(value).split(",") if item.strip()
+            )
+        info_codes = [
+            _text(value) for value in group.get("infoCode", []) if _text(value)
+        ]
         info_code = info_codes[0] if info_codes else ""
         rating_values = group.get("sRatingName", group.get("emRatingName", []))
         rows.append(
@@ -968,17 +968,14 @@ def _merge_reports(
         for column in ("rating", "target_price_min", "target_price_max"):
             left = {_text(value) for value in ts.get(column, []) if _text(value)}
             right = {_text(value) for value in em.get(column, []) if _text(value)}
-            disagreements = disagreements or bool(left and right and left.isdisjoint(right))
+            disagreements = disagreements or bool(
+                left and right and left.isdisjoint(right)
+            )
         analysts = {
-            item
-            for value in group["analyst"]
-            for item in str(value).split(";")
-            if item
+            item for value in group["analyst"] for item in str(value).split(";") if item
         }
         reasons = {
-            _text(value)
-            for value in group["identity_conflict_reason"]
-            if _text(value)
+            _text(value) for value in group["identity_conflict_reason"] if _text(value)
         }
         rows.append(
             {
@@ -1041,10 +1038,14 @@ def prepare_reports(
     forecast_parts: list[Path] = []
     statistics: list[dict[str, Any]] = []
     for year in range(2010, 2026):
-        raw_paths = sorted(_report_rc_page_path(workspace, year, 0).parent.glob("*.parquet"))
+        raw_paths = sorted(
+            _report_rc_page_path(workspace, year, 0).parent.glob("*.parquet")
+        )
         if not raw_paths:
             raise ResearchEventUpdateError(f"tushare_report_year_missing:{year}")
-        raw = pd.concat([pd.read_parquet(path) for path in raw_paths], ignore_index=True)
+        raw = pd.concat(
+            [pd.read_parquet(path) for path in raw_paths], ignore_index=True
+        )
         reports, forecasts, stats = _normalize_tushare_report_year(
             raw,
             open_dates=open_dates,
@@ -1064,7 +1065,9 @@ def prepare_reports(
             }
         )
         del raw, reports, forecasts
-    em_paths = sorted((_runtime(workspace) / "raw" / "eastmoney_reports").glob("*.parquet"))
+    em_paths = sorted(
+        (_runtime(workspace) / "raw" / "eastmoney_reports").glob("*.parquet")
+    )
     if not em_paths:
         raise ResearchEventUpdateError("eastmoney_report_cache_missing")
     eastmoney_parts: list[pd.DataFrame] = []
@@ -1238,16 +1241,54 @@ def download_announcements(
         max_workers=max_workers,
         allow_failures=True,
     )
+    cninfo_failures = sorted(dict(cninfo.get("failures", {}) or {}))
     eastmoney = _download_symbol_files(
         workspace=workspace,
         state_key="eastmoney_announcements",
-        symbols=symbols,
+        symbols=cninfo_failures,
         path_for=_eastmoney_announcement_path,
         fetch=_fetch_eastmoney_announcements,
         max_workers=max_workers,
         allow_failures=True,
     )
-    return {"cninfo": cninfo, "eastmoney": eastmoney}
+    state = _read_state(workspace)
+    source_policy = {
+        "primary_provider": "cninfo",
+        "fallback_provider": "eastmoney",
+        "fallback_unit": "whole_symbol",
+        "cninfo_failed_symbols": cninfo_failures,
+        "cninfo_failed_symbol_count": len(cninfo_failures),
+        "eastmoney_fallback_symbols": cninfo_failures,
+        "eastmoney_fallback_symbol_count": len(cninfo_failures),
+        "eastmoney_unresolved_symbols": sorted(
+            dict(eastmoney.get("failures", {}) or {})
+        ),
+        "stale_non_fallback_cache_excluded": True,
+    }
+    state["announcement_source_policy"] = source_policy
+    _write_state(workspace, state)
+    return {
+        "cninfo": cninfo,
+        "eastmoney": eastmoney,
+        "source_policy": source_policy,
+    }
+
+
+def _announcement_raw_source_paths(
+    workspace: Path,
+    *,
+    fallback_symbols: Sequence[str],
+) -> dict[str, list[Path]]:
+    """Select canonical announcement caches without admitting stale fallbacks."""
+    cninfo_root = _runtime(workspace) / "raw" / "cninfo_announcements"
+    return {
+        "cninfo": sorted(cninfo_root.glob("*.parquet")),
+        "eastmoney": [
+            path
+            for symbol in sorted(set(fallback_symbols))
+            if (path := _eastmoney_announcement_path(workspace, symbol)).is_file()
+        ],
+    }
 
 
 _CATEGORY_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -1299,7 +1340,9 @@ def _normalize_cninfo_announcements(
     if raw.empty:
         return pd.DataFrame(columns=ANNOUNCEMENT_COLUMNS)
     data = raw.copy()
-    data["symbol"] = data.get("_query_symbol", data.get("symbol", "")).fillna("").astype(str)
+    data["symbol"] = (
+        data.get("_query_symbol", data.get("symbol", "")).fillna("").astype(str)
+    )
     data["source_date"] = pd.to_datetime(
         data.get("source_date", data.get("trade_date")), errors="coerce"
     ).dt.strftime("%Y-%m-%d")
@@ -1308,13 +1351,9 @@ def _normalize_cninfo_announcements(
     data["feature_available_date"] = _next_open_date(data["source_date"], open_dates)
     data["category"] = [
         _announcement_category(title, codes)
-        for title, codes in zip(
-            data["title"], data.get("announcement_type_codes", "")
-        )
+        for title, codes in zip(data["title"], data.get("announcement_type_codes", ""))
     ]
-    data["file_size_kb"] = pd.to_numeric(
-        data.get("file_size_kb"), errors="coerce"
-    )
+    data["file_size_kb"] = pd.to_numeric(data.get("file_size_kb"), errors="coerce")
     data["_event_key"] = [
         _stable_hash(symbol, date, title)
         for symbol, date, title in zip(
@@ -1339,11 +1378,14 @@ def _normalize_cninfo_announcements(
     }.items():
         if column not in data:
             data[column] = default
-    valid = (
-        data["source_date"].between(START_DATE, END_DATE)
-        & data["normalized_title"].ne("")
+    valid = data["source_date"].between(START_DATE, END_DATE) & data[
+        "normalized_title"
+    ].ne("")
+    return (
+        data.loc[valid, list(ANNOUNCEMENT_COLUMNS)]
+        .drop_duplicates()
+        .reset_index(drop=True)
     )
-    return data.loc[valid, list(ANNOUNCEMENT_COLUMNS)].drop_duplicates().reset_index(drop=True)
 
 
 def _normalize_eastmoney_announcements(
@@ -1394,11 +1436,14 @@ def _normalize_eastmoney_announcements(
     data["eastmoney_present"] = True
     data["source_disagreement"] = False
     data["source"] = "eastmoney_announcement_metadata"
-    valid = (
-        data["source_date"].between(START_DATE, END_DATE)
-        & data["normalized_title"].ne("")
+    valid = data["source_date"].between(START_DATE, END_DATE) & data[
+        "normalized_title"
+    ].ne("")
+    return (
+        data.loc[valid, list(ANNOUNCEMENT_COLUMNS)]
+        .drop_duplicates()
+        .reset_index(drop=True)
     )
-    return data.loc[valid, list(ANNOUNCEMENT_COLUMNS)].drop_duplicates().reset_index(drop=True)
 
 
 def prepare_announcements(
@@ -1408,25 +1453,37 @@ def prepare_announcements(
     workspace = _workspace(workspace_root)
     open_dates = _open_dates(workspace)
     normalized_root = _runtime(workspace) / "normalized" / "announcements"
+    state = _read_state(workspace)
+    source_policy = dict(state.get("announcement_source_policy", {}) or {})
+    if not source_policy:
+        raise ResearchEventUpdateError("announcement_source_policy_missing")
+    fallback_symbols = list(source_policy.get("eastmoney_fallback_symbols", []) or [])
+    selected_paths = _announcement_raw_source_paths(
+        workspace,
+        fallback_symbols=fallback_symbols,
+    )
     source_specs = (
         (
             "cninfo",
-            _runtime(workspace) / "raw" / "cninfo_announcements",
+            selected_paths["cninfo"],
             _normalize_cninfo_announcements,
         ),
         (
             "eastmoney",
-            _runtime(workspace) / "raw" / "eastmoney_announcements",
+            selected_paths["eastmoney"],
             _normalize_eastmoney_announcements,
         ),
     )
     normalized_paths: list[Path] = []
     source_rows: dict[str, int] = {}
-    for source_name, raw_root, normalize in source_specs:
+    for source_name, raw_paths, normalize in source_specs:
         count = 0
-        for raw_path in sorted(raw_root.glob("*.parquet")):
+        for raw_path in raw_paths:
             output_path = normalized_root / source_name / raw_path.name
-            if not output_path.is_file():
+            if (
+                not output_path.is_file()
+                or raw_path.stat().st_mtime_ns > output_path.stat().st_mtime_ns
+            ):
                 frame = normalize(pd.read_parquet(raw_path), open_dates=open_dates)
                 _write_parquet(frame, output_path)
             count += int(pq.ParquetFile(output_path).metadata.num_rows)
@@ -1488,6 +1545,9 @@ def prepare_announcements(
         "announcement_path": str(prepared),
         "announcement_row_count": len(frame),
         "source_normalized_rows": source_rows,
+        "source_policy": source_policy,
+        "selected_cninfo_cache_count": len(selected_paths["cninfo"]),
+        "selected_eastmoney_fallback_cache_count": len(selected_paths["eastmoney"]),
         "matched_announcement_count": int(
             (frame["cninfo_present"] & frame["eastmoney_present"]).sum()
         ),
@@ -1525,7 +1585,11 @@ def _install_domain(
     try:
         quoted = str(shard).replace("'", "''")
         key_sql = ",".join(f'"{item}"' for item in primary_key)
-        row_count = int(connection.execute(f"SELECT count(*) FROM read_parquet('{quoted}')").fetchone()[0])
+        row_count = int(
+            connection.execute(
+                f"SELECT count(*) FROM read_parquet('{quoted}')"
+            ).fetchone()[0]
+        )
         duplicate_count = int(
             connection.execute(
                 f"SELECT count(*) FROM (SELECT {key_sql},count(*) n "
@@ -1641,6 +1705,8 @@ def commit_prepared(
         ),
     ]
     if include_announcements:
+        state = _read_state(workspace)
+        announcement_policy = dict(state.get("announcement_source_policy", {}) or {})
         specs.append(
             (
                 DataDomain.ANNOUNCEMENT,
@@ -1649,8 +1715,9 @@ def commit_prepared(
                 ["announcement_id"],
                 "event",
                 {
-                    "provider": "cninfo+eastmoney_announcement_metadata",
+                    "provider": "cninfo_primary_with_eastmoney_whole_symbol_fallback",
                     "availability_semantics": "announcement date; consume next exchange-open day",
+                    "source_selection_policy": announcement_policy,
                 },
             )
         )
@@ -1699,8 +1766,11 @@ def evaluate(
     checks = {
         "date_range_exact": bool(
             domains
-            and domains.get(DataDomain.RESEARCH_REPORT, {}).get("start_date") == START_DATE
-            and all(str(item.get("end_date", "")) <= END_DATE for item in domains.values())
+            and domains.get(DataDomain.RESEARCH_REPORT, {}).get("start_date")
+            == START_DATE
+            and all(
+                str(item.get("end_date", "")) <= END_DATE for item in domains.values()
+            )
         ),
         "forbidden_2026_rows": True,
         "credential_not_persisted": True,
@@ -1741,7 +1811,10 @@ def self_test() -> dict[str, Any]:
     available = _next_open_date(pd.Series(["2024-01-02", "2024-01-05"]), dates)
     if available.tolist() != ["2024-01-03", ""]:
         raise AssertionError("next-open availability changed")
-    if _announcement_category("关于公司股票可能被终止上市的风险提示公告") != "risk_warning":
+    if (
+        _announcement_category("关于公司股票可能被终止上市的风险提示公告")
+        != "risk_warning"
+    ):
         raise AssertionError("announcement category mapping changed")
     return {
         "status": "ok",
@@ -1831,7 +1904,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="qdp research-event-update")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--max-workers", type=int, default=MAX_WORKERS)
-    parser.add_argument("--phase", choices=("all", "reports", "announcements"), default="all")
+    parser.add_argument(
+        "--phase", choices=("all", "reports", "announcements"), default="all"
+    )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--status", action="store_true")
     mode.add_argument("--run-pending", action="store_true")

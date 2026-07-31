@@ -14,9 +14,9 @@ reinforcement-learning policy has been selected.
 
 ## Current QDP data state
 
-The 2026-07-31 incremental QDP repair preserved the existing dataset IDs and
-changed only defective metadata/tables or missing rows. The active catalog now
-contains 16 domains and passes the full deep audit with `status=ok` and zero
+The 2026-07-31 incremental QDP repair changed only defective metadata/tables or
+missing rows. The active catalog now contains 22 domains and passes the full
+deep audit with `status=ok` and zero
 blocking errors. The only finding is the expected medium-severity warning for
 explicit historical 5-minute gaps; missing intraday history is not an
 eligibility rule.
@@ -40,6 +40,18 @@ eligibility rule.
 - Optional PIT event domains were added: `financial_quarterly` has 175,885
   rows and `performance_forecast` has 77,711 rows. Event time is announcement
   date; feature use must lag publication by one day.
+- The canonical announcement domain contains 4,796,992 rows for 2010-2025.
+  CNINFO succeeded for every requested symbol; Eastmoney remains a whole-symbol
+  fallback and was not used in the active dataset.
+- The report domains contain 820,246 report identities and 1,515,126 forecast
+  details. Tushare-compatible `report_rc` is the forecast source and Eastmoney
+  adds report metadata only. Forecast coverage is complete-span for 2010-2016,
+  2022, and 2025; 2017-2020 and 2023-2024 are partial spans, while 2021 is
+  explicitly source-unavailable. Missing source coverage must not be treated as
+  evidence that no report existed.
+- PIT income, balance-sheet, and cash-flow statement domains contain 181,900,
+  179,220, and 181,047 rows. They use actual announcement dates and become
+  available on the next exchange-open day.
 - Existing valuation already contains PE, PB, market value, float market
   value, and turnover. The new financial domain adds ROE, margins, growth,
   EPS, leverage, liquidity, turnover, and operating-cash-flow-per-share
@@ -350,6 +362,30 @@ not reopen completed LightGBM capacity, feature-union, or five-target A/B
 searches without new evidence.
 
 There is no active training process.
+
+## Quality-liquidity pre-training dataset
+
+`seq100_quality_liquidity_data_prep_v1` is complete and no model was trained.
+It provides one common 2010-2025 PIT sample for all future daily, minute,
+fundamental, announcement, and report feature comparisons:
+
+- `quality_liquidity_complete_pit` has 4,487,912 stock-days. Membership uses
+  only contemporaneously available status, listing age, liquidity, float market
+  value, and announcement-lagged financial quality.
+- Every retained stock-day has exactly 48 current-day five-minute bars. Missing
+  minute data removes only that stock-day, never the whole security, and there
+  is no daily-feature fallback inside this common sample.
+- Listing age uses exchange calendar history before 2010, so early-2010 support
+  is no longer incorrectly empty.
+- The prepared atlas contains 518 usable continuous features: 296 existing
+  Seq100 base features, 25 minute features, 142 fundamental/statement features,
+  and 55 announcement/report features. No feature is entirely null.
+- The atlas is descriptive only. No feature set or model variant has been
+  selected. Future rolling OOS model evaluation is limited to 2023-2025 and
+  every variant must use the same common-support identity.
+- The owner selected this common sample for the next model research. The old
+  all-market v4 contract remains the frozen comparison baseline; the earlier
+  stock-pool audit's default decision does not redefine the new training pool.
 
 ## PIT stock-pool audit
 

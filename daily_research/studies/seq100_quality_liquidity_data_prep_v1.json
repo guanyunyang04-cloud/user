@@ -1,0 +1,43 @@
+{
+  "study_id": "seq100_quality_liquidity_data_prep_v1",
+  "status": "preregistered",
+  "purpose": "Prepare a single full-history PIT common support and feature atlas before any new Seq100 training.",
+  "period": {
+    "start_date": "2010-01-01",
+    "end_date": "2025-12-31",
+    "forbidden_year": 2026,
+    "future_oos_prediction_years": [2023, 2024, 2025]
+  },
+  "common_support": {
+    "base": "quality_liquidity_pit",
+    "requires_current_day_complete_5m": true,
+    "required_5m_bars": 48,
+    "missing_5m_action": "drop_stock_day_only",
+    "drop_entire_symbol": false,
+    "daily_fallback": false,
+    "sparse_events_filter_rows": false
+  },
+  "quality_liquidity_rules": {
+    "listed_open_days_minimum": 250,
+    "valid_amount_observations_in_20_minimum": 15,
+    "amount_median_20_cross_section_percentile_minimum": 0.30,
+    "float_market_cap_cross_section_percentile_minimum": 0.20,
+    "financial_report_age_days_maximum": 550,
+    "quality_metrics_nonnull_minimum": 3,
+    "quality_score_percentile_minimum": 0.30,
+    "industry_rank_minimum_group_size": 20,
+    "same_day_forbidden_statuses": ["st", "suspended", "delisted"]
+  },
+  "feature_families": [
+    "existing_seq100_base",
+    "same_day_5m_aggregates",
+    "pit_financial_and_statement",
+    "pit_announcement_metadata",
+    "pit_research_report_and_forecast"
+  ],
+  "training": {
+    "performed": false,
+    "feature_set_selected": false,
+    "model_variants_selected": false
+  }
+}

@@ -6,6 +6,8 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 from quant_data_platform.qdp_v2.research_event_update import (
+    _announcement_raw_source_paths,
+    _eastmoney_announcement_path,
     _merge_reports,
     _normalize_cninfo_announcements,
     _normalize_eastmoney_announcements,
@@ -113,10 +115,13 @@ def test_report_identity_normalizes_punctuation_and_legal_suffixes() -> None:
 
 
 def test_report_source_coverage_distinguishes_empty_and_partial_years() -> None:
-    assert _report_year_source_coverage(
-        2021,
-        {"raw_row_count": 0, "earliest_report_date": "", "latest_report_date": ""},
-    )["tushare_source_coverage_status"] == "source_unavailable"
+    assert (
+        _report_year_source_coverage(
+            2021,
+            {"raw_row_count": 0, "earliest_report_date": "", "latest_report_date": ""},
+        )["tushare_source_coverage_status"]
+        == "source_unavailable"
+    )
     partial = _report_year_source_coverage(
         2023,
         {
@@ -223,3 +228,27 @@ def test_cninfo_fetch_uses_org_id_and_reads_all_pages(monkeypatch) -> None:
     assert len(calls) == 2
     assert all(call["stock"] == "000001,gssz0000001" for call in calls)
     assert all(call["pageSize"] == 30 for call in calls)
+
+
+def test_announcement_source_paths_exclude_stale_non_fallback_cache(
+    tmp_path,
+) -> None:
+    from quant_data_platform.qdp_v2.research_event_update import (
+        _cninfo_announcement_path,
+    )
+
+    cninfo = _cninfo_announcement_path(tmp_path, "000001.SZ")
+    selected_fallback = _eastmoney_announcement_path(tmp_path, "000002.SZ")
+    stale_fallback = _eastmoney_announcement_path(tmp_path, "000003.SZ")
+    for path in (cninfo, selected_fallback, stale_fallback):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    selected = _announcement_raw_source_paths(
+        tmp_path,
+        fallback_symbols=["000002.SZ"],
+    )
+
+    assert selected["cninfo"] == [cninfo]
+    assert selected["eastmoney"] == [selected_fallback]
+    assert stale_fallback not in selected["eastmoney"]
