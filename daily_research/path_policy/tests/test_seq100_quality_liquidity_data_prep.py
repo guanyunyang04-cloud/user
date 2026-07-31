@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 
 import duckdb
 import numpy as np
@@ -64,8 +65,9 @@ def test_combined_feature_sample_loads_each_modulus_independently(
 ) -> None:
     observed_moduli: list[int] = []
 
-    def fake_feature_sample(*, output_root, state, modulus):
+    def fake_feature_sample(*, output_root, state, modulus, years):
         del output_root, state
+        assert tuple(years) == YEARS
         observed_moduli.append(modulus)
         candidate_ids = np.array([modulus, modulus * 2], dtype=np.int64)
         return pd.DataFrame(
@@ -177,7 +179,11 @@ def test_reused_atlas_restores_completed_top_level_state(monkeypatch, tmp_path) 
         },
     }
     writes: list[dict[str, object]] = []
-    monkeypatch.setattr(prep, "_feature_blocks_hash", lambda value: "blocks-hash")
+    monkeypatch.setattr(
+        prep,
+        "_feature_blocks_hash",
+        lambda value, *, years: "blocks-hash",
+    )
     monkeypatch.setattr(
         prep,
         "_write_state",
@@ -191,3 +197,35 @@ def test_reused_atlas_restores_completed_top_level_state(monkeypatch, tmp_path) 
     assert state["training_performed"] is False
     assert state["feature_set_selected"] is False
     assert writes[-1]["status"] == "completed"
+
+
+def test_atlas_statistics_handle_constant_features_without_runtime_warning() -> None:
+    features = pd.DataFrame(
+        {
+            "constant": np.ones(100),
+            "varying": np.arange(100, dtype=np.float64),
+        }
+    )
+    labels = pd.DataFrame(
+        {
+            "mfe_10": np.arange(100, dtype=np.float64),
+            "mfe_20": np.arange(100, dtype=np.float64)[::-1],
+        }
+    )
+    years = np.full(100, 2023)
+    catalog = pd.DataFrame(
+        {
+            "name": ["constant", "varying"],
+            "family": ["test", "test"],
+        }
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        associations = prep._association_rows(features, labels, years, catalog)
+        redundancy = prep._redundancy_rows(features, catalog)
+
+    constant_rows = [row for row in associations if row["feature"] == "constant"]
+    assert constant_rows
+    assert all(np.isnan(row["spearman"]) for row in constant_rows)
+    assert redundancy == []

@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-07-31
+Updated: 2026-08-01
 
 ## Objective
 
@@ -386,6 +386,15 @@ fundamental, announcement, and report feature comparisons:
 - The owner selected this common sample for the next model research. The old
   all-market v4 contract remains the frozen comparison baseline; the earlier
   stock-pool audit's default decision does not redefine the new training pool.
+
+`seq100_quality_liquidity_research_scope_v1` freezes the formal research
+boundary without rebuilding those physical partitions. Raw PIT history still
+starts in 2010 so causal lagged features may use it, but 2010 is burn-in only:
+it is excluded from training rows, evaluation rows, labels, and feature-atlas
+statistics. The formal 2011-2025 common support contains 4,441,395 unique
+stock-days and 518 features. Rolling OOS evaluation remains 2023-2025; the
+pre-purge expanding training counts are 3,206,854, 3,616,558, and 4,028,849.
+No model or feature set was selected while freezing this scope.
 
 ## PIT stock-pool audit
 

@@ -860,9 +860,11 @@ def prepare_membership(
     return records
 
 
-def _common_support_hash(records: Mapping[str, Any]) -> str:
+def _common_support_hash(
+    records: Mapping[str, Any], *, years: Sequence[int] = YEARS
+) -> str:
     digest = hashlib.sha256()
-    for year in YEARS:
+    for year in years:
         path = Path(records[str(year)]["support_path"])
         frame = pd.read_parquet(path, columns=["candidate_id", "trade_date", "symbol"])
         for row in frame.itertuples(index=False):
@@ -1744,7 +1746,9 @@ def _write_frame(frame: pd.DataFrame, path: Path) -> None:
     os.replace(temporary, path)
 
 
-def _feature_catalog(state: Mapping[str, Any]) -> pd.DataFrame:
+def _feature_catalog(
+    state: Mapping[str, Any], *, years: Sequence[int] = YEARS
+) -> pd.DataFrame:
     base_manifest = json.loads(BASE_FEATURE_MANIFEST.read_text(encoding="utf-8"))
     rows = [
         {
@@ -1761,7 +1765,7 @@ def _feature_catalog(state: Mapping[str, Any]) -> pd.DataFrame:
     ]
     blocks = dict(state.get("feature_blocks", {}) or {})
     reference_year = next(
-        (str(year) for year in reversed(YEARS) if str(year) in blocks),
+        (str(year) for year in reversed(tuple(years)) if str(year) in blocks),
         "",
     )
     family_names = {
@@ -1786,10 +1790,12 @@ def _feature_catalog(state: Mapping[str, Any]) -> pd.DataFrame:
     )
 
 
-def _feature_blocks_hash(state: Mapping[str, Any]) -> str:
+def _feature_blocks_hash(
+    state: Mapping[str, Any], *, years: Sequence[int] = YEARS
+) -> str:
     digest = hashlib.sha256()
     blocks = dict(state.get("feature_blocks", {}) or {})
-    for year in YEARS:
+    for year in years:
         for family in ("minute", "fundamental", "event"):
             record = dict(blocks[str(year)][family])
             digest.update(
@@ -1864,18 +1870,21 @@ def _feature_sample(
     output_root: Path,
     state: Mapping[str, Any],
     modulus: int,
+    years: Sequence[int] = YEARS,
 ) -> pd.DataFrame:
+    scope_years = tuple(int(year) for year in years)
     blocks = dict(state["feature_blocks"])
-    minute_paths = [Path(blocks[str(year)]["minute"]["path"]) for year in YEARS]
+    minute_paths = [Path(blocks[str(year)]["minute"]["path"]) for year in scope_years]
     fundamental_paths = [
-        Path(blocks[str(year)]["fundamental"]["path"]) for year in YEARS
+        Path(blocks[str(year)]["fundamental"]["path"]) for year in scope_years
     ]
-    event_paths = [Path(blocks[str(year)]["event"]["path"]) for year in YEARS]
-    minute_features = list(blocks[str(YEARS[-1])]["minute"]["feature_columns"])
+    event_paths = [Path(blocks[str(year)]["event"]["path"]) for year in scope_years]
+    reference_year = str(scope_years[-1])
+    minute_features = list(blocks[reference_year]["minute"]["feature_columns"])
     fundamental_features = list(
-        blocks[str(YEARS[-1])]["fundamental"]["feature_columns"]
+        blocks[reference_year]["fundamental"]["feature_columns"]
     )
-    event_features = list(blocks[str(YEARS[-1])]["event"]["feature_columns"])
+    event_features = list(blocks[reference_year]["event"]["feature_columns"])
     sql = (
         f"SELECT {','.join('m.' + column for column in KEY_COLUMNS)},"
         + ",".join(f'm."{column}"' for column in minute_features)
@@ -1921,8 +1930,14 @@ def _combined_feature_sample(
     output_root: Path,
     state: Mapping[str, Any],
     modulus: int,
+    years: Sequence[int] = YEARS,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    sample = _feature_sample(output_root=output_root, state=state, modulus=modulus)
+    sample = _feature_sample(
+        output_root=output_root,
+        state=state,
+        modulus=modulus,
+        years=years,
+    )
     candidate_ids = sample["candidate_id"].to_numpy(dtype=np.int64)
     base, _ = _base_sample(candidate_ids)
     new = sample.drop(columns=list(KEY_COLUMNS)).reset_index(drop=True)
@@ -1953,11 +1968,19 @@ def _association_rows(
                     continue
                 value_series = pd.Series(values[valid])
                 outcome_series = pd.Series(outcome[valid])
-                rho = float(
-                    value_series.rank(method="average").corr(
-                        outcome_series.rank(method="average")
+                ranked_values = value_series.rank(method="average")
+                ranked_outcome = outcome_series.rank(method="average")
+                if (
+                    ranked_values.nunique(dropna=True) < 2
+                    or ranked_outcome.nunique(dropna=True) < 2
+                ):
+                    rho = float("nan")
+                else:
+                    rho = float(
+                        ranked_values.corr(
+                            ranked_outcome,
+                        )
                     )
-                )
                 direction = 1.0 if not np.isfinite(rho) or rho >= 0 else -1.0
                 score = direction * values[valid]
                 q95 = float(np.nanquantile(score, 0.95))
@@ -1989,6 +2012,7 @@ def _redundancy_rows(
 ) -> list[dict[str, Any]]:
     family = dict(zip(catalog["name"], catalog["family"]))
     usable = features.loc[:, features.notna().sum(axis=0) >= 100]
+    usable = usable.loc[:, usable.nunique(dropna=True) >= 2]
     ranked = usable.rank(method="average", pct=True)
     correlation = ranked.corr(method="pearson", min_periods=100)
     values = correlation.to_numpy(dtype=np.float64)
@@ -2012,10 +2036,22 @@ def _redundancy_rows(
     return sorted(rows, key=lambda item: item["absolute_spearman"], reverse=True)
 
 
-def prepare_atlas(*, output_root: Path, state: dict[str, Any]) -> dict[str, Any]:
+def prepare_atlas(
+    *,
+    output_root: Path,
+    state: dict[str, Any],
+    years: Sequence[int] = YEARS,
+    study_id: str = STUDY_ID,
+    start_date: str = START_DATE,
+    end_date: str = END_DATE,
+    future_oos_prediction_years: Sequence[int] = (2023, 2024, 2025),
+) -> dict[str, Any]:
+    scope_years = tuple(int(year) for year in years)
+    if not scope_years or tuple(sorted(set(scope_years))) != scope_years:
+        raise DataPreparationError("atlas_years_must_be_sorted_unique")
     atlas_root = output_root / "atlas"
     manifest_path = atlas_root / "manifest.json"
-    feature_blocks_hash = _feature_blocks_hash(state)
+    feature_blocks_hash = _feature_blocks_hash(state, years=scope_years)
     existing = dict(state.get("atlas", {}) or {})
     if (
         manifest_path.is_file()
@@ -2027,20 +2063,21 @@ def prepare_atlas(*, output_root: Path, state: dict[str, Any]) -> dict[str, Any]
             manifest.get("builder_version") == ATLAS_BUILDER_VERSION
             and manifest.get("common_support_hash") == state.get("common_support_hash")
             and manifest.get("feature_blocks_hash") == feature_blocks_hash
+            and tuple(manifest.get("years", YEARS)) == scope_years
         ):
             state["status"] = "completed"
             state["training_performed"] = False
             state["feature_set_selected"] = False
             _write_state(output_root, state)
             return existing
-    catalog = _feature_catalog(state)
+    catalog = _feature_catalog(state, years=scope_years)
     catalog_path = atlas_root / "feature_catalog.parquet"
     _write_frame(catalog, catalog_path)
     coverage_rows: list[dict[str, Any]] = []
     distribution_rows: list[dict[str, Any]] = []
     connection = _connect(output_root)
     try:
-        for year in YEARS:
+        for year in scope_years:
             for family in ("minute", "fundamental", "event"):
                 record = state["feature_blocks"][str(year)][family]
                 coverage, distribution = _feature_stats_for_file(
@@ -2063,6 +2100,7 @@ def prepare_atlas(*, output_root: Path, state: dict[str, Any]) -> dict[str, Any]
         output_root=output_root,
         state=state,
         modulus=223,
+        years=scope_years,
     )
     candidate_ids = sample["candidate_id"].to_numpy(dtype=np.int64)
     labels = _label_sample(candidate_ids)
@@ -2081,6 +2119,7 @@ def prepare_atlas(*, output_root: Path, state: dict[str, Any]) -> dict[str, Any]
         output_root=output_root,
         state=state,
         modulus=887,
+        years=scope_years,
     )
     redundancy = pd.DataFrame(_redundancy_rows(redundancy_sample, catalog))
     if redundancy.empty:
@@ -2113,19 +2152,26 @@ def prepare_atlas(*, output_root: Path, state: dict[str, Any]) -> dict[str, Any]
                     )
                 },
             }
-            for year in YEARS
+            for year in scope_years
         ]
     )
     support_summary_path = atlas_root / "common_support_by_year.parquet"
     _write_frame(support_summary, support_summary_path)
-    report_coverage = _report_coverage_status()
+    all_report_coverage = _report_coverage_status()
+    report_coverage = {
+        str(year): all_report_coverage.get(
+            str(year), all_report_coverage.get(year, "unknown")
+        )
+        for year in scope_years
+    }
     manifest = {
         "schema": "seq100_quality_liquidity_feature_atlas/v1",
         "builder_version": ATLAS_BUILDER_VERSION,
         "status": "completed",
-        "study_id": STUDY_ID,
-        "start_date": START_DATE,
-        "end_date": END_DATE,
+        "study_id": study_id,
+        "start_date": start_date,
+        "end_date": end_date,
+        "years": list(scope_years),
         "forbidden_2026_rows": 0,
         "common_support_row_count": int(state["common_support_row_count"]),
         "common_support_hash": str(state["common_support_hash"]),
@@ -2146,7 +2192,9 @@ def prepare_atlas(*, output_root: Path, state: dict[str, Any]) -> dict[str, Any]
         "association_results_are_descriptive_not_feature_selection": True,
         "feature_set_selected": False,
         "training_performed": False,
-        "future_oos_prediction_years": [2023, 2024, 2025],
+        "future_oos_prediction_years": [
+            int(year) for year in future_oos_prediction_years
+        ],
         "report_forecast_source_coverage_by_year": report_coverage,
         "files": {
             "feature_catalog": _record(catalog_path),
