@@ -54,6 +54,7 @@ class DataDomain:
     NEWS_EVENT = "news_event"
     ANNOUNCEMENT = "announcement"
     RESEARCH_REPORT = "research_report"
+    RESEARCH_REPORT_FORECAST = "research_report_forecast"
     IWENCAI_SEMANTIC = "iwencai_semantic"
 
 
@@ -85,6 +86,7 @@ EXCLUDED_V1_DOMAINS = (
     DataDomain.PERFORMANCE_EXPRESS,
     DataDomain.NEWS_EVENT,
     DataDomain.RESEARCH_REPORT,
+    DataDomain.RESEARCH_REPORT_FORECAST,
     DataDomain.IWENCAI_SEMANTIC,
 )
 
@@ -439,8 +441,77 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "source",
     ],
     DataDomain.NEWS_EVENT: ["symbol", "trade_date", "title", "url", "summary", "source"],
-    DataDomain.ANNOUNCEMENT: ["symbol", "trade_date", "title", "url", "category", "source"],
-    DataDomain.RESEARCH_REPORT: ["symbol", "trade_date", "title", "institution", "analyst", "url", "source"],
+    DataDomain.ANNOUNCEMENT: [
+        "announcement_id",
+        "symbol",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "publish_time",
+        "title",
+        "normalized_title",
+        "category",
+        "announcement_type_codes",
+        "cninfo_announcement_id",
+        "eastmoney_art_code",
+        "org_id",
+        "url",
+        "pdf_url",
+        "file_size_kb",
+        "cninfo_present",
+        "eastmoney_present",
+        "source_disagreement",
+        "source",
+    ],
+    DataDomain.RESEARCH_REPORT: [
+        "report_id",
+        "source_report_key",
+        "symbol",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "title",
+        "normalized_title",
+        "institution",
+        "normalized_institution",
+        "analyst",
+        "report_type",
+        "classification",
+        "rating",
+        "rating_change",
+        "target_price_min",
+        "target_price_max",
+        "tushare_present",
+        "eastmoney_present",
+        "tushare_source_ids",
+        "eastmoney_info_codes",
+        "url",
+        "pdf_file_size_kb",
+        "pdf_pages",
+        "source_disagreement",
+        "identity_conflict_reason",
+        "source",
+    ],
+    DataDomain.RESEARCH_REPORT_FORECAST: [
+        "report_id",
+        "symbol",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "forecast_quarter",
+        "forecast_year",
+        "operating_revenue",
+        "operating_profit",
+        "total_profit",
+        "net_profit",
+        "eps",
+        "pe",
+        "research_development",
+        "roe",
+        "ev_ebitda",
+        "source_disagreement",
+        "source",
+    ],
     DataDomain.IWENCAI_SEMANTIC: ["symbol", "trade_date", "query", "answer", "tags", "source"],
 }
 
@@ -696,6 +767,8 @@ def normalize_domain(domain: str) -> str:
         "announcement": DataDomain.ANNOUNCEMENT,
         "research_report": DataDomain.RESEARCH_REPORT,
         "report": DataDomain.RESEARCH_REPORT,
+        "research_report_forecast": DataDomain.RESEARCH_REPORT_FORECAST,
+        "report_forecast": DataDomain.RESEARCH_REPORT_FORECAST,
         "iwencai": DataDomain.IWENCAI_SEMANTIC,
     }
     normalized = aliases.get(normalized, normalized)
@@ -851,6 +924,7 @@ def normalize_domain_frame(
         DataDomain.NEWS_EVENT,
         DataDomain.ANNOUNCEMENT,
         DataDomain.RESEARCH_REPORT,
+        DataDomain.RESEARCH_REPORT_FORECAST,
         DataDomain.IWENCAI_SEMANTIC,
     }:
         return normalize_generic_text_domain_frame(frame, domain=normalized_domain, source=source, as_of_date=as_of_date, require_columns=require_columns)

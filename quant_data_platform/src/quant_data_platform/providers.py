@@ -1820,7 +1820,7 @@ class ResearchRebuildMinimalFreeProvider:
 class CninfoAnnouncementProvider:
     name: str = "cninfo"
     page_size: int = 30
-    max_pages: int = 3
+    max_pages: int = 0
 
     def fetch_market_bars(self, request: FetchRequest) -> ProviderResult:
         raise RuntimeError("cninfo only supports announcement/disclosure domains")
@@ -2519,20 +2519,31 @@ def _fetch_cninfo_announcements(
     end_date: str,
     page_size: int,
     max_pages: int,
+    org_id: str = "",
 ) -> pd.DataFrame:
     url = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
     headers = {
         "User-Agent": "Mozilla/5.0 qdp-cninfo-provider",
         "Referer": "http://www.cninfo.com.cn/new/commonUrl/pageOfSearch",
     }
+    normalized_symbol = str(symbol).strip().upper()
+    code = _strip_suffix(normalized_symbol)
+    resolved_org_id = str(org_id or _fetch_cninfo_org_id(code)).strip()
+    if not resolved_org_id:
+        raise RuntimeError(f"cninfo_org_id_missing:{normalized_symbol}")
     rows: list[pd.DataFrame] = []
-    for page in range(1, max(int(max_pages), 1) + 1):
+    page = 1
+    total_pages: int | None = None
+    session = requests.Session()
+    while total_pages is None or page <= total_pages:
+        if int(max_pages) > 0 and page > int(max_pages):
+            break
         payload = {
             "pageNum": int(page),
-            "pageSize": int(page_size),
-            "column": "szse" if str(symbol).upper().endswith(".SZ") else "sse",
+            "pageSize": min(max(int(page_size), 1), 30),
+            "column": "szse" if normalized_symbol.endswith(".SZ") else "sse",
             "tabName": "fulltext",
-            "stock": f"{_strip_suffix(symbol)},",
+            "stock": f"{code},{resolved_org_id}",
             "searchkey": "",
             "secid": "",
             "plate": "",
@@ -2543,7 +2554,7 @@ def _fetch_cninfo_announcements(
             "sortType": "",
             "isHLtitle": "true",
         }
-        response = requests.post(url, headers=headers, data=payload, timeout=20)
+        response = session.post(url, headers=headers, data=payload, timeout=20)
         if response.status_code >= 400:
             raise RuntimeError(f"cninfo_http_{response.status_code}: {response.text[:200]}")
         try:
@@ -2551,21 +2562,110 @@ def _fetch_cninfo_announcements(
         except Exception as exc:
             raise RuntimeError(f"cninfo_non_json_response: {response.text[:200]}") from exc
         announcements = body.get("announcements", []) if isinstance(body, dict) else []
+        if total_pages is None:
+            total = int(body.get("totalAnnouncement", 0) or 0)
+            total_pages = max(1, math.ceil(total / 30)) if total else 0
         frame = pd.DataFrame(announcements)
         if frame.empty:
             break
-        frame = frame.rename(columns={"announcementTitle": "title", "announcementTime": "trade_date", "adjunctUrl": "url", "announcementTypeName": "category"})
-        if "trade_date" in frame.columns:
-            values = pd.to_numeric(frame["trade_date"], errors="coerce")
-            parsed_ms = pd.to_datetime(values, unit="ms", errors="coerce")
-            parsed_text = pd.to_datetime(frame["trade_date"], errors="coerce")
-            frame["trade_date"] = parsed_ms.fillna(parsed_text).dt.strftime("%Y-%m-%d")
-        frame["symbol"] = str(symbol).strip().upper()
+        if "secCode" in frame.columns:
+            frame = frame.loc[frame["secCode"].astype(str).eq(code)].copy()
+        frame = frame.rename(
+            columns={
+                "announcementId": "announcement_id",
+                "announcementTitle": "title",
+                "announcementTime": "publish_time",
+                "announcementType": "announcement_type_codes",
+                "adjunctSize": "file_size_kb",
+            }
+        )
+        if "publish_time" in frame.columns:
+            values = pd.to_numeric(frame["publish_time"], errors="coerce")
+            parsed_ms = pd.to_datetime(values, unit="ms", utc=True, errors="coerce")
+            parsed_text = pd.to_datetime(frame["publish_time"], utc=True, errors="coerce")
+            parsed = parsed_ms.fillna(parsed_text).dt.tz_convert("Asia/Shanghai")
+            frame["publish_time"] = parsed.dt.strftime("%Y-%m-%d %H:%M:%S")
+            frame["trade_date"] = parsed.dt.strftime("%Y-%m-%d")
+        frame["source_date"] = frame.get("trade_date", "")
+        frame["feature_available_date"] = ""
+        frame["symbol"] = normalized_symbol
+        frame["normalized_title"] = frame.get("title", "")
+        frame["category"] = frame.get("announcement_type_codes", "")
+        frame["cninfo_announcement_id"] = frame.get("announcement_id", "")
+        frame["eastmoney_art_code"] = ""
+        frame["org_id"] = resolved_org_id
+        adjunct = frame.get("adjunctUrl", pd.Series("", index=frame.index)).fillna("").astype(str)
+        frame["pdf_url"] = adjunct.map(
+            lambda value: (
+                f"http://static.cninfo.com.cn/{value.lstrip('/')}" if value else ""
+            )
+        )
+        frame["url"] = frame.apply(
+            lambda row: (
+                "http://www.cninfo.com.cn/new/disclosure/detail?"
+                f"stockCode={code}&announcementId={row.get('announcement_id', '')}"
+                f"&orgId={resolved_org_id}&announcementTime={row.get('trade_date', '')}"
+            ),
+            axis=1,
+        )
+        frame["cninfo_present"] = True
+        frame["eastmoney_present"] = False
+        frame["source_disagreement"] = False
         frame["source"] = "cninfo"
         rows.append(frame)
-        if len(frame) < int(page_size):
+        page += 1
+        if total_pages == 0:
             break
+    session.close()
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+_CNINFO_ORG_MAP: dict[str, str] | None = None
+_CNINFO_ORG_MAP_LOCK = threading.Lock()
+
+
+def _cninfo_org_map() -> dict[str, str]:
+    global _CNINFO_ORG_MAP
+    with _CNINFO_ORG_MAP_LOCK:
+        if _CNINFO_ORG_MAP is not None:
+            return dict(_CNINFO_ORG_MAP)
+        response = requests.get(
+            "http://www.cninfo.com.cn/new/data/szse_stock.json",
+            headers={"User-Agent": "Mozilla/5.0 qdp-cninfo-provider"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        _CNINFO_ORG_MAP = {
+            str(item.get("code", "")).strip(): str(item.get("orgId", "")).strip()
+            for item in list(payload.get("stockList", []) or [])
+            if str(item.get("code", "")).strip()
+            and str(item.get("orgId", "")).strip()
+        }
+        return dict(_CNINFO_ORG_MAP)
+
+
+def _fetch_cninfo_org_id(symbol: str) -> str:
+    code = _strip_suffix(symbol)
+    resolved = _cninfo_org_map().get(code, "")
+    if resolved:
+        return resolved
+    response = requests.post(
+        "https://irm.cninfo.com.cn/newircs/index/queryKeyboardInfo",
+        params={"_t": str(int(time.time() * 1000))},
+        data={"keyWord": code},
+        headers={"User-Agent": "Mozilla/5.0 qdp-cninfo-provider"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    candidates = list((response.json() or {}).get("data", []) or [])
+    exact = [
+        item
+        for item in candidates
+        if str(item.get("stockcode", item.get("secCode", ""))).strip() == code
+    ]
+    selected = exact[0] if exact else (candidates[0] if candidates else {})
+    return str(selected.get("secid", selected.get("orgId", ""))).strip()
 
 
 def _to_baostock_code(symbol: str) -> str:

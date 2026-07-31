@@ -1,0 +1,413 @@
+{
+  "industry_overall": [
+    {
+      "row_count": 10212710,
+      "industries": 491,
+      "symbols": 3416,
+      "start_date": "2010-01-04",
+      "end_date": "2026-07-21"
+    }
+  ],
+  "industry_through_2025": [
+    {
+      "industries": 491,
+      "symbols": 3400
+    }
+  ],
+  "industry_latest_2025": [
+    {
+      "industry": "C39计算机、通信和其他电子设备制造业",
+      "symbols": 245
+    },
+    {
+      "industry": "C26化学原料和化学制品制造业",
+      "symbols": 219
+    },
+    {
+      "industry": "C38电气机械和器材制造业",
+      "symbols": 194
+    },
+    {
+      "industry": "Unknown",
+      "symbols": 163
+    },
+    {
+      "industry": "C27医药制造业",
+      "symbols": 155
+    },
+    {
+      "industry": "C36汽车制造业",
+      "symbols": 139
+    },
+    {
+      "industry": "C35专用设备制造业",
+      "symbols": 123
+    },
+    {
+      "industry": "C34通用设备制造业",
+      "symbols": 119
+    },
+    {
+      "industry": "D44电力、热力生产和供应业",
+      "symbols": 90
+    },
+    {
+      "industry": "I65软件和信息技术服务业",
+      "symbols": 87
+    },
+    {
+      "industry": "K70房地产业",
+      "symbols": 82
+    },
+    {
+      "industry": "C30非金属矿物制品业",
+      "symbols": 75
+    },
+    {
+      "industry": "C32有色金属冶炼和压延加工业",
+      "symbols": 70
+    },
+    {
+      "industry": "F52零售业",
+      "symbols": 70
+    },
+    {
+      "industry": "F51批发业",
+      "symbols": 68
+    },
+    {
+      "industry": "C29橡胶和塑料制品业",
+      "symbols": 66
+    },
+    {
+      "industry": "C33金属制品业",
+      "symbols": 65
+    },
+    {
+      "industry": "C14食品制造业",
+      "symbols": 56
+    },
+    {
+      "industry": "J67资本市场服务",
+      "symbols": 54
+    },
+    {
+      "industry": "E48土木工程建筑业",
+      "symbols": 53
+    },
+    {
+      "industry": "L72商务服务业",
+      "symbols": 51
+    },
+    {
+      "industry": "C13农副食品加工业",
+      "symbols": 50
+    },
+    {
+      "industry": "J66货币金融服务",
+      "symbols": 45
+    },
+    {
+      "industry": "C37铁路、船舶、航空航天和其他运输设备制造业",
+      "symbols": 43
+    },
+    {
+      "industry": "C15酒、饮料和精制茶制造业",
+      "symbols": 42
+    },
+    {
+      "industry": "C17纺织业",
+      "symbols": 35
+    },
+    {
+      "industry": "G55水上运输业",
+      "symbols": 35
+    },
+    {
+      "industry": "C22造纸和纸制品业",
+      "symbols": 33
+    },
+    {
+      "industry": "I64互联网和相关服务",
+      "symbols": 33
+    },
+    {
+      "industry": "C18纺织服装、服饰业",
+      "symbols": 31
+    },
+    {
+      "industry": "G54道路运输业",
+      "symbols": 30
+    },
+    {
+      "industry": "C31黑色金属冶炼和压延加工业",
+      "symbols": 29
+    },
+    {
+      "industry": "D45燃气生产和供应业",
+      "symbols": 27
+    },
+    {
+      "industry": "B09有色金属矿采选业",
+      "symbols": 26
+    },
+    {
+      "industry": "N77生态保护和环境治理业",
+      "symbols": 26
+    },
+    {
+      "industry": "B06煤炭开采和洗选业",
+      "symbols": 25
+    },
+    {
+      "industry": "C40仪器仪表制造业",
+      "symbols": 21
+    },
+    {
+      "industry": "M74专业技术服务业",
+      "symbols": 21
+    },
+    {
+      "industry": "R86新闻和出版业",
+      "symbols": 21
+    },
+    {
+      "industry": "N78公共设施管理业",
+      "symbols": 20
+    },
+    {
+      "industry": "C21家具制造业",
+      "symbols": 18
+    },
+    {
+      "industry": "D46水的生产和供应业",
+      "symbols": 18
+    },
+    {
+      "industry": "C28化学纤维制造业",
+      "symbols": 16
+    },
+    {
+      "industry": "E50建筑装饰、装修和其他建筑业",
+      "symbols": 16
+    },
+    {
+      "industry": "I63电信、广播电视和卫星传输服务",
+      "symbols": 16
+    },
+    {
+      "industry": "C24文教、工美、体育和娱乐用品制造业",
+      "symbols": 15
+    },
+    {
+      "industry": "A03畜牧业",
+      "symbols": 14
+    },
+    {
+      "industry": "C25石油、煤炭及其他燃料加工业",
+      "symbols": 14
+    },
+    {
+      "industry": "G56航空运输业",
+      "symbols": 14
+    },
+    {
+      "industry": "C23印刷和记录媒介复制业",
+      "symbols": 13
+    },
+    {
+      "industry": "R87广播、电视、电影和录音制作业",
+      "symbols": 13
+    },
+    {
+      "industry": "J69其他金融业",
+      "symbols": 12
+    },
+    {
+      "industry": "B11开采专业及辅助性活动",
+      "symbols": 11
+    },
+    {
+      "industry": "C20木材加工和木、竹、藤、棕、草制品业",
+      "symbols": 11
+    },
+    {
+      "industry": "C42废弃资源综合利用业",
+      "symbols": 10
+    },
+    {
+      "industry": "Q84卫生",
+      "symbols": 10
+    },
+    {
+      "industry": "C19皮革、毛皮、羽毛及其制品和制鞋业",
+      "symbols": 9
+    },
+    {
+      "industry": "G58多式联运和运输代理业",
+      "symbols": 9
+    },
+    {
+      "industry": "B07石油和天然气开采业",
+      "symbols": 7
+    },
+    {
+      "industry": "C41其他制造业",
+      "symbols": 7
+    },
+    {
+      "industry": "G53铁路运输业",
+      "symbols": 7
+    },
+    {
+      "industry": "P83教育",
+      "symbols": 7
+    },
+    {
+      "industry": "A01农业",
+      "symbols": 6
+    },
+    {
+      "industry": "A04渔业",
+      "symbols": 6
+    },
+    {
+      "industry": "B08黑色金属矿采选业",
+      "symbols": 6
+    },
+    {
+      "industry": "G59装卸搬运和仓储业",
+      "symbols": 6
+    },
+    {
+      "industry": "J68保险业",
+      "symbols": 6
+    },
+    {
+      "industry": "S91综合",
+      "symbols": 6
+    },
+    {
+      "industry": "A05农、林、牧、渔专业及辅助性活动",
+      "symbols": 5
+    },
+    {
+      "industry": "E49建筑安装业",
+      "symbols": 4
+    },
+    {
+      "industry": "G60邮政业",
+      "symbols": 4
+    },
+    {
+      "industry": "H61住宿业",
+      "symbols": 4
+    },
+    {
+      "industry": "E47房屋建筑业",
+      "symbols": 3
+    },
+    {
+      "industry": "H62餐饮业",
+      "symbols": 3
+    },
+    {
+      "industry": "L71租赁业",
+      "symbols": 3
+    },
+    {
+      "industry": "A02林业",
+      "symbols": 2
+    },
+    {
+      "industry": "B10非金属矿采选业",
+      "symbols": 2
+    },
+    {
+      "industry": "C43金属制品、机械和设备修理业",
+      "symbols": 2
+    },
+    {
+      "industry": "M73研究和试验发展",
+      "symbols": 2
+    },
+    {
+      "industry": "M75科技推广和应用服务业",
+      "symbols": 2
+    },
+    {
+      "industry": "R89体育",
+      "symbols": 2
+    },
+    {
+      "industry": "R88文化艺术业",
+      "symbols": 1
+    },
+    {
+      "industry": "专业技术服务业",
+      "symbols": 1
+    },
+    {
+      "industry": "化学原料和化学制品制造业",
+      "symbols": 1
+    }
+  ],
+  "industry_standard": [
+    {
+      "industry_standard": "证监会行业分类",
+      "row_count": 9143901,
+      "industries": 490
+    },
+    {
+      "industry_standard": "Unclassified",
+      "row_count": 1068809,
+      "industries": 1
+    }
+  ],
+  "index_list": [
+    {
+      "index_symbol": "000016.SH",
+      "index_name": "SSE 50",
+      "row_count": 188687,
+      "symbols": 134,
+      "start_date": "2010-01-04",
+      "end_date": "2026-07-21",
+      "snapshots": 205
+    },
+    {
+      "index_symbol": "000300.SH",
+      "index_name": "CSI 300",
+      "row_count": 1063143,
+      "symbols": 649,
+      "start_date": "2010-01-04",
+      "end_date": "2026-07-21",
+      "snapshots": 205
+    },
+    {
+      "index_symbol": "000905.SH",
+      "index_name": "CSI 500",
+      "row_count": 1683549,
+      "symbols": 1244,
+      "start_date": "2010-01-04",
+      "end_date": "2026-07-21",
+      "snapshots": 205
+    }
+  ],
+  "index_2025_last": [
+    {
+      "index_symbol": "000016.SH",
+      "index_name": "SSE 50",
+      "constituents": 44
+    },
+    {
+      "index_symbol": "000300.SH",
+      "index_name": "CSI 300",
+      "constituents": 246
+    },
+    {
+      "index_symbol": "000905.SH",
+      "index_name": "CSI 500",
+      "constituents": 369
+    }
+  ]
+}
