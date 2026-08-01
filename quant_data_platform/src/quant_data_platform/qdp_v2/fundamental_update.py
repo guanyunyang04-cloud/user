@@ -307,8 +307,8 @@ def download(
         return state
     target = pd.Timestamp(target_date).strftime("%Y-%m-%d")
     periods = _quarter_ends(target)
-    token = _resolve_tushare_token()
-    client = _TushareClient(token)
+    token = _resolve_tushare_token(workspace)
+    client = _TushareClient(token, workspace_root=workspace)
     runtime = _runtime(workspace)
     raw_dir = runtime / "raw"
     raw_dir.mkdir(parents=True, exist_ok=True)

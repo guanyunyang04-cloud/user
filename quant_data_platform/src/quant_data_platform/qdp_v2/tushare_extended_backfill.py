@@ -43,6 +43,13 @@ from quant_data_platform.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
+from quant_data_platform.qdp_v2.provider_credentials import (
+    ProviderCredentialError,
+    resolve_tushare_api_url,
+    resolve_tushare_rate_limit,
+    tushare_credential_values,
+    tushare_provider_status,
+)
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 UPDATE_ID = "tushare_extended_backfill_v1"
@@ -112,13 +119,13 @@ class TushareExtendedBackfillError(RuntimeError):
     pass
 
 
-def _resolve_tushare_api_url() -> str:
-    value = str(
-        os.environ.get("QDP_TUSHARE_API_URL") or os.environ.get("TUSHARE_API_URL") or ""
-    ).strip()
-    if not value:
-        raise TushareExtendedBackfillError("tushare_api_url_missing")
-    return value
+def _resolve_tushare_api_url(
+    workspace_root: str | Path | None = None,
+) -> str:
+    try:
+        return resolve_tushare_api_url(workspace_root)
+    except ProviderCredentialError as exc:
+        raise TushareExtendedBackfillError(str(exc)) from exc
 
 
 class ResilientTushareClient:
@@ -130,15 +137,18 @@ class ResilientTushareClient:
         *,
         rpm: int = MAX_REQUESTS_PER_MINUTE,
         timeout: int = 60,
+        workspace_root: str | Path | None = None,
     ) -> None:
         secret = str(token or "").strip()
         if not secret:
             raise TushareExtendedBackfillError("tushare_token_missing")
         self._token = secret
         self._timeout = int(timeout)
-        self._limiter = _MinuteLimiter(rpm)
+        self._limiter = _MinuteLimiter(
+            resolve_tushare_rate_limit(rpm, workspace_root=workspace_root)
+        )
         self._local = threading.local()
-        self._url = _resolve_tushare_api_url()
+        self._url = _resolve_tushare_api_url(workspace_root)
 
     def _session(self) -> requests.Session:
         session = getattr(self._local, "session", None)
@@ -272,15 +282,7 @@ def _state_path(workspace: Path) -> Path:
 
 
 def _credential_values() -> tuple[str, ...]:
-    return tuple(
-        value
-        for value in (
-            os.environ.get("QDP_TUSHARE_PROXY_TOKEN", "").strip(),
-            os.environ.get("QDP_TUSHARE_TOKEN", "").strip(),
-            os.environ.get("TUSHARE_TOKEN", "").strip(),
-        )
-        if value
-    )
+    return tushare_credential_values()
 
 
 def _assert_credential_free(payload: Any) -> None:
@@ -425,10 +427,12 @@ def _probe_params(spec: EndpointSpec, date: str) -> dict[str, Any]:
 
 def probe(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
-    token = _resolve_tushare_token()
+    token = _resolve_tushare_token(workspace)
     if not token:
         raise TushareExtendedBackfillError("tushare_token_required")
-    client = ResilientTushareClient(token, rpm=MAX_REQUESTS_PER_MINUTE)
+    client = ResilientTushareClient(
+        token, rpm=MAX_REQUESTS_PER_MINUTE, workspace_root=workspace
+    )
     previous = dict(
         dict(_read_state(workspace).get("probe", {}) or {}).get("endpoints", {}) or {}
     )
@@ -706,10 +710,12 @@ def _download_inventory(
         raise TushareExtendedBackfillError(
             f"mandatory_source_unavailable:{','.join(unavailable_mandatory)}"
         )
-    token = _resolve_tushare_token()
+    token = _resolve_tushare_token(workspace)
     if not token:
         raise TushareExtendedBackfillError("tushare_token_required")
-    client = ResilientTushareClient(token, rpm=MAX_REQUESTS_PER_MINUTE)
+    client = ResilientTushareClient(
+        token, rpm=MAX_REQUESTS_PER_MINUTE, workspace_root=workspace
+    )
     open_dates = _open_dates(workspace)
     tasks: list[tuple[EndpointSpec, str]] = []
     skipped: dict[str, Any] = {}
@@ -1411,7 +1417,9 @@ def run_pending(
 
 
 def _credential_file_hits(workspace: Path) -> list[str]:
-    secrets = tuple(value.encode() for value in _credential_values() if value)
+    secrets = tuple(
+        value.encode() for value in tushare_credential_values(workspace) if value
+    )
     if not secrets:
         return []
     candidates = [Path(__file__).resolve()]
@@ -1537,6 +1545,7 @@ def audit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
             workspace, spec, str(record["dataset_id"])
         )
     credential_hits = _credential_file_hits(workspace)
+    provider_profile = tushare_provider_status(workspace)
     query_granularity: dict[str, str] = {}
     for spec in SPECS.values():
         record = dict(installed.get(spec.domain, {}) or {})
@@ -1607,6 +1616,7 @@ def audit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
             for record in physical_domains.values()
         ),
         "credential_not_persisted": not credential_hits,
+        "credential_not_persisted_outside_private_profile": not credential_hits,
         "training_not_performed": state.get("training_performed") is False,
     }
     status_value = "ok" if all(checks.values()) else "error"
@@ -1617,6 +1627,7 @@ def audit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         "domains": installed,
         "physical_domains": physical_domains,
         "credential_file_hits": credential_hits,
+        "provider_profile": provider_profile,
         "query_granularity": query_granularity,
         "legacy_year_range_cache": legacy_year_cache,
     }
@@ -1628,7 +1639,8 @@ def audit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
 
 
 def status(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
-    state = _read_state(_workspace(workspace_root))
+    workspace = _workspace(workspace_root)
+    state = _read_state(workspace)
     probe_state = dict(state.get("probe", {}) or {})
     return {
         "update_id": UPDATE_ID,
@@ -1640,6 +1652,7 @@ def status(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         },
         "download_progress": state.get("download_progress", {}),
         "installed_domains": state.get("installed_domains", {}),
+        "provider_profile": tushare_provider_status(workspace),
         "training_performed": state.get("training_performed", False),
     }
 
@@ -1694,19 +1707,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    workspace = str(args.workspace_root or "") or None
     if args.credential_stdin:
         token = getpass.getpass("Token: ").strip()
         if not token:
             raise TushareExtendedBackfillError("tushare_token_required")
         os.environ["QDP_TUSHARE_PROXY_TOKEN"] = token
-        if not (
-            os.environ.get("QDP_TUSHARE_API_URL") or os.environ.get("TUSHARE_API_URL")
-        ):
+        os.environ["QDP_TUSHARE_PREFER_ENV"] = "1"
+        try:
+            _resolve_tushare_api_url(workspace)
+        except TushareExtendedBackfillError:
             api_url = getpass.getpass("API URL: ").strip()
             if not api_url:
                 raise TushareExtendedBackfillError("tushare_api_url_missing")
             os.environ["QDP_TUSHARE_API_URL"] = api_url
-    workspace = str(args.workspace_root or "") or None
     domains = str(args.domains or "") or None
     if args.probe:
         payload = probe(workspace_root=workspace)

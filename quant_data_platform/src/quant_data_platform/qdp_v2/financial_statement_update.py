@@ -287,7 +287,7 @@ def download(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         and state.get("source_schema_version") == SOURCE_SCHEMA_VERSION
     ):
         return state
-    client = _TushareClient(_resolve_tushare_token())
+    client = _TushareClient(_resolve_tushare_token(workspace), workspace_root=workspace)
     periods = _report_periods()
     completed = dict(state.get("completed", {}) or {})
     discarded_future_rows = int(state.get("provider_future_rows_discarded", 0) or 0)

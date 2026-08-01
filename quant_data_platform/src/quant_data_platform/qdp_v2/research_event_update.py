@@ -52,6 +52,7 @@ from quant_data_platform.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
+from quant_data_platform.qdp_v2.provider_credentials import tushare_credential_values
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 UPDATE_ID = "research_report_rc_backfill_v1"
@@ -191,15 +192,7 @@ def _read_state(workspace: Path) -> dict[str, Any]:
 
 
 def _credential_values() -> tuple[str, ...]:
-    return tuple(
-        value
-        for value in (
-            os.environ.get("QDP_TUSHARE_PROXY_TOKEN", "").strip(),
-            os.environ.get("QDP_TUSHARE_TOKEN", "").strip(),
-            os.environ.get("TUSHARE_TOKEN", "").strip(),
-        )
-        if value
-    )
+    return tushare_credential_values()
 
 
 def _assert_credential_free(payload: Any) -> None:
@@ -471,10 +464,10 @@ def download_tushare_reports(
 ) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     state = _read_state(workspace)
-    token = _resolve_tushare_token()
+    token = _resolve_tushare_token(workspace)
     if not token:
         raise ResearchEventUpdateError("tushare_token_required")
-    client = _TushareClient(token)
+    client = _TushareClient(token, workspace_root=workspace)
     years = list(range(2010, 2026))
     year_state: dict[str, Any] = {}
     pending: deque[int] = deque()

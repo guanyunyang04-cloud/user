@@ -395,8 +395,8 @@ def run_pending(
     inventory = pd.read_parquet(state["inventory_path"])
     inventory["month"] = inventory["trade_date"].astype(str).str[:7]
     reference_path = Path(state["daily_reference_path"])
-    token = _resolve_tushare_token()
-    client = _TushareClient(token)
+    token = _resolve_tushare_token(workspace)
+    client = _TushareClient(token, workspace_root=workspace)
     parts = _runtime(workspace) / "parts"
     parts.mkdir(parents=True, exist_ok=True)
     preflight = dict(state.get("preflight", {}) or {})

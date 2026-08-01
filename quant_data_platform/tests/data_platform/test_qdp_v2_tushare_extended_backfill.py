@@ -8,6 +8,9 @@ import pyarrow.parquet as pq
 import pytest
 from quant_data_platform.domains.contracts import DataDomain, normalize_domain
 from quant_data_platform.qdp_v2 import tushare_extended_backfill as extended
+from quant_data_platform.qdp_v2.provider_credentials import (
+    save_tushare_provider_profile,
+)
 
 
 class FakeClient:
@@ -40,16 +43,32 @@ def test_new_domains_are_registered() -> None:
     assert normalize_domain("moneyflow") == DataDomain.MONEYFLOW_RAW
 
 
-def test_api_url_must_come_from_environment(monkeypatch) -> None:
+def test_api_url_uses_private_profile_and_allows_environment_override(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.delenv("QDP_TUSHARE_API_URL", raising=False)
     monkeypatch.delenv("TUSHARE_API_URL", raising=False)
+    monkeypatch.delenv("QDP_TUSHARE_PREFER_ENV", raising=False)
     with pytest.raises(
         extended.TushareExtendedBackfillError, match="tushare_api_url_missing"
     ):
-        extended._resolve_tushare_api_url()
+        extended._resolve_tushare_api_url(tmp_path)
+
+    save_tushare_provider_profile(
+        workspace_root=tmp_path,
+        token="unit-secret",
+        api_url="https://profile.example/api",
+        plan="unit",
+        expires_at="2026-08-06T17:48:00+08:00",
+        rate_limit_per_minute=150,
+    )
+    assert extended._resolve_tushare_api_url(tmp_path) == (
+        "https://profile.example/api"
+    )
 
     monkeypatch.setenv("QDP_TUSHARE_API_URL", "https://example.invalid/api")
-    assert extended._resolve_tushare_api_url() == "https://example.invalid/api"
+    monkeypatch.setenv("QDP_TUSHARE_PREFER_ENV", "1")
+    assert extended._resolve_tushare_api_url(tmp_path) == "https://example.invalid/api"
 
 
 def test_year_range_task_never_uses_2026() -> None:

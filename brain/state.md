@@ -56,8 +56,13 @@ missing intraday history is not an eligibility rule.
   EPS, leverage, liquidity, turnover, and operating-cash-flow-per-share
   fields. Absolute revenue/profit was left null where no safely aligned
   statement source was fetched.
-- The source credential was process-local and was not written to code,
-  manifests, logs, or Brain.
+- The active Tushare-compatible credential is now intentionally persisted only
+  in the Git-ignored QDP private provider profile. The profile also records the
+  compatible API URL, gzip transport, SDK override, MCP URL template, plan,
+  expiry, and provider rate limit. The active local profile takes precedence
+  over legacy environment variables; `QDP_TUSHARE_PREFER_ENV=1` is required
+  for an explicit process-local override. Credentials remain prohibited from
+  datasets, manifests, runtime state, logs, tracked code, and Brain.
 
 The extended Tushare-compatible backfill is complete for 2010-2025 (2010 is
 burn-in only): `stk_factor_pro_raw` has 9,795,055 rows, `margin_market` 8,361,
@@ -66,7 +71,7 @@ explicitly source-unavailable and remains unknown rather than being filled as
 false. Stock-level endpoints use date batching; legacy truncated annual caches
 remain evidence only and are excluded from the prepared inventory. The active
 domains pass primary-key, PIT-date, nonnegative-field, cross-year schema,
-2026-zero-read, and credential-persistence audits. All 261 technical fields
+2026-zero-read, and credential-isolation audits. All 261 technical fields
 are preserved; sampled HFQ consistency failed and HFQ/QFQ-dependent fields are
 not formal candidates. Moneyflow `net_mf_vol` and `net_mf_amount` retain their
 provider aggregate values as diagnostic-only because they are not stably

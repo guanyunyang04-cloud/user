@@ -32,6 +32,12 @@ from quant_data_platform.qdp_v2.manifest import (
     resolve_manifest_path,
     utc_now,
 )
+from quant_data_platform.qdp_v2.provider_credentials import (
+    ProviderCredentialError,
+    resolve_tushare_api_url,
+    resolve_tushare_rate_limit,
+    resolve_tushare_token,
+)
 from quant_data_platform.qdp_v2.repair import (
     _sql_literal,
     replace_active_table_from_parquet,
@@ -57,7 +63,6 @@ INDEX_SPECS = (
     ("000300.SH", "CSI 300", "hs300"),
     ("000905.SH", "CSI 500", "zz500"),
 )
-TUSHARE_API_URL = "https://ts.gyzcloud.top/api"
 TUSHARE_MAX_RPM = 96
 TUSHARE_WORKERS = 3
 BAOSTOCK_WORKERS = 4
@@ -96,12 +101,21 @@ class _MinuteLimiter:
 
 
 class _TushareClient:
-    def __init__(self, token: str, *, rpm: int = TUSHARE_MAX_RPM) -> None:
+    def __init__(
+        self,
+        token: str,
+        *,
+        rpm: int = TUSHARE_MAX_RPM,
+        workspace_root: str | Path | None = None,
+    ) -> None:
         secret = str(token or "").strip()
         if not secret:
             raise AuxiliaryUpdateError("tushare_token_missing")
         self._token = secret
-        self._limiter = _MinuteLimiter(rpm)
+        self._url = _resolve_tushare_api_url(workspace_root)
+        self._limiter = _MinuteLimiter(
+            resolve_tushare_rate_limit(rpm, workspace_root=workspace_root)
+        )
 
     def fetch(
         self,
@@ -116,7 +130,7 @@ class _TushareClient:
             self._limiter.wait()
             try:
                 response = requests.post(
-                    TUSHARE_API_URL,
+                    self._url,
                     json={
                         "api_name": str(api_name),
                         "token": self._token,
@@ -144,13 +158,15 @@ class _TushareClient:
         raise AuxiliaryUpdateError(f"tushare_request_failed:{api_name}:{last_error}")
 
 
-def _resolve_tushare_token() -> str:
-    return str(
-        os.environ.get("QDP_TUSHARE_PROXY_TOKEN")
-        or os.environ.get("QDP_TUSHARE_TOKEN")
-        or os.environ.get("TUSHARE_TOKEN")
-        or ""
-    ).strip()
+def _resolve_tushare_token(workspace_root: str | Path | None = None) -> str:
+    return resolve_tushare_token(workspace_root)
+
+
+def _resolve_tushare_api_url(workspace_root: str | Path | None = None) -> str:
+    try:
+        return resolve_tushare_api_url(workspace_root)
+    except ProviderCredentialError as exc:
+        raise AuxiliaryUpdateError(str(exc)) from exc
 
 
 def _context(
@@ -1633,12 +1649,12 @@ def _normalize_name_intervals(
 
 
 def _fetch_name_change_parts(ctx: AuxiliaryContext) -> list[Path]:
-    token = _resolve_tushare_token()
+    token = _resolve_tushare_token(ctx.workspace)
     if not token:
         raise AuxiliaryUpdateError("tushare_token_required_for_name_change_repair")
     output_dir = ctx.runtime / "name_change_parts"
     output_dir.mkdir(parents=True, exist_ok=True)
-    client = _TushareClient(token)
+    client = _TushareClient(token, workspace_root=ctx.workspace)
     symbols = _current_symbols(ctx)
 
     def fetch_one(symbol: str) -> Path:
@@ -2011,7 +2027,7 @@ def _fetch_daily_basic_parts(
     ctx: AuxiliaryContext,
     dates: Sequence[str],
 ) -> list[Path]:
-    token = _resolve_tushare_token()
+    token = _resolve_tushare_token(ctx.workspace)
     if not token:
         raise AuxiliaryUpdateError(
             "tushare_token_required_for_historical_share_capital_repair"
@@ -2019,7 +2035,7 @@ def _fetch_daily_basic_parts(
     output_dir = ctx.runtime / "daily_basic_parts"
     output_dir.mkdir(parents=True, exist_ok=True)
     unique_dates = sorted(set(str(item) for item in dates))
-    client = _TushareClient(token)
+    client = _TushareClient(token, workspace_root=ctx.workspace)
 
     def fetch_one(trade_date: str) -> Path:
         path = output_dir / f"daily_basic_{trade_date.replace('-', '')}.parquet"
@@ -2905,12 +2921,12 @@ def _normalize_dividend(frame: pd.DataFrame, *, target_date: str) -> pd.DataFram
 
 
 def _fetch_dividend_parts(ctx: AuxiliaryContext) -> list[Path]:
-    token = _resolve_tushare_token()
+    token = _resolve_tushare_token(ctx.workspace)
     if not token:
         raise AuxiliaryUpdateError("tushare_token_required_for_corporate_action_repair")
     output_dir = ctx.runtime / "dividend_parts"
     output_dir.mkdir(parents=True, exist_ok=True)
-    client = _TushareClient(token)
+    client = _TushareClient(token, workspace_root=ctx.workspace)
     symbols = _current_symbols(ctx)
 
     def fetch_one(symbol: str) -> Path:
