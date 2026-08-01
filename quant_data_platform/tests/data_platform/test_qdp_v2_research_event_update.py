@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
+
+import quant_data_platform.qdp_v2.research_event_update as research_update
 from quant_data_platform.qdp_v2.research_event_update import (
+    ResearchEventUpdateError,
     _announcement_raw_source_paths,
     _eastmoney_announcement_path,
     _merge_reports,
@@ -132,6 +137,105 @@ def test_report_source_coverage_distinguishes_empty_and_partial_years() -> None:
     )
     assert partial["tushare_source_coverage_status"] == "partial_year_span"
     assert partial["tushare_source_unavailable_is_not_zero_reports"]
+
+
+def test_report_source_coverage_uses_closed_daily_ledger() -> None:
+    result = _report_year_source_coverage(
+        2021,
+        {
+            "raw_row_count": 12,
+            "earliest_report_date": "2021-02-01",
+            "latest_report_date": "2021-12-30",
+        },
+        {
+            "requested_date_count": 365,
+            "terminal_date_count": 365,
+            "failed_date_count": 0,
+            "pending_date_count": 0,
+        },
+    )
+
+    assert result["tushare_source_coverage_status"] == "complete_daily_task_ledger"
+    assert not result["tushare_source_unavailable_is_not_zero_reports"]
+
+
+def test_report_daily_download_pages_confirms_empty_and_resumes_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    requested_dates = ("2024-01-01", "2024-01-02", "2024-01-03")
+    calls: Counter[tuple[str, int]] = Counter()
+    fail_once = {"enabled": True}
+
+    class FakeClient:
+        def __init__(self, token, workspace_root):
+            assert token == "fixture-token"
+            assert workspace_root == tmp_path
+
+        def fetch(self, api_name, *, params, fields):
+            assert api_name == "report_rc"
+            assert int(params["limit"]) == 3_000
+            report_date = pd.to_datetime(params["start_date"]).strftime("%Y-%m-%d")
+            assert params["start_date"] == params["end_date"]
+            offset = int(params["offset"])
+            calls[(report_date, offset)] += 1
+            if report_date == "2024-01-01":
+                count = 3_000 if offset == 0 else 7
+                return pd.DataFrame({"ts_code": ["000001.SZ"] * count})
+            if report_date == "2024-01-02":
+                return pd.DataFrame(columns=["ts_code"])
+            if fail_once["enabled"]:
+                raise RuntimeError("transient fixture failure")
+            return pd.DataFrame({"ts_code": ["000003.SZ"]})
+
+    monkeypatch.setattr(research_update, "_report_request_dates", lambda: requested_dates)
+    monkeypatch.setattr(
+        research_update, "_resolve_tushare_token", lambda workspace: "fixture-token"
+    )
+    monkeypatch.setattr(research_update, "_TushareClient", FakeClient)
+
+    with pytest.raises(ResearchEventUpdateError, match="daily_tasks_incomplete:1"):
+        research_update.download_tushare_reports(
+            workspace_root=tmp_path,
+            max_workers=1,
+        )
+
+    assert calls[("2024-01-01", 0)] == 1
+    assert calls[("2024-01-01", 3_000)] == 1
+    assert calls[("2024-01-02", 0)] == 2
+    assert calls[("2024-01-03", 0)] == 1
+
+    fail_once["enabled"] = False
+    result = research_update.download_tushare_reports(
+        workspace_root=tmp_path,
+        max_workers=1,
+    )
+
+    assert result["status"] == "completed"
+    assert calls[("2024-01-01", 0)] == 1
+    assert calls[("2024-01-02", 0)] == 2
+    assert calls[("2024-01-03", 0)] == 2
+    assert result["days"]["2024-01-02"]["status"] == "confirmed_empty"
+    assert all(not value.startswith("2026-") for value in requested_dates)
+
+
+def test_report_state_atomic_replace_retries_transient_windows_lock(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls = {"count": 0}
+
+    def flaky_write(path, payload):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            raise PermissionError("fixture lock")
+
+    monkeypatch.setattr(research_update, "atomic_write_json", flaky_write)
+    monkeypatch.setattr(research_update.time, "sleep", lambda seconds: None)
+
+    research_update._write_state(tmp_path, {"status": "downloading"})
+
+    assert calls["count"] == 3
 
 
 def test_provider_json_cache_serializes_mixed_object_columns() -> None:

@@ -3,9 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from quant_data_platform.qdp_v2.financial_statement_update import (
+    BALANCE_METRICS,
     CASH_FLOW_METRICS,
     START_DATE,
     STATEMENT_SPECS,
+    V2_STATEMENT_SPECS,
     _in_scope_provider_rows,
     _normalize_statement_part,
     _report_periods,
@@ -140,3 +142,64 @@ def test_cashflow_uses_provider_employee_and_tax_payment_fields() -> None:
 
     assert result.loc[0, "payroll_paid"] == 12.5
     assert result.loc[0, "taxes_paid"] == 3.5
+
+
+def test_balance_v2_maps_totals_without_overwriting_split_fields() -> None:
+    assert BALANCE_METRICS["oth_receiv"] == "other_receivables"
+    assert BALANCE_METRICS["oth_rcv_total"] == "other_receivables_total"
+    assert BALANCE_METRICS["oth_payable"] == "other_payables"
+    assert BALANCE_METRICS["oth_pay_total"] == "other_payables_total"
+    assert BALANCE_METRICS["adv_receipts"] == "advances_from_customers"
+    assert BALANCE_METRICS["contract_liab"] == "contract_liabilities"
+    assert [spec.name for spec in V2_STATEMENT_SPECS] == ["balance_sheet"]
+
+
+def test_balance_v2_combination_and_null_states_are_explicit() -> None:
+    spec = STATEMENT_SPECS[1]
+    row_count = 5
+    raw = pd.DataFrame(
+        {
+            **{column: [None] * row_count for column in spec.fields},
+            "ts_code": ["000001.SZ"] * row_count,
+            "ann_date": ["20240102"] * row_count,
+            "f_ann_date": ["20240102"] * row_count,
+            "end_date": ["20231231"] * row_count,
+            "report_type": [str(value) for value in range(1, row_count + 1)],
+            "comp_type": ["1", "1", "1", "1", "2"],
+            "end_type": ["4"] * row_count,
+            "adv_receipts": [10.0, 10.0, None, None, None],
+            "contract_liab": [20.0, None, 20.0, None, None],
+            "oth_rcv_total": [30.0, None, None, None, None],
+            "oth_pay_total": [40.0, None, None, None, None],
+            "update_flag": ["1"] * row_count,
+        }
+    )
+    open_dates = np.asarray(
+        pd.to_datetime(["2024-01-02", "2024-01-03"]),
+        dtype="datetime64[ns]",
+    )
+
+    result = _normalize_statement_part(
+        raw,
+        spec=spec,
+        identity_symbols={"000001.SZ"},
+        open_dates=open_dates,
+    )
+
+    assert result["customer_advances_and_contract_liabilities"].tolist()[:3] == [
+        30.0,
+        10.0,
+        20.0,
+    ]
+    assert pd.isna(result.loc[3, "customer_advances_and_contract_liabilities"])
+    assert result["customer_liability_field_state"].tolist() == [
+        "both_observed",
+        "advances_only",
+        "contract_only",
+        "neither_observed",
+        "neither_observed",
+    ]
+    assert result.loc[0, "other_receivables_total_field_state"] == "observed"
+    assert result.loc[3, "other_receivables_total_field_state"] == "unknown"
+    assert result.loc[4, "other_receivables_total_field_state"] == "not_applicable"
+    assert result.loc[4, "contract_liabilities_field_state"] == "not_applicable"

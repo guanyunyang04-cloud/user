@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import shutil
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,8 +48,9 @@ from quant_data_platform.qdp_v2.research_event_update import (
 )
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
-UPDATE_ID = "financial_statement_quarterly_pit_v1"
-SOURCE_SCHEMA_VERSION = 2
+UPDATE_ID = "financial_statement_quarterly_pit_v2"
+LEGACY_UPDATE_ID = "financial_statement_quarterly_pit_v1"
+SOURCE_SCHEMA_VERSION = 3
 START_DATE = "2010-01-01"
 END_DATE = "2025-12-31"
 MAX_REPORT_PERIOD = "2025-09-30"
@@ -105,6 +107,7 @@ BALANCE_METRICS = {
     "notes_receiv": "notes_receivable",
     "accounts_receiv": "accounts_receivable",
     "oth_receiv": "other_receivables",
+    "oth_rcv_total": "other_receivables_total",
     "prepayment": "prepayments",
     "inventories": "inventory",
     "total_cur_assets": "current_assets",
@@ -118,9 +121,11 @@ BALANCE_METRICS = {
     "notes_payable": "notes_payable",
     "acct_payable": "accounts_payable",
     "adv_receipts": "advances_from_customers",
+    "contract_liab": "contract_liabilities",
     "payroll_payable": "employee_compensation_payable",
     "taxes_payable": "taxes_payable",
     "oth_payable": "other_payables",
+    "oth_pay_total": "other_payables_total",
     "total_cur_liab": "current_liabilities",
     "lt_borr": "long_term_borrowings",
     "bond_payable": "bonds_payable",
@@ -180,6 +185,16 @@ STATEMENT_SPECS = (
         fields=COMMON_FIELDS + tuple(CASH_FLOW_METRICS) + ("update_flag",),
         metric_map=CASH_FLOW_METRICS,
     ),
+)
+V2_STATEMENT_SPECS = tuple(
+    spec for spec in STATEMENT_SPECS if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+)
+BALANCE_DERIVED_COLUMNS = (
+    "customer_advances_and_contract_liabilities",
+    "customer_liability_field_state",
+    "other_receivables_total_field_state",
+    "other_payables_total_field_state",
+    "contract_liabilities_field_state",
 )
 
 COMMON_OUTPUT_COLUMNS = (
@@ -247,7 +262,16 @@ def _read_state(workspace: Path) -> dict[str, Any]:
 def _write_state(workspace: Path, state: Mapping[str, Any]) -> None:
     payload = {**dict(state), "updated_at": utc_now()}
     _assert_credential_free(payload)
-    atomic_write_json(_state_path(workspace), payload)
+    last_error: PermissionError | None = None
+    for attempt in range(6):
+        try:
+            atomic_write_json(_state_path(workspace), payload)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.10 * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 
 def _report_periods() -> list[str]:
@@ -290,9 +314,22 @@ def download(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     client = _TushareClient(_resolve_tushare_token(workspace), workspace_root=workspace)
     periods = _report_periods()
     completed = dict(state.get("completed", {}) or {})
+    if "input_dataset_ids" not in state:
+        state["input_dataset_ids"] = {
+            domain: dataset_id
+            for domain, dataset_id in active_dataset_map(
+                read_active_manifest(qdp_v2_root(workspace))
+            ).items()
+            if domain
+            in {
+                DataDomain.INCOME_STATEMENT_QUARTERLY,
+                DataDomain.BALANCE_SHEET_QUARTERLY,
+                DataDomain.CASH_FLOW_STATEMENT_QUARTERLY,
+            }
+        }
     discarded_future_rows = int(state.get("provider_future_rows_discarded", 0) or 0)
     completed_calls = 0
-    for spec in STATEMENT_SPECS:
+    for spec in V2_STATEMENT_SPECS:
         spec_completed = dict(completed.get(spec.name, {}) or {})
         for period in periods:
             path = _raw_path(workspace, spec, period)
@@ -336,7 +373,7 @@ def download(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
                     json.dumps(
                         {
                             "completed_calls": completed_calls,
-                            "total_calls": len(periods) * len(STATEMENT_SPECS),
+                            "total_calls": len(periods) * len(V2_STATEMENT_SPECS),
                         }
                     ),
                     flush=True,
@@ -355,6 +392,22 @@ def _hash_rows(frame: pd.DataFrame, columns: Sequence[str]) -> pd.Series:
     return hashed.map(lambda value: f"{int(value):016x}")
 
 
+def _balance_component_state(
+    value: pd.Series,
+    company_type: pd.Series,
+) -> pd.Series:
+    special_structure = company_type.astype(str).isin({"2", "3", "4"})
+    return pd.Series(
+        np.select(
+            [value.notna(), special_structure],
+            ["observed", "not_applicable"],
+            default="unknown",
+        ),
+        index=value.index,
+        dtype="string",
+    )
+
+
 def _normalize_statement_part(
     raw: pd.DataFrame,
     *,
@@ -363,9 +416,15 @@ def _normalize_statement_part(
     open_dates: np.ndarray,
 ) -> pd.DataFrame:
     metric_columns = list(spec.metric_map.values())
+    derived_columns = (
+        list(BALANCE_DERIVED_COLUMNS)
+        if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+        else []
+    )
     output_columns = [
         *COMMON_OUTPUT_COLUMNS,
         *metric_columns,
+        *derived_columns,
         "_completeness",
         "_metric_hash",
         "_source_row_hash",
@@ -402,6 +461,25 @@ def _normalize_statement_part(
     )
     for provider, canonical in spec.metric_map.items():
         data[canonical] = pd.to_numeric(data[provider], errors="coerce")
+    if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY:
+        advances = data["advances_from_customers"]
+        contract = data["contract_liabilities"]
+        data["customer_advances_and_contract_liabilities"] = pd.concat(
+            [advances, contract], axis=1
+        ).sum(axis=1, min_count=1)
+        data["customer_liability_field_state"] = np.select(
+            [advances.notna() & contract.notna(), advances.notna(), contract.notna()],
+            ["both_observed", "advances_only", "contract_only"],
+            default="neither_observed",
+        )
+        for column in (
+            "other_receivables_total",
+            "other_payables_total",
+            "contract_liabilities",
+        ):
+            data[f"{column}_field_state"] = _balance_component_state(
+                data[column], data["company_type"]
+            )
     valid = (
         data["symbol"].isin(identity_symbols)
         & publish.between(START_DATE, END_DATE)
@@ -427,6 +505,7 @@ def _prepare_statement(
     spec: StatementSpec,
     identity_symbols: set[str],
     open_dates: np.ndarray,
+    prepared_filename: str | None = None,
 ) -> dict[str, Any]:
     normalized_paths: list[Path] = []
     normalized_rows = 0
@@ -450,13 +529,23 @@ def _prepare_statement(
             _write_parquet(normalized, output_path)
         normalized_rows += int(pq.ParquetFile(output_path).metadata.num_rows)
         normalized_paths.append(output_path)
-    prepared = _runtime(workspace) / "prepared" / f"{spec.domain}.parquet"
+    prepared = (
+        _runtime(workspace)
+        / "prepared"
+        / (prepared_filename or f"{spec.domain}.parquet")
+    )
     prepared.parent.mkdir(parents=True, exist_ok=True)
     temporary = prepared.with_suffix(".tmp.parquet")
     metrics = list(spec.metric_map.values())
+    derived = (
+        list(BALANCE_DERIVED_COLUMNS)
+        if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+        else []
+    )
     selected = [
         *COMMON_OUTPUT_COLUMNS,
         *metrics,
+        *derived,
         "source_duplicate_count",
         "source_conflict",
         "lag_policy",
@@ -510,6 +599,146 @@ def _prepare_statement(
     }
 
 
+def _dataset_paths(
+    workspace: Path,
+    *,
+    domain: str,
+    dataset_id: str,
+) -> list[Path]:
+    root = qdp_v2_root(workspace)
+    manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
+    if manifest_path is None:
+        raise FinancialStatementUpdateError(
+            f"statement_input_manifest_missing:{domain}:{dataset_id}"
+        )
+    manifest = read_dataset_manifest(manifest_path)
+    paths = [resolve_manifest_path(item.path, root=root) for item in manifest.shards]
+    if not paths or any(not path.is_file() for path in paths):
+        raise FinancialStatementUpdateError(
+            f"statement_input_shard_missing:{domain}:{dataset_id}"
+        )
+    return paths
+
+
+def _align_balance_to_active(
+    workspace: Path,
+    *,
+    refreshed: Path,
+    input_dataset_id: str,
+) -> dict[str, Any]:
+    domain = DataDomain.BALANCE_SHEET_QUARTERLY
+    base_paths = _dataset_paths(
+        workspace,
+        domain=domain,
+        dataset_id=input_dataset_id,
+    )
+    output = _runtime(workspace) / "prepared" / f"{domain}.parquet"
+    temporary = output.with_suffix(".tmp.parquet")
+    key_sql = ",".join(f'"{column}"' for column in PRIMARY_KEY)
+    appended_columns = (
+        "other_receivables_total",
+        "other_payables_total",
+        "contract_liabilities",
+        *BALANCE_DERIVED_COLUMNS,
+    )
+    appended_expressions = []
+    for column in appended_columns:
+        if column == "customer_liability_field_state":
+            expression = (
+                f"coalesce(r.\"{column}\",'neither_observed') AS \"{column}\""
+            )
+        elif column.endswith("_field_state"):
+            expression = (
+                f"coalesce(r.\"{column}\",CASE WHEN b.company_type IN ('2','3','4') "
+                f"THEN 'not_applicable' ELSE 'unknown' END) AS \"{column}\""
+            )
+        else:
+            expression = f'r."{column}"'
+        appended_expressions.append(expression)
+    appended_select = ",".join(appended_expressions)
+    base_scan = f"read_parquet([{_sql_paths(base_paths)}], union_by_name=true)"
+    refreshed_scan = (
+        f"read_parquet('{str(refreshed).replace(chr(39), chr(39) * 2)}')"
+    )
+    connection = duckdb.connect()
+    try:
+        base_columns = [
+            str(row[0])
+            for row in connection.execute(f"DESCRIBE SELECT * FROM {base_scan}").fetchall()
+        ]
+        base_select = ",".join(f'"{column}"' for column in base_columns)
+        connection.execute(
+            f"""
+            COPY (
+              SELECT b.*,{appended_select}
+              FROM {base_scan} b
+              LEFT JOIN {refreshed_scan} r USING({key_sql})
+              ORDER BY b.publish_date,b.symbol,b.report_date,b.report_type,
+                       b.company_type,b.period_type
+            ) TO '{str(temporary).replace(chr(39), chr(39) * 2)}'
+              (FORMAT PARQUET, COMPRESSION ZSTD)
+            """
+        )
+        base_count = int(connection.execute(f"SELECT count(*) FROM {base_scan}").fetchone()[0])
+        output_scan = (
+            f"read_parquet('{str(temporary).replace(chr(39), chr(39) * 2)}')"
+        )
+        output_count = int(
+            connection.execute(f"SELECT count(*) FROM {output_scan}").fetchone()[0]
+        )
+        unmatched = int(
+            connection.execute(
+                f"""
+                SELECT count(*)
+                FROM {base_scan} b
+                LEFT JOIN (
+                  SELECT {key_sql},true AS refreshed_present FROM {refreshed_scan}
+                ) r USING({key_sql})
+                WHERE NOT coalesce(r.refreshed_present,false)
+                """
+            ).fetchone()[0]
+        )
+        core_mismatch = int(
+            connection.execute(
+                f"""
+                SELECT count(*) FROM (
+                  (SELECT {base_select} FROM {base_scan})
+                  EXCEPT ALL
+                  (SELECT {base_select} FROM {output_scan})
+                )
+                """
+            ).fetchone()[0]
+        )
+        duplicate_count = int(
+            connection.execute(
+                f"SELECT count(*) FROM (SELECT {key_sql},count(*) n "
+                f"FROM {output_scan} GROUP BY {key_sql} HAVING n>1)"
+            ).fetchone()[0]
+        )
+    finally:
+        connection.close()
+    if base_count != output_count or core_mismatch or duplicate_count:
+        raise FinancialStatementUpdateError(
+            "balance_alignment_contract_failed:"
+            f"base={base_count}:output={output_count}:"
+            f"core_mismatch={core_mismatch}:duplicates={duplicate_count}"
+        )
+    os.replace(temporary, output)
+    return {
+        "status": "completed",
+        "domain": domain,
+        "path": str(output),
+        "input_dataset_id": input_dataset_id,
+        "refreshed_path": str(refreshed),
+        "row_count": output_count,
+        "input_row_count": base_count,
+        "unmatched_refreshed_key_count": unmatched,
+        "existing_core_value_mismatch_count": core_mismatch,
+        "primary_key_duplicate_count": duplicate_count,
+        "sha256": _sha256(output),
+    }
+
+
 def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     state = _read_state(workspace)
@@ -521,14 +750,30 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         )
     identity = set(_identity_symbols(workspace))
     open_dates = _open_dates(workspace)
-    domains = {
-        spec.domain: _prepare_statement(
-            workspace,
-            spec=spec,
-            identity_symbols=identity,
-            open_dates=open_dates,
+    balance_spec = V2_STATEMENT_SPECS[0]
+    refreshed = _prepare_statement(
+        workspace,
+        spec=balance_spec,
+        identity_symbols=identity,
+        open_dates=open_dates,
+        prepared_filename="balance_sheet_quarterly_refreshed.parquet",
+    )
+    input_dataset_id = str(
+        dict(state.get("input_dataset_ids", {}) or {}).get(
+            DataDomain.BALANCE_SHEET_QUARTERLY, ""
         )
-        for spec in STATEMENT_SPECS
+    )
+    if not input_dataset_id:
+        raise FinancialStatementUpdateError("balance_input_dataset_id_missing")
+    domains = {
+        balance_spec.domain: {
+            **_align_balance_to_active(
+                workspace,
+                refreshed=Path(refreshed["path"]),
+                input_dataset_id=input_dataset_id,
+            ),
+            "refreshed_normalization": refreshed,
+        }
     }
     state.update(
         {
@@ -593,7 +838,7 @@ def _install_domain(
         domain=spec.domain,
         layer="raw",
         frequency="quarterly_event",
-        contract_version=f"qdp_v2_{spec.domain}_pit_v1",
+        contract_version=f"qdp_v2_{spec.domain}_pit_v2",
         primary_key=list(PRIMARY_KEY),
         start_date=str(dates[0]),
         end_date=str(dates[1]),
@@ -629,6 +874,8 @@ def _install_domain(
             "f_ann_date is the PIT publication date when present; ann_date is the fallback",
             "duplicate provider rows prefer update_flag=1, then completeness, with conflicts retained as flags",
             "the provider does not expose complete correction timestamps for every restatement",
+            "v2 preserves every v1 key and existing value; only audited balance-sheet fields are appended",
+            "special financial-company statement structures retain not_applicable rather than numeric zero",
         ],
     )
     _assert_credential_free(manifest.to_dict())
@@ -653,7 +900,7 @@ def commit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         )
     installed: dict[str, Any] = {}
     dataset_ids: dict[str, str] = {}
-    for spec in STATEMENT_SPECS:
+    for spec in V2_STATEMENT_SPECS:
         path = Path(state["prepared_domains"][spec.domain]["path"])
         dataset_id, record = _install_domain(
             workspace,
@@ -664,6 +911,17 @@ def commit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         installed[spec.domain] = record
     root = qdp_v2_root(workspace)
     active = read_active_manifest(root)
+    expected_unchanged = dict(state.get("input_dataset_ids", {}) or {})
+    for domain in (
+        DataDomain.INCOME_STATEMENT_QUARTERLY,
+        DataDomain.CASH_FLOW_STATEMENT_QUARTERLY,
+    ):
+        if str(dict(active.get("datasets", {}) or {}).get(domain, "")) != str(
+            expected_unchanged.get(domain, "")
+        ):
+            raise FinancialStatementUpdateError(
+                f"unchanged_statement_domain_drifted:{domain}"
+            )
     active["datasets"] = {
         **dict(active.get("datasets", {}) or {}),
         **dataset_ids,
@@ -696,9 +954,32 @@ def _active_domain_record(workspace: Path, domain: str) -> dict[str, Any]:
             f"sum(publish_date>'{END_DATE}') FROM read_parquet([{quoted}])"
         ).fetchone()
         cashflow_coverage = None
+        balance_coverage = None
         if domain == DataDomain.CASH_FLOW_STATEMENT_QUARTERLY:
             cashflow_coverage = connection.execute(
                 "SELECT count(payroll_paid),count(taxes_paid) "
+                f"FROM read_parquet([{quoted}])"
+            ).fetchone()
+        if domain == DataDomain.BALANCE_SHEET_QUARTERLY:
+            balance_coverage = connection.execute(
+                "SELECT "
+                "count(*) FILTER(WHERE fiscal_quarter IN (1,3)),"
+                "count(other_receivables_total) FILTER(WHERE fiscal_quarter IN (1,3)),"
+                "count(other_payables_total) FILTER(WHERE fiscal_quarter IN (1,3)),"
+                "count(*) FILTER(WHERE report_date>='2020-01-01'),"
+                "count(contract_liabilities) FILTER(WHERE report_date>='2020-01-01'),"
+                "count(*) FILTER(WHERE customer_liability_field_state NOT IN "
+                "('advances_only','contract_only','both_observed','neither_observed') "
+                "OR customer_liability_field_state IS NULL),"
+                "count(*) FILTER(WHERE other_receivables_total_field_state NOT IN "
+                "('observed','unknown','not_applicable') "
+                "OR other_receivables_total_field_state IS NULL),"
+                "count(*) FILTER(WHERE other_payables_total_field_state NOT IN "
+                "('observed','unknown','not_applicable') "
+                "OR other_payables_total_field_state IS NULL),"
+                "count(*) FILTER(WHERE contract_liabilities_field_state NOT IN "
+                "('observed','unknown','not_applicable') "
+                "OR contract_liabilities_field_state IS NULL) "
                 f"FROM read_parquet([{quoted}])"
             ).fetchone()
     finally:
@@ -715,35 +996,116 @@ def _active_domain_record(workspace: Path, domain: str) -> dict[str, Any]:
     if cashflow_coverage is not None:
         result["payroll_paid_nonnull_count"] = int(cashflow_coverage[0] or 0)
         result["taxes_paid_nonnull_count"] = int(cashflow_coverage[1] or 0)
+    if balance_coverage is not None:
+        quarter_rows = int(balance_coverage[0] or 0)
+        post_2020_rows = int(balance_coverage[3] or 0)
+        result.update(
+            {
+                "q1_q3_row_count": quarter_rows,
+                "other_receivables_total_q1_q3_nonnull_count": int(
+                    balance_coverage[1] or 0
+                ),
+                "other_payables_total_q1_q3_nonnull_count": int(
+                    balance_coverage[2] or 0
+                ),
+                "other_receivables_total_q1_q3_coverage": (
+                    float(balance_coverage[1] or 0) / quarter_rows
+                    if quarter_rows
+                    else 0.0
+                ),
+                "other_payables_total_q1_q3_coverage": (
+                    float(balance_coverage[2] or 0) / quarter_rows
+                    if quarter_rows
+                    else 0.0
+                ),
+                "post_2020_row_count": post_2020_rows,
+                "contract_liabilities_post_2020_nonnull_count": int(
+                    balance_coverage[4] or 0
+                ),
+                "contract_liabilities_post_2020_coverage": (
+                    float(balance_coverage[4] or 0) / post_2020_rows
+                    if post_2020_rows
+                    else 0.0
+                ),
+                "invalid_customer_liability_state_count": int(
+                    balance_coverage[5] or 0
+                ),
+                "invalid_component_state_count": int(
+                    sum(int(value or 0) for value in balance_coverage[6:9])
+                ),
+            }
+        )
     return result
 
 
 def evaluate(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
+    state = _read_state(workspace)
     domains = {
         spec.domain: _active_domain_record(workspace, spec.domain)
         for spec in STATEMENT_SPECS
     }
+    active = active_dataset_map(read_active_manifest(qdp_v2_root(workspace)))
+    inputs = dict(state.get("input_dataset_ids", {}) or {})
+    balance = domains[DataDomain.BALANCE_SHEET_QUARTERLY]
+    alignment = dict(
+        dict(state.get("prepared_domains", {}) or {}).get(
+            DataDomain.BALANCE_SHEET_QUARTERLY, {}
+        )
+        or {}
+    )
+    checks = {
+        "forbidden_2026_rows": all(
+            record["forbidden_2026_rows"] == 0 for record in domains.values()
+        ),
+        "credential_not_persisted": True,
+        "next_exchange_open_availability": True,
+        "existing_financial_ratio_domain_unchanged": True,
+        "income_statement_dataset_unchanged": active.get(
+            DataDomain.INCOME_STATEMENT_QUARTERLY
+        )
+        == inputs.get(DataDomain.INCOME_STATEMENT_QUARTERLY),
+        "cash_flow_statement_dataset_unchanged": active.get(
+            DataDomain.CASH_FLOW_STATEMENT_QUARTERLY
+        )
+        == inputs.get(DataDomain.CASH_FLOW_STATEMENT_QUARTERLY),
+        "balance_existing_keys_and_values_unchanged": bool(
+            alignment
+            and int(alignment.get("row_count", -1))
+            == int(alignment.get("input_row_count", -2))
+            and int(alignment.get("existing_core_value_mismatch_count", -1)) == 0
+            and int(alignment.get("primary_key_duplicate_count", -1)) == 0
+        ),
+        "balance_component_states_valid": int(
+            balance.get("invalid_customer_liability_state_count", -1)
+        )
+        == 0
+        and int(balance.get("invalid_component_state_count", -1)) == 0,
+        "balance_total_fields_q1_q3_coverage_recovered": float(
+            balance.get("other_receivables_total_q1_q3_coverage", 0.0)
+        )
+        >= 0.95
+        and float(balance.get("other_payables_total_q1_q3_coverage", 0.0))
+        >= 0.95,
+        "contract_liabilities_post_2020_populated": int(
+            balance.get("contract_liabilities_post_2020_nonnull_count", 0)
+        )
+        > 0,
+        "cashflow_employee_and_tax_payments_populated": domains[
+            DataDomain.CASH_FLOW_STATEMENT_QUARTERLY
+        ].get("payroll_paid_nonnull_count", 0)
+        > 0
+        and domains[DataDomain.CASH_FLOW_STATEMENT_QUARTERLY].get(
+            "taxes_paid_nonnull_count", 0
+        )
+        > 0,
+    }
     return {
-        "status": "ok",
+        "status": "ok" if all(checks.values()) else "error",
         "update_id": UPDATE_ID,
         "domains": domains,
-        "checks": {
-            "forbidden_2026_rows": all(
-                record["forbidden_2026_rows"] == 0 for record in domains.values()
-            ),
-            "credential_not_persisted": True,
-            "next_exchange_open_availability": True,
-            "existing_financial_ratio_domain_unchanged": True,
-            "cashflow_employee_and_tax_payments_populated": domains[
-                DataDomain.CASH_FLOW_STATEMENT_QUARTERLY
-            ].get("payroll_paid_nonnull_count", 0)
-            > 0
-            and domains[DataDomain.CASH_FLOW_STATEMENT_QUARTERLY].get(
-                "taxes_paid_nonnull_count", 0
-            )
-            > 0,
-        },
+        "checks": checks,
+        "alignment": alignment,
     }
 
 
@@ -760,6 +1122,8 @@ def self_test() -> dict[str, Any]:
     scoped, future = _in_scope_provider_rows(frame)
     if len(scoped) != 1 or future != 1:
         raise AssertionError("statement 2026 guard changed")
+    if len(V2_STATEMENT_SPECS) != 1 or V2_STATEMENT_SPECS[0].domain != DataDomain.BALANCE_SHEET_QUARTERLY:
+        raise AssertionError("v2 should only redownload the balance sheet")
     return {
         "status": "ok",
         "checks": {
@@ -767,6 +1131,7 @@ def self_test() -> dict[str, Any]:
             "maximum_report_period": periods[-1],
             "forbidden_2026_provider_rows_not_persisted": True,
             "statement_domains_are_separate": True,
+            "v2_redownload_domain_count": len(V2_STATEMENT_SPECS),
         },
     }
 
@@ -787,7 +1152,7 @@ def status(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         if key not in {"completed", "prepared_domains"}
     } | {
         "completed_calls": sum(len(dict(value or {})) for value in completed.values()),
-        "total_calls": len(_report_periods()) * len(STATEMENT_SPECS),
+        "total_calls": len(_report_periods()) * len(V2_STATEMENT_SPECS),
         "prepared_domains": dict(state.get("prepared_domains", {}) or {}),
     }
 

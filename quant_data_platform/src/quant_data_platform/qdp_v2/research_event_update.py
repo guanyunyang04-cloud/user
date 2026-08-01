@@ -55,11 +55,13 @@ from quant_data_platform.qdp_v2.manifest import (
 from quant_data_platform.qdp_v2.provider_credentials import tushare_credential_values
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
-UPDATE_ID = "research_report_rc_backfill_v1"
+UPDATE_ID = "research_report_rc_backfill_v2"
+LEGACY_UPDATE_ID = "research_report_rc_backfill_v1"
 START_DATE = "2010-01-01"
 END_DATE = "2025-12-31"
 REPORT_EASTMONEY_START = "2017-01-01"
-REPORT_RC_PAGE_SIZE = 5_000
+REPORT_RC_PAGE_SIZE = 3_000
+REPORT_RC_EMPTY_CONFIRMATIONS = 2
 MAX_WORKERS = 3
 REPORT_RC_FIELDS = (
     "ts_code",
@@ -175,6 +177,12 @@ def _runtime(workspace: Path) -> Path:
     return path
 
 
+def _legacy_runtime(workspace: Path) -> Path:
+    return (
+        qdp_paths(workspace).data_dir / "qdp_runtime" / LEGACY_UPDATE_ID
+    ).resolve()
+
+
 def _state_path(workspace: Path) -> Path:
     return _runtime(workspace) / "state.json"
 
@@ -205,7 +213,16 @@ def _assert_credential_free(payload: Any) -> None:
 def _write_state(workspace: Path, state: Mapping[str, Any]) -> None:
     payload = {**dict(state), "updated_at": utc_now()}
     _assert_credential_free(payload)
-    atomic_write_json(_state_path(workspace), payload)
+    last_error: PermissionError | None = None
+    for attempt in range(6):
+        try:
+            atomic_write_json(_state_path(workspace), payload)
+            return
+        except PermissionError as exc:
+            last_error = exc
+            time.sleep(0.10 * (attempt + 1))
+    assert last_error is not None
+    raise last_error
 
 
 def _sha256(path: Path) -> str:
@@ -397,12 +414,15 @@ def _report_id(source_report_key: str) -> str:
     return f"rr_{source_report_key[:24]}"
 
 
-def _report_rc_page_path(workspace: Path, year: int, offset: int) -> Path:
+def _report_rc_page_path(workspace: Path, report_date: str, offset: int) -> Path:
+    normalized = str(report_date)[:10]
+    year = int(normalized[:4])
     return (
         _runtime(workspace)
         / "raw"
         / "tushare_report_rc"
-        / f"year={int(year)}"
+        / f"year={year}"
+        / f"date={normalized}"
         / f"offset={int(offset):09d}.parquet"
     )
 
@@ -415,14 +435,41 @@ def _next_report_offset(row_count: int, offset: int) -> int | None:
     )
 
 
+def _report_request_dates() -> tuple[str, ...]:
+    return tuple(
+        pd.date_range(START_DATE, END_DATE, freq="D").strftime("%Y-%m-%d")
+    )
+
+
+def _frame_schema_hash(frame: pd.DataFrame) -> str:
+    payload = [
+        {"name": str(column), "dtype": str(frame[column].dtype)}
+        for column in frame.columns
+    ]
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _report_year_source_coverage(
     year: int,
     statistics: Mapping[str, Any],
+    task_coverage: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     earliest = _text(statistics.get("earliest_report_date"))
     latest = _text(statistics.get("latest_report_date"))
     raw_rows = int(statistics.get("raw_row_count", 0) or 0)
-    if raw_rows == 0:
+    coverage = dict(task_coverage or {})
+    if coverage:
+        requested = int(coverage.get("requested_date_count", 0) or 0)
+        terminal = int(coverage.get("terminal_date_count", 0) or 0)
+        failed = int(coverage.get("failed_date_count", 0) or 0)
+        pending = int(coverage.get("pending_date_count", 0) or 0)
+        if requested and terminal == requested and not failed and not pending:
+            status = "complete_daily_task_ledger"
+        else:
+            status = "incomplete_daily_task_ledger"
+    elif raw_rows == 0:
         status = "source_unavailable"
     elif earliest > f"{int(year)}-01-01" or latest < f"{int(year)}-12-31":
         status = "partial_year_span"
@@ -433,27 +480,38 @@ def _report_year_source_coverage(
         "tushare_source_coverage_start": earliest,
         "tushare_source_coverage_end": latest,
         "tushare_source_unavailable_is_not_zero_reports": status
-        != "observed_full_year_span",
+        not in {"observed_full_year_span", "complete_daily_task_ledger"},
+        **coverage,
     }
 
 
-def _cached_report_year(workspace: Path, year: int) -> tuple[int, bool, dict[str, Any]]:
-    root = _report_rc_page_path(workspace, year, 0).parent
+def _cached_report_day(
+    workspace: Path,
+    report_date: str,
+) -> tuple[int, bool, dict[str, Any], str]:
+    root = _report_rc_page_path(workspace, report_date, 0).parent
     offset = 0
     pages: dict[str, Any] = {}
     while True:
         path = root / f"offset={offset:09d}.parquet"
         if not path.is_file():
-            return offset, False, pages
-        rows = int(pq.ParquetFile(path).metadata.num_rows)
+            return offset, False, pages, "pending"
+        parquet = pq.ParquetFile(path)
+        rows = int(parquet.metadata.num_rows)
         pages[str(offset)] = {
             "path": str(path),
             "row_count": rows,
             "sha256": _sha256(path),
+            "schema_hash": hashlib.sha256(
+                str(parquet.schema_arrow).encode("utf-8")
+            ).hexdigest(),
         }
         following = _next_report_offset(rows, offset)
         if following is None:
-            return offset, True, pages
+            status = "confirmed_empty" if not sum(
+                int(item["row_count"]) for item in pages.values()
+            ) else "observed"
+            return offset, True, pages, status
         offset = following
 
 
@@ -468,106 +526,188 @@ def download_tushare_reports(
     if not token:
         raise ResearchEventUpdateError("tushare_token_required")
     client = _TushareClient(token, workspace_root=workspace)
-    years = list(range(2010, 2026))
-    year_state: dict[str, Any] = {}
-    pending: deque[int] = deque()
-    next_offsets: dict[int, int] = {}
-    for year in years:
-        offset, complete, pages = _cached_report_year(workspace, year)
-        year_state[str(year)] = {
-            "status": "completed" if complete else "pending",
+    dates = _report_request_dates()
+    day_state: dict[str, Any] = {}
+    pending: deque[str] = deque()
+    next_offsets: dict[str, int] = {}
+    for report_date in dates:
+        offset, complete, pages, terminal_status = _cached_report_day(
+            workspace, report_date
+        )
+        previous = dict(
+            dict(state.get("tushare_report_rc", {}) or {})
+            .get("days", {})
+            .get(report_date, {})
+            or {}
+        )
+        day_state[report_date] = {
+            "status": terminal_status if complete else "pending",
             "pages": pages,
             "raw_row_count": int(sum(item["row_count"] for item in pages.values())),
+            "attempt_count": int(previous.get("attempt_count", 0) or 0),
+            "empty_confirmation_count": int(
+                previous.get("empty_confirmation_count", 0) or 0
+            ),
+            "last_error": "",
         }
         if not complete:
-            pending.append(year)
-            next_offsets[year] = offset
+            pending.append(report_date)
+            next_offsets[report_date] = offset
 
-    def fetch(year: int, offset: int) -> pd.DataFrame:
+    def fetch(report_date: str, offset: int) -> pd.DataFrame:
+        compact = report_date.replace("-", "")
         return client.fetch(
             "report_rc",
             params={
-                "start_date": f"{year}0101",
-                "end_date": f"{year}1231",
+                "start_date": compact,
+                "end_date": compact,
                 "limit": REPORT_RC_PAGE_SIZE,
                 "offset": int(offset),
             },
             fields=REPORT_RC_FIELDS,
         )
 
-    active: dict[Future[pd.DataFrame], tuple[int, int]] = {}
+    def checkpoint(status_value: str) -> None:
+        state["status"] = status_value
+        all_terminal = all(
+            item["status"] in {"observed", "confirmed_empty"}
+            for item in day_state.values()
+        )
+        state["tushare_report_rc"] = {
+            "status": "completed" if all_terminal else status_value,
+            "maximum_workers": workers,
+            "page_size": REPORT_RC_PAGE_SIZE,
+            "empty_confirmations_required": REPORT_RC_EMPTY_CONFIRMATIONS,
+            "request_granularity": "report_date",
+            "requested_date_count": len(dates),
+            "days": day_state,
+            "credential_persisted": False,
+        }
+        _write_state(workspace, state)
+
+    active: dict[Future[pd.DataFrame], tuple[str, int]] = {}
     workers = min(max(1, int(max_workers)), MAX_WORKERS)
-    with ThreadPoolExecutor(max_workers=workers) as pool:
+    processed = 0
+
+    def fill_worker_slots(pool: ThreadPoolExecutor) -> None:
         while pending and len(active) < workers:
-            year = pending.popleft()
-            offset = next_offsets[year]
-            active[pool.submit(fetch, year, offset)] = (year, offset)
+            next_date = pending.popleft()
+            next_offset = next_offsets[next_date]
+            day_state[next_date]["status"] = "downloading"
+            active[pool.submit(fetch, next_date, next_offset)] = (
+                next_date,
+                next_offset,
+            )
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        fill_worker_slots(pool)
         while active:
             completed, _ = wait(tuple(active), return_when=FIRST_COMPLETED)
             for future in completed:
-                year, offset = active.pop(future)
+                report_date, offset = active.pop(future)
+                record = day_state[report_date]
+                record["attempt_count"] = int(record.get("attempt_count", 0) or 0) + 1
                 try:
-                    frame = future.result()
-                except Exception as exc:
-                    year_state[str(year)]["status"] = "failed"
-                    year_state[str(year)]["error"] = (
+                    frame = _parquet_safe_provider_frame(future.result())
+                except Exception as exc:  # noqa: BLE001 - provider failures are ledger data
+                    record["status"] = "failed"
+                    record["error_type"] = type(exc).__name__
+                    record["last_error"] = (
                         f"{type(exc).__name__}:{str(exc)[:240]}"
                     )
-                    state["tushare_report_rc"] = {
-                        "status": "failed",
-                        "maximum_workers": workers,
-                        "years": year_state,
-                    }
-                    _write_state(workspace, state)
-                    raise
-                path = _report_rc_page_path(workspace, year, offset)
+                    processed += 1
+                    if processed % 25 == 0:
+                        checkpoint("failed")
+                    fill_worker_slots(pool)
+                    continue
+                record["last_error"] = ""
+                record["error_type"] = ""
+                if frame.empty:
+                    confirmations = int(
+                        record.get("empty_confirmation_count", 0) or 0
+                    ) + 1
+                    record["empty_confirmation_count"] = confirmations
+                    if confirmations < REPORT_RC_EMPTY_CONFIRMATIONS:
+                        record["status"] = "confirming_empty"
+                        active[pool.submit(fetch, report_date, offset)] = (
+                            report_date,
+                            offset,
+                        )
+                        continue
+                else:
+                    record["empty_confirmation_count"] = 0
+                path = _report_rc_page_path(workspace, report_date, offset)
                 _write_parquet(frame, path)
                 record = {
                     "path": str(path),
                     "row_count": len(frame),
                     "sha256": _sha256(path),
+                    "response_hash": _sha256(path),
+                    "schema_hash": _frame_schema_hash(frame),
+                    "request_status": "success",
+                    "completed_at": utc_now(),
                 }
-                year_state[str(year)]["pages"][str(offset)] = record
-                year_state[str(year)]["raw_row_count"] = int(
+                day_state[report_date]["pages"][str(offset)] = record
+                day_state[report_date]["raw_row_count"] = int(
                     sum(
                         item["row_count"]
-                        for item in year_state[str(year)]["pages"].values()
+                        for item in day_state[report_date]["pages"].values()
                     )
                 )
                 following = _next_report_offset(len(frame), offset)
                 if following is None:
-                    year_state[str(year)]["status"] = "completed"
+                    day_state[report_date]["status"] = (
+                        "confirmed_empty"
+                        if not day_state[report_date]["raw_row_count"]
+                        else "observed"
+                    )
                 else:
-                    year_state[str(year)]["status"] = "downloading"
-                    next_offsets[year] = following
-                    active[pool.submit(fetch, year, following)] = (year, following)
-                state["status"] = "downloading_tushare_reports"
-                state["tushare_report_rc"] = {
-                    "status": "completed"
-                    if all(
-                        item["status"] == "completed" for item in year_state.values()
+                    day_state[report_date]["status"] = "downloading"
+                    next_offsets[report_date] = following
+                    active[pool.submit(fetch, report_date, following)] = (
+                        report_date,
+                        following,
                     )
-                    else "downloading",
-                    "maximum_workers": workers,
-                    "page_size": REPORT_RC_PAGE_SIZE,
-                    "years": year_state,
-                    "credential_persisted": False,
-                }
-                _write_state(workspace, state)
-                while pending and len(active) < workers:
-                    next_year = pending.popleft()
-                    next_offset = next_offsets[next_year]
-                    active[pool.submit(fetch, next_year, next_offset)] = (
-                        next_year,
-                        next_offset,
-                    )
-    state["status"] = "tushare_reports_downloaded"
-    state["tushare_report_rc"]["status"] = "completed"
-    _write_state(workspace, state)
+                processed += 1
+                if processed % 25 == 0:
+                    checkpoint("downloading_tushare_reports")
+                fill_worker_slots(pool)
+    failed = [
+        report_date
+        for report_date, record in day_state.items()
+        if record["status"] not in {"observed", "confirmed_empty"}
+    ]
+    checkpoint("failed" if failed else "tushare_reports_downloaded")
+    if failed:
+        raise ResearchEventUpdateError(
+            f"tushare_report_daily_tasks_incomplete:{len(failed)}"
+        )
     return dict(state["tushare_report_rc"])
 
 
 def _eastmoney_report_path(workspace: Path, symbol: str) -> Path:
+    relative = (
+        Path("raw")
+        / "eastmoney_reports"
+        / f"symbol={symbol.replace('.', '_')}.parquet"
+    )
+    current = _runtime(workspace) / relative
+    legacy = _legacy_runtime(workspace) / relative
+    if not current.is_file() and legacy.is_file():
+        return legacy
+    return current
+
+
+def _eastmoney_report_paths(workspace: Path) -> list[Path]:
+    paths = {
+        path.resolve()
+        for root in (_legacy_runtime(workspace), _runtime(workspace))
+        for path in (root / "raw" / "eastmoney_reports").glob("*.parquet")
+    }
+    return sorted(paths)
+
+
+def _eastmoney_report_output_path(workspace: Path, symbol: str) -> Path:
     return (
         _runtime(workspace)
         / "raw"
@@ -1030,12 +1170,51 @@ def prepare_reports(
     report_parts: list[Path] = []
     forecast_parts: list[Path] = []
     statistics: list[dict[str, Any]] = []
+    state = _read_state(workspace)
+    report_state = dict(state.get("tushare_report_rc", {}) or {})
+    task_days = dict(report_state.get("days", {}) or {})
+    if int(report_state.get("requested_date_count", 0) or 0) != len(
+        _report_request_dates()
+    ):
+        raise ResearchEventUpdateError("tushare_report_daily_ledger_incomplete")
     for year in range(2010, 2026):
-        raw_paths = sorted(
-            _report_rc_page_path(workspace, year, 0).parent.glob("*.parquet")
-        )
+        year_root = _report_rc_page_path(
+            workspace, f"{year}-01-01", 0
+        ).parent.parent
+        raw_paths = sorted(year_root.rglob("*.parquet"))
         if not raw_paths:
             raise ResearchEventUpdateError(f"tushare_report_year_missing:{year}")
+        expected_dates = tuple(
+            item for item in _report_request_dates() if item.startswith(f"{year}-")
+        )
+        year_tasks = {
+            report_date: dict(task_days.get(report_date, {}) or {})
+            for report_date in expected_dates
+        }
+        terminal = sum(
+            item.get("status") in {"observed", "confirmed_empty"}
+            for item in year_tasks.values()
+        )
+        failed = sum(item.get("status") == "failed" for item in year_tasks.values())
+        pending = len(expected_dates) - terminal - failed
+        if terminal != len(expected_dates):
+            raise ResearchEventUpdateError(
+                f"tushare_report_year_tasks_incomplete:{year}:"
+                f"terminal={terminal}:failed={failed}:pending={pending}"
+            )
+        task_coverage = {
+            "requested_date_count": len(expected_dates),
+            "terminal_date_count": terminal,
+            "observed_date_count": sum(
+                item.get("status") == "observed" for item in year_tasks.values()
+            ),
+            "confirmed_empty_date_count": sum(
+                item.get("status") == "confirmed_empty"
+                for item in year_tasks.values()
+            ),
+            "failed_date_count": failed,
+            "pending_date_count": pending,
+        }
         raw = pd.concat(
             [pd.read_parquet(path) for path in raw_paths], ignore_index=True
         )
@@ -1054,13 +1233,11 @@ def prepare_reports(
                 "year": year,
                 "request_page_count": len(raw_paths),
                 **stats,
-                **_report_year_source_coverage(year, stats),
+                **_report_year_source_coverage(year, stats, task_coverage),
             }
         )
         del raw, reports, forecasts
-    em_paths = sorted(
-        (_runtime(workspace) / "raw" / "eastmoney_reports").glob("*.parquet")
-    )
+    em_paths = _eastmoney_report_paths(workspace)
     if not em_paths:
         raise ResearchEventUpdateError("eastmoney_report_cache_missing")
     eastmoney_parts: list[pd.DataFrame] = []
@@ -1100,6 +1277,12 @@ def prepare_reports(
         for item in statistics
         if item["tushare_source_coverage_status"] == "partial_year_span"
     ]
+    incomplete_years = [
+        int(item["year"])
+        for item in statistics
+        if item["tushare_source_coverage_status"]
+        != "complete_daily_task_ledger"
+    ]
     result = {
         "status": "completed",
         "report_path": str(report_path),
@@ -1120,9 +1303,10 @@ def prepare_reports(
         "latest_report_date": str(reports["source_date"].max()),
         "tushare_source_unavailable_years": unavailable_years,
         "tushare_source_partial_years": partial_years,
+        "tushare_incomplete_task_years": incomplete_years,
         "source_coverage_semantics": (
-            "source_unavailable and partial-year periods must not be interpreted "
-            "as dates with zero research activity"
+            "coverage is proven by a complete daily request ledger; confirmed-empty "
+            "dates are distinct from provider failures"
         ),
         "eastmoney_forecasts_used": False,
         "eastmoney_forecast_exclusion_reason": (
@@ -1667,32 +1851,44 @@ def commit_prepared(
             "tushare_source_coverage_status",
             "tushare_source_coverage_start",
             "tushare_source_coverage_end",
+            "requested_date_count",
+            "terminal_date_count",
+            "observed_date_count",
+            "confirmed_empty_date_count",
+            "failed_date_count",
+            "pending_date_count",
         ],
     ).to_dict(orient="records")
     specs = [
         (
             DataDomain.RESEARCH_REPORT,
             prepared / "research_report.parquet",
-            "qdp_v2_research_report_pit_v1",
+            "qdp_v2_research_report_pit_v2",
             ["report_id"],
             "event",
             {
                 "provider": "tushare_report_rc+eastmoney_report_metadata",
                 "availability_semantics": "report date; consume next exchange-open day",
                 "eastmoney_forecasts_used": False,
+                "request_granularity": "report_date",
+                "page_size": REPORT_RC_PAGE_SIZE,
+                "coverage_contract": "complete_daily_task_ledger",
                 "tushare_annual_source_coverage": annual_statistics,
             },
         ),
         (
             DataDomain.RESEARCH_REPORT_FORECAST,
             prepared / "research_report_forecast.parquet",
-            "qdp_v2_research_report_forecast_pit_v1",
+            "qdp_v2_research_report_forecast_pit_v2",
             ["report_id", "forecast_quarter", "source"],
             "event_forecast",
             {
                 "provider": "tushare_report_rc",
                 "availability_semantics": "parent report date; consume next exchange-open day",
                 "quarter_rows_do_not_repeat_report_weight": True,
+                "request_granularity": "report_date",
+                "page_size": REPORT_RC_PAGE_SIZE,
+                "coverage_contract": "complete_daily_task_ledger",
                 "tushare_annual_source_coverage": annual_statistics,
             },
         ),
@@ -1756,6 +1952,16 @@ def evaluate(
     workspace = _workspace(workspace_root)
     state = _read_state(workspace)
     domains = dict(state.get("installed_domains", {}) or {})
+    report_tasks = dict(state.get("tushare_report_rc", {}) or {})
+    task_days = dict(report_tasks.get("days", {}) or {})
+    requested_dates = _report_request_dates()
+    reports_prepared = dict(state.get("reports_prepared", {}) or {})
+    statistics_path = Path(reports_prepared.get("annual_statistics_path", ""))
+    report_2021_rows = 0
+    if statistics_path.is_file():
+        statistics = pd.read_parquet(statistics_path)
+        selected = statistics.loc[statistics["year"] == 2021, "raw_row_count"]
+        report_2021_rows = int(selected.iloc[0]) if len(selected) else 0
     checks = {
         "date_range_exact": bool(
             domains
@@ -1770,6 +1976,15 @@ def evaluate(
         "pdf_not_downloaded": True,
         "report_forecast_is_separate_domain": DataDomain.RESEARCH_REPORT_FORECAST
         in domains,
+        "daily_report_tasks_closed": bool(
+            len(task_days) == len(requested_dates)
+            and all(
+                dict(task_days.get(report_date, {}) or {}).get("status")
+                in {"observed", "confirmed_empty"}
+                for report_date in requested_dates
+            )
+        ),
+        "report_2021_observed": bool(report_2021_rows),
     }
     result = {
         "status": "ok" if all(checks.values()) else "error",
@@ -1790,6 +2005,11 @@ def self_test() -> dict[str, Any]:
         raise AssertionError("report_rc full page pagination changed")
     if _next_report_offset(REPORT_RC_PAGE_SIZE - 1, 0) is not None:
         raise AssertionError("report_rc terminal page pagination changed")
+    dates = _report_request_dates()
+    if dates[0] != START_DATE or dates[-1] != END_DATE:
+        raise AssertionError("report_rc request boundary changed")
+    if any(item.startswith("2026-") for item in dates):
+        raise AssertionError("report_rc 2026 request boundary changed")
     source_key = _report_source_key(
         "000001.SZ", "2024-01-02", " 盈利预测：更新 ", "某某证券股份有限公司"
     )
@@ -1797,11 +2017,13 @@ def self_test() -> dict[str, Any]:
         "000001.SZ", "2024-01-02", "盈利预测更新", "某某证券"
     ):
         raise AssertionError("cross-source report identity normalization changed")
-    dates = np.asarray(
+    open_dates = np.asarray(
         pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-05"]),
         dtype="datetime64[ns]",
     )
-    available = _next_open_date(pd.Series(["2024-01-02", "2024-01-05"]), dates)
+    available = _next_open_date(
+        pd.Series(["2024-01-02", "2024-01-05"]), open_dates
+    )
     if available.tolist() != ["2024-01-03", ""]:
         raise AssertionError("next-open availability changed")
     if (
@@ -1870,14 +2092,18 @@ def status(
 ) -> dict[str, Any]:
     state = _read_state(_workspace(workspace_root))
     reports = dict(state.get("tushare_report_rc", {}) or {})
-    years = dict(reports.get("years", {}) or {})
+    days = dict(reports.get("days", {}) or {})
     return {
         "update_id": UPDATE_ID,
         "status": state.get("status", "pending"),
-        "tushare_report_years_completed": sum(
-            item.get("status") == "completed" for item in years.values()
+        "tushare_report_dates_terminal": sum(
+            item.get("status") in {"observed", "confirmed_empty"}
+            for item in days.values()
         ),
-        "tushare_report_year_count": len(years),
+        "tushare_report_dates_failed": sum(
+            item.get("status") == "failed" for item in days.values()
+        ),
+        "tushare_report_date_count": len(days),
         "eastmoney_report_symbols_completed": dict(
             state.get("eastmoney_reports", {}) or {}
         ).get("completed_symbol_count", 0),

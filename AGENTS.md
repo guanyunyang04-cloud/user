@@ -6,7 +6,10 @@
 
 ## Long tasks
 
-- Run long tasks in the foreground, let the tool layer wait, and resume once the process finishes. This saves tokens.
+- Run long tasks in the foreground and delegate waiting to the tool layer.
+- Use the longest supported blocking wait. If the tool layer yields before the process exits, continue waiting through the tool layer without manually polling progress.
+- Do not perform periodic status checks, run unrelated work in parallel, or send progress commentary while the process is running.
+- Resume model work only when the process finishes, fails, explicitly requests attention, or the user sends new instructions.
 
 ## Git
 
