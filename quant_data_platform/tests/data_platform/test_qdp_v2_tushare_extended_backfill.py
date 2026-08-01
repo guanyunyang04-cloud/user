@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+
 from quant_data_platform.domains.contracts import DataDomain, normalize_domain
 from quant_data_platform.qdp_v2 import tushare_extended_backfill as extended
+from quant_data_platform.qdp_v2.manifest import (
+    DatasetManifest,
+    ShardManifestEntry,
+    qdp_v2_root,
+    write_active_manifest,
+    write_dataset_manifest,
+)
 from quant_data_platform.qdp_v2.provider_credentials import (
     save_tushare_provider_profile,
 )
@@ -288,6 +297,88 @@ def test_self_test_locks_download_contract() -> None:
     assert result["status"] == "ok"
     assert result["checks"]["factor_field_count"] == 261
     assert result["checks"]["forbidden_2026"] is True
+
+
+def test_cleanup_prepared_cache_deletes_only_verified_installed_copy(tmp_path) -> None:
+    domain = "unit_domain"
+    dataset_id = "unit_domain__installed"
+    prepared = (
+        extended._runtime(tmp_path)
+        / "prepared"
+        / domain
+        / "year=2011"
+        / "part-0000.parquet"
+    )
+    installed = (
+        qdp_v2_root(tmp_path)
+        / "datasets"
+        / domain
+        / dataset_id
+        / "shards"
+        / "year=2011"
+        / "part-0000.parquet"
+    )
+    prepared.parent.mkdir(parents=True, exist_ok=True)
+    installed.parent.mkdir(parents=True, exist_ok=True)
+    prepared.write_bytes(b"verified-derived-copy")
+    installed.write_bytes(prepared.read_bytes())
+    digest = extended._sha256(prepared)
+    extended.atomic_write_json(
+        prepared.with_suffix(".json"),
+        {"sha256": digest, "input_hash": "unit"},
+    )
+    root = qdp_v2_root(tmp_path)
+    write_dataset_manifest(
+        root,
+        DatasetManifest(
+            dataset_id=dataset_id,
+            domain=domain,
+            layer="raw",
+            frequency="1d",
+            contract_version="unit_v1",
+            primary_key=["trade_date"],
+            start_date="2011-01-04",
+            end_date="2011-01-04",
+            row_count=1,
+            shards=[
+                ShardManifestEntry(
+                    path=str(installed.relative_to(root)).replace("\\", "/"),
+                    row_count=1,
+                    start_date="2011-01-04",
+                    end_date="2011-01-04",
+                    file_size=installed.stat().st_size,
+                    metadata={"year": 2011, "sha256": digest},
+                )
+            ],
+            source={"provider": "unit"},
+            quality={},
+        ),
+    )
+    write_active_manifest(root, {"datasets": {domain: dataset_id}})
+    extended._write_state(
+        tmp_path,
+        {
+            "status": "applied",
+            "installed_domains": {
+                domain: {"status": "installed", "dataset_id": dataset_id}
+            },
+        },
+    )
+
+    dry = extended.cleanup_prepared_cache(workspace_root=tmp_path)
+    deleted = extended.cleanup_prepared_cache(
+        workspace_root=tmp_path,
+        delete=True,
+        yes=True,
+    )
+
+    assert dry["status"] == "dry_run"
+    assert dry["deletable"] is True
+    assert deleted["status"] == "deleted"
+    assert deleted["destructive_actions_performed"] is True
+    assert not prepared.exists()
+    assert installed.is_file()
+    assert Path(deleted["receipt_path"]).is_file()
 
 
 def test_credential_stdin_flag_never_accepts_token_value() -> None:

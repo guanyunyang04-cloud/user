@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
 
 from quant_data_platform.core.json_io import json_safe
-from quant_data_platform.qdp_v2.manifest import iter_dataset_manifests, qdp_v2_root, read_active_manifest, read_dataset_manifest
+from quant_data_platform.qdp_v2.manifest import (
+    iter_dataset_manifests,
+    qdp_v2_root,
+    read_active_manifest,
+    read_dataset_manifest,
+)
 from quant_data_platform.qdp_v2.status import _active_dataset_refs
 
 
@@ -19,16 +25,34 @@ def lake_gc(
     with_size: bool = False,
     max_items: int = 200,
     clean_runtime: bool = False,
+    purge_runtime: bool = False,
 ) -> dict[str, Any]:
     if delete and not yes:
         raise ValueError("qdp_v2_gc_delete_requires_yes")
+    if purge_runtime and not clean_runtime:
+        raise ValueError("qdp_v2_gc_runtime_purge_requires_runtime_inventory")
+    if delete and clean_runtime and not purge_runtime:
+        raise ValueError("qdp_v2_gc_runtime_delete_requires_explicit_purge")
     root = qdp_v2_root(workspace_root)
+    workspace = (
+        Path(workspace_root).resolve()
+        if workspace_root is not None
+        else root.resolve().parents[2]
+    )
     active = read_active_manifest(root)
+    active_seed_ids = {dataset_id for _, _, dataset_id in _active_dataset_refs(active)}
+    inventory = _dataset_dir_inventory(root, with_size=with_size or delete)
+    reference_scan = _research_reference_inventory(
+        workspace,
+        {str(item["dataset_id"]) for item in inventory},
+    )
+    if delete and not bool(reference_scan["complete"]):
+        raise RuntimeError("qdp_v2_gc_research_reference_scan_incomplete")
+    research_seed_ids = set(reference_scan["referenced_dataset_ids"])
     referenced = _referenced_dataset_closure(
         root,
-        {dataset_id for _, _, dataset_id in _active_dataset_refs(active)},
+        active_seed_ids | research_seed_ids,
     )
-    inventory = _dataset_dir_inventory(root, with_size=with_size or delete)
     unreferenced = [item for item in inventory if item["dataset_id"] not in referenced]
     referenced_items = [item for item in inventory if item["dataset_id"] in referenced]
     runtime = root.parent / "qdp_runtime"
@@ -37,8 +61,12 @@ def lake_gc(
         if clean_runtime
         else []
     )
-    unreferenced = sorted(unreferenced, key=lambda item: int(item["bytes"]), reverse=True)
-    referenced_items = sorted(referenced_items, key=lambda item: int(item["bytes"]), reverse=True)
+    unreferenced = sorted(
+        unreferenced, key=lambda item: int(item["bytes"]), reverse=True
+    )
+    referenced_items = sorted(
+        referenced_items, key=lambda item: int(item["bytes"]), reverse=True
+    )
     deleted: list[dict[str, Any]] = []
     if delete:
         for item in unreferenced:
@@ -62,6 +90,8 @@ def lake_gc(
         "status": "deleted" if delete else "dry_run",
         "qdp_v2_root": str(root.resolve()),
         "destructive_actions_performed": bool(delete and (deleted or deleted_runtime)),
+        "active_seed_dataset_count": len(active_seed_ids),
+        "research_seed_dataset_count": len(research_seed_ids),
         "referenced_dataset_count": len(referenced),
         "dataset_dir_count": len(inventory),
         "unreferenced_dataset_dir_count": len(unreferenced),
@@ -71,6 +101,7 @@ def lake_gc(
         "deleted_bytes": sum(int(item["bytes"]) for item in deleted),
         "unreferenced": unreferenced[:limit] if limit else unreferenced,
         "deleted": deleted[:limit] if limit else deleted,
+        "research_reference_scan": reference_scan,
         "runtime": {
             "included": bool(clean_runtime),
             "path": str(runtime.resolve()),
@@ -84,6 +115,111 @@ def lake_gc(
     }
 
 
+_REFERENCE_SUFFIXES = frozenset({".json", ".jsonl", ".toml", ".yaml", ".yml"})
+_REFERENCE_STATE_NAMES = frozenset({"readiness.json", "state.json"})
+
+
+def _research_reference_inventory(
+    workspace: Path,
+    dataset_ids: set[str],
+) -> dict[str, Any]:
+    """Find dataset versions pinned by durable research configuration.
+
+    QDP manifests only describe the current data graph.  Frozen research studies can
+    intentionally retain an older dataset version, so a dataset is not collectible
+    merely because it is absent from ``active.json``.  We scan dependency-bearing
+    research manifests and study specifications, while deliberately excluding logs,
+    reports, and QDP audit inventories that are evidence rather than consumers.
+    """
+
+    candidates = _research_reference_files(workspace)
+    encoded = {
+        dataset_id.encode("utf-8"): dataset_id
+        for dataset_id in sorted(dataset_ids)
+        if dataset_id
+    }
+    matcher = (
+        re.compile(b"|".join(re.escape(item) for item in encoded)) if encoded else None
+    )
+    references: dict[str, list[str]] = {}
+    errors: list[dict[str, str]] = []
+    scanned_bytes = 0
+    for path in candidates:
+        try:
+            payload = path.read_bytes()
+        except OSError as exc:
+            errors.append({"path": str(path), "error": str(exc)})
+            continue
+        scanned_bytes += len(payload)
+        if matcher is None:
+            continue
+        matched_ids = {encoded[match.group(0)] for match in matcher.finditer(payload)}
+        if not matched_ids:
+            continue
+        try:
+            display_path = path.relative_to(workspace).as_posix()
+        except ValueError:
+            display_path = str(path)
+        for dataset_id in matched_ids:
+            references.setdefault(dataset_id, []).append(display_path)
+
+    details = [
+        {
+            "dataset_id": dataset_id,
+            "reference_file_count": len(paths),
+            "reference_files": sorted(paths),
+        }
+        for dataset_id, paths in sorted(references.items())
+    ]
+    return {
+        "complete": not errors,
+        "scanned_file_count": len(candidates),
+        "scanned_bytes": int(scanned_bytes),
+        "matched_file_count": len(
+            {path for paths in references.values() for path in paths}
+        ),
+        "referenced_dataset_ids": [item["dataset_id"] for item in details],
+        "references": details,
+        "errors": errors,
+    }
+
+
+def _research_reference_files(workspace: Path) -> list[Path]:
+    files: set[Path] = set()
+    specifications = workspace / "daily_research" / "studies"
+    if specifications.is_dir():
+        files.update(
+            path
+            for path in specifications.rglob("*")
+            if path.is_file() and path.suffix.lower() in _REFERENCE_SUFFIXES
+        )
+
+    research_records = workspace / "daily_research" / "research_records"
+    if research_records.is_dir():
+        files.update(
+            path
+            for path in research_records.rglob("*")
+            if path.is_file() and path.suffix.lower() in _REFERENCE_SUFFIXES
+        )
+
+    for root in (
+        workspace / "daily_research" / "output",
+        workspace / "daily_research" / "data" / "research_store",
+    ):
+        if not root.is_dir():
+            continue
+        files.update(
+            path
+            for path in root.rglob("*.json")
+            if path.is_file()
+            and (
+                "manifest" in path.name.lower()
+                or path.name.lower() in _REFERENCE_STATE_NAMES
+            )
+        )
+    return sorted(files)
+
+
 def _referenced_dataset_closure(root: Path, seed_ids: set[str]) -> set[str]:
     """Keep datasets whose shards are referenced by another live manifest."""
 
@@ -91,7 +227,7 @@ def _referenced_dataset_closure(root: Path, seed_ids: set[str]) -> set[str]:
     for path in iter_dataset_manifests(root):
         manifest = read_dataset_manifest(path)
         manifests[str(manifest.dataset_id)] = path
-    referenced = set(str(item) for item in seed_ids if str(item))
+    referenced = {str(item) for item in seed_ids if str(item)}
     pending = list(referenced)
     datasets_root = (root / "datasets").resolve()
     while pending:
@@ -102,7 +238,9 @@ def _referenced_dataset_closure(root: Path, seed_ids: set[str]) -> set[str]:
         manifest = read_dataset_manifest(manifest_path)
         for shard in manifest.shards:
             candidate = Path(shard.path)
-            absolute = (candidate if candidate.is_absolute() else root / candidate).resolve()
+            absolute = (
+                candidate if candidate.is_absolute() else root / candidate
+            ).resolve()
             try:
                 relative = absolute.relative_to(datasets_root)
             except ValueError:
@@ -131,8 +269,14 @@ def _dataset_dir_inventory(root: Path, *, with_size: bool) -> list[dict[str, Any
             "row_count": manifest.row_count,
         }
     items: list[dict[str, Any]] = []
-    for domain_dir in sorted([item for item in datasets_root.iterdir() if item.is_dir()], key=lambda item: item.name):
-        for dataset_dir in sorted([item for item in domain_dir.iterdir() if item.is_dir()], key=lambda item: item.name):
+    for domain_dir in sorted(
+        [item for item in datasets_root.iterdir() if item.is_dir()],
+        key=lambda item: item.name,
+    ):
+        for dataset_dir in sorted(
+            [item for item in domain_dir.iterdir() if item.is_dir()],
+            key=lambda item: item.name,
+        ):
             if dataset_dir.name.startswith("."):
                 continue
             meta = manifest_by_dir.get(dataset_dir, {})
@@ -172,8 +316,10 @@ def _runtime_inventory(root: Path, *, with_size: bool) -> list[dict[str, Any]]:
     for path in sorted(root.iterdir(), key=lambda item: item.name):
         is_directory = path.is_dir()
         try:
-            size = _directory_size(path) if is_directory and with_size else (
-                int(path.stat().st_size) if with_size else 0
+            size = (
+                _directory_size(path)
+                if is_directory and with_size
+                else (int(path.stat().st_size) if with_size else 0)
             )
         except OSError:
             size = 0
@@ -197,7 +343,9 @@ def _is_inside(path: Path, root: Path) -> bool:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="qdp gc", description="qdp_v2 manifest-first GC.")
+    parser = argparse.ArgumentParser(
+        prog="qdp gc", description="qdp_v2 manifest-first GC."
+    )
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--dry-run", action="store_true", default=True)
     parser.add_argument("--delete", action="store_true")
@@ -207,7 +355,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--runtime",
         action="store_true",
-        help="Include repository-local qdp_runtime files; deletion still requires --delete --yes.",
+        help="Inventory repository-local qdp_runtime files without deleting them.",
+    )
+    parser.add_argument(
+        "--purge-runtime",
+        action="store_true",
+        help=(
+            "Allow deletion of the complete qdp_runtime tree inventory; requires "
+            "--runtime --delete --yes. Prefer workflow-specific cleanup commands."
+        ),
     )
     parser.add_argument("--json", action="store_true")
     return parser
@@ -222,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
         with_size=bool(args.with_size),
         max_items=int(args.max_items or 0),
         clean_runtime=bool(args.runtime),
+        purge_runtime=bool(args.purge_runtime),
     )
     if bool(args.json):
         print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
@@ -235,13 +392,20 @@ def _format(payload: dict[str, Any]) -> str:
         f"status: {payload.get('status')}",
         f"qdp_v2_root: {payload.get('qdp_v2_root')}",
         f"referenced_dataset_count: {payload.get('referenced_dataset_count', 0)}",
+        f"research_seed_dataset_count: {payload.get('research_seed_dataset_count', 0)}",
+        (
+            "research_reference_files_scanned: "
+            f"{payload.get('research_reference_scan', {}).get('scanned_file_count', 0)}"
+        ),
         f"unreferenced_dataset_dir_count: {payload.get('unreferenced_dataset_dir_count', 0)}",
         f"unreferenced_gb: {round(int(payload.get('unreferenced_bytes', 0)) / 1024**3, 4)}",
         f"runtime_item_count: {payload.get('runtime', {}).get('item_count', 0)}",
         f"runtime_gb: {round(int(payload.get('runtime', {}).get('bytes', 0)) / 1024**3, 4)}",
     ]
     for item in list(payload.get("unreferenced", []) or [])[:20]:
-        lines.append(f"unreferenced: {item.get('domain')} {item.get('dataset_id')} {item.get('gb')}GB {item.get('path')}")
+        lines.append(
+            f"unreferenced: {item.get('domain')} {item.get('dataset_id')} {item.get('gb')}GB {item.get('path')}"
+        )
     return "\n".join(lines)
 
 

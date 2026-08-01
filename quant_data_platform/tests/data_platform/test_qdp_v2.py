@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+
 from quant_data_platform.core.paths import workspace_root
 from quant_data_platform.qdp_v2.audit import audit_active
 from quant_data_platform.qdp_v2.check import run_check
@@ -303,6 +304,68 @@ def test_audit_and_gc_use_manifests(tmp_path: Path) -> None:
     assert any(item["dataset_id"] == "valuation__orphan" for item in deleted["deleted"])
 
 
+def test_gc_protects_dataset_referenced_by_frozen_research_manifest(
+    tmp_path: Path,
+) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    active_id = _write_domain(
+        root,
+        "trading_calendar",
+        pd.DataFrame(
+            {
+                "trade_date": ["2026-01-05"],
+                "is_open": [True],
+                "exchange": ["SSE"],
+                "source": ["unit"],
+            }
+        ),
+        contract="qdp_v2_trading_calendar_v1",
+        primary_key=["trade_date", "exchange"],
+    )
+    frozen_id = "valuation__frozen_research_input"
+    frozen_dir = root / "datasets" / "valuation" / frozen_id
+    frozen_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        frozen_dir / "dataset.json",
+        {
+            "dataset_id": frozen_id,
+            "domain": "valuation",
+            "shards": [],
+            "row_count": 0,
+        },
+    )
+    research_manifest = (
+        workspace
+        / "daily_research"
+        / "output"
+        / "path_policy"
+        / "studies"
+        / "frozen_v1"
+        / "manifest.json"
+    )
+    _write_json(research_manifest, {"source_dataset_id": frozen_id})
+    _write_active(root, {"trading_calendar": active_id})
+
+    dry = lake_gc(workspace_root=workspace, with_size=True)
+    deleted = lake_gc(workspace_root=workspace, delete=True, yes=True)
+
+    assert frozen_id not in {item["dataset_id"] for item in dry["unreferenced"]}
+    assert dry["research_seed_dataset_count"] == 1
+    assert dry["research_reference_scan"]["complete"] is True
+    assert dry["research_reference_scan"]["references"] == [
+        {
+            "dataset_id": frozen_id,
+            "reference_file_count": 1,
+            "reference_files": [
+                "daily_research/output/path_policy/studies/frozen_v1/manifest.json"
+            ],
+        }
+    ]
+    assert not deleted["deleted"]
+    assert frozen_dir.is_dir()
+
+
 def test_gc_can_explicitly_remove_workspace_local_runtime(tmp_path: Path) -> None:
     workspace = _workspace(tmp_path)
     root = qdp_v2_root(workspace)
@@ -314,6 +377,7 @@ def test_gc_can_explicitly_remove_workspace_local_runtime(tmp_path: Path) -> Non
     deleted = lake_gc(
         workspace_root=workspace,
         clean_runtime=True,
+        purge_runtime=True,
         delete=True,
         yes=True,
         with_size=True,
@@ -779,13 +843,9 @@ def test_intraday_physical_order_follows_declared_primary_key(tmp_path: Path) ->
         "symbol",
         "bar_time",
     ]
-    assert result["observed_physical_key_orders"] == {
-        "trade_date>symbol>bar_time": 1
-    }
+    assert result["observed_physical_key_orders"] == {"trade_date>symbol>bar_time": 1}
     assert legacy["status"] == "ok"
-    assert legacy["observed_physical_key_orders"] == {
-        "symbol>trade_date>bar_time": 1
-    }
+    assert legacy["observed_physical_key_orders"] == {"symbol>trade_date>bar_time": 1}
 
 
 def test_bar_day_check_aggregates_independent_date_shards(tmp_path: Path) -> None:

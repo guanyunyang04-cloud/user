@@ -1638,6 +1638,136 @@ def audit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     return result
 
 
+def cleanup_prepared_cache(
+    *,
+    workspace_root: str | Path | None = None,
+    delete: bool = False,
+    yes: bool = False,
+) -> dict[str, Any]:
+    """Remove only prepared shards already copied into the active QDP datasets."""
+
+    if delete and not yes:
+        raise ValueError("prepared_cache_cleanup_requires_yes")
+    workspace = _workspace(workspace_root)
+    runtime = _runtime(workspace).resolve()
+    prepared_root = (runtime / "prepared").resolve()
+    prepared_root.relative_to(runtime)
+    if not prepared_root.is_dir():
+        return {
+            "status": "absent",
+            "prepared_root": str(prepared_root),
+            "deletable": True,
+            "bytes": 0,
+            "file_count": 0,
+            "verified_domains": [],
+            "blockers": [],
+            "destructive_actions_performed": False,
+        }
+
+    state = _read_state(workspace)
+    installed = dict(state.get("installed_domains", {}) or {})
+    qdp_root = qdp_v2_root(workspace)
+    active = active_dataset_map(read_active_manifest(qdp_root))
+    blockers: list[str] = []
+    verified_domains: list[dict[str, Any]] = []
+    prepared_files = sorted(path for path in prepared_root.rglob("*") if path.is_file())
+
+    for domain_dir in sorted(path for path in prepared_root.iterdir() if path.is_dir()):
+        domain = domain_dir.name
+        record = dict(installed.get(domain, {}) or {})
+        dataset_id = str(record.get("dataset_id", "") or "")
+        if record.get("status") != "installed" or not dataset_id:
+            blockers.append(f"prepared_domain_not_recorded_as_installed:{domain}")
+            continue
+        if active.get(domain) != dataset_id:
+            blockers.append(f"prepared_domain_not_active:{domain}:{dataset_id}")
+            continue
+        manifest_path = dataset_manifest_for_id(qdp_root, dataset_id, domain)
+        if manifest_path is None:
+            blockers.append(f"prepared_domain_manifest_missing:{domain}:{dataset_id}")
+            continue
+        manifest = read_dataset_manifest(manifest_path)
+        installed_by_year = {
+            int(
+                dict(shard.metadata or {}).get("year") or str(shard.start_date)[:4]
+            ): shard
+            for shard in manifest.shards
+        }
+        domain_prepared = sorted(domain_dir.rglob("*.parquet"))
+        verified_years: list[int] = []
+        for path in domain_prepared:
+            try:
+                year = int(path.parent.name.removeprefix("year="))
+            except ValueError:
+                blockers.append(f"prepared_year_invalid:{path}")
+                continue
+            sidecar = path.with_suffix(".json")
+            shard = installed_by_year.get(year)
+            if shard is None:
+                blockers.append(f"prepared_year_not_installed:{domain}:{year}")
+                continue
+            if not sidecar.is_file():
+                blockers.append(f"prepared_sidecar_missing:{domain}:{year}")
+                continue
+            try:
+                profile = json.loads(sidecar.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                blockers.append(f"prepared_sidecar_invalid:{domain}:{year}:{exc}")
+                continue
+            installed_path = resolve_manifest_path(shard.path, root=qdp_root)
+            prepared_hash = str(profile.get("sha256", "") or "")
+            installed_hash = str(dict(shard.metadata or {}).get("sha256", "") or "")
+            expected_size = int(shard.file_size or 0)
+            if not installed_path.is_file():
+                blockers.append(f"installed_shard_missing:{domain}:{year}")
+            elif not prepared_hash or prepared_hash != installed_hash:
+                blockers.append(f"prepared_installed_hash_mismatch:{domain}:{year}")
+            elif path.stat().st_size != installed_path.stat().st_size:
+                blockers.append(f"prepared_installed_size_mismatch:{domain}:{year}")
+            elif expected_size and installed_path.stat().st_size != expected_size:
+                blockers.append(f"installed_manifest_size_mismatch:{domain}:{year}")
+            else:
+                verified_years.append(year)
+        if set(verified_years) != set(installed_by_year):
+            blockers.append(
+                f"prepared_year_inventory_mismatch:{domain}:"
+                f"{sorted(verified_years)}!={sorted(installed_by_year)}"
+            )
+        verified_domains.append(
+            {
+                "domain": domain,
+                "dataset_id": dataset_id,
+                "verified_years": sorted(verified_years),
+                "prepared_parquet_count": len(domain_prepared),
+            }
+        )
+
+    size = sum(path.stat().st_size for path in prepared_files)
+    payload: dict[str, Any] = {
+        "status": "blocked" if blockers else ("deleted" if delete else "dry_run"),
+        "prepared_root": str(prepared_root),
+        "deletable": not blockers,
+        "bytes": int(size),
+        "file_count": len(prepared_files),
+        "verified_domains": verified_domains,
+        "blockers": sorted(set(blockers)),
+        "destructive_actions_performed": False,
+    }
+    if blockers:
+        return payload
+    if delete:
+        shutil.rmtree(prepared_root)
+        payload["destructive_actions_performed"] = True
+        receipt = (
+            qdp_root
+            / "audits"
+            / f"{UPDATE_ID}_prepared_cleanup_{utc_now().replace(':', '')}.json"
+        )
+        atomic_write_json(receipt, payload)
+        payload["receipt_path"] = str(receipt)
+    return payload
+
+
 def status(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     state = _read_state(workspace)
@@ -1701,7 +1831,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode.add_argument("--run-pending", action="store_true")
     mode.add_argument("--prepare", action="store_true")
     mode.add_argument("--audit", action="store_true")
+    mode.add_argument("--cleanup-prepared", action="store_true")
     mode.add_argument("--self-test", action="store_true")
+    parser.add_argument("--delete", action="store_true")
+    parser.add_argument("--yes", action="store_true")
     return parser
 
 
@@ -1736,6 +1869,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = prepare_and_install(workspace_root=workspace, domains=domains)
     elif args.audit:
         payload = audit(workspace_root=workspace)
+    elif args.cleanup_prepared:
+        payload = cleanup_prepared_cache(
+            workspace_root=workspace,
+            delete=bool(args.delete),
+            yes=bool(args.yes),
+        )
     else:
         payload = self_test()
     print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))

@@ -77,6 +77,30 @@ not formal candidates. Moneyflow `net_mf_vol` and `net_mf_amount` retain their
 provider aggregate values as diagnostic-only because they are not stably
 reconstructible from the buy/sell buckets.
 
+The 2026-08-01 storage cleanup retained the active catalog, raw provider
+evidence, and frozen research inputs while removing only verified redundant
+copies. QDP GC now treats dataset IDs found in durable study specifications,
+research records, and frozen manifests as live roots before following manifest
+shard dependencies. It protected 32 research-pinned versions and removed nine
+zero-reference dataset versions (9.8334 GiB). The extended-backfill prepared
+cache was removed only after all 64 annual Parquet shards matched the four
+active installed datasets by dataset ID, year, recorded SHA-256, and size;
+this recovered another 10,433,623,907 bytes while preserving the per-request
+raw cache. Its receipt is
+`quant_data_platform/data/qdp_v2/audits/tushare_extended_backfill_v1_prepared_cleanup_2026-08-01T105744+0000.json`.
+Generic runtime deletion now requires a separate explicit purge flag; the
+workflow-specific verified cleanup is the default path.
+
+Git cruft contained 1,084 unreachable blobs (22.5866 GiB inflated, 8.8088 GiB
+packed) plus obsolete WIP/temp snapshots, including a tracked DuckDB temporary
+file. `git gc --prune=now` reduced the object store to one 229.07 MiB pack with
+zero garbage. Across data and Git cleanup, verified logical removal was about
+28.3 GiB; H-drive free space increased from 566,759,522,304 to
+601,169,592,320 bytes during the cleanup window. The remaining raw request
+cache and stable artifacts under `tmp` were deliberately not deleted; future
+small-file compaction must preserve exact raw evidence and first pin every
+durable `tmp` dependency.
+
 The pool coverage audit through 2025 reports complete 48-bar 5-minute coverage
 of 92.79% for all positive daily rows, 93.77% for the same-day
 non-ST/non-suspended/non-delisted pool, and 94.66% for the dated union of
