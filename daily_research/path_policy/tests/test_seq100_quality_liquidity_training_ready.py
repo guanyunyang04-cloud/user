@@ -27,8 +27,33 @@ def _config() -> dict[str, object]:
             "eligible_for_atlas_statistics": False,
             "eligible_for_labels": False,
         },
+        "input_contract": {
+            "row_spine_contract_version": ready.ROW_SPINE_CONTRACT_VERSION,
+            "row_spine_projection": list(ready.ROW_SPINE_COLUMNS),
+            "forbidden_inherited_metadata_columns": list(
+                ready.FORBIDDEN_INHERITED_METADATA_COLUMNS
+            ),
+            "source_support_future_metadata_policy": "document_but_do_not_project",
+            "symbol_history_cutoff_date": ready.END_DATE,
+            "feature_loading": "feature_registry_whitelist_only",
+            "label_validity_source": "cutoff_memmaps_and_label_flags_only",
+        },
         "training": {"performed": False},
     }
+
+
+def _spine_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "candidate_id": [1, 2],
+            "year": [2011, 2011],
+            "trade_date": ["2011-01-05", "2011-01-05"],
+            "date_idx": [1, 1],
+            "symbol_idx": [10, 20],
+            "symbol": ["000001.SZ", "600000.SH"],
+            "security_id": ["SZ-1", "SH-1"],
+        }
+    )
 
 
 def test_config_keeps_2010_out_of_formal_rows(tmp_path) -> None:
@@ -47,6 +72,16 @@ def test_config_rejects_training_or_2026(tmp_path) -> None:
     path = tmp_path / "study.json"
     path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ready.TrainingReadyError, match="must_not_train"):
+        ready._load_config(path)
+
+
+def test_config_rejects_unsafe_row_spine_projection(tmp_path) -> None:
+    config = _config()
+    config["input_contract"]["row_spine_projection"].append("entry_filled")
+    path = tmp_path / "study.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+
+    with pytest.raises(ready.TrainingReadyError, match="input_contract_changed"):
         ready._load_config(path)
 
 
@@ -107,13 +142,21 @@ def test_row_spine_adds_exact_security_id_without_row_expansion(tmp_path) -> Non
             "candidate_id": [1, 2],
             "year": [2011, 2011],
             "trade_date": ["2011-01-04", "2011-01-04"],
+            "date_idx": [0, 0],
+            "symbol_idx": [10, 20],
             "symbol": ["000001.SZ", "600000.SH"],
+            "entry_trade_date": ["2011-01-05", "2011-01-05"],
+            "entry_filled": [True, True],
+            "label_valid": [True, True],
+            "price_label_valid": [True, True],
+            "va_aux_valid": [True, True],
         }
     ).to_parquet(support, index=False)
     pd.DataFrame(
         {
-            "security_id": ["SZ-1", "SH-1"],
-            "symbol": ["000001.SZ", "600000.SH"],
+            "security_id": ["SZ-1", "SH-1", "SZ-FUTURE"],
+            "symbol": ["000001.SZ", "600000.SH", "000001.SZ"],
+            "effective_from": ["1991-01-01", "1999-01-01", "2026-01-02"],
         }
     ).to_parquet(history, index=False)
 
@@ -124,18 +167,58 @@ def test_row_spine_adds_exact_security_id_without_row_expansion(tmp_path) -> Non
 
     assert len(result) == 2
     assert result["security_id"].tolist() == ["SZ-1", "SH-1"]
+    assert tuple(result.columns) == ready.ROW_SPINE_COLUMNS
+    assert not set(result.columns).intersection(
+        ready.FORBIDDEN_INHERITED_METADATA_COLUMNS
+    )
+    history_profile = ready._history_mapping_profile([history])
+    assert history_profile["mapping_row_count"] == 2
+    assert history_profile["excluded_after_end_row_count"] == 1
+
+
+def test_forbidden_date_detector_rejects_legacy_row_spine(tmp_path) -> None:
+    path = tmp_path / "legacy-spine.parquet"
+    frame = _spine_frame().iloc[:1].copy()
+    frame["entry_trade_date"] = "2026-01-05"
+    frame["entry_filled"] = True
+    frame.to_parquet(path, index=False)
+
+    assert ready._forbidden_date_row_count(path) == 1
+    with pytest.raises(ready.TrainingReadyError, match="row_spine_schema_changed"):
+        ready._assert_safe_row_spine_schema(path)
+
+
+def test_source_support_boundary_documents_but_excludes_future_metadata(
+    tmp_path, monkeypatch
+) -> None:
+    support = tmp_path / "support.parquet"
+    frame = _spine_frame().iloc[:1].drop(columns="security_id")
+    frame["entry_trade_date"] = "2026-01-05"
+    frame["entry_filled"] = True
+    frame["label_valid"] = True
+    frame["price_label_valid"] = True
+    frame["va_aux_valid"] = True
+    frame.to_parquet(support, index=False)
+    monkeypatch.setattr(ready, "RESEARCH_YEARS", (2025,))
+
+    profile = ready._source_support_boundary_profile(
+        {"membership_years": {"2025": {"support_path": str(support)}}}
+    )
+
+    assert profile["projection_columns"] == list(ready.SUPPORT_IDENTITY_COLUMNS)
+    assert profile["explicit_future_date_row_count"] == 1
+    assert profile["forbidden_metadata_columns_present"] == sorted(
+        ready.FORBIDDEN_INHERITED_METADATA_COLUMNS
+    )
 
 
 def test_lagged_feature_joins_on_feature_available_date(tmp_path) -> None:
     spine = tmp_path / "spine.parquet"
     source = tmp_path / "source.parquet"
-    pd.DataFrame(
-        {
-            "candidate_id": [1],
-            "trade_date": ["2011-01-05"],
-            "security_id": ["SZ-1"],
-        }
-    ).to_parquet(spine, index=False)
+    frame = _spine_frame().iloc[:1].copy()
+    frame["entry_trade_date"] = "2026-01-05"
+    frame["entry_filled"] = True
+    frame.to_parquet(spine, index=False)
     pd.DataFrame(
         {
             "security_id": ["SZ-1"],
@@ -160,18 +243,17 @@ def test_lagged_feature_joins_on_feature_available_date(tmp_path) -> None:
     assert result.loc[0, "coverage_state"] == "observed"
     assert result.loc[0, "margin_detail_rzye"] == 10.0
     assert result.loc[0, "source_date"] == "2011-01-04"
+    assert tuple(result.columns[: len(ready.ROW_SPINE_COLUMNS)]) == (
+        ready.ROW_SPINE_COLUMNS
+    )
+    assert "entry_trade_date" not in result
+    assert "entry_filled" not in result
 
 
 def test_technical_block_marks_joined_all_null_row_as_warmup(tmp_path) -> None:
     spine = tmp_path / "spine.parquet"
     source = tmp_path / "source.parquet"
-    pd.DataFrame(
-        {
-            "candidate_id": [1],
-            "trade_date": ["2011-01-05"],
-            "security_id": ["SZ-1"],
-        }
-    ).to_parquet(spine, index=False)
+    _spine_frame().iloc[:1].to_parquet(spine, index=False)
     pd.DataFrame(
         {
             "security_id": ["SZ-1"],
@@ -223,14 +305,7 @@ def test_margin_block_joins_detail_and_exchange_market_data(tmp_path) -> None:
     spine = tmp_path / "spine.parquet"
     detail = tmp_path / "detail.parquet"
     market = tmp_path / "market.parquet"
-    pd.DataFrame(
-        {
-            "candidate_id": [1, 2],
-            "trade_date": ["2011-01-05", "2011-01-05"],
-            "security_id": ["SZ-1", "SH-1"],
-            "symbol": ["000001.SZ", "600000.SH"],
-        }
-    ).to_parquet(spine, index=False)
+    _spine_frame().to_parquet(spine, index=False)
     pd.DataFrame(
         {
             "security_id": ["SZ-1"],
@@ -281,3 +356,7 @@ def test_self_test_locks_qfq_and_date_boundaries() -> None:
     assert result["status"] == "ok"
     assert result["checks"]["qfq_formal"] is False
     assert result["checks"]["forbidden_2026"] is True
+    assert (
+        result["checks"]["row_spine_contract_version"]
+        == ready.ROW_SPINE_CONTRACT_VERSION
+    )

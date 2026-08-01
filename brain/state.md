@@ -417,6 +417,22 @@ at zero rows, and explicitly records `training_performed=false` and
 `feature_set_selected=false`. The next research step is descriptive
 candidate/target and tail-opportunity analysis before any new model training.
 
+The training-ready boundary was hardened after a takeover audit found that its
+source common-support files physically carried five inherited pack metadata
+columns: `entry_trade_date`, `entry_filled`, `label_valid`,
+`price_label_valid`, and `va_aux_valid`. These columns never defined pool
+membership or formal feature eligibility, but 1,696 rows on 2025-12-31 had an
+`entry_trade_date` of 2026-01-05, so wildcard projection was unsafe. The
+remediated row-spine contract is version 2 and contains exactly
+`candidate_id, year, trade_date, date_idx, symbol_idx, symbol, security_id`.
+All three new physical feature blocks repeat that explicit identity projection,
+feature loading is registry-whitelist only, and label validity must come only
+from the cutoff memmaps and label flags. Symbol-history mapping is cut off at
+2025-12-31; 16 later history rows are explicitly excluded. The rebuilt package
+preserves all 4,441,395 rows and the frozen common-support hash, documents the
+1,696 source-only future-date rows, and physically verifies zero consumed 2026
+dependencies across every row-spine and feature partition.
+
 ## PIT stock-pool audit
 
 `seq100_v4_pit_stock_pool_audit_v1` was prepared and evaluated without model

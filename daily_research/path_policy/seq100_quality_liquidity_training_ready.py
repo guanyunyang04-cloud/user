@@ -41,6 +41,23 @@ EXPECTED_FACTOR_FIELD_COUNT = 261
 EXPECTED_FACTOR_SCHEMA_HASH = (
     "14cf668f77da06b5ddaffe59057e98c25107a870d7ec006ec5e9ee1ae574d488"
 )
+ROW_SPINE_CONTRACT_VERSION = 2
+SUPPORT_IDENTITY_COLUMNS = (
+    "candidate_id",
+    "year",
+    "trade_date",
+    "date_idx",
+    "symbol_idx",
+    "symbol",
+)
+ROW_SPINE_COLUMNS = (*SUPPORT_IDENTITY_COLUMNS, "security_id")
+FORBIDDEN_INHERITED_METADATA_COLUMNS = (
+    "entry_trade_date",
+    "entry_filled",
+    "label_valid",
+    "price_label_valid",
+    "va_aux_valid",
+)
 ROW_KEY_COLUMNS = ("candidate_id", "trade_date", "security_id")
 
 DEFAULT_SCOPE_OUTPUT_ROOT = (
@@ -259,6 +276,146 @@ def _quoted(name: str) -> str:
     return '"' + str(name).replace('"', '""') + '"'
 
 
+def _projection(alias: str, columns: Sequence[str]) -> str:
+    return ",".join(f"{alias}.{_quoted(column)}" for column in columns)
+
+
+def _parquet_columns(path: Path) -> tuple[str, ...]:
+    return tuple(pq.read_schema(path).names)
+
+
+def _date_dependency_columns(path: Path) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name in _parquet_columns(path)
+        if name == "trade_date" or name.endswith("_date")
+    )
+
+
+def _forbidden_date_row_count(
+    path: Path, *, columns: Sequence[str] | None = None
+) -> int:
+    selected = tuple(columns) if columns is not None else _date_dependency_columns(path)
+    if not selected:
+        return 0
+    available = set(_parquet_columns(path))
+    missing = [column for column in selected if column not in available]
+    if missing:
+        raise TrainingReadyError(f"date_dependency_columns_missing:{path}:{missing}")
+    predicate = " OR ".join(
+        f"try_cast({_quoted(column)} AS DATE)>=DATE '{FORBIDDEN_YEAR}-01-01'"
+        for column in selected
+    )
+    literal = str(path).replace("'", "''")
+    with duckdb.connect() as connection:
+        value = connection.execute(
+            f"SELECT count(*) FILTER(WHERE {predicate}) FROM read_parquet('{literal}')"
+        ).fetchone()[0]
+    return int(value or 0)
+
+
+def _assert_safe_row_spine_schema(path: Path) -> None:
+    actual = _parquet_columns(path)
+    if actual != ROW_SPINE_COLUMNS:
+        raise TrainingReadyError(
+            f"row_spine_schema_changed:{path}:{actual}:{ROW_SPINE_COLUMNS}"
+        )
+
+
+def _assert_safe_feature_identity_schema(path: Path) -> None:
+    actual = _parquet_columns(path)
+    prefix = actual[: len(ROW_SPINE_COLUMNS)]
+    forbidden = sorted(set(actual).intersection(FORBIDDEN_INHERITED_METADATA_COLUMNS))
+    if prefix != ROW_SPINE_COLUMNS or forbidden:
+        raise TrainingReadyError(
+            f"feature_identity_schema_changed:{path}:{prefix}:{forbidden}"
+        )
+
+
+def _history_mapping_profile(history_paths: Sequence[Path]) -> dict[str, Any]:
+    source = _scan(history_paths)
+    eligible = f"try_cast(effective_from AS DATE)<=DATE '{END_DATE}'"
+    with duckdb.connect() as connection:
+        invalid_date_count = int(
+            connection.execute(
+                f"SELECT count(*) FROM {source} "
+                "WHERE try_cast(effective_from AS DATE) IS NULL"
+            ).fetchone()[0]
+            or 0
+        )
+        excluded_after_end_count = int(
+            connection.execute(
+                f"SELECT count(*) FROM {source} WHERE NOT ({eligible})"
+            ).fetchone()[0]
+            or 0
+        )
+        ambiguous_symbol_count = int(
+            connection.execute(
+                f"SELECT count(*) FROM (SELECT symbol FROM {source} "
+                f"WHERE {eligible} GROUP BY symbol "
+                "HAVING count(DISTINCT security_id)>1)"
+            ).fetchone()[0]
+            or 0
+        )
+        mapping = connection.execute(
+            "SELECT symbol,min(security_id) AS security_id "
+            f"FROM {source} WHERE {eligible} GROUP BY symbol "
+            "HAVING count(DISTINCT security_id)=1 ORDER BY symbol"
+        ).fetchall()
+    if invalid_date_count or ambiguous_symbol_count:
+        raise TrainingReadyError(
+            "symbol_history_mapping_contract_failed:"
+            f"{invalid_date_count}:{ambiguous_symbol_count}"
+        )
+    digest = hashlib.sha256()
+    for symbol, security_id in mapping:
+        digest.update(f"{symbol}|{security_id}\n".encode())
+    return {
+        "cutoff_date": END_DATE,
+        "mapping_row_count": len(mapping),
+        "mapping_hash": digest.hexdigest(),
+        "invalid_effective_from_row_count": invalid_date_count,
+        "ambiguous_symbol_count": ambiguous_symbol_count,
+        "excluded_after_end_row_count": excluded_after_end_count,
+    }
+
+
+def _source_support_boundary_profile(
+    scope_state: Mapping[str, Any],
+) -> dict[str, Any]:
+    membership = dict(scope_state.get("membership_years", {}) or {})
+    present_columns: set[str] = set()
+    explicit_future_date_rows = 0
+    partitions: dict[str, Any] = {}
+    for year in RESEARCH_YEARS:
+        path = Path(str(dict(membership[str(year)])["support_path"]))
+        columns = _parquet_columns(path)
+        missing = sorted(set(SUPPORT_IDENTITY_COLUMNS).difference(columns))
+        if missing:
+            raise TrainingReadyError(
+                f"source_support_identity_columns_missing:{year}:{missing}"
+            )
+        inherited = sorted(
+            set(columns).intersection(FORBIDDEN_INHERITED_METADATA_COLUMNS)
+        )
+        present_columns.update(inherited)
+        date_columns = tuple(
+            column for column in ("trade_date", "entry_trade_date") if column in columns
+        )
+        future_count = _forbidden_date_row_count(path, columns=date_columns)
+        explicit_future_date_rows += future_count
+        partitions[str(year)] = {
+            "forbidden_metadata_columns_present": inherited,
+            "explicit_future_date_row_count": future_count,
+        }
+    return {
+        "projection_columns": list(SUPPORT_IDENTITY_COLUMNS),
+        "forbidden_metadata_columns_present": sorted(present_columns),
+        "explicit_future_date_row_count": explicit_future_date_rows,
+        "partitions": partitions,
+    }
+
+
 def _copy_query(connection: duckdb.DuckDBPyConnection, sql: str, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".tmp.parquet")
@@ -276,6 +433,7 @@ def _load_config(path: Path) -> dict[str, Any]:
     payload = _read_json(path)
     period = dict(payload.get("period", {}) or {})
     burn_in = dict(payload.get("burn_in", {}) or {})
+    input_contract = dict(payload.get("input_contract", {}) or {})
     if payload.get("study_id") != STUDY_ID:
         raise TrainingReadyError("training_ready_study_id_changed")
     if (
@@ -297,6 +455,20 @@ def _load_config(path: Path) -> dict[str, Any]:
         raise TrainingReadyError("training_ready_burn_in_semantics_changed")
     if dict(payload.get("training", {}) or {}).get("performed") is not False:
         raise TrainingReadyError("training_ready_must_not_train")
+    if (
+        int(input_contract.get("row_spine_contract_version", 0))
+        != ROW_SPINE_CONTRACT_VERSION
+        or tuple(input_contract.get("row_spine_projection", ())) != ROW_SPINE_COLUMNS
+        or tuple(input_contract.get("forbidden_inherited_metadata_columns", ()))
+        != FORBIDDEN_INHERITED_METADATA_COLUMNS
+        or input_contract.get("source_support_future_metadata_policy")
+        != "document_but_do_not_project"
+        or input_contract.get("symbol_history_cutoff_date") != END_DATE
+        or input_contract.get("feature_loading") != "feature_registry_whitelist_only"
+        or input_contract.get("label_validity_source")
+        != "cutoff_memmaps_and_label_flags_only"
+    ):
+        raise TrainingReadyError("training_ready_input_contract_changed")
     return payload
 
 
@@ -555,14 +727,16 @@ def _row_spine_sql(
     support_path: Path,
     history_paths: Sequence[Path],
 ) -> str:
+    identity = _projection("s", SUPPORT_IDENTITY_COLUMNS)
     return f"""
     WITH history AS (
       SELECT symbol,min(security_id) AS security_id
       FROM {_scan(history_paths)}
+      WHERE try_cast(effective_from AS DATE)<=DATE '{END_DATE}'
       GROUP BY symbol
       HAVING count(DISTINCT security_id)=1
     )
-    SELECT s.*,h.security_id
+    SELECT {identity},h.security_id
     FROM read_parquet('{str(support_path).replace("'", "''")}') s
     JOIN history h USING(symbol)
     ORDER BY candidate_id
@@ -574,8 +748,9 @@ def _build_row_spines(
     workspace: Path,
     scope_state: Mapping[str, Any],
     output_root: Path,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     history_paths = _active_paths(workspace, DataDomain.SYMBOL_HISTORY)
+    history_profile = _history_mapping_profile(history_paths)
     membership = dict(scope_state.get("membership_years", {}) or {})
     records: dict[str, Any] = {}
     for year in RESEARCH_YEARS:
@@ -589,9 +764,15 @@ def _build_row_spines(
         reusable = False
         if path.is_file() and sidecar.is_file():
             previous = _read_json(sidecar)
-            reusable = previous.get("input_hash") == input_hash and previous.get(
-                "sha256"
-            ) == _sha256(path)
+            reusable = (
+                previous.get("input_hash") == input_hash
+                and previous.get("sha256") == _sha256(path)
+                and int(previous.get("row_spine_contract_version", 0))
+                == ROW_SPINE_CONTRACT_VERSION
+                and previous.get("history_mapping_hash")
+                == history_profile["mapping_hash"]
+                and _parquet_columns(path) == ROW_SPINE_COLUMNS
+            )
         if not reusable:
             with duckdb.connect() as connection:
                 _copy_query(
@@ -603,18 +784,20 @@ def _build_row_spines(
                 )
             with duckdb.connect() as connection:
                 path_literal = str(path).replace("'", "''")
-                row_count, unique_count, future_count = connection.execute(
-                    f"SELECT count(*),count(DISTINCT candidate_id),"
-                    f"count(*) FILTER(WHERE trade_date>='{FORBIDDEN_YEAR}-01-01') "
+                row_count, unique_count = connection.execute(
+                    "SELECT count(*),count(DISTINCT candidate_id) "
                     f"FROM read_parquet('{path_literal}')"
                 ).fetchone()
             expected = int(support["common_support_row_count"])
-            if (
-                int(row_count) != expected
-                or int(unique_count) != expected
-                or int(future_count or 0)
-            ):
+            _assert_safe_row_spine_schema(path)
+            forbidden_dependency_count = _forbidden_date_row_count(path)
+            if int(row_count) != expected or int(unique_count) != expected:
                 raise TrainingReadyError(f"row_spine_contract_failed:{year}")
+            if forbidden_dependency_count:
+                raise TrainingReadyError(
+                    f"row_spine_forbidden_dependency:{year}:"
+                    f"{forbidden_dependency_count}"
+                )
             _write_json(
                 sidecar,
                 {
@@ -622,7 +805,17 @@ def _build_row_spines(
                     "sha256": _sha256(path),
                     "row_count": int(row_count),
                     "security_id_joined": True,
+                    "row_spine_contract_version": ROW_SPINE_CONTRACT_VERSION,
+                    "projection_columns": list(ROW_SPINE_COLUMNS),
+                    "history_mapping_hash": history_profile["mapping_hash"],
+                    "forbidden_dependency_row_count": forbidden_dependency_count,
                 },
+            )
+        _assert_safe_row_spine_schema(path)
+        forbidden_dependency_count = _forbidden_date_row_count(path)
+        if forbidden_dependency_count:
+            raise TrainingReadyError(
+                f"row_spine_forbidden_dependency:{year}:{forbidden_dependency_count}"
             )
         row_key_hash = _row_key_hash(path)
         profile = _partition_profile(
@@ -645,9 +838,13 @@ def _build_row_spines(
             "sha256": _sha256(path),
             "row_count": int(pq.ParquetFile(path).metadata.num_rows),
             "support_sha256": input_hash,
+            "row_spine_contract_version": ROW_SPINE_CONTRACT_VERSION,
+            "projection_columns": list(ROW_SPINE_COLUMNS),
+            "history_mapping_hash": history_profile["mapping_hash"],
+            "forbidden_dependency_row_count": forbidden_dependency_count,
             **profile,
         }
-    return records
+    return records, history_profile
 
 
 def _feature_select_sql(
@@ -659,6 +856,7 @@ def _feature_select_sql(
     lagged: bool,
 ) -> str:
     source = _scan(source_paths)
+    identity = _projection("s", ROW_SPINE_COLUMNS)
     if lagged:
         join = "f.security_id=s.security_id AND f.feature_available_date=s.trade_date"
     else:
@@ -684,7 +882,7 @@ def _feature_select_sql(
             "ELSE 'observed' END"
         )
     return f"""
-    SELECT s.* EXCLUDE(security_id),s.security_id,
+    SELECT {identity},
            {coverage_state} AS coverage_state,
            f.source_date,f.feature_available_date,
            {selected}
@@ -733,16 +931,17 @@ def _build_feature_block(
             )
         with duckdb.connect() as connection:
             path_literal = str(output_path).replace("'", "''")
-            row_count, unique_count, future_count = connection.execute(
-                f"SELECT count(*),count(DISTINCT candidate_id),"
-                f"count(*) FILTER(WHERE trade_date>='{FORBIDDEN_YEAR}-01-01') "
+            row_count, unique_count = connection.execute(
+                "SELECT count(*),count(DISTINCT candidate_id) "
                 f"FROM read_parquet('{path_literal}')"
             ).fetchone()
             if int(row_count) != int(row_spines[str(year)]["row_count"]):
                 raise TrainingReadyError(
                     f"feature_block_row_count_changed:{domain}:{year}"
                 )
-            if int(unique_count) != int(row_count) or int(future_count or 0):
+            _assert_safe_feature_identity_schema(output_path)
+            forbidden_dependency_count = _forbidden_date_row_count(output_path)
+            if int(unique_count) != int(row_count) or forbidden_dependency_count:
                 raise TrainingReadyError(
                     f"feature_block_contract_failed:{domain}:{year}"
                 )
@@ -762,6 +961,7 @@ def _build_feature_block(
             "row_count": int(row_count),
             "field_count": len(fields),
             "coverage_counts": {str(key): int(value) for key, value in coverage},
+            "forbidden_dependency_row_count": forbidden_dependency_count,
             **profile,
         }
     return {
@@ -782,6 +982,7 @@ def _margin_block_sql(
     detail_fields: Sequence[str],
     market_fields: Sequence[str],
 ) -> str:
+    identity = _projection("s", ROW_SPINE_COLUMNS)
     detail_values = ",\n           ".join(
         f"d.{_quoted(field)} AS {_quoted('margin_detail_' + field)}"
         for field in detail_fields
@@ -812,7 +1013,7 @@ def _margin_block_sql(
             "ELSE 'source_unavailable' END"
         )
     return f"""
-    SELECT s.* EXCLUDE(security_id),s.security_id,
+    SELECT {identity},
            {coverage_state} AS coverage_state,
            CASE WHEN d.security_id IS NULL THEN 'source_unavailable'
                 ELSE 'observed' END AS margin_detail_coverage_state,
@@ -878,9 +1079,8 @@ def _build_margin_block(
             )
         path_literal = str(output_path).replace("'", "''")
         with duckdb.connect() as connection:
-            row_count, unique_count, future_count = connection.execute(
-                f"SELECT count(*),count(DISTINCT candidate_id),"
-                f"count(*) FILTER(WHERE trade_date>='{FORBIDDEN_YEAR}-01-01') "
+            row_count, unique_count = connection.execute(
+                "SELECT count(*),count(DISTINCT candidate_id) "
                 f"FROM read_parquet('{path_literal}')"
             ).fetchone()
             coverage = connection.execute(
@@ -901,7 +1101,9 @@ def _build_margin_block(
             ).fetchall()
         if int(row_count) != int(row_spines[str(year)]["row_count"]):
             raise TrainingReadyError(f"margin_block_row_count_changed:{year}")
-        if int(unique_count) != int(row_count) or int(future_count or 0):
+        _assert_safe_feature_identity_schema(output_path)
+        forbidden_dependency_count = _forbidden_date_row_count(output_path)
+        if int(unique_count) != int(row_count) or forbidden_dependency_count:
             raise TrainingReadyError(f"margin_block_contract_failed:{year}")
         _assert_same_row_keys(block_path=output_path, spine_path=spine_path)
         profile = _partition_profile(
@@ -921,6 +1123,7 @@ def _build_margin_block(
             "margin_market_coverage_counts": {
                 str(key): int(value) for key, value in market_coverage
             },
+            "forbidden_dependency_row_count": forbidden_dependency_count,
             **profile,
         }
     return {
@@ -1025,8 +1228,9 @@ def prepare(
     scope_state, scope_manifest = _scope_state(scope_output_root)
     _validate_source_inputs(state=scope_state, manifest=scope_manifest)
     source_query_contract = _source_query_contract(workspace_root)
+    source_support_boundary = _source_support_boundary_profile(scope_state)
     output_root.mkdir(parents=True, exist_ok=True)
-    row_spines = _build_row_spines(
+    row_spines, history_mapping = _build_row_spines(
         workspace=workspace_root,
         scope_state=scope_state,
         output_root=output_root,
@@ -1187,6 +1391,19 @@ def prepare(
         if mandatory_ready and not has_documented_gaps
         else "ready_with_documented_optional_gaps"
     )
+    consumed_forbidden_dependency_rows = sum(
+        int(partition.get("forbidden_dependency_row_count", 0))
+        for partition in row_spines.values()
+    ) + sum(
+        int(partition.get("forbidden_dependency_row_count", 0))
+        for block in blocks.values()
+        for partition in dict(block.get("partitions", {}) or {}).values()
+    )
+    if consumed_forbidden_dependency_rows:
+        raise TrainingReadyError(
+            "training_ready_forbidden_dependency_consumed:"
+            f"{consumed_forbidden_dependency_rows}"
+        )
     manifest = {
         "schema": "seq100_quality_liquidity_training_ready/v1",
         "status": "completed",
@@ -1215,6 +1432,18 @@ def prepare(
             "stock_day_identity": "security_id",
             "daily_and_minute_models_share_exact_rows": True,
             "missing_5m_action": "drop_stock_day_only",
+        },
+        "row_spine_contract": {
+            "version": ROW_SPINE_CONTRACT_VERSION,
+            "projection_columns": list(ROW_SPINE_COLUMNS),
+            "forbidden_inherited_metadata_columns": list(
+                FORBIDDEN_INHERITED_METADATA_COLUMNS
+            ),
+            "source_support_boundary": source_support_boundary,
+            "symbol_history_mapping": history_mapping,
+            "consumed_forbidden_dependency_row_count": (
+                consumed_forbidden_dependency_rows
+            ),
         },
         "row_spine": row_spines,
         "existing_atlas_518": {
@@ -1265,7 +1494,7 @@ def prepare(
         "feature_set_selected": False,
         "readiness_status": readiness_status,
         "config": config,
-        "forbidden_2026_rows": 0,
+        "forbidden_2026_rows": consumed_forbidden_dependency_rows,
     }
     formal_candidates = (
         feature_registry.loc[
@@ -1325,7 +1554,14 @@ def prepare(
             "research_start_date": RESEARCH_START,
             "research_end_date": END_DATE,
             "forbidden_2026_request_count": 0,
-            "forbidden_2026_feature_row_count": 0,
+            "forbidden_2026_feature_row_count": (consumed_forbidden_dependency_rows),
+            "source_support_explicit_future_date_row_count": int(
+                source_support_boundary["explicit_future_date_row_count"]
+            ),
+            "source_support_future_metadata_consumed": False,
+            "symbol_history_rows_excluded_after_end": int(
+                history_mapping["excluded_after_end_row_count"]
+            ),
         },
         "future_oos_folds": list(scope_manifest["rolling_oos_folds"]),
         "training_performed": False,
@@ -1350,6 +1586,8 @@ def prepare(
         "common_support_hash": scope_hash,
         "training_performed": False,
         "feature_set_selected": False,
+        "row_spine_contract_version": ROW_SPINE_CONTRACT_VERSION,
+        "consumed_forbidden_dependency_row_count": (consumed_forbidden_dependency_rows),
         "readiness_status": readiness_status,
         "readiness_path": str(readiness_path.resolve()),
         "readiness_sha256": _sha256(readiness_path),
@@ -1369,6 +1607,10 @@ def status(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         "common_support_hash": state.get("common_support_hash", ""),
         "training_performed": state.get("training_performed", False),
         "feature_set_selected": state.get("feature_set_selected", False),
+        "row_spine_contract_version": int(state.get("row_spine_contract_version", 0)),
+        "consumed_forbidden_dependency_row_count": int(
+            state.get("consumed_forbidden_dependency_row_count", 0)
+        ),
     }
 
 
@@ -1380,11 +1622,27 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     coverage = pd.read_parquet(manifest["coverage_registry"]["path"])
     row_spines = dict(manifest.get("row_spine", {}) or {})
     blocks = dict(manifest.get("blocks", {}) or {})
+    row_spine_contract = dict(manifest.get("row_spine_contract", {}) or {})
     spine_years = {int(year) for year in row_spines}
     spine_total = sum(int(item["row_count"]) for item in row_spines.values())
     profile_hashes_valid = True
     block_alignment_valid = True
+    row_spine_schema_valid = True
+    feature_identity_schema_valid = True
+    partition_dependency_counts_match = True
+    actual_forbidden_dependency_rows = 0
     for year, spine in row_spines.items():
+        spine_path = Path(str(spine["path"]))
+        if not spine_path.is_file():
+            row_spine_schema_valid = False
+            partition_dependency_counts_match = False
+            continue
+        row_spine_schema_valid &= _parquet_columns(spine_path) == ROW_SPINE_COLUMNS
+        spine_forbidden_count = _forbidden_date_row_count(spine_path)
+        actual_forbidden_dependency_rows += spine_forbidden_count
+        partition_dependency_counts_match &= spine_forbidden_count == int(
+            spine.get("forbidden_dependency_row_count", -1)
+        )
         profile_path = Path(str(spine["profile_path"]))
         profile_hashes_valid &= profile_path.is_file() and _sha256(profile_path) == str(
             spine["profile_sha256"]
@@ -1395,6 +1653,22 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
                 block_alignment_valid = False
                 continue
             partition = dict(partitions[year])
+            partition_path = Path(str(partition["path"]))
+            if not partition_path.is_file():
+                feature_identity_schema_valid = False
+                partition_dependency_counts_match = False
+                continue
+            partition_columns = _parquet_columns(partition_path)
+            feature_identity_schema_valid &= partition_columns[
+                : len(ROW_SPINE_COLUMNS)
+            ] == ROW_SPINE_COLUMNS and not set(partition_columns).intersection(
+                FORBIDDEN_INHERITED_METADATA_COLUMNS
+            )
+            partition_forbidden_count = _forbidden_date_row_count(partition_path)
+            actual_forbidden_dependency_rows += partition_forbidden_count
+            partition_dependency_counts_match &= partition_forbidden_count == int(
+                partition.get("forbidden_dependency_row_count", -1)
+            )
             profile_path = Path(str(partition["profile_path"]))
             profile_hashes_valid &= profile_path.is_file() and _sha256(
                 profile_path
@@ -1420,6 +1694,11 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         DataDomain.MARGIN_DETAIL: "trade_date",
         DataDomain.MONEYFLOW_RAW: "trade_date",
     }
+    source_support_boundary = dict(
+        row_spine_contract.get("source_support_boundary", {}) or {}
+    )
+    history_mapping = dict(row_spine_contract.get("symbol_history_mapping", {}) or {})
+    readiness_boundaries = dict(readiness.get("time_boundaries", {}) or {})
     checks = {
         "completed": state.get("status") == "completed"
         and manifest.get("status") == "completed",
@@ -1430,8 +1709,26 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         == expected_source_query_contract,
         "row_spine_years_exact": spine_years == set(RESEARCH_YEARS),
         "row_spine_total_exact": spine_total == EXPECTED_COMMON_SUPPORT_ROW_COUNT,
+        "row_spine_contract_exact": int(row_spine_contract.get("version", 0))
+        == ROW_SPINE_CONTRACT_VERSION
+        and tuple(row_spine_contract.get("projection_columns", ())) == ROW_SPINE_COLUMNS
+        and tuple(row_spine_contract.get("forbidden_inherited_metadata_columns", ()))
+        == FORBIDDEN_INHERITED_METADATA_COLUMNS,
+        "row_spine_schema_exact": row_spine_schema_valid,
+        "feature_identity_schema_exact": feature_identity_schema_valid,
+        "source_support_projection_safe": tuple(
+            source_support_boundary.get("projection_columns", ())
+        )
+        == SUPPORT_IDENTITY_COLUMNS
+        and not set(source_support_boundary.get("projection_columns", ())).intersection(
+            FORBIDDEN_INHERITED_METADATA_COLUMNS
+        ),
+        "symbol_history_cutoff_exact": history_mapping.get("cutoff_date") == END_DATE
+        and int(history_mapping.get("invalid_effective_from_row_count", -1)) == 0
+        and int(history_mapping.get("ambiguous_symbol_count", -1)) == 0,
         "block_row_keys_exact": block_alignment_valid,
         "partition_profiles_valid": profile_hashes_valid,
+        "partition_dependency_counts_exact": partition_dependency_counts_match,
         "period_exact": manifest["research_period"]["start_date"] == RESEARCH_START
         and manifest["research_period"]["end_date"] == END_DATE,
         "oos_training_rows_exact": fold_counts == EXPECTED_OOS_TRAINING_ROW_COUNTS,
@@ -1463,7 +1760,14 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         "readiness_file_matches": manifest["readiness"]["sha256"]
         == _sha256(output_root / "readiness.json")
         and readiness.get("status") == manifest.get("readiness_status"),
-        "no_2026": int(manifest.get("forbidden_2026_rows", 0)) == 0,
+        "no_2026": actual_forbidden_dependency_rows == 0
+        and int(manifest.get("forbidden_2026_rows", -1)) == 0
+        and int(row_spine_contract.get("consumed_forbidden_dependency_row_count", -1))
+        == 0
+        and int(state.get("consumed_forbidden_dependency_row_count", -1)) == 0
+        and int(readiness_boundaries.get("forbidden_2026_feature_row_count", -1)) == 0
+        and readiness_boundaries.get("source_support_future_metadata_consumed")
+        is False,
         "training_false": state.get("training_performed") is False
         and manifest.get("training_performed") is False,
         "feature_selection_false": state.get("feature_set_selected") is False
@@ -1480,6 +1784,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
             (registry["eligibility"] == "formal_candidate").sum()
         ),
         "existing_feature_count": EXPECTED_EXISTING_FEATURE_COUNT,
+        "consumed_forbidden_dependency_row_count": (actual_forbidden_dependency_rows),
         "training_performed": False,
     }
 
@@ -1515,6 +1820,7 @@ def self_test() -> dict[str, Any]:
             "qfq_formal": False,
             "training_performed": False,
             "forbidden_2026": True,
+            "row_spine_contract_version": ROW_SPINE_CONTRACT_VERSION,
         },
     }
 

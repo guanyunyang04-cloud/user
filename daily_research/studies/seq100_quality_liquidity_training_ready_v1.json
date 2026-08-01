@@ -39,6 +39,29 @@
     "drop_entire_symbol": false,
     "daily_fallback": false
   },
+  "input_contract": {
+    "row_spine_contract_version": 2,
+    "row_spine_projection": [
+      "candidate_id",
+      "year",
+      "trade_date",
+      "date_idx",
+      "symbol_idx",
+      "symbol",
+      "security_id"
+    ],
+    "forbidden_inherited_metadata_columns": [
+      "entry_trade_date",
+      "entry_filled",
+      "label_valid",
+      "price_label_valid",
+      "va_aux_valid"
+    ],
+    "source_support_future_metadata_policy": "document_but_do_not_project",
+    "symbol_history_cutoff_date": "2025-12-31",
+    "feature_loading": "feature_registry_whitelist_only",
+    "label_validity_source": "cutoff_memmaps_and_label_flags_only"
+  },
   "training": {
     "performed": false,
     "feature_set_selected": false,
