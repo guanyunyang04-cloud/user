@@ -15,11 +15,10 @@ reinforcement-learning policy has been selected.
 ## Current QDP data state
 
 The 2026-07-31 incremental QDP repair changed only defective metadata/tables or
-missing rows. The active catalog now contains 22 domains and passes the full
-deep audit with `status=ok` and zero
-blocking errors. The only finding is the expected medium-severity warning for
-explicit historical 5-minute gaps; missing intraday history is not an
-eligibility rule.
+missing rows. The active catalog now contains 26 domains and passes the full
+deep audit with `status=ok` and zero blocking errors. The only finding is the
+expected medium-severity warning for explicit historical 5-minute gaps;
+missing intraday history is not an eligibility rule.
 
 - `market_intraday_5m`: 466,317,792 rows. The BaoStock historical repair
   accepted 214,694 independently validated stock-days (10,305,312 bars) from
@@ -59,6 +58,19 @@ eligibility rule.
   statement source was fetched.
 - The source credential was process-local and was not written to code,
   manifests, logs, or Brain.
+
+The extended Tushare-compatible backfill is complete for 2010-2025 (2010 is
+burn-in only): `stk_factor_pro_raw` has 9,795,055 rows, `margin_market` 8,361,
+`margin_detail` 3,926,502, and `moneyflow_raw` 9,790,824. `margin_secs` is
+explicitly source-unavailable and remains unknown rather than being filled as
+false. Stock-level endpoints use date batching; legacy truncated annual caches
+remain evidence only and are excluded from the prepared inventory. The active
+domains pass primary-key, PIT-date, nonnegative-field, cross-year schema,
+2026-zero-read, and credential-persistence audits. All 261 technical fields
+are preserved; sampled HFQ consistency failed and HFQ/QFQ-dependent fields are
+not formal candidates. Moneyflow `net_mf_vol` and `net_mf_amount` retain their
+provider aggregate values as diagnostic-only because they are not stably
+reconstructible from the buy/sell buckets.
 
 The pool coverage audit through 2025 reports complete 48-bar 5-minute coverage
 of 92.79% for all positive daily rows, 93.77% for the same-day
@@ -366,10 +378,10 @@ There is no active training process.
 ## Quality-liquidity pre-training dataset
 
 `seq100_quality_liquidity_data_prep_v1` is complete and no model was trained.
-It provides one common 2010-2025 PIT sample for all future daily, minute,
+It provides the physical 2010-2025 PIT sample for all future daily, minute,
 fundamental, announcement, and report feature comparisons:
 
-- `quality_liquidity_complete_pit` has 4,487,912 stock-days. Membership uses
+- `quality_liquidity_complete_pit` has 4,487,912 physical stock-days. Membership uses
   only contemporaneously available status, listing age, liquidity, float market
   value, and announcement-lagged financial quality.
 - Every retained stock-day has exactly 48 current-day five-minute bars. Missing
@@ -377,9 +389,10 @@ fundamental, announcement, and report feature comparisons:
   is no daily-feature fallback inside this common sample.
 - Listing age uses exchange calendar history before 2010, so early-2010 support
   is no longer incorrectly empty.
-- The prepared atlas contains 518 usable continuous features: 296 existing
-  Seq100 base features, 25 minute features, 142 fundamental/statement features,
-  and 55 announcement/report features. No feature is entirely null.
+- The formal 2011-2025 complete common support contains 4,441,395 unique
+  stock-days. The existing 518-feature atlas is unchanged. The training-ready
+  package preserves 106 new formal technical/margin/moneyflow candidates and
+  83 diagnostic-only fields; no feature set or model variant has been selected.
 - The atlas is descriptive only. No feature set or model variant has been
   selected. Future rolling OOS model evaluation is limited to 2023-2025 and
   every variant must use the same common-support identity.
@@ -395,6 +408,14 @@ statistics. The formal 2011-2025 common support contains 4,441,395 unique
 stock-days and 518 features. Rolling OOS evaluation remains 2023-2025; the
 pre-purge expanding training counts are 3,206,854, 3,616,558, and 4,028,849.
 No model or feature set was selected while freezing this scope.
+
+`seq100_quality_liquidity_training_ready_v1` is completed with status
+`ready_with_documented_optional_gaps`. Daily and minute models share the exact
+same row spine and missing-minute action is stock-day deletion only. It records
+the 2023-2025 OOS boundaries and expanding-window training counts, keeps 2026
+at zero rows, and explicitly records `training_performed=false` and
+`feature_set_selected=false`. The next research step is descriptive
+candidate/target and tail-opportunity analysis before any new model training.
 
 ## PIT stock-pool audit
 

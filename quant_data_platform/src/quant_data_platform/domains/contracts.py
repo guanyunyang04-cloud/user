@@ -58,6 +58,11 @@ class DataDomain:
     ANNOUNCEMENT = "announcement"
     RESEARCH_REPORT = "research_report"
     RESEARCH_REPORT_FORECAST = "research_report_forecast"
+    STK_FACTOR_PRO_RAW = "stk_factor_pro_raw"
+    MARGIN_MARKET = "margin_market"
+    MARGIN_DETAIL = "margin_detail"
+    MARGIN_SECS = "margin_secs"
+    MONEYFLOW_RAW = "moneyflow_raw"
     IWENCAI_SEMANTIC = "iwencai_semantic"
 
 
@@ -515,6 +520,89 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "source_disagreement",
         "source",
     ],
+    DataDomain.STK_FACTOR_PRO_RAW: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MARGIN_MARKET: [
+        "trade_date",
+        "exchange_id",
+        "rzye",
+        "rzmre",
+        "rzche",
+        "rqye",
+        "rqmcl",
+        "rzrqye",
+        "rqyl",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MARGIN_DETAIL: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "rzye",
+        "rqye",
+        "rzmre",
+        "rqyl",
+        "rzche",
+        "rqchl",
+        "rqmcl",
+        "rzrqye",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MARGIN_SECS: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "name",
+        "exchange",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MONEYFLOW_RAW: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "buy_sm_vol",
+        "buy_sm_amount",
+        "sell_sm_vol",
+        "sell_sm_amount",
+        "buy_md_vol",
+        "buy_md_amount",
+        "sell_md_vol",
+        "sell_md_amount",
+        "buy_lg_vol",
+        "buy_lg_amount",
+        "sell_lg_vol",
+        "sell_lg_amount",
+        "buy_elg_vol",
+        "buy_elg_amount",
+        "sell_elg_vol",
+        "sell_elg_amount",
+        "net_mf_vol",
+        "net_mf_amount",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
     DataDomain.IWENCAI_SEMANTIC: ["symbol", "trade_date", "query", "answer", "tags", "source"],
 }
 
@@ -772,6 +860,13 @@ def normalize_domain(domain: str) -> str:
         "report": DataDomain.RESEARCH_REPORT,
         "research_report_forecast": DataDomain.RESEARCH_REPORT_FORECAST,
         "report_forecast": DataDomain.RESEARCH_REPORT_FORECAST,
+        "stk_factor_pro": DataDomain.STK_FACTOR_PRO_RAW,
+        "technical_factor": DataDomain.STK_FACTOR_PRO_RAW,
+        "margin_market": DataDomain.MARGIN_MARKET,
+        "margin_detail": DataDomain.MARGIN_DETAIL,
+        "margin_secs": DataDomain.MARGIN_SECS,
+        "moneyflow": DataDomain.MONEYFLOW_RAW,
+        "moneyflow_raw": DataDomain.MONEYFLOW_RAW,
         "iwencai": DataDomain.IWENCAI_SEMANTIC,
     }
     normalized = aliases.get(normalized, normalized)

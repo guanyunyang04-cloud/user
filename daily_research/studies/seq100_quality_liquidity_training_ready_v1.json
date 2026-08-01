@@ -1,0 +1,47 @@
+{
+  "study_id": "seq100_quality_liquidity_training_ready_v1",
+  "status": "preregistered",
+  "purpose": "Freeze the 2011-2025 training-ready feature blocks without training a model or selecting a feature set.",
+  "source_scope": {
+    "study_id": "seq100_quality_liquidity_research_scope_v1",
+    "expected_common_support_rows": 4441395,
+    "expected_existing_feature_count": 518,
+    "reuse_existing_partitions": true
+  },
+  "period": {
+    "data_history_start": "2010-01-01",
+    "research_start_date": "2011-01-01",
+    "end_date": "2025-12-31",
+    "forbidden_year": 2026,
+    "future_oos_prediction_years": [2023, 2024, 2025]
+  },
+  "burn_in": {
+    "years": [2010],
+    "available_for_feature_history": true,
+    "eligible_for_training": false,
+    "eligible_for_evaluation": false,
+    "eligible_for_atlas_statistics": false,
+    "eligible_for_labels": false
+  },
+  "source_policy": {
+    "daily_adjustment_valuation": "baostock_qdp_primary",
+    "intraday_5m": "baostock_primary_mootdx_validated_fallback",
+    "technical_factor": "tushare_stk_factor_pro_direct",
+    "margin": "tushare_margin_family",
+    "traditional_moneyflow": "tushare_moneyflow",
+    "qfq_formal_eligibility": false,
+    "missing_values_are_zero": false
+  },
+  "common_support": {
+    "name": "quality_liquidity_complete_pit",
+    "daily_and_minute_models_share_exact_rows": true,
+    "missing_5m_action": "drop_stock_day_only",
+    "drop_entire_symbol": false,
+    "daily_fallback": false
+  },
+  "training": {
+    "performed": false,
+    "feature_set_selected": false,
+    "model_variants_selected": false
+  }
+}
