@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 
+import duckdb
 import pandas as pd
 from quant_data_platform.qdp_v2 import margin_eligibility_update as update
 
@@ -58,3 +59,56 @@ def test_szse_eligibility_is_not_inferred_from_detail_balance(monkeypatch) -> No
     assert bool(row["eligible"])
     assert bool(row["finance_eligible"])
     assert not bool(row["securities_lending_eligible"])
+
+
+def test_sse_detail_absence_is_unknown_not_known_ineligible() -> None:
+    universe = pd.DataFrame(
+        {
+            "symbol": ["600000.SH", "600001.SH", "000001.SZ", "000002.SZ"],
+            "trade_date": ["2024-01-02"] * 4,
+            "exchange": ["SH", "SH", "SZ", "SZ"],
+            "board": ["main"] * 4,
+        }
+    )
+    eligibility = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2024-01-02"],
+            "exchange": ["SZ"],
+            "eligible": [True],
+            "finance_eligible": [True],
+            "securities_lending_eligible": [False],
+            "source": ["szse"],
+        }
+    )
+    detail = pd.DataFrame(
+        {
+            "symbol": ["600000.SH"],
+            "trade_date": ["2024-01-02"],
+            "exchange": ["SH"],
+        }
+    )
+    next_open = pd.DataFrame(
+        {
+            "trade_date": ["2024-01-02"],
+            "feature_available_date": ["2024-01-03"],
+        }
+    )
+    with duckdb.connect() as connection:
+        connection.register("universe", universe)
+        connection.register("official_eligibility", eligibility)
+        connection.register("official_detail", detail)
+        connection.register("next_open_dates", next_open)
+        result = connection.execute(
+            update._eligibility_query(universe_scan="universe", year=2024)
+        ).fetchdf()
+
+    result = result.set_index("symbol")
+    assert result.loc["600000.SH", "eligibility_state"] == "eligible_observed"
+    assert bool(result.loc["600000.SH", "eligible"])
+    assert result.loc["600001.SH", "eligibility_state"] == "source_unavailable"
+    assert pd.isna(result.loc["600001.SH", "eligible"])
+    assert not bool(result.loc["600001.SH", "source_available"])
+    assert result.loc["000001.SZ", "eligibility_state"] == "eligible_observed"
+    assert result.loc["000002.SZ", "eligibility_state"] == "known_ineligible"
+    assert not bool(result.loc["000002.SZ", "eligible"])

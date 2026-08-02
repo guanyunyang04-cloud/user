@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import importlib
-from typing import Callable
+from collections.abc import Callable
 
 from quant_data_platform.qdp_v2.environment import assert_yolos_environment
-
 
 CommandMain = Callable[[list[str] | None], int]
 
@@ -16,7 +15,8 @@ commands:
   status                  Show table coverage and row counts.
   list                    List current tables.
   describe <table>        Describe a current table.
-  check --quick|--full    Validate manifests and data structure.
+  check --quick|--full|--semantic
+                          Validate physical or selected semantic contracts.
   update                  Add recent market data in place.
   compact                 Merge the 5-minute table into yearly files.
   repair                  Repair active shards with explicit CAS protection.
@@ -57,7 +57,7 @@ def dispatch(argv: list[str]) -> int | None:
         module = importlib.import_module(module_name)
         main = getattr(module, "main", None)
         if not callable(main):
-            raise RuntimeError(f"{module_name} does not expose callable main(argv)")
+            raise TypeError(f"{module_name} does not expose callable main(argv)")
         global_args, tail = _split_workspace_option(raw[len(prefix) :])
         forwarded = global_args + list(ARG_ALIASES.get(prefix, [])) + tail
         return int(main(forwarded) or 0)

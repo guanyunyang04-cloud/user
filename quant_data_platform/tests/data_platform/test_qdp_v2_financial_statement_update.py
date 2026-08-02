@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import duckdb
 import numpy as np
 import pandas as pd
 from quant_data_platform.qdp_v2.financial_statement_update import (
+    BALANCE_EXTENSION_NUMERIC_COLUMNS,
     BALANCE_METRICS,
     CASH_FLOW_METRICS,
     START_DATE,
     STATEMENT_SPECS,
     V2_STATEMENT_SPECS,
+    _balance_extension_hash_sql,
     _in_scope_provider_rows,
     _normalize_statement_part,
     _report_periods,
@@ -152,6 +155,29 @@ def test_balance_v2_maps_totals_without_overwriting_split_fields() -> None:
     assert BALANCE_METRICS["adv_receipts"] == "advances_from_customers"
     assert BALANCE_METRICS["contract_liab"] == "contract_liabilities"
     assert [spec.name for spec in V2_STATEMENT_SPECS] == ["balance_sheet"]
+
+
+def test_balance_extension_conflict_hash_uses_only_extension_values() -> None:
+    frame = pd.DataFrame(
+        {
+            **{column: [1.0, 1.0] for column in BALANCE_EXTENSION_NUMERIC_COLUMNS},
+            "unrelated_balance_metric": [10.0, 20.0],
+        }
+    )
+    with duckdb.connect() as connection:
+        connection.register("rows", frame)
+        versions = connection.execute(
+            f"SELECT count(DISTINCT {_balance_extension_hash_sql()}) FROM rows"
+        ).fetchone()[0]
+        frame.loc[1, "contract_liabilities"] = 2.0
+        connection.unregister("rows")
+        connection.register("rows", frame)
+        changed_versions = connection.execute(
+            f"SELECT count(DISTINCT {_balance_extension_hash_sql()}) FROM rows"
+        ).fetchone()[0]
+
+    assert versions == 1
+    assert changed_versions == 2
 
 
 def test_balance_v2_combination_and_null_states_are_explicit() -> None:

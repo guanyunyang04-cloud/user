@@ -117,6 +117,8 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = Fals
         )
     payload = {
         "status": "ok" if not errors else "error",
+        "scope": "active_manifest_files_schema_and_declared_contracts",
+        "all_active_domains_semantically_certified": False,
         "qdp_v2_root": str(root.resolve()),
         "active_manifest": str((root / "active" / "active.json").resolve()),
         "audited_at": utc_now(),
@@ -141,13 +143,17 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
     quality = dict(manifest.get("quality", {}) or {})
     schema = [str(dict(item).get("name", "") or "") for item in list(manifest.get("schema", []) or []) if isinstance(item, dict)]
     expected_contracts = {
-        "market_intraday_5m": "qdp_current_intraday_5m_48_v1",
-        "market_daily_raw": "qdp_v2_market_daily_raw_v1",
-        "margin_eligibility": "qdp_v2_margin_eligibility_exchange_tristate_v1",
+        "market_intraday_5m": ("qdp_current_intraday_5m_48_v1",),
+        "market_daily_raw": ("qdp_v2_market_daily_raw_v1",),
+        "margin_eligibility": (
+            "qdp_v2_margin_eligibility_exchange_tristate_v1",
+            "qdp_v2_margin_eligibility_exchange_tristate_v2",
+        ),
     }
-    expected = expected_contracts.get(domain)
-    if expected and contract != expected:
-        errors.append(f"wrong_contract:{domain}:{dataset_id}:expected={expected}:actual={contract}")
+    expected = expected_contracts.get(domain, ())
+    if expected and contract not in expected:
+        expected_text = "|".join(expected)
+        errors.append(f"wrong_contract:{domain}:{dataset_id}:expected={expected_text}:actual={contract}")
     valuation_contracts = {
         "qdp_v2_valuation_v1",
         "qdp_v2_valuation_v2",

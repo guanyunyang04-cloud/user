@@ -50,6 +50,7 @@ from quant_data_platform.qdp_v2.status import active_dataset_map
 
 UPDATE_ID = "financial_statement_quarterly_pit_v2"
 LEGACY_UPDATE_ID = "financial_statement_quarterly_pit_v1"
+BALANCE_CONFLICT_REPAIR_ID = "balance_extension_conflict_semantics_repair_v2"
 SOURCE_SCHEMA_VERSION = 3
 START_DATE = "2010-01-01"
 END_DATE = "2025-12-31"
@@ -187,7 +188,9 @@ STATEMENT_SPECS = (
     ),
 )
 V2_STATEMENT_SPECS = tuple(
-    spec for spec in STATEMENT_SPECS if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+    spec
+    for spec in STATEMENT_SPECS
+    if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
 )
 BALANCE_DERIVED_COLUMNS = (
     "customer_advances_and_contract_liabilities",
@@ -196,6 +199,13 @@ BALANCE_DERIVED_COLUMNS = (
     "other_payables_total_field_state",
     "contract_liabilities_field_state",
 )
+BALANCE_EXTENSION_NUMERIC_COLUMNS = (
+    "other_receivables_total",
+    "other_payables_total",
+    "contract_liabilities",
+    "customer_advances_and_contract_liabilities",
+)
+BALANCE_EXTENSION_CONFLICT_COLUMN = "balance_extension_source_conflict"
 
 COMMON_OUTPUT_COLUMNS = (
     "symbol",
@@ -499,6 +509,14 @@ def _sql_paths(paths: Sequence[Path]) -> str:
     return ",".join(f"'{str(path).replace(chr(39), chr(39) * 2)}'" for path in paths)
 
 
+def _balance_extension_hash_sql(*, prefix: str = "") -> str:
+    values = ",".join(
+        f"coalesce(cast({prefix}\"{column}\" AS VARCHAR),'<NA>')"
+        for column in BALANCE_EXTENSION_NUMERIC_COLUMNS
+    )
+    return f"md5(concat_ws('|',{values}))"
+
+
 def _prepare_statement(
     workspace: Path,
     *,
@@ -548,11 +566,23 @@ def _prepare_statement(
         *derived,
         "source_duplicate_count",
         "source_conflict",
+        *(
+            [BALANCE_EXTENSION_CONFLICT_COLUMN]
+            if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+            else []
+        ),
         "lag_policy",
         "source",
     ]
     key_sql = ",".join(f'"{column}"' for column in PRIMARY_KEY)
     select_sql = ",".join(f'"{column}"' for column in selected)
+    extension_conflict_sql = (
+        ",\n          count(DISTINCT "
+        f"{_balance_extension_hash_sql()}) OVER (PARTITION BY {key_sql}) > 1 "
+        f"AS {BALANCE_EXTENSION_CONFLICT_COLUMN}"
+        if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+        else ""
+    )
     sql = f"""
     COPY (
       WITH source AS (
@@ -560,7 +590,7 @@ def _prepare_statement(
       ), ranked AS (
         SELECT *,
           count(*) OVER (PARTITION BY {key_sql}) AS source_duplicate_count,
-          count(DISTINCT _metric_hash) OVER (PARTITION BY {key_sql}) > 1 AS source_conflict,
+          count(DISTINCT _metric_hash) OVER (PARTITION BY {key_sql}) > 1 AS source_conflict{extension_conflict_sql},
           row_number() OVER (
             PARTITION BY {key_sql}
             ORDER BY update_flag DESC, _completeness DESC, _source_row_hash DESC
@@ -576,9 +606,14 @@ def _prepare_statement(
     connection = duckdb.connect()
     try:
         connection.execute(sql)
+        extension_conflict_sum = (
+            f"sum({BALANCE_EXTENSION_CONFLICT_COLUMN})"
+            if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+            else "NULL"
+        )
         row = connection.execute(
             f"SELECT count(*),sum(source_duplicate_count>1),sum(source_conflict),"
-            "min(publish_date),max(publish_date) "
+            f"{extension_conflict_sum},min(publish_date),max(publish_date) "
             f"FROM read_parquet('{str(temporary).replace(chr(39), chr(39) * 2)}')"
         ).fetchone()
     finally:
@@ -593,8 +628,9 @@ def _prepare_statement(
         "deduplicated_row_count": normalized_rows - int(row[0]),
         "rows_from_duplicate_source_groups": int(row[1] or 0),
         "source_conflict_row_count": int(row[2] or 0),
-        "start_date": str(row[3]),
-        "end_date": str(row[4]),
+        "balance_extension_source_conflict_count": int(row[3] or 0),
+        "start_date": str(row[4]),
+        "end_date": str(row[5]),
         "sha256": _sha256(prepared),
     }
 
@@ -640,31 +676,32 @@ def _align_balance_to_active(
         "other_payables_total",
         "contract_liabilities",
         *BALANCE_DERIVED_COLUMNS,
+        BALANCE_EXTENSION_CONFLICT_COLUMN,
     )
     appended_expressions = []
     for column in appended_columns:
         if column == "customer_liability_field_state":
-            expression = (
-                f"coalesce(r.\"{column}\",'neither_observed') AS \"{column}\""
-            )
+            expression = f'coalesce(r."{column}",\'neither_observed\') AS "{column}"'
         elif column.endswith("_field_state"):
             expression = (
                 f"coalesce(r.\"{column}\",CASE WHEN b.company_type IN ('2','3','4') "
                 f"THEN 'not_applicable' ELSE 'unknown' END) AS \"{column}\""
             )
+        elif column == BALANCE_EXTENSION_CONFLICT_COLUMN:
+            expression = f'r."{column}"'
         else:
             expression = f'r."{column}"'
         appended_expressions.append(expression)
     appended_select = ",".join(appended_expressions)
     base_scan = f"read_parquet([{_sql_paths(base_paths)}], union_by_name=true)"
-    refreshed_scan = (
-        f"read_parquet('{str(refreshed).replace(chr(39), chr(39) * 2)}')"
-    )
+    refreshed_scan = f"read_parquet('{str(refreshed).replace(chr(39), chr(39) * 2)}')"
     connection = duckdb.connect()
     try:
         base_columns = [
             str(row[0])
-            for row in connection.execute(f"DESCRIBE SELECT * FROM {base_scan}").fetchall()
+            for row in connection.execute(
+                f"DESCRIBE SELECT * FROM {base_scan}"
+            ).fetchall()
         ]
         base_select = ",".join(f'"{column}"' for column in base_columns)
         connection.execute(
@@ -679,10 +716,10 @@ def _align_balance_to_active(
               (FORMAT PARQUET, COMPRESSION ZSTD)
             """
         )
-        base_count = int(connection.execute(f"SELECT count(*) FROM {base_scan}").fetchone()[0])
-        output_scan = (
-            f"read_parquet('{str(temporary).replace(chr(39), chr(39) * 2)}')"
+        base_count = int(
+            connection.execute(f"SELECT count(*) FROM {base_scan}").fetchone()[0]
         )
+        output_scan = f"read_parquet('{str(temporary).replace(chr(39), chr(39) * 2)}')"
         output_count = int(
             connection.execute(f"SELECT count(*) FROM {output_scan}").fetchone()[0]
         )
@@ -838,7 +875,12 @@ def _install_domain(
         domain=spec.domain,
         layer="raw",
         frequency="quarterly_event",
-        contract_version=f"qdp_v2_{spec.domain}_pit_v2",
+        contract_version=(
+            f"qdp_v2_{spec.domain}_pit_v4"
+            if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+            and BALANCE_EXTENSION_CONFLICT_COLUMN in pq.read_schema(shard).names
+            else f"qdp_v2_{spec.domain}_pit_v2"
+        ),
         primary_key=list(PRIMARY_KEY),
         start_date=str(dates[0]),
         end_date=str(dates[1]),
@@ -875,6 +917,7 @@ def _install_domain(
             "duplicate provider rows prefer update_flag=1, then completeness, with conflicts retained as flags",
             "the provider does not expose complete correction timestamps for every restatement",
             "v2 preserves every v1 key and existing value; only audited balance-sheet fields are appended",
+            "balance extension source conflicts are retained separately from legacy core-field conflicts",
             "special financial-company statement structures retain not_applicable rather than numeric zero",
         ],
     )
@@ -932,6 +975,212 @@ def commit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     _write_state(workspace, state)
     atomic_write_json(root / "audits" / f"{UPDATE_ID}.json", state)
     return state
+
+
+def repair_balance_extension_conflict_metadata(
+    *, workspace_root: str | Path | None = None
+) -> dict[str, Any]:
+    """Install an exact four-field extension-conflict flag without changing core data."""
+
+    workspace = _workspace(workspace_root)
+    root = qdp_v2_root(workspace)
+    active = read_active_manifest(root)
+    current = active_dataset_map(active)
+    domain = DataDomain.BALANCE_SHEET_QUARTERLY
+    current_id = str(current.get(domain, ""))
+    current_path = dataset_manifest_for_id(root, current_id, domain)
+    if current_path is None:
+        raise FinancialStatementUpdateError("active_balance_manifest_missing")
+    current_manifest = read_dataset_manifest(current_path)
+    existing_columns = [str(item.get("name", "")) for item in current_manifest.schema]
+    if (
+        BALANCE_EXTENSION_CONFLICT_COLUMN in existing_columns
+        and current_manifest.contract_version == "qdp_v2_balance_sheet_quarterly_pit_v4"
+    ):
+        return {
+            "status": "already_repaired",
+            "repair_id": BALANCE_CONFLICT_REPAIR_ID,
+            "dataset_id": current_id,
+        }
+
+    balance_spec = next(spec for spec in V2_STATEMENT_SPECS if spec.domain == domain)
+    normalized_paths = [
+        _normalized_path(workspace, balance_spec, period)
+        for period in _report_periods()
+    ]
+    if any(not path.is_file() for path in normalized_paths):
+        raise FinancialStatementUpdateError(
+            "balance_extension_normalized_evidence_missing"
+        )
+    base_paths = _dataset_paths(workspace, domain=domain, dataset_id=current_id)
+    base_scan = f"read_parquet([{_sql_paths(base_paths)}], union_by_name=true)"
+    normalized_scan = (
+        f"read_parquet([{_sql_paths(normalized_paths)}], union_by_name=true, "
+        "hive_partitioning=false)"
+    )
+    output = (
+        qdp_paths(workspace).data_dir
+        / "qdp_runtime"
+        / BALANCE_CONFLICT_REPAIR_ID
+        / "prepared"
+        / f"{domain}.parquet"
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".tmp.parquet")
+    key_sql = ",".join(f'"{column}"' for column in PRIMARY_KEY)
+    conflict_query = f"""
+      SELECT {key_sql},
+        count(DISTINCT {_balance_extension_hash_sql()}) > 1
+          AS {BALANCE_EXTENSION_CONFLICT_COLUMN}
+      FROM {normalized_scan}
+      GROUP BY {key_sql}
+    """
+    with duckdb.connect() as connection:
+        base_columns = [
+            str(row[0])
+            for row in connection.execute(
+                f"DESCRIBE SELECT * FROM {base_scan}"
+            ).fetchall()
+        ]
+        preserved_columns = [
+            column
+            for column in base_columns
+            if column != BALANCE_EXTENSION_CONFLICT_COLUMN
+        ]
+        base_select = ",".join(f'"{column}"' for column in preserved_columns)
+        joined_select = ",".join(f'b."{column}"' for column in preserved_columns)
+        previous_conflict_count = (
+            int(
+                connection.execute(
+                    f"SELECT count(*) FILTER(WHERE {BALANCE_EXTENSION_CONFLICT_COLUMN}) "
+                    f"FROM {base_scan}"
+                ).fetchone()[0]
+                or 0
+            )
+            if BALANCE_EXTENSION_CONFLICT_COLUMN in base_columns
+            else 0
+        )
+        connection.execute(
+            f"""
+            COPY (
+              SELECT {joined_select},
+                coalesce(r.{BALANCE_EXTENSION_CONFLICT_COLUMN},false)
+                  AS {BALANCE_EXTENSION_CONFLICT_COLUMN}
+              FROM {base_scan} b
+              LEFT JOIN ({conflict_query}) r USING({key_sql})
+              ORDER BY b.publish_date,b.symbol,b.report_date,b.report_type,
+                       b.company_type,b.period_type
+            ) TO '{str(temporary).replace(chr(39), chr(39) * 2)}'
+              (FORMAT PARQUET, COMPRESSION ZSTD)
+            """
+        )
+        output_scan = f"read_parquet('{str(temporary).replace(chr(39), chr(39) * 2)}')"
+        missing_normalized_keys = int(
+            connection.execute(
+                "SELECT count(*) FILTER(WHERE r.symbol IS NULL) "
+                f"FROM {base_scan} b LEFT JOIN ({conflict_query}) r USING({key_sql})"
+            ).fetchone()[0]
+        )
+        output_stats = connection.execute(
+            "SELECT count(*),"
+            f"count(*)-count(DISTINCT concat_ws('|',{key_sql})),"
+            f"count(*) FILTER(WHERE {BALANCE_EXTENSION_CONFLICT_COLUMN}),"
+            f"count(*) FILTER(WHERE publish_date>'{END_DATE}') "
+            f"FROM {output_scan}"
+        ).fetchone()
+        core_mismatch = int(
+            connection.execute(
+                f"""
+                SELECT count(*) FROM (
+                  (SELECT {base_select} FROM {base_scan})
+                  EXCEPT ALL
+                  (SELECT {base_select} FROM {output_scan})
+                )
+                """
+            ).fetchone()[0]
+        )
+        exact_extension_conflicts = int(
+            connection.execute(
+                f"SELECT count(*) FROM ({conflict_query}) "
+                f"WHERE {BALANCE_EXTENSION_CONFLICT_COLUMN}"
+            ).fetchone()[0]
+        )
+    checks = {
+        "row_count_unchanged": int(output_stats[0]) == current_manifest.row_count,
+        "primary_key_unique": int(output_stats[1]) == 0,
+        "existing_non_conflict_columns_unchanged": core_mismatch == 0,
+        "extension_conflicts_are_exact": int(output_stats[2])
+        == exact_extension_conflicts,
+        "all_active_keys_have_normalized_evidence": missing_normalized_keys == 0,
+        "forbidden_2026_rows": int(output_stats[3]) == 0,
+    }
+    if not all(checks.values()):
+        temporary.unlink(missing_ok=True)
+        raise FinancialStatementUpdateError(
+            f"balance_conflict_metadata_contract_failed:{checks}"
+        )
+    os.replace(temporary, output)
+
+    dataset_id, installed = _install_domain(
+        workspace, spec=balance_spec, prepared=output
+    )
+    installed_path = dataset_manifest_for_id(root, dataset_id, domain)
+    assert installed_path is not None
+    installed_manifest = read_dataset_manifest(installed_path)
+    repaired_manifest = DatasetManifest.from_mapping(
+        {
+            **installed_manifest.to_dict(),
+            "source": {
+                **dict(installed_manifest.source or {}),
+                "semantic_repair_id": BALANCE_CONFLICT_REPAIR_ID,
+                "upstream_dataset_id": current_id,
+            },
+            "quality": {
+                **dict(installed_manifest.quality or {}),
+                "balance_extension_source_conflict_count": int(output_stats[2]),
+                "prior_overbroad_balance_source_conflict_count": previous_conflict_count,
+                "semantic_repair_checks": checks,
+            },
+            "notes": [
+                *list(installed_manifest.notes or []),
+                "immutable successor; non-conflict columns and values are unchanged",
+                "the extension conflict flag compares only the four extension numeric values",
+            ],
+        }
+    )
+    _assert_credential_free(repaired_manifest.to_dict())
+    write_dataset_manifest(root, repaired_manifest)
+
+    latest_active = read_active_manifest(root)
+    latest = active_dataset_map(latest_active)
+    if latest.get(domain) != current_id:
+        raise FinancialStatementUpdateError("active_balance_dataset_drifted")
+    latest_active["datasets"] = {**latest, domain: dataset_id}
+    latest_active["updated_at"] = utc_now()
+    write_active_manifest(root, latest_active)
+    if active_dataset_map(read_active_manifest(root)).get(domain) != dataset_id:
+        raise FinancialStatementUpdateError("balance_conflict_active_switch_failed")
+
+    payload = {
+        "status": "applied",
+        "repair_id": BALANCE_CONFLICT_REPAIR_ID,
+        "input_dataset_id": current_id,
+        "installed_domains": {domain: installed},
+        "checks": checks,
+        "statistics": {
+            "row_count": int(output_stats[0]),
+            "balance_extension_source_conflict_count": int(output_stats[2]),
+            "prior_overbroad_balance_source_conflict_count": previous_conflict_count,
+            "generic_only_conflict_count": max(
+                0, previous_conflict_count - int(output_stats[2])
+            ),
+            "request_2026_count": 0,
+        },
+        "updated_at": utc_now(),
+    }
+    _assert_credential_free(payload)
+    atomic_write_json(root / "audits" / f"{BALANCE_CONFLICT_REPAIR_ID}.json", payload)
+    return payload
 
 
 def _active_domain_record(workspace: Path, domain: str) -> dict[str, Any]:
@@ -1027,9 +1276,7 @@ def _active_domain_record(workspace: Path, domain: str) -> dict[str, Any]:
                     if post_2020_rows
                     else 0.0
                 ),
-                "invalid_customer_liability_state_count": int(
-                    balance_coverage[5] or 0
-                ),
+                "invalid_customer_liability_state_count": int(balance_coverage[5] or 0),
                 "invalid_component_state_count": int(
                     sum(int(value or 0) for value in balance_coverage[6:9])
                 ),
@@ -1085,8 +1332,7 @@ def evaluate(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
             balance.get("other_receivables_total_q1_q3_coverage", 0.0)
         )
         >= 0.95
-        and float(balance.get("other_payables_total_q1_q3_coverage", 0.0))
-        >= 0.95,
+        and float(balance.get("other_payables_total_q1_q3_coverage", 0.0)) >= 0.95,
         "contract_liabilities_post_2020_populated": int(
             balance.get("contract_liabilities_post_2020_nonnull_count", 0)
         )
@@ -1122,7 +1368,10 @@ def self_test() -> dict[str, Any]:
     scoped, future = _in_scope_provider_rows(frame)
     if len(scoped) != 1 or future != 1:
         raise AssertionError("statement 2026 guard changed")
-    if len(V2_STATEMENT_SPECS) != 1 or V2_STATEMENT_SPECS[0].domain != DataDomain.BALANCE_SHEET_QUARTERLY:
+    if (
+        len(V2_STATEMENT_SPECS) != 1
+        or V2_STATEMENT_SPECS[0].domain != DataDomain.BALANCE_SHEET_QUARTERLY
+    ):
         raise AssertionError("v2 should only redownload the balance sheet")
     return {
         "status": "ok",
@@ -1165,6 +1414,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode.add_argument("--run-pending", action="store_true")
     mode.add_argument("--evaluate", action="store_true")
     mode.add_argument("--self-test", action="store_true")
+    mode.add_argument("--repair-extension-conflicts", action="store_true")
     return parser
 
 
@@ -1177,6 +1427,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = run_pending(workspace_root=workspace)
     elif args.evaluate:
         payload = evaluate(workspace_root=workspace)
+    elif args.repair_extension_conflicts:
+        payload = repair_balance_extension_conflict_metadata(workspace_root=workspace)
     else:
         payload = self_test()
     print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))

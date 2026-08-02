@@ -143,8 +143,13 @@ def recent_equal_or_larger_reversal(
     *,
     recent_years: Sequence[int] = (2023, 2024, 2025),
 ) -> bool:
+    recent_set = {int(year) for year in recent_years}
     history = np.asarray(
-        [value for value in annual_effects.values() if np.isfinite(value)],
+        [
+            value
+            for year, value in annual_effects.items()
+            if int(year) not in recent_set and np.isfinite(value)
+        ],
         dtype=np.float64,
     )
     recent = np.asarray(
@@ -173,12 +178,16 @@ def classify_family(
     stable_nonreversed_feature_count: int,
     availability_gated: bool,
     formal_eligible_feature_count: int,
+    minimum_independent_representatives: int = 1,
 ) -> str:
     if formal_eligible_feature_count <= 0:
         return "diagnostic_only"
     if availability_gated:
         return "availability_gated_family"
-    if stable_feature_count > 0 and stable_nonreversed_feature_count > 0:
+    if (
+        stable_feature_count > 0
+        and stable_nonreversed_feature_count >= minimum_independent_representatives
+    ):
         return "first_model_formal_family"
     return "defer_from_v1"
 
@@ -1422,11 +1431,33 @@ def _redundancy_pairs(
     )
 
 
+def _independent_representatives(
+    features: set[str], redundancy: pd.DataFrame
+) -> list[str]:
+    """Greedily retain stable representatives not joined by a redundancy edge."""
+
+    if not features:
+        return []
+    neighbors: dict[str, set[str]] = {feature: set() for feature in features}
+    for row in redundancy.itertuples(index=False):
+        left = str(row.feature_left)
+        right = str(row.feature_right)
+        if left in features and right in features:
+            neighbors[left].add(right)
+            neighbors[right].add(left)
+    selected: list[str] = []
+    for feature in sorted(features, key=lambda name: (len(neighbors[name]), name)):
+        if all(feature not in neighbors[existing] for existing in selected):
+            selected.append(feature)
+    return selected
+
+
 def _recommendations(
     catalog: pd.DataFrame,
     registry: pd.DataFrame,
     stability: pd.DataFrame,
     redundancy: pd.DataFrame,
+    config: Mapping[str, Any],
 ) -> pd.DataFrame:
     redundant_features = set(redundancy["feature_left"]) | set(
         redundancy["feature_right"]
@@ -1452,6 +1483,11 @@ def _recommendations(
         set(catalog["analytic_family"].astype(str))
         | set(diagnostic["analytic_family"].astype(str))
     )
+    gate = dict(config["stability_gate"])
+    large_family_minimum = int(gate.get("large_family_minimum_formal_features", 10))
+    large_family_representatives = int(
+        gate.get("minimum_independent_stable_members_large_family", 2)
+    )
     for family in all_families:
         family_catalog = catalog[catalog["analytic_family"] == family]
         family_stability = stability[stability["analytic_family"] == family]
@@ -1465,6 +1501,14 @@ def _recommendations(
                 family_stability["stable_without_recent_reversal"], "feature"
             ].astype(str)
         )
+        independent_representatives = _independent_representatives(
+            stable_nonreversed, redundancy
+        )
+        minimum_representatives = (
+            large_family_representatives
+            if len(family_catalog) >= large_family_minimum
+            else 1
+        )
         family_diagnostic_count = int((diagnostic["analytic_family"] == family).sum())
         availability_gated = bool(
             family in gated_families
@@ -1475,18 +1519,19 @@ def _recommendations(
         )
         classification = classify_family(
             stable_feature_count=len(stable_features),
-            stable_nonreversed_feature_count=len(stable_nonreversed),
+            stable_nonreversed_feature_count=len(independent_representatives),
             availability_gated=availability_gated,
             formal_eligible_feature_count=len(family_catalog),
+            minimum_independent_representatives=minimum_representatives,
         )
         if classification == "first_model_formal_family":
-            reason = (
-                "pit_valid_and_at_least_one_member_has_a_stable_nonreversed_relation"
-            )
+            reason = "pit_valid_and_independent_members_support_first_model_ablation"
         elif classification == "availability_gated_family":
             reason = "structural_source_availability_requires_explicit_gate"
         elif classification == "diagnostic_only":
             reason = "registry_excludes_formal_model_use"
+        elif stable_nonreversed:
+            reason = "stable_members_do_not_meet_the_independent_representative_gate"
         else:
             reason = "no_member_passed_the_preregistered_ten_year_stability_gate"
         rows.append(
@@ -1497,13 +1542,20 @@ def _recommendations(
                 "diagnostic_only_feature_count": family_diagnostic_count,
                 "stable_feature_count": len(stable_features),
                 "stable_nonreversed_feature_count": len(stable_nonreversed),
+                "independent_stable_representative_count": len(
+                    independent_representatives
+                ),
+                "minimum_independent_representative_count": minimum_representatives,
                 "redundant_feature_count": len(
                     set(family_catalog["feature_name"].astype(str)) & redundant_features
                 ),
                 "representative_stable_features": ",".join(
-                    sorted(stable_nonreversed)[:10]
+                    independent_representatives[:10]
                 ),
                 "reason": reason,
+                "recommendation_semantics": (
+                    "candidate_for_first_model_ablation_not_final_inclusion"
+                ),
                 "final_field_set_frozen": False,
             }
         )
@@ -1706,7 +1758,7 @@ def _aggregate_outputs(
         threshold=float(config["stability_gate"]["redundancy_absolute_spearman"]),
         minimum_rows=int(config["redundancy"]["minimum_pairwise_rows"]),
     )
-    recommendations = _recommendations(catalog, registry, stability, redundancy)
+    recommendations = _recommendations(catalog, registry, stability, redundancy, config)
     drift = _drift_summary(annual_coverage)
     _write_frame(stability, output_root / "feature_stability.parquet")
     _write_frame(redundancy, output_root / "redundancy_pairs.parquet")

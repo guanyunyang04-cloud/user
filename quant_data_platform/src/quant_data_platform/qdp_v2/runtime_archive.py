@@ -73,6 +73,9 @@ LEDGER_COLUMNS = (
     "response_sha256",
     "error_type",
     "error_message",
+    "attempt_count",
+    "empty_confirmation_count",
+    "completed_at",
 )
 
 
@@ -235,6 +238,11 @@ def _json_metadata(path: Path) -> dict[str, Any]:
             payload.get("last_error", payload.get("error", payload.get("message", "")))
             or ""
         )[:1000],
+        "attempt_count": payload.get("attempt_count", payload.get("attempts")),
+        "empty_confirmation_count": payload.get(
+            "empty_confirmation_count", payload.get("empty_confirmations")
+        ),
+        "completed_at": str(payload.get("completed_at", "") or ""),
     }
 
 
@@ -266,6 +274,9 @@ def _ledger_record(unit: ArchiveUnit, path: Path) -> dict[str, Any]:
         "response_sha256": str(json_meta.get("response_sha256", "")),
         "error_type": str(json_meta.get("error_type", "")),
         "error_message": str(json_meta.get("error_message", "")),
+        "attempt_count": json_meta.get("attempt_count"),
+        "empty_confirmation_count": json_meta.get("empty_confirmation_count"),
+        "completed_at": str(json_meta.get("completed_at", "")),
     }
 
 
@@ -284,6 +295,50 @@ def _atomic_parquet(frame: pd.DataFrame, path: Path) -> None:
     temporary.unlink(missing_ok=True)
     frame.to_parquet(temporary, index=False, compression="zstd")
     os.replace(temporary, path)
+
+
+def _state_snapshot(workspace: Path, workflow: str) -> dict[str, Any]:
+    source = _within(
+        _runtime_root(workspace) / workflow / "state.json", _runtime_root(workspace)
+    )
+    if not source.is_file():
+        return {"status": "not_available"}
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeArchiveError(
+            f"runtime_archive_state_unreadable:{workflow}:{type(exc).__name__}"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise RuntimeArchiveError(f"runtime_archive_state_invalid:{workflow}")
+    redacted = _redact(payload)
+    _assert_credential_free(redacted)
+    canonical = json.dumps(
+        redacted, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    target = (
+        _archive_root(workspace)
+        / _safe_name(workflow)
+        / f"state.snapshot.{digest[:16]}.json"
+    )
+    if not target.is_file():
+        atomic_write_json(target, redacted)
+    try:
+        stored = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeArchiveError(
+            f"runtime_archive_state_snapshot_unreadable:{workflow}"
+        ) from exc
+    if stored != redacted:
+        raise RuntimeArchiveError(f"runtime_archive_state_snapshot_hash:{workflow}")
+    return {
+        "status": "preserved",
+        "path": str(target),
+        "sha256": _sha256(target),
+        "source_path": str(source),
+        "redacted": True,
+    }
 
 
 def _create_tar_zst(unit: ArchiveUnit, ledger: pd.DataFrame, target: Path) -> None:
@@ -600,6 +655,7 @@ def seal_unit(
     _atomic_parquet(ledger, ledger_path)
     _create_tar_zst(unit, ledger, archive_path)
     verification = verify_archive(archive_path, ledger)
+    state_snapshot = _state_snapshot(workspace, unit.workflow)
     logical_bytes = int(ledger["file_size"].sum())
     manifest = {
         "archive_version": ARCHIVE_VERSION,
@@ -614,6 +670,8 @@ def seal_unit(
         "archive_bytes": archive_path.stat().st_size,
         "ledger_path": str(ledger_path),
         "ledger_sha256": _sha256(ledger_path),
+        "ledger_semantics": "file_inventory_with_best_effort_sidecar_request_metadata",
+        "state_snapshot": state_snapshot,
         "source_file_count": len(ledger),
         "source_logical_bytes": logical_bytes,
         "estimated_source_allocated_bytes_1mib": int(

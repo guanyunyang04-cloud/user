@@ -49,6 +49,9 @@ from quant_data_platform.qdp_v2.status import active_dataset_map
 
 UPDATE_ID = "margin_eligibility_exchange_history_v1"
 PROVENANCE_REPAIR_ID = "margin_detail_provenance_repair_v1"
+SSE_SEMANTICS_REPAIR_ID = "margin_eligibility_sse_semantics_repair_v1"
+MARGIN_ELIGIBILITY_CONTRACT_V1 = "qdp_v2_margin_eligibility_exchange_tristate_v1"
+MARGIN_ELIGIBILITY_CONTRACT_V2 = "qdp_v2_margin_eligibility_exchange_tristate_v2"
 START_DATE = "2011-01-01"
 END_DATE = "2025-12-31"
 MAX_WORKERS = 4
@@ -92,6 +95,23 @@ MARGIN_DETAIL_COLUMNS = (
     "rqchl",
     "rqmcl",
     "rzrqye",
+    "source_date",
+    "feature_available_date",
+    "burn_in_only",
+    "source",
+)
+MARGIN_ELIGIBILITY_COLUMNS = (
+    "symbol",
+    "trade_date",
+    "exchange",
+    "eligibility_state",
+    "eligible",
+    "finance_eligible",
+    "securities_lending_eligible",
+    "detail_observed",
+    "source_available",
+    "eligibility_source_available",
+    "detail_source_available",
     "source_date",
     "feature_available_date",
     "burn_in_only",
@@ -576,6 +596,51 @@ def _copy_query(
     os.replace(temporary, path)
 
 
+def _eligibility_query(*, universe_scan: str, year: int) -> str:
+    """Build daily eligibility states without inferring an SSE negative list.
+
+    SZSE publishes an explicit historical eligibility table, so an absent or
+    false entry is a known negative.  SSE only publishes daily margin detail;
+    presence proves eligibility, while absence carries no eligibility meaning.
+    """
+
+    return f"""
+      SELECT u.symbol,u.trade_date,u.exchange,
+        CASE
+          WHEN u.exchange='SH' AND d.symbol IS NOT NULL THEN 'eligible_observed'
+          WHEN u.exchange='SH' THEN 'source_unavailable'
+          WHEN coalesce(e.eligible,false) THEN 'eligible_observed'
+          ELSE 'known_ineligible'
+        END AS eligibility_state,
+        CASE
+          WHEN u.exchange='SH' AND d.symbol IS NOT NULL THEN true
+          WHEN u.exchange='SH' THEN NULL::BOOLEAN
+          ELSE coalesce(e.eligible,false)
+        END AS eligible,
+        CASE WHEN u.exchange='SZ' THEN coalesce(e.finance_eligible,false)
+             ELSE NULL::BOOLEAN END AS finance_eligible,
+        CASE WHEN u.exchange='SZ' THEN coalesce(e.securities_lending_eligible,false)
+             ELSE NULL::BOOLEAN END AS securities_lending_eligible,
+        d.symbol IS NOT NULL AS detail_observed,
+        CASE WHEN u.exchange='SH' THEN d.symbol IS NOT NULL ELSE true END
+          AS source_available,
+        CASE WHEN u.exchange='SH' THEN d.symbol IS NOT NULL ELSE true END
+          AS eligibility_source_available,
+        true AS detail_source_available,
+        u.trade_date AS source_date,n.feature_available_date,
+        false AS burn_in_only,
+        CASE WHEN u.exchange='SH' THEN 'sse_official_margin_detail_only'
+             ELSE 'szse_official_margin_eligibility+detail' END AS source
+      FROM {universe_scan} u
+      JOIN next_open_dates n USING(trade_date)
+      LEFT JOIN official_eligibility e USING(symbol,trade_date,exchange)
+      LEFT JOIN official_detail d USING(symbol,trade_date,exchange)
+      WHERE u.trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
+        AND lower(u.board)='main' AND u.exchange IN ('SH','SZ')
+      ORDER BY u.trade_date,u.symbol
+    """
+
+
 def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     state = _read_state(workspace)
@@ -635,12 +700,6 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
                    finance_eligible,securities_lending_eligible,source
             FROM {raw_scan}
             WHERE endpoint='szse_eligibility'
-            UNION ALL
-            SELECT symbol,trade_date,exchange,true AS eligible,
-                   NULL::BOOLEAN AS finance_eligible,
-                   NULL::BOOLEAN AS securities_lending_eligible,source
-            FROM {raw_scan}
-            WHERE endpoint='sse_detail'
             """
         )
         next_dates = pd.DataFrame({"trade_date": dates})
@@ -656,33 +715,15 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
                 / f"year={year}"
                 / "part-0000.parquet"
             )
-            query = f"""
-              SELECT u.symbol,u.trade_date,u.exchange,
-                CASE WHEN e.symbol IS NOT NULL THEN 'eligible_observed'
-                     ELSE 'known_ineligible' END AS eligibility_state,
-                e.symbol IS NOT NULL AS eligible,
-                e.finance_eligible,e.securities_lending_eligible,
-                d.symbol IS NOT NULL AS detail_observed,
-                true AS source_available,
-                true AS eligibility_source_available,
-                true AS detail_source_available,
-                u.trade_date AS source_date,n.feature_available_date,
-                false AS burn_in_only,
-                CASE WHEN u.exchange='SH' THEN 'sse_official_margin_detail'
-                     ELSE 'szse_official_margin_eligibility+detail' END AS source
-              FROM {universe_scan} u
-              JOIN next_open_dates n USING(trade_date)
-              LEFT JOIN official_eligibility e USING(symbol,trade_date,exchange)
-              LEFT JOIN official_detail d USING(symbol,trade_date,exchange)
-              WHERE u.trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
-                AND lower(u.board)='main' AND u.exchange IN ('SH','SZ')
-              ORDER BY u.trade_date,u.symbol
-            """
+            query = _eligibility_query(universe_scan=universe_scan, year=year)
             _copy_query(connection, query=query, path=path)
             eligibility_paths.append(path)
             stats = connection.execute(
                 f"SELECT count(*),count(*) FILTER(WHERE eligible),"
-                f"count(*) FILTER(WHERE detail_observed) FROM ({query})"
+                "count(*) FILTER(WHERE detail_observed),"
+                "count(*) FILTER(WHERE eligibility_state='source_unavailable'),"
+                "count(*) FILTER(WHERE eligibility_state='known_ineligible') "
+                f"FROM ({query})"
             ).fetchone()
             annual_stats.append(
                 {
@@ -690,6 +731,8 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
                     "row_count": int(stats[0]),
                     "eligible_count": int(stats[1]),
                     "detail_observed_count": int(stats[2]),
+                    "source_unavailable_count": int(stats[3]),
+                    "known_ineligible_count": int(stats[4]),
                 }
             )
         eligibility_scan = (
@@ -780,7 +823,19 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
             f"count(*) FILTER(WHERE eligibility_state='source_unavailable'),"
             f"count(*) FILTER(WHERE trade_date>'{END_DATE}'),"
             "count(*) FILTER(WHERE trade_date='2024-01-02' AND eligible),"
-            "count(*) FILTER(WHERE trade_date='2011-01-04' AND eligible) "
+            "count(*) FILTER(WHERE trade_date='2011-01-04' AND eligible),"
+            "count(*) FILTER(WHERE exchange='SH' AND eligibility_state='known_ineligible'),"
+            "count(*) FILTER(WHERE exchange='SH' AND eligibility_state='source_unavailable'),"
+            "count(*) FILTER(WHERE exchange='SH' AND NOT detail_observed),"
+            "count(*) FILTER(WHERE exchange='SZ' AND eligibility_state='source_unavailable'),"
+            "count(*) FILTER(WHERE NOT coalesce(("
+            "  (eligibility_state='eligible_observed' AND eligible IS true) OR"
+            "  (eligibility_state='known_ineligible' AND eligible IS false) OR"
+            "  (eligibility_state='source_unavailable' AND eligible IS NULL)),false)),"
+            "count(*) FILTER(WHERE NOT coalesce("
+            "  source_available=eligibility_source_available AND "
+            "  source_available=(eligibility_state<>'source_unavailable') AND "
+            "  detail_source_available,false)) "
             f"FROM {eligibility_scan}"
         ).fetchone()
         expected_eligibility_rows = int(
@@ -807,12 +862,19 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         "every_trade_date_covered": int(eligibility_stats[1]) == len(dates),
         "eligibility_row_count_matches_universe": int(eligibility_stats[0])
         == expected_eligibility_rows,
-        "source_unavailable_explicit_count": int(eligibility_stats[2]) >= 0,
+        "source_unavailable_is_explicit": int(eligibility_stats[2]) > 0,
         "forbidden_2026_eligibility_rows": int(eligibility_stats[3]) == 0,
         "benchmark_2024_01_02_mainboard_eligible_count": int(eligibility_stats[4])
         == 1_888,
         "benchmark_2011_01_04_mainboard_eligible_count": int(eligibility_stats[5])
         == 90,
+        "sse_absence_is_not_known_ineligible": int(eligibility_stats[6]) == 0,
+        "sse_absence_is_source_unavailable": int(eligibility_stats[7])
+        == int(eligibility_stats[8]),
+        "szse_explicit_eligibility_has_no_unknown_state": int(eligibility_stats[9])
+        == 0,
+        "eligibility_state_matches_nullable_value": int(eligibility_stats[10]) == 0,
+        "source_availability_flags_are_consistent": int(eligibility_stats[11]) == 0,
         "known_000527_gap_repaired": known_000527 == 1,
         "margin_detail_primary_key_unique": int(margin_stats[1]) == 0,
         "margin_detail_forbidden_2026_rows": int(margin_stats[2]) == 0,
@@ -892,13 +954,14 @@ def _install(
         )
     first_schema = pq.read_schema(paths[0])
     if domain == DataDomain.MARGIN_ELIGIBILITY:
-        contract = "qdp_v2_margin_eligibility_exchange_tristate_v1"
+        contract = MARGIN_ELIGIBILITY_CONTRACT_V2
         primary_key = ["trade_date", "symbol"]
         start_date = START_DATE
         end_date = END_DATE
         frequency = "1d"
         notes = [
             "eligible_observed, known_ineligible, and source_unavailable are distinct",
+            "SSE detail presence proves eligibility but detail absence is not an official negative eligibility list",
             "non-eligible securities never receive synthetic zero balances",
             "exchange data from date D is available on the next exchange-open date",
         ]
@@ -965,6 +1028,193 @@ def _install(
         "end_date": end_date,
         "shard_count": len(entries),
     }
+
+
+def repair_sse_eligibility_semantics(
+    *, workspace_root: str | Path | None = None
+) -> dict[str, Any]:
+    """Replace unsupported SSE negative states with explicit unknown states.
+
+    The repair only rewrites ``margin_eligibility``.  Existing v1 shards and
+    manifests remain immutable and the active pointer switches only after the
+    successor has passed the state/value invariants below.
+    """
+
+    workspace = _workspace(workspace_root)
+    root = qdp_v2_root(workspace)
+    active = read_active_manifest(root)
+    current = active_dataset_map(active)
+    current_id = str(current.get(DataDomain.MARGIN_ELIGIBILITY, ""))
+    current_path = dataset_manifest_for_id(
+        root, current_id, DataDomain.MARGIN_ELIGIBILITY
+    )
+    if current_path is None:
+        raise MarginEligibilityUpdateError("active_margin_eligibility_missing")
+    current_manifest = read_dataset_manifest(current_path)
+    if current_manifest.contract_version == MARGIN_ELIGIBILITY_CONTRACT_V2:
+        return {
+            "status": "already_repaired",
+            "repair_id": SSE_SEMANTICS_REPAIR_ID,
+            "dataset_id": current_id,
+        }
+    if current_manifest.contract_version != MARGIN_ELIGIBILITY_CONTRACT_V1:
+        raise MarginEligibilityUpdateError(
+            "unsupported_margin_eligibility_contract:"
+            f"{current_manifest.contract_version}"
+        )
+
+    prepared_root = (
+        qdp_paths(workspace).data_dir
+        / "qdp_runtime"
+        / SSE_SEMANTICS_REPAIR_ID
+        / "prepared"
+        / DataDomain.MARGIN_ELIGIBILITY
+    )
+    prepared_paths: list[Path] = []
+    for shard in current_manifest.shards:
+        source_path = resolve_manifest_path(shard.path, root=root)
+        year = str(shard.start_date)[:4]
+        output_path = prepared_root / f"year={year}" / "part-0000.parquet"
+        scan = (
+            "read_parquet('"
+            + source_path.resolve().as_posix().replace("'", "''")
+            + "')"
+        )
+        query = f"""
+          SELECT symbol,trade_date,exchange,
+            CASE WHEN exchange='SH' AND detail_observed THEN 'eligible_observed'
+                 WHEN exchange='SH' THEN 'source_unavailable'
+                 ELSE eligibility_state END AS eligibility_state,
+            CASE WHEN exchange='SH' AND detail_observed THEN true
+                 WHEN exchange='SH' THEN NULL::BOOLEAN
+                 ELSE eligible END AS eligible,
+            CASE WHEN exchange='SH' THEN NULL::BOOLEAN
+                 ELSE finance_eligible END AS finance_eligible,
+            CASE WHEN exchange='SH' THEN NULL::BOOLEAN
+                 ELSE securities_lending_eligible END
+              AS securities_lending_eligible,
+            detail_observed,
+            CASE WHEN exchange='SH' THEN detail_observed
+                 ELSE source_available END AS source_available,
+            CASE WHEN exchange='SH' THEN detail_observed
+                 ELSE eligibility_source_available END
+              AS eligibility_source_available,
+            detail_source_available,source_date,feature_available_date,burn_in_only,
+            CASE WHEN exchange='SH' THEN 'sse_official_margin_detail_only'
+                 ELSE source END AS source
+          FROM {scan}
+          ORDER BY trade_date,symbol
+        """
+        with duckdb.connect() as connection:
+            _copy_query(connection, query=query, path=output_path)
+        prepared_paths.append(output_path)
+
+    repaired_scan = (
+        f"read_parquet([{_sql_paths(prepared_paths)}], union_by_name=true, "
+        "hive_partitioning=false)"
+    )
+    with duckdb.connect() as connection:
+        stats = connection.execute(
+            "SELECT count(*),"
+            "count(*)-count(DISTINCT trade_date||'|'||symbol),"
+            f"count(*) FILTER(WHERE trade_date>'{END_DATE}'),"
+            "count(*) FILTER(WHERE exchange='SH' AND eligibility_state='known_ineligible'),"
+            "count(*) FILTER(WHERE exchange='SH' AND eligibility_state='source_unavailable'),"
+            "count(*) FILTER(WHERE exchange='SH' AND NOT detail_observed),"
+            "count(*) FILTER(WHERE exchange='SZ' AND eligibility_state='source_unavailable'),"
+            "count(*) FILTER(WHERE NOT coalesce(("
+            " (eligibility_state='eligible_observed' AND eligible IS true) OR"
+            " (eligibility_state='known_ineligible' AND eligible IS false) OR"
+            " (eligibility_state='source_unavailable' AND eligible IS NULL)),false)),"
+            "count(*) FILTER(WHERE NOT coalesce("
+            " source_available=eligibility_source_available AND "
+            " source_available=(eligibility_state<>'source_unavailable') AND "
+            " detail_source_available,false)) "
+            f"FROM {repaired_scan}"
+        ).fetchone()
+    checks = {
+        "row_count_unchanged": int(stats[0]) == current_manifest.row_count,
+        "primary_key_unique": int(stats[1]) == 0,
+        "forbidden_2026_rows": int(stats[2]) == 0,
+        "sse_known_ineligible_removed": int(stats[3]) == 0,
+        "sse_absence_is_source_unavailable": int(stats[4]) == int(stats[5]),
+        "szse_explicit_states_unchanged": int(stats[6]) == 0,
+        "eligibility_state_matches_nullable_value": int(stats[7]) == 0,
+        "source_availability_flags_are_consistent": int(stats[8]) == 0,
+    }
+    if not all(checks.values()):
+        raise MarginEligibilityUpdateError(
+            f"sse_semantics_repair_contract_failed:{checks}"
+        )
+
+    dataset_id, installed = _install(
+        workspace,
+        domain=DataDomain.MARGIN_ELIGIBILITY,
+        paths=prepared_paths,
+        input_manifest=None,
+    )
+    installed_path = dataset_manifest_for_id(
+        root, dataset_id, DataDomain.MARGIN_ELIGIBILITY
+    )
+    assert installed_path is not None
+    installed_manifest = read_dataset_manifest(installed_path)
+    repaired_manifest = DatasetManifest.from_mapping(
+        {
+            **installed_manifest.to_dict(),
+            "source": {
+                **dict(installed_manifest.source or {}),
+                "semantic_repair_id": SSE_SEMANTICS_REPAIR_ID,
+                "upstream_dataset_id": current_id,
+            },
+            "quality": {
+                **dict(installed_manifest.quality or {}),
+                "sse_known_ineligible_count": 0,
+                "sse_source_unavailable_count": int(stats[4]),
+                "semantic_repair_checks": checks,
+            },
+            "notes": [
+                *list(installed_manifest.notes or []),
+                "immutable successor of the v1 dataset; only SSE eligibility semantics changed",
+            ],
+        }
+    )
+    _assert_credential_free(repaired_manifest.to_dict())
+    write_dataset_manifest(root, repaired_manifest)
+
+    latest_active = read_active_manifest(root)
+    latest = active_dataset_map(latest_active)
+    if latest.get(DataDomain.MARGIN_ELIGIBILITY) != current_id:
+        raise MarginEligibilityUpdateError("active_margin_eligibility_drifted")
+    latest_active["datasets"] = {
+        **latest,
+        DataDomain.MARGIN_ELIGIBILITY: dataset_id,
+    }
+    latest_active["updated_at"] = utc_now()
+    write_active_manifest(root, latest_active)
+    if (
+        active_dataset_map(read_active_manifest(root)).get(
+            DataDomain.MARGIN_ELIGIBILITY
+        )
+        != dataset_id
+    ):
+        raise MarginEligibilityUpdateError("sse_semantics_active_switch_failed")
+
+    payload = {
+        "status": "applied",
+        "repair_id": SSE_SEMANTICS_REPAIR_ID,
+        "input_dataset_id": current_id,
+        "installed_domains": {DataDomain.MARGIN_ELIGIBILITY: installed},
+        "checks": checks,
+        "statistics": {
+            "row_count": int(stats[0]),
+            "sse_source_unavailable_count": int(stats[4]),
+            "request_2026_count": 0,
+        },
+        "updated_at": utc_now(),
+    }
+    _assert_credential_free(payload)
+    atomic_write_json(root / "audits" / f"{SSE_SEMANTICS_REPAIR_ID}.json", payload)
+    return payload
 
 
 def repair_margin_detail_provenance(
@@ -1172,6 +1422,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     mode.add_argument("--evaluate", action="store_true")
     mode.add_argument("--status", action="store_true")
     mode.add_argument("--repair-provenance", action="store_true")
+    mode.add_argument("--repair-sse-semantics", action="store_true")
     return parser
 
 
@@ -1187,6 +1438,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = evaluate(workspace_root=workspace)
     elif args.repair_provenance:
         payload = repair_margin_detail_provenance(workspace_root=workspace)
+    elif args.repair_sse_semantics:
+        payload = repair_sse_eligibility_semantics(workspace_root=workspace)
     else:
         payload = _read_state(_workspace(workspace))
     print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))

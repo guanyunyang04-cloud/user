@@ -13,6 +13,7 @@ from quant_data_platform.qdp_v2.database_audit import (
     audit_latest_keys,
 )
 from quant_data_platform.qdp_v2.manifest import qdp_v2_root, read_active_manifest
+from quant_data_platform.qdp_v2.semantic_audit import audit_semantics
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 
@@ -20,9 +21,12 @@ def run_check(
     *,
     workspace_root: str | Path | None = None,
     full: bool = False,
+    semantic: bool = False,
     runtime: str = "balanced",
     write: bool = False,
 ) -> dict[str, Any]:
+    if semantic:
+        return audit_semantics(workspace_root=workspace_root, write=write)
     if full:
         return audit_database(workspace_root=workspace_root, deep=True, runtime=runtime, write=write)
     active = audit_active(workspace_root=workspace_root, write=write, verify_footers=False)
@@ -39,6 +43,8 @@ def run_check(
     return {
         "status": status,
         "mode": "quick",
+        "scope": "physical_contract_and_latest_market_key_checks",
+        "all_active_domains_semantically_certified": False,
         "active": active,
         "database": {
             "status": database_status,
@@ -70,6 +76,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run deep schema, primary-key, OHLC, factor, identity and 48-bar checks.",
     )
+    mode.add_argument(
+        "--semantic",
+        action="store_true",
+        help="Aggregate specialty audits and selected stable semantic invariants.",
+    )
     parser.add_argument("--runtime", default="balanced", choices=("safe", "balanced", "fast"))
     parser.add_argument("--write-audit", action="store_true", help="Persist audit output; checks are read-only by default.")
     parser.add_argument("--json", action="store_true")
@@ -81,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = run_check(
         workspace_root=str(args.workspace_root or "") or None,
         full=bool(args.full),
+        semantic=bool(args.semantic),
         runtime=str(args.runtime or "balanced"),
         write=bool(args.write_audit),
     )

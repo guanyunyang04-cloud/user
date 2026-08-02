@@ -36,6 +36,20 @@ def _expanded_fixture(workspace: Path) -> Path:
                 "status": "observed",
                 "offset": 0,
                 "params": {"trade_date": "20200102"},
+                "attempt_count": 2,
+                "empty_confirmation_count": 0,
+                "completed_at": "2020-01-03T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    workflow_root = root.parents[3]
+    (workflow_root / "state.json").write_text(
+        json.dumps(
+            {
+                "status": "applied",
+                "token": "fixture-secret",
+                "days": {"2020-01-02": {"status": "observed"}},
             }
         ),
         encoding="utf-8",
@@ -57,6 +71,16 @@ def test_runtime_archive_seal_verify_restore_and_explicit_delete(
     assert sealed["source_file_count"] == 2
     assert sealed["sample_restore"]["status"] == "restored_and_hash_verified"
     manifest = json.loads(Path(sealed["manifests"][0]).read_text(encoding="utf-8"))
+    snapshot = json.loads(
+        Path(manifest["state_snapshot"]["path"]).read_text(encoding="utf-8")
+    )
+    ledger = pd.read_parquet(manifest["ledger_path"])
+    metadata = ledger.loc[ledger["suffix"].eq(".json")].iloc[0]
+    assert snapshot["token"] == "<redacted>"
+    assert snapshot["status"] == "applied"
+    assert metadata["attempt_count"] == 2
+    assert metadata["empty_confirmation_count"] == 0
+    assert metadata["completed_at"] == "2020-01-03T00:00:00Z"
     restored = restore_archive(
         manifest["archive_path"],
         manifest["ledger_path"],

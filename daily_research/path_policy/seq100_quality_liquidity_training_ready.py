@@ -71,6 +71,7 @@ BALANCE_EXTENSION_STATE_FIELDS = (
     "other_payables_total_field_state",
     "contract_liabilities_field_state",
 )
+BALANCE_EXTENSION_CONFLICT_FIELD = "balance_extension_source_conflict"
 
 DEFAULT_SCOPE_OUTPUT_ROOT = (
     WORKSPACE_ROOT
@@ -1039,19 +1040,41 @@ def _balance_extension_sql(
     *,
     spine_path: Path,
     source_paths: Sequence[Path],
+    conflict_gate: bool,
 ) -> str:
     identity = _projection("s", ROW_SPINE_COLUMNS)
-    selected = ",\n           ".join(
-        f"e.{_quoted(field)} AS {_quoted('balance_' + field)}"
-        for field in (
-            *BALANCE_EXTENSION_NUMERIC_FIELDS,
-            *BALANCE_EXTENSION_STATE_FIELDS,
+    if conflict_gate:
+        numeric = ",\n           ".join(
+            "CASE WHEN coalesce(e."
+            f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)},false) THEN NULL "
+            f"ELSE e.{_quoted(field)} END AS {_quoted('balance_' + field)}"
+            for field in BALANCE_EXTENSION_NUMERIC_FIELDS
         )
+    else:
+        numeric = ",\n           ".join(
+            f"e.{_quoted(field)} AS {_quoted('balance_' + field)}"
+            for field in BALANCE_EXTENSION_NUMERIC_FIELDS
+        )
+    states = ",\n           ".join(
+        f"e.{_quoted(field)} AS {_quoted('balance_' + field)}"
+        for field in BALANCE_EXTENSION_STATE_FIELDS
+    )
+    event_fields = (
+        *BALANCE_EXTENSION_NUMERIC_FIELDS,
+        *BALANCE_EXTENSION_STATE_FIELDS,
+        *([BALANCE_EXTENSION_CONFLICT_FIELD] if conflict_gate else []),
+    )
+    conflict_output = (
+        ",\n           e."
+        f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)} AS "
+        f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)}"
+        if conflict_gate
+        else ""
     )
     return f"""
     WITH events AS (
       SELECT symbol,feature_available_date,source_date,report_date,
-             {','.join(_quoted(field) for field in (*BALANCE_EXTENSION_NUMERIC_FIELDS, *BALANCE_EXTENSION_STATE_FIELDS))}
+             {",".join(_quoted(field) for field in event_fields)}
       FROM {_scan(source_paths)}
       WHERE feature_available_date<>'' AND feature_available_date<='{END_DATE}'
       QUALIFY row_number() OVER (
@@ -1063,7 +1086,8 @@ def _balance_extension_sql(
            CASE WHEN e.symbol IS NULL THEN 'warmup_missing'
                 ELSE 'observed' END AS coverage_state,
            e.source_date,e.feature_available_date,
-           {selected}
+           {numeric},
+           {states}{conflict_output}
     FROM read_parquet('{str(spine_path).replace("'", "''")}') s
     ASOF LEFT JOIN events e
       ON s.symbol=e.symbol AND s.trade_date>=e.feature_available_date
@@ -1077,12 +1101,15 @@ def _build_balance_extension_block(
     output_root: Path,
     row_spines: Mapping[str, Mapping[str, Any]],
     dataset_ids: Mapping[str, str] | None = None,
+    conflict_gate: bool = False,
 ) -> dict[str, Any]:
     domain = DataDomain.BALANCE_SHEET_QUARTERLY
     source_paths = _active_paths(workspace, domain, dataset_ids)
     required = set(BALANCE_EXTENSION_NUMERIC_FIELDS) | set(
         BALANCE_EXTENSION_STATE_FIELDS
     )
+    if conflict_gate:
+        required.add(BALANCE_EXTENSION_CONFLICT_FIELD)
     missing = sorted(required.difference(pq.read_schema(source_paths[0]).names))
     if missing:
         raise TrainingReadyError(f"balance_extension_fields_missing:{missing}")
@@ -1104,6 +1131,7 @@ def _build_balance_extension_block(
                 _balance_extension_sql(
                     spine_path=spine_path,
                     source_paths=source_paths,
+                    conflict_gate=conflict_gate,
                 ),
                 output_path,
             )
@@ -1118,9 +1146,7 @@ def _build_balance_extension_block(
                 "GROUP BY coverage_state ORDER BY coverage_state"
             ).fetchall()
         if int(row_count) != int(row_spines[str(year)]["row_count"]):
-            raise TrainingReadyError(
-                f"balance_extension_row_count_changed:{year}"
-            )
+            raise TrainingReadyError(f"balance_extension_row_count_changed:{year}")
         _assert_safe_feature_identity_schema(output_path)
         forbidden_dependency_count = _forbidden_date_row_count(output_path)
         if int(unique_count) != int(row_count) or forbidden_dependency_count:
@@ -1146,7 +1172,10 @@ def _build_balance_extension_block(
         "fields": sorted(required),
         "partitions": partitions,
         "lagged": True,
-        "availability_state_fields": list(BALANCE_EXTENSION_STATE_FIELDS),
+        "availability_state_fields": [
+            *BALANCE_EXTENSION_STATE_FIELDS,
+            *([BALANCE_EXTENSION_CONFLICT_FIELD] if conflict_gate else []),
+        ],
     }
 
 
@@ -1491,6 +1520,21 @@ def prepare(
     }
     if not dataset_ids:
         raise TrainingReadyError("source_scope_qdp_dataset_ids_missing")
+    dataset_overrides = {
+        str(domain): str(dataset_id)
+        for domain, dataset_id in dict(
+            source_config.get("dataset_id_overrides", {}) or {}
+        ).items()
+    }
+    for domain, dataset_id in dataset_overrides.items():
+        if (
+            dataset_manifest_for_id(qdp_v2_root(workspace_root), dataset_id, domain)
+            is None
+        ):
+            raise TrainingReadyError(
+                f"source_scope_dataset_override_missing:{domain}:{dataset_id}"
+            )
+    dataset_ids.update(dataset_overrides)
     source_query_contract = _source_query_contract(workspace_root, dataset_ids)
     source_support_boundary = _source_support_boundary_profile(scope_state)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -1570,6 +1614,9 @@ def prepare(
         }
     ]
     source_policy = dict(config.get("source_policy", {}) or {})
+    balance_extension_conflict_gate = (
+        source_policy.get("balance_extension_conflict_gate") == "required"
+    )
     eligibility_domain = (
         DataDomain.MARGIN_ELIGIBILITY
         if source_policy.get("margin_eligibility")
@@ -1606,13 +1653,12 @@ def prepare(
         ),
     }
     if bool(source_policy.get("include_financial_statement_extensions", False)):
-        blocks["financial_statement_extensions"] = (
-            _build_balance_extension_block(
-                workspace=workspace_root,
-                output_root=output_root,
-                row_spines=row_spines,
-                dataset_ids=dataset_ids,
-            )
+        blocks["financial_statement_extensions"] = _build_balance_extension_block(
+            workspace=workspace_root,
+            output_root=output_root,
+            row_spines=row_spines,
+            dataset_ids=dataset_ids,
+            conflict_gate=balance_extension_conflict_gate,
         )
     coverage = _coverage_registry(output_root=output_root, blocks=blocks)
     margin_detail_eligibility = {
@@ -1681,6 +1727,22 @@ def prepare(
                 }
                 for field in BALANCE_EXTENSION_STATE_FIELDS
             ]
+            + (
+                [
+                    {
+                        "feature_name": BALANCE_EXTENSION_CONFLICT_FIELD,
+                        "physical_column": BALANCE_EXTENSION_CONFLICT_FIELD,
+                        "block": "financial_statement_extensions",
+                        "source_domain": DataDomain.BALANCE_SHEET_QUARTERLY,
+                        "source_field": BALANCE_EXTENSION_CONFLICT_FIELD,
+                        "eligibility": "availability_metadata",
+                        "eligibility_reason": "conflicting_extension_values_are_gated",
+                        "availability_lag": "next_open_day",
+                    }
+                ]
+                if balance_extension_conflict_gate
+                else []
+            )
         )
     feature_registry = pd.concat(
         [
@@ -1773,9 +1835,8 @@ def prepare(
             f"{consumed_forbidden_dependency_rows}"
         )
     manifest = {
-        "schema": "seq100_quality_liquidity_training_ready/v2"
-        if study_id.endswith("_v2")
-        else "seq100_quality_liquidity_training_ready/v1",
+        "schema": "seq100_quality_liquidity_training_ready/"
+        + study_id.rsplit("_", maxsplit=1)[-1],
         "status": "completed",
         "study_id": study_id,
         "source_scope_study_id": source_scope_study_id,
@@ -1878,9 +1939,8 @@ def prepare(
         .to_dict("records")
     )
     readiness = {
-        "schema": "seq100_quality_liquidity_training_readiness/v2"
-        if study_id.endswith("_v2")
-        else "seq100_quality_liquidity_training_readiness/v1",
+        "schema": "seq100_quality_liquidity_training_readiness/"
+        + study_id.rsplit("_", maxsplit=1)[-1],
         "study_id": study_id,
         "status": readiness_status,
         "common_support": {

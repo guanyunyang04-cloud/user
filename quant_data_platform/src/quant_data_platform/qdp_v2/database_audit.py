@@ -630,6 +630,8 @@ def audit_database(
     payload: dict[str, Any] = {
         "status": "needs_attention" if blocking else "ok",
         "mode": "full",
+        "scope": "physical_contract_and_selected_market_identity_semantics",
+        "all_active_domains_semantically_certified": False,
         "deep": bool(deep),
         "qdp_v2_root": str(root.resolve()),
         "audited_at": utc_now(),

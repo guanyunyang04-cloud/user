@@ -22,6 +22,10 @@ def test_recent_reversal_requires_opposite_equal_or_larger_effect() -> None:
     effects.update({2023: -0.005, 2024: -0.004, 2025: -0.003})
     assert not audit.recent_equal_or_larger_reversal(effects)
 
+    short_history = {2021: 0.01, 2022: 0.01}
+    short_history.update({2023: -0.02, 2024: -0.02, 2025: -0.02})
+    assert audit.recent_equal_or_larger_reversal(short_history)
+
 
 def test_family_classification_respects_availability_gate() -> None:
     assert (
@@ -51,6 +55,70 @@ def test_family_classification_respects_availability_gate() -> None:
         )
         == "diagnostic_only"
     )
+    assert (
+        audit.classify_family(
+            stable_feature_count=5,
+            stable_nonreversed_feature_count=1,
+            availability_gated=False,
+            formal_eligible_feature_count=20,
+            minimum_independent_representatives=2,
+        )
+        == "defer_from_v1"
+    )
+
+
+def test_independent_representatives_do_not_count_redundant_twins() -> None:
+    redundancy = pd.DataFrame(
+        {
+            "feature_left": ["a"],
+            "feature_right": ["b"],
+            "absolute_spearman": [0.999],
+        }
+    )
+
+    representatives = audit._independent_representatives({"a", "b", "c"}, redundancy)
+
+    assert "c" in representatives
+    assert len(set(representatives) & {"a", "b"}) == 1
+    assert len(representatives) == 2
+
+
+def test_large_family_recommendation_uses_independent_representatives() -> None:
+    features = [f"feature_{index}" for index in range(10)]
+    catalog = pd.DataFrame(
+        {
+            "feature_name": features,
+            "analytic_family": ["test"] * len(features),
+            "eligibility": ["formal_candidate"] * len(features),
+        }
+    )
+    registry = pd.DataFrame(
+        columns=["feature_name", "eligibility", "block", "source_domain"]
+    )
+    stability = pd.DataFrame(
+        {
+            "feature": features[:2],
+            "analytic_family": ["test", "test"],
+            "stable_ten_year_relation": [True, True],
+            "stable_without_recent_reversal": [True, True],
+        }
+    )
+    redundancy = pd.DataFrame(
+        {"feature_left": [features[0]], "feature_right": [features[1]]}
+    )
+    config = {
+        "stability_gate": {
+            "large_family_minimum_formal_features": 10,
+            "minimum_independent_stable_members_large_family": 2,
+        }
+    }
+
+    result = audit._recommendations(
+        catalog, registry, stability, redundancy, config
+    ).iloc[0]
+
+    assert result["independent_stable_representative_count"] == 1
+    assert result["classification"] == "defer_from_v1"
 
 
 def test_relation_rows_keep_missing_values_out_of_real_zero() -> None:

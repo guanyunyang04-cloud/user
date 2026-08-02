@@ -41,7 +41,7 @@ FAMILY_LABELS = {
     "traditional_technical_indicators": "传统技术指标",
 }
 CLASS_LABELS = {
-    "first_model_formal_family": "首版正式候选族",
+    "first_model_formal_family": "首版消融候选族",
     "availability_gated_family": "需可用性门控",
     "diagnostic_only": "仅诊断",
     "defer_from_v1": "首版暂缓",
@@ -557,11 +557,11 @@ def prepare_artifact(audit_root: Path = DEFAULT_AUDIT_ROOT) -> dict[str, Any]:
         },
         {
             "id": "formal_families_card",
-            "description": "通过预注册稳定性门控的首版正式候选特征族；不等于最终字段集合。",
+            "description": "通过稳定性与独立代表门控的首版消融候选族；不等于最终纳入。",
             "dataset": "headline",
             "sourceId": "feature_evidence",
             "metrics": [
-                {"label": "正式候选族", "field": "formal_families", "format": "number"}
+                {"label": "消融候选族", "field": "formal_families", "format": "number"}
             ],
         },
         {
@@ -861,7 +861,7 @@ def prepare_artifact(audit_root: Path = DEFAULT_AUDIT_ROOT) -> dict[str, Any]:
             "body": (
                 "## 技术结论\n\n"
                 f"- **数据已达到进入首版建模设计的条件。** 审计覆盖 {manifest['scope']['common_support_row_count']:,} 个 2011–2025 公共股票日、628 个可分析数值字段；2010 未进入统计，2026 读取为零。\n"
-                f"- **建议保留 {first_formal} 个首版正式候选族，另有 {gated} 个族必须走 availability gate。** 这只是特征族建议，尚未冻结字段，更没有训练模型。\n"
+                f"- **建议保留 {first_formal} 个首版消融候选族，另有 {gated} 个族必须走 availability gate。** 这只是待比较的特征族，不代表最终纳入，尚未冻结字段，也没有训练模型。\n"
                 f"- **强机会与风险来自同一套活跃度结构。** 10日 ATR 高分位的 Top 5% lift 为 {atr.high_top5_lift:.2f}×，但 MAE 中位数由低分位的 {atr.low_mae_median:.2%} 扩大到 {atr.high_mae_median:.2%}；不能把强机会富集直接等同为更好的可交易收益。\n"
                 f"- **剩余分钟缺口足够小但并非随机。** 152 行中 10日 Top 5% 比例为 {excluded_10.top5_rate:.2%}，完整组为 {retained_10.top5_rate:.2%}，同时缺口组 MAE 更差；应保留双股票池和偏差报告。"
             ),
@@ -973,7 +973,7 @@ def prepare_artifact(audit_root: Path = DEFAULT_AUDIT_ROOT) -> dict[str, Any]:
             "type": "markdown",
             "body": (
                 "## 方法与稳健性门控\n\n"
-                "每个年度对全部公共行计算覆盖、分布、特征分位、Top 1%/5% lift、MFE、MAE 与状态差异，再用行数充分统计量聚合三个时期和全历史。某族只有在至少一个成员于不少于 10 个年份呈现同方向的强机会、风险或状态关系，且 2023–2025 未出现同等或更大反向效果时，才可进入正式候选。冗余审计是唯一使用固定哈希样本的步骤，共 4,975 行。"
+                "每个年度对全部公共行计算覆盖、分布、特征分位、Top 1%/5% lift、MFE、MAE 与状态差异，再用行数充分统计量聚合三个时期和全历史。近年反转使用排除 2023–2025 的历史基线；正式字段较多的族还需至少两个不落入 |ρ|≥0.995 冗余边的稳定代表，才列为首版消融候选。年度中位数聚合仍是近似统计，最终短名单冻结前需重算精确 pooled median。"
             ),
         },
         {
