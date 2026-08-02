@@ -26,7 +26,7 @@ from quant_data_platform.qdp_v2.status import active_dataset_map
 from daily_research.path_policy import seq100_quality_liquidity_research_scope as scope
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-STUDY_ID = "seq100_quality_liquidity_training_ready_v1"
+STUDY_ID = "seq100_quality_liquidity_training_ready"
 SOURCE_SCOPE_STUDY_ID = scope.STUDY_ID
 DATA_HISTORY_START = "2010-01-01"
 RESEARCH_START = "2011-01-01"
@@ -34,8 +34,8 @@ END_DATE = "2025-12-31"
 FORBIDDEN_YEAR = 2026
 RESEARCH_YEARS = tuple(range(2011, 2026))
 OOS_YEARS = (2023, 2024, 2025)
-EXPECTED_OOS_TRAINING_ROW_COUNTS = {2023: 3_206_854, 2024: 3_616_558, 2025: 4_028_849}
-EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_441_395
+EXPECTED_OOS_TRAINING_ROW_COUNTS = {2023: 3_242_301, 2024: 3_652_008, 2025: 4_064_304}
+EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_476_851
 EXPECTED_EXISTING_FEATURE_COUNT = 518
 EXPECTED_FACTOR_FIELD_COUNT = 261
 EXPECTED_FACTOR_SCHEMA_HASH = (
@@ -75,15 +75,15 @@ BALANCE_EXTENSION_CONFLICT_FIELD = "balance_extension_source_conflict"
 
 DEFAULT_SCOPE_OUTPUT_ROOT = (
     WORKSPACE_ROOT
-    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope_v1"
+    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope"
 )
 DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
-    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready_v1"
+    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready"
 )
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT
-    / "daily_research/studies/seq100_quality_liquidity_training_ready_v1.json"
+    / "daily_research/studies/seq100_quality_liquidity_training_ready.json"
 )
 
 REFERENCE_FACTOR_FIELDS = frozenset(
@@ -517,8 +517,7 @@ def _dataset_map(
 ) -> dict[str, str]:
     if dataset_ids is not None:
         return {
-            str(domain): str(dataset_id)
-            for domain, dataset_id in dataset_ids.items()
+            str(domain): str(dataset_id) for domain, dataset_id in dataset_ids.items()
         }
     return active_dataset_map(read_active_manifest(qdp_v2_root(workspace)))
 
@@ -612,8 +611,7 @@ def _validate_source_inputs(
         for item in list(manifest.get("rolling_oos_folds", []) or [])
     }
     checks = {
-        "scope_rows": int(support.get("row_count", 0))
-        == expected_row_count,
+        "scope_rows": int(support.get("row_count", 0)) == expected_row_count,
         "scope_hash_present": bool(support.get("common_support_hash")),
         "scope_start": manifest.get("research_period", {}).get("start_date")
         == RESEARCH_START,
@@ -692,9 +690,7 @@ def _factor_registry(
     output_root: Path,
     dataset_ids: Mapping[str, str] | None = None,
 ) -> tuple[pd.DataFrame, list[str]]:
-    factor_paths = _active_paths(
-        workspace, DataDomain.STK_FACTOR_PRO_RAW, dataset_ids
-    )
+    factor_paths = _active_paths(workspace, DataDomain.STK_FACTOR_PRO_RAW, dataset_ids)
     schema_names = pq.read_schema(factor_paths[0]).names
     quality = _factor_quality(workspace, dataset_ids)
     raw_ok = bool(quality.get("raw_price_validation_passed"))
@@ -816,9 +812,7 @@ def _build_row_spines(
     for year in RESEARCH_YEARS:
         support = dict(membership[str(year)])
         support_path = Path(str(support[support_path_key]))
-        path = (
-            output_root / output_directory / f"year={year}" / "part-0000.parquet"
-        )
+        path = output_root / output_directory / f"year={year}" / "part-0000.parquet"
         input_hash = str(support.get(support_hash_key, ""))
         if not support_path.is_file() or _sha256(support_path) != input_hash:
             raise TrainingReadyError(f"source_support_partition_changed:{year}")
@@ -1040,21 +1034,14 @@ def _balance_extension_sql(
     *,
     spine_path: Path,
     source_paths: Sequence[Path],
-    conflict_gate: bool,
 ) -> str:
     identity = _projection("s", ROW_SPINE_COLUMNS)
-    if conflict_gate:
-        numeric = ",\n           ".join(
-            "CASE WHEN coalesce(e."
-            f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)},false) THEN NULL "
-            f"ELSE e.{_quoted(field)} END AS {_quoted('balance_' + field)}"
-            for field in BALANCE_EXTENSION_NUMERIC_FIELDS
-        )
-    else:
-        numeric = ",\n           ".join(
-            f"e.{_quoted(field)} AS {_quoted('balance_' + field)}"
-            for field in BALANCE_EXTENSION_NUMERIC_FIELDS
-        )
+    numeric = ",\n           ".join(
+        "CASE WHEN coalesce(e."
+        f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)},false) THEN NULL "
+        f"ELSE e.{_quoted(field)} END AS {_quoted('balance_' + field)}"
+        for field in BALANCE_EXTENSION_NUMERIC_FIELDS
+    )
     states = ",\n           ".join(
         f"e.{_quoted(field)} AS {_quoted('balance_' + field)}"
         for field in BALANCE_EXTENSION_STATE_FIELDS
@@ -1062,14 +1049,12 @@ def _balance_extension_sql(
     event_fields = (
         *BALANCE_EXTENSION_NUMERIC_FIELDS,
         *BALANCE_EXTENSION_STATE_FIELDS,
-        *([BALANCE_EXTENSION_CONFLICT_FIELD] if conflict_gate else []),
+        BALANCE_EXTENSION_CONFLICT_FIELD,
     )
     conflict_output = (
         ",\n           e."
         f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)} AS "
         f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)}"
-        if conflict_gate
-        else ""
     )
     return f"""
     WITH events AS (
@@ -1101,15 +1086,13 @@ def _build_balance_extension_block(
     output_root: Path,
     row_spines: Mapping[str, Mapping[str, Any]],
     dataset_ids: Mapping[str, str] | None = None,
-    conflict_gate: bool = False,
 ) -> dict[str, Any]:
     domain = DataDomain.BALANCE_SHEET_QUARTERLY
     source_paths = _active_paths(workspace, domain, dataset_ids)
     required = set(BALANCE_EXTENSION_NUMERIC_FIELDS) | set(
         BALANCE_EXTENSION_STATE_FIELDS
     )
-    if conflict_gate:
-        required.add(BALANCE_EXTENSION_CONFLICT_FIELD)
+    required.add(BALANCE_EXTENSION_CONFLICT_FIELD)
     missing = sorted(required.difference(pq.read_schema(source_paths[0]).names))
     if missing:
         raise TrainingReadyError(f"balance_extension_fields_missing:{missing}")
@@ -1131,7 +1114,6 @@ def _build_balance_extension_block(
                 _balance_extension_sql(
                     spine_path=spine_path,
                     source_paths=source_paths,
-                    conflict_gate=conflict_gate,
                 ),
                 output_path,
             )
@@ -1174,7 +1156,7 @@ def _build_balance_extension_block(
         "lagged": True,
         "availability_state_fields": [
             *BALANCE_EXTENSION_STATE_FIELDS,
-            *([BALANCE_EXTENSION_CONFLICT_FIELD] if conflict_gate else []),
+            BALANCE_EXTENSION_CONFLICT_FIELD,
         ],
     }
 
@@ -1475,9 +1457,7 @@ def prepare(
     config = _load_config(study_path)
     study_id = str(config["study_id"])
     source_config = dict(config.get("source_scope", {}) or {})
-    source_scope_study_id = str(
-        source_config.get("study_id", SOURCE_SCOPE_STUDY_ID)
-    )
+    source_scope_study_id = str(source_config.get("study_id", SOURCE_SCOPE_STUDY_ID))
     expected_row_count = int(
         source_config.get(
             "expected_common_support_rows",
@@ -1520,21 +1500,6 @@ def prepare(
     }
     if not dataset_ids:
         raise TrainingReadyError("source_scope_qdp_dataset_ids_missing")
-    dataset_overrides = {
-        str(domain): str(dataset_id)
-        for domain, dataset_id in dict(
-            source_config.get("dataset_id_overrides", {}) or {}
-        ).items()
-    }
-    for domain, dataset_id in dataset_overrides.items():
-        if (
-            dataset_manifest_for_id(qdp_v2_root(workspace_root), dataset_id, domain)
-            is None
-        ):
-            raise TrainingReadyError(
-                f"source_scope_dataset_override_missing:{domain}:{dataset_id}"
-            )
-    dataset_ids.update(dataset_overrides)
     source_query_contract = _source_query_contract(workspace_root, dataset_ids)
     source_support_boundary = _source_support_boundary_profile(scope_state)
     output_root.mkdir(parents=True, exist_ok=True)
@@ -1613,16 +1578,7 @@ def prepare(
             "source",
         }
     ]
-    source_policy = dict(config.get("source_policy", {}) or {})
-    balance_extension_conflict_gate = (
-        source_policy.get("balance_extension_conflict_gate") == "required"
-    )
-    eligibility_domain = (
-        DataDomain.MARGIN_ELIGIBILITY
-        if source_policy.get("margin_eligibility")
-        == "exchange_tristate_availability_metadata"
-        else DataDomain.MARGIN_SECS
-    )
+    eligibility_domain = DataDomain.MARGIN_ELIGIBILITY
     blocks = {
         "tushare_technical_candidates": _build_feature_block(
             workspace=workspace_root,
@@ -1652,14 +1608,12 @@ def prepare(
             dataset_ids=dataset_ids,
         ),
     }
-    if bool(source_policy.get("include_financial_statement_extensions", False)):
-        blocks["financial_statement_extensions"] = _build_balance_extension_block(
-            workspace=workspace_root,
-            output_root=output_root,
-            row_spines=row_spines,
-            dataset_ids=dataset_ids,
-            conflict_gate=balance_extension_conflict_gate,
-        )
+    blocks["financial_statement_extensions"] = _build_balance_extension_block(
+        workspace=workspace_root,
+        output_root=output_root,
+        row_spines=row_spines,
+        dataset_ids=dataset_ids,
+    )
     coverage = _coverage_registry(output_root=output_root, blocks=blocks)
     margin_detail_eligibility = {
         field: classify_extended_field(DataDomain.MARGIN_DETAIL, field)
@@ -1727,22 +1681,18 @@ def prepare(
                 }
                 for field in BALANCE_EXTENSION_STATE_FIELDS
             ]
-            + (
-                [
-                    {
-                        "feature_name": BALANCE_EXTENSION_CONFLICT_FIELD,
-                        "physical_column": BALANCE_EXTENSION_CONFLICT_FIELD,
-                        "block": "financial_statement_extensions",
-                        "source_domain": DataDomain.BALANCE_SHEET_QUARTERLY,
-                        "source_field": BALANCE_EXTENSION_CONFLICT_FIELD,
-                        "eligibility": "availability_metadata",
-                        "eligibility_reason": "conflicting_extension_values_are_gated",
-                        "availability_lag": "next_open_day",
-                    }
-                ]
-                if balance_extension_conflict_gate
-                else []
-            )
+            + [
+                {
+                    "feature_name": BALANCE_EXTENSION_CONFLICT_FIELD,
+                    "physical_column": BALANCE_EXTENSION_CONFLICT_FIELD,
+                    "block": "financial_statement_extensions",
+                    "source_domain": DataDomain.BALANCE_SHEET_QUARTERLY,
+                    "source_field": BALANCE_EXTENSION_CONFLICT_FIELD,
+                    "eligibility": "availability_metadata",
+                    "eligibility_reason": "conflicting_extension_values_are_gated",
+                    "availability_lag": "next_open_day",
+                }
+            ]
         )
     feature_registry = pd.concat(
         [
@@ -1818,16 +1768,20 @@ def prepare(
         if mandatory_ready and not has_documented_gaps
         else "ready_with_documented_optional_gaps"
     )
-    consumed_forbidden_dependency_rows = sum(
-        int(partition.get("forbidden_dependency_row_count", 0))
-        for partition in row_spines.values()
-    ) + sum(
-        int(partition.get("forbidden_dependency_row_count", 0))
-        for partition in daily_quality_row_spines.values()
-    ) + sum(
-        int(partition.get("forbidden_dependency_row_count", 0))
-        for block in blocks.values()
-        for partition in dict(block.get("partitions", {}) or {}).values()
+    consumed_forbidden_dependency_rows = (
+        sum(
+            int(partition.get("forbidden_dependency_row_count", 0))
+            for partition in row_spines.values()
+        )
+        + sum(
+            int(partition.get("forbidden_dependency_row_count", 0))
+            for partition in daily_quality_row_spines.values()
+        )
+        + sum(
+            int(partition.get("forbidden_dependency_row_count", 0))
+            for block in blocks.values()
+            for partition in dict(block.get("partitions", {}) or {}).values()
+        )
     )
     if consumed_forbidden_dependency_rows:
         raise TrainingReadyError(
@@ -1835,8 +1789,7 @@ def prepare(
             f"{consumed_forbidden_dependency_rows}"
         )
     manifest = {
-        "schema": "seq100_quality_liquidity_training_ready/"
-        + study_id.rsplit("_", maxsplit=1)[-1],
+        "schema": "seq100_quality_liquidity_training_ready/v1",
         "status": "completed",
         "study_id": study_id,
         "source_scope_study_id": source_scope_study_id,
@@ -1939,8 +1892,7 @@ def prepare(
         .to_dict("records")
     )
     readiness = {
-        "schema": "seq100_quality_liquidity_training_readiness/"
-        + study_id.rsplit("_", maxsplit=1)[-1],
+        "schema": "seq100_quality_liquidity_training_readiness/v1",
         "study_id": study_id,
         "status": readiness_status,
         "common_support": {
@@ -2063,9 +2015,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     registry = pd.read_parquet(manifest["feature_registry"]["path"])
     coverage = pd.read_parquet(manifest["coverage_registry"]["path"])
     row_spines = dict(manifest.get("row_spine", {}) or {})
-    daily_quality_row_spines = dict(
-        manifest.get("daily_quality_row_spine", {}) or {}
-    )
+    daily_quality_row_spines = dict(manifest.get("daily_quality_row_spine", {}) or {})
     blocks = dict(manifest.get("blocks", {}) or {})
     row_spine_contract = dict(manifest.get("row_spine_contract", {}) or {})
     spine_years = {int(year) for year in row_spines}
@@ -2137,9 +2087,9 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
             spine.get("forbidden_dependency_row_count", -1)
         )
         profile_path = Path(str(spine["profile_path"]))
-        profile_hashes_valid &= profile_path.is_file() and _sha256(
-            profile_path
-        ) == str(spine["profile_sha256"])
+        profile_hashes_valid &= profile_path.is_file() and _sha256(profile_path) == str(
+            spine["profile_sha256"]
+        )
     fold_counts = {
         int(item["evaluation_year"]): int(
             item["training_candidate_row_count_before_target_purge"]
@@ -2256,9 +2206,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
                     "quality_liquidity_pit",
                     "quality_liquidity_complete_pit",
                 }
-                and int(
-                    pools["quality_liquidity_complete_pit"].get("row_count", 0)
-                )
+                and int(pools["quality_liquidity_complete_pit"].get("row_count", 0))
                 == expected_row_count
                 and daily_quality_spine_valid
                 and {int(year) for year in daily_quality_row_spines}

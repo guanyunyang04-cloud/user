@@ -63,7 +63,7 @@ def test_family_classification_respects_availability_gate() -> None:
             formal_eligible_feature_count=20,
             minimum_independent_representatives=2,
         )
-        == "defer_from_v1"
+        == "defer_from_initial_model"
     )
 
 
@@ -118,7 +118,7 @@ def test_large_family_recommendation_uses_independent_representatives() -> None:
     ).iloc[0]
 
     assert result["independent_stable_representative_count"] == 1
-    assert result["classification"] == "defer_from_v1"
+    assert result["classification"] == "defer_from_initial_model"
 
 
 def test_relation_rows_keep_missing_values_out_of_real_zero() -> None:

@@ -1,8 +1,8 @@
 {
-  "study_id": "seq100_quality_liquidity_descriptive_feature_audit_v1",
+  "study_id": "seq100_quality_liquidity_descriptive_feature_audit",
   "status": "preregistered",
-  "purpose": "Describe target, risk, state, coverage, drift, and feature-family relationships on the repaired quality-liquidity training-ready v2 package without fitting any model.",
-  "source_training_ready_study_id": "seq100_quality_liquidity_training_ready_v2",
+  "purpose": "Describe target, risk, state, coverage, drift, and feature-family relationships on the current corrected quality-liquidity package without fitting any model.",
+  "source_training_ready_study_id": "seq100_quality_liquidity_training_ready",
   "period": {
     "research_start_date": "2011-01-01",
     "end_date": "2025-12-31",
@@ -37,7 +37,9 @@
     "minimum_state_high_rate_difference": 0.01,
     "recent_years": [2023, 2024, 2025],
     "reject_equal_or_larger_recent_reversal": true,
-    "redundancy_absolute_spearman": 0.995
+    "redundancy_absolute_spearman": 0.995,
+    "large_family_minimum_formal_features": 10,
+    "minimum_independent_stable_members_large_family": 2
   },
   "redundancy": {
     "deterministic_candidate_id_modulus": 887,

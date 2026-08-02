@@ -45,7 +45,7 @@ def test_quality_rank_direction_rewards_low_debt() -> None:
 
 def test_config_forbids_symbol_deletion_and_daily_fallback(tmp_path) -> None:
     source = {
-        "study_id": "seq100_quality_liquidity_data_prep_v1",
+        "study_id": "seq100_quality_liquidity_data_prep",
         "period": {"end_date": "2025-12-31", "forbidden_year": 2026},
         "common_support": {
             "requires_current_day_complete_5m": True,

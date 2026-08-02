@@ -437,7 +437,6 @@ def test_balance_extension_uses_next_open_pit_asof_semantics(tmp_path) -> None:
             ready._balance_extension_sql(
                 spine_path=spine,
                 source_paths=[source],
-                conflict_gate=True,
             )
         ).fetchdf()
 
@@ -476,51 +475,12 @@ def test_balance_extension_conflict_gates_numeric_values(tmp_path) -> None:
             ready._balance_extension_sql(
                 spine_path=spine,
                 source_paths=[source],
-                conflict_gate=True,
             )
         ).fetchdf()
 
     numeric = [f"balance_{field}" for field in ready.BALANCE_EXTENSION_NUMERIC_FIELDS]
     assert result.loc[0, numeric].isna().all()
     assert bool(result.loc[0, "balance_extension_source_conflict"])
-
-
-def test_balance_extension_legacy_mode_does_not_require_conflict_field(
-    tmp_path,
-) -> None:
-    spine = tmp_path / "spine.parquet"
-    source = tmp_path / "balance.parquet"
-    _spine_frame().to_parquet(spine, index=False)
-    pd.DataFrame(
-        {
-            "symbol": ["000001.SZ"],
-            "feature_available_date": ["2011-01-05"],
-            "source_date": ["2011-01-04"],
-            "report_date": ["2010-12-31"],
-            "report_type": ["1"],
-            "update_flag": [0],
-            "other_receivables_total": [12.0],
-            "other_payables_total": [8.0],
-            "contract_liabilities": [3.0],
-            "customer_advances_and_contract_liabilities": [5.0],
-            "customer_liability_field_state": ["both_observed"],
-            "other_receivables_total_field_state": ["observed"],
-            "other_payables_total_field_state": ["observed"],
-            "contract_liabilities_field_state": ["observed"],
-        }
-    ).to_parquet(source, index=False)
-
-    with duckdb.connect() as connection:
-        result = connection.execute(
-            ready._balance_extension_sql(
-                spine_path=spine,
-                source_paths=[source],
-                conflict_gate=False,
-            )
-        ).fetchdf()
-
-    assert "balance_extension_source_conflict" not in result
-    assert result.loc[0, "balance_contract_liabilities"] == 3.0
 
 
 def test_self_test_locks_qfq_and_date_boundaries() -> None:

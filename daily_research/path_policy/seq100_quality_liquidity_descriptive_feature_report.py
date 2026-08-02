@@ -44,7 +44,7 @@ CLASS_LABELS = {
     "first_model_formal_family": "首版消融候选族",
     "availability_gated_family": "需可用性门控",
     "diagnostic_only": "仅诊断",
-    "defer_from_v1": "首版暂缓",
+    "defer_from_initial_model": "首版暂缓",
 }
 
 
@@ -421,7 +421,7 @@ def prepare_artifact(audit_root: Path = DEFAULT_AUDIT_ROOT) -> dict[str, Any]:
             "读取冻结范围、不训练约束、输入指纹和输出 hash。",
             [
                 "manifest.json",
-                "seq100_quality_liquidity_descriptive_feature_audit_v1.json",
+                "seq100_quality_liquidity_descriptive_feature_audit.json",
             ],
             ["2011-2025 only", "2010 excluded from statistics", "2026 read count = 0"],
             {"common_rows": "sum of annual complete-pool row spine counts"},

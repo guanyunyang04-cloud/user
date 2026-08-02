@@ -1,16 +1,12 @@
 {
-  "study_id": "seq100_quality_liquidity_training_ready_v3",
+  "study_id": "seq100_quality_liquidity_training_ready",
   "status": "preregistered",
-  "purpose": "Freeze the corrected margin-eligibility and balance-extension semantics on the existing v2 quality-liquidity support without training or selecting features.",
+  "purpose": "Prepare the current corrected quality-liquidity feature package without training or selecting features.",
   "source_scope": {
-    "study_id": "seq100_quality_liquidity_research_scope_v2",
+    "study_id": "seq100_quality_liquidity_research_scope",
     "expected_common_support_rows": 4476851,
     "expected_existing_feature_count": 518,
-    "reuse_existing_partitions": true,
-    "dataset_id_overrides": {
-      "margin_eligibility": "margin_eligibility__17297a42fd20f688b435b218",
-      "balance_sheet_quarterly": "balance_sheet_quarterly__269e29bfec59fd64dd73d3f0"
-    }
+    "reuse_existing_partitions": true
   },
   "expected_daily_support_rows": 4477003,
   "expected_rolling_training_rows": {
@@ -42,9 +38,8 @@
     "technical_factor": "tushare_stk_factor_pro_direct",
     "margin": "tushare_plus_official_exchange",
     "margin_eligibility": "exchange_tristate_availability_metadata",
-    "balance_extension_conflict_gate": "required",
+    "financial_statement_extensions": "exact_conflicts_are_gated",
     "traditional_moneyflow": "tushare_moneyflow",
-    "include_financial_statement_extensions": true,
     "qfq_formal_eligibility": false,
     "hfq_formal_eligibility": false,
     "net_mf_formal_eligibility": false,

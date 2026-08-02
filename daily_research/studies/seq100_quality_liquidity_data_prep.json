@@ -1,7 +1,7 @@
 {
-  "study_id": "seq100_quality_liquidity_data_prep_v2",
+  "study_id": "seq100_quality_liquidity_data_prep",
   "status": "preregistered",
-  "purpose": "Freeze repaired 2010-2025 QDP inputs and materialize both the daily quality pool and complete five-minute common support without training.",
+  "purpose": "Prepare the current 2010-2025 quality-liquidity data package and both daily and complete five-minute supports without training.",
   "period": {
     "start_date": "2010-01-01",
     "end_date": "2025-12-31",
@@ -36,7 +36,7 @@
   "qdp_dataset_ids": {
     "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
     "announcement": "announcement__5519420e9b586c89fa6e9b57",
-    "balance_sheet_quarterly": "balance_sheet_quarterly__e72d08b1896d5e5071240dda",
+    "balance_sheet_quarterly": "balance_sheet_quarterly__c97d2e51362266b0b097f3bb",
     "cash_flow_statement_quarterly": "cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6",
     "corporate_actions": "corporate_actions__a415e50cd459b3d93cc76e5a",
     "financial_quarterly": "financial_quarterly__72ba12c395f79a62bd75b70c",
@@ -44,7 +44,7 @@
     "index_constituents": "index_constituents__f22406610f67eac361f4c332",
     "industry_concept": "industry_concept__e80436b5b466c965caf6c6a1",
     "margin_detail": "margin_detail__2ed8aba21121548425f56b7c",
-    "margin_eligibility": "margin_eligibility__f5dba2ee15dbd0d7a91e11c3",
+    "margin_eligibility": "margin_eligibility__17297a42fd20f688b435b218",
     "margin_market": "margin_market__56ef83c719973fea83362f87",
     "market_daily_raw": "market_daily_raw__0559f722eb9142e5f476854a",
     "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",

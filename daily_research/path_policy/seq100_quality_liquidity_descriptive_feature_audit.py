@@ -19,18 +19,18 @@ import pyarrow.parquet as pq
 from daily_research.path_policy import seq100_quality_liquidity_data_prep as data_prep
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-STUDY_ID = "seq100_quality_liquidity_descriptive_feature_audit_v1"
-SOURCE_STUDY_ID = "seq100_quality_liquidity_training_ready_v2"
+STUDY_ID = "seq100_quality_liquidity_descriptive_feature_audit"
+SOURCE_STUDY_ID = "seq100_quality_liquidity_training_ready"
 BUILDER_VERSION = "seq100_quality_liquidity_descriptive_feature_audit/1.0"
 YEARS = tuple(range(2011, 2026))
 HORIZONS = (10, 20)
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT
-    / "daily_research/studies/seq100_quality_liquidity_descriptive_feature_audit_v1.json"
+    / "daily_research/studies/seq100_quality_liquidity_descriptive_feature_audit.json"
 )
 DEFAULT_SOURCE_ROOT = (
     WORKSPACE_ROOT
-    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready_v2"
+    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready"
 )
 DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT / "daily_research/output/path_policy/studies" / STUDY_ID
@@ -189,7 +189,7 @@ def classify_family(
         and stable_nonreversed_feature_count >= minimum_independent_representatives
     ):
         return "first_model_formal_family"
-    return "defer_from_v1"
+    return "defer_from_initial_model"
 
 
 def _analytic_family(
@@ -712,23 +712,16 @@ def _source_state_rows(
     return rows
 
 
-def _physical_sources(source_manifest: Mapping[str, Any], year: int) -> dict[str, Path]:
-    scope_manifest = (
-        _read_json(
-            Path(
-                source_manifest["source_scope_study_id"]
-                and source_manifest["config"]["source_scope_manifest_path"]
-            )
-        )
-        if source_manifest.get("config", {}).get("source_scope_manifest_path")
-        else None
+def _source_scope_manifest(source_manifest: Mapping[str, Any]) -> dict[str, Any]:
+    atlas_manifest_path = Path(
+        str(source_manifest["existing_atlas_518"]["manifest_path"])
     )
-    if scope_manifest is None:
-        scope_path = (
-            WORKSPACE_ROOT
-            / "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope_v2/manifest.json"
-        )
-        scope_manifest = _read_json(scope_path)
+    scope_path = atlas_manifest_path.parent.parent / "manifest.json"
+    return _read_json(scope_path)
+
+
+def _physical_sources(source_manifest: Mapping[str, Any], year: int) -> dict[str, Path]:
+    scope_manifest = _source_scope_manifest(source_manifest)
     sources = {
         block: Path(scope_manifest["feature_partitions"][str(year)][block]["path"])
         for block in ("minute", "fundamental", "event")
@@ -744,12 +737,13 @@ def _physical_sources(source_manifest: Mapping[str, Any], year: int) -> dict[str
     return sources
 
 
-def _diagnostics_path(year: int) -> Path:
-    return (
-        WORKSPACE_ROOT
-        / "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep_v2"
-        / f"membership/year={year}/diagnostics.parquet"
+def _diagnostics_path(source_manifest: Mapping[str, Any], year: int) -> Path:
+    scope_manifest = _source_scope_manifest(source_manifest)
+    minute_path = Path(
+        scope_manifest["feature_partitions"][str(year)]["minute"]["path"]
     )
+    data_prep_root = minute_path.parents[3]
+    return data_prep_root / f"membership/year={year}/diagnostics.parquet"
 
 
 def _state_fields_for_block(
@@ -887,7 +881,7 @@ def _prepare_year(
     turnover_column = base_catalog["log_turnover_rate"]
     context, strata = _context_and_strata(
         year=year,
-        diagnostics_path=_diagnostics_path(year),
+        diagnostics_path=_diagnostics_path(source_manifest, year),
         spine=spine,
         bundle=bundle,
         base_values=base_values,
@@ -1021,7 +1015,7 @@ def _prepare_year(
         year=year,
         daily_spine_path=daily_spine_path,
         complete_candidate_ids=candidate_ids,
-        diagnostics_path=_diagnostics_path(year),
+        diagnostics_path=_diagnostics_path(source_manifest, year),
         labels=labels,
         flags=flags,
         states=states,
@@ -1886,9 +1880,7 @@ def prepare(
     )
     state_path = output_root / "state.json"
     if force and output_root.is_dir():
-        raise DescriptiveAuditError(
-            "force_requires_manual_versioned_output_root_to_preserve_immutable_evidence"
-        )
+        raise DescriptiveAuditError("force_requires_an_empty_canonical_output_root")
     state = (
         _read_json(state_path)
         if state_path.is_file()

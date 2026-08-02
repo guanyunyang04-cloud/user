@@ -12,13 +12,17 @@ ceiling and candidate-aligned prediction-to-oracle loss audits are complete.
 No score fusion, deployment policy, holding period, stop, deep model, or
 reinforcement-learning policy has been selected.
 
-## Superseding QDP and pre-training state (2026-08-02)
+## Current QDP and pre-training state (2026-08-02)
 
-The pre-training data repair, storage compaction, v2 freeze chain, descriptive
-feature audit, and takeover semantic corrections are complete. No model was
-trained and no final feature set was selected. The next research artifact is an
-immutable descriptive audit v2 sourced from training-ready v4; only after that
-should feature-family ablations be specified.
+The pre-training data repair, storage compaction, canonical freeze chain,
+descriptive feature audit, and takeover semantic corrections are complete. No
+model was trained and no final feature set was selected. The quality-liquidity
+preparation workflow now has one current study ID and output directory per
+stage; superseded numbered preparation artifacts were removed after the
+canonical chain passed evaluation. QDP content-addressed dataset IDs remain as
+an internal data-integrity mechanism. Cleanup removed nine superseded study
+directories (1,283 files, 11.882 GiB logical) and nine zero-reference QDP
+dataset versions (699,722,187 bytes); the post-cleanup QDP GC dry-run is empty.
 
 The active QDP catalog contains 27 immutable domains. The current quick audit
 and selected-invariant semantic audit v2 both have `status=ok` and no errors.
@@ -69,28 +73,29 @@ certification.
   preserve a content-addressed redacted state snapshot and richer request-ledger
   fields; existing verified archives are not rewritten.
 
-The repaired freeze chain is now the source of truth for new research:
+The canonical freeze chain is now the source of truth for new research:
 
-- `seq100_quality_liquidity_data_prep_v2` materializes both pools without
+- `seq100_quality_liquidity_data_prep` materializes both pools without
   changing the pool thresholds. The formal 2011-2025 daily pool has 4,477,003
   rows; the complete daily/minute support has 4,476,851 rows. 2010 is burn-in
   only and 2026 reads/writes are zero.
-- `seq100_quality_liquidity_research_scope_v2` pins repaired dataset IDs and
+- `seq100_quality_liquidity_research_scope` pins repaired dataset IDs and
   both row spines. Expanding training counts for the 2023/2024/2025 folds are
   3,242,301, 3,652,008, and 4,064,304.
-- `seq100_quality_liquidity_training_ready_v4` supersedes v2/v3 and is
+- `seq100_quality_liquidity_training_ready` is
   `ready_with_documented_optional_gaps`: 518 existing features, 106 new formal
   candidates, 83 diagnostic-only fields, and four availability-gated numeric
   fields. QFQ, failed-HFQ, and `net_mf_*` remain diagnostic-only. Availability
   metadata is separate from economic zero values. It has 13,863 stock-days with
   exact extension conflicts and zero non-null gated numeric cells; correcting
-  the broad v3 flag released 97,945 stock-days from unnecessary gating.
-- Training-ready v1/v2/v3, old entry-contract v4, and old QDP research remain
-  readable. Future model reports using knowledge from all 2011-2025 descriptive
-  research are called retrospective rolling OOS rather than untouched
-  confirmatory OOS.
+  the earlier broad conflict flag released 97,945 stock-days from unnecessary
+  gating.
+- Historical model experiments such as `seq100_entry_contract_oos_v4` remain
+  readable and are not part of this preparation-chain cleanup. Future model
+  reports using knowledge from all 2011-2025 descriptive research are called
+  retrospective rolling OOS rather than untouched confirmatory OOS.
 
-`seq100_quality_liquidity_descriptive_feature_audit_v1` completed on every one
+`seq100_quality_liquidity_descriptive_feature_audit` completed on every one
 of the 4,476,851 formal rows and 628 numeric candidates, with overall, annual,
 and three-period views. It used daily cross-sectional Top-1%/Top-5% true MFE
 labels, separate risk/state coordinates, explicit source-state semantics, and
@@ -117,17 +122,11 @@ rows); the relationship tables use the full population.
   count means the 2023-2025 common-support distortion is negligible.
 
 The human-readable report is
-`daily_research/output/path_policy/studies/seq100_quality_liquidity_descriptive_feature_audit_v1/report.html`.
+`daily_research/output/path_policy/studies/seq100_quality_liquidity_descriptive_feature_audit/report.html`.
 Its self-contained artifact, package validation, structural checks, hashes,
 and delivery receipt pass. Enhanced Chromium semantic QA timed out and is
 retained as a documented tooling limitation; no report data or audit result
 depends on that browser check.
-
-The v1 artifact remains historical and was not overwritten. A lightweight
-re-evaluation of its saved stability and redundancy tables still yields 11
-ablation candidates and four availability-gated families. The next full audit
-version should read training-ready v4 so exact financial conflict semantics are
-reflected in all annual and period tables.
 
 ## Prior QDP data state (superseded by the 2026-08-02 state above)
 
@@ -520,64 +519,6 @@ not reopen completed LightGBM capacity, feature-union, or five-target A/B
 searches without new evidence.
 
 There is no active training process.
-
-## Quality-liquidity pre-training dataset (v1 retained; v2 supersedes it)
-
-`seq100_quality_liquidity_data_prep_v1` is complete and no model was trained.
-It provides the physical 2010-2025 PIT sample for all future daily, minute,
-fundamental, announcement, and report feature comparisons:
-
-- `quality_liquidity_complete_pit` has 4,487,912 physical stock-days. Membership uses
-  only contemporaneously available status, listing age, liquidity, float market
-  value, and announcement-lagged financial quality.
-- Every retained stock-day has exactly 48 current-day five-minute bars. Missing
-  minute data removes only that stock-day, never the whole security, and there
-  is no daily-feature fallback inside this common sample.
-- Listing age uses exchange calendar history before 2010, so early-2010 support
-  is no longer incorrectly empty.
-- The formal 2011-2025 complete common support contains 4,441,395 unique
-  stock-days. The existing 518-feature atlas is unchanged. The training-ready
-  package preserves 106 new formal technical/margin/moneyflow candidates and
-  83 diagnostic-only fields; no feature set or model variant has been selected.
-- The atlas is descriptive only. No feature set or model variant has been
-  selected. Future rolling OOS model evaluation is limited to 2023-2025 and
-  every variant must use the same common-support identity.
-- The owner selected this common sample for the next model research. The old
-  all-market v4 contract remains the frozen comparison baseline; the earlier
-  stock-pool audit's default decision does not redefine the new training pool.
-
-`seq100_quality_liquidity_research_scope_v1` freezes the formal research
-boundary without rebuilding those physical partitions. Raw PIT history still
-starts in 2010 so causal lagged features may use it, but 2010 is burn-in only:
-it is excluded from training rows, evaluation rows, labels, and feature-atlas
-statistics. The formal 2011-2025 common support contains 4,441,395 unique
-stock-days and 518 features. Rolling OOS evaluation remains 2023-2025; the
-pre-purge expanding training counts are 3,206,854, 3,616,558, and 4,028,849.
-No model or feature set was selected while freezing this scope.
-
-`seq100_quality_liquidity_training_ready_v1` is completed with status
-`ready_with_documented_optional_gaps`. Daily and minute models share the exact
-same row spine and missing-minute action is stock-day deletion only. It records
-the 2023-2025 OOS boundaries and expanding-window training counts, keeps 2026
-at zero rows, and explicitly records `training_performed=false` and
-`feature_set_selected=false`. The next research step is descriptive
-candidate/target and tail-opportunity analysis before any new model training.
-
-The training-ready boundary was hardened after a takeover audit found that its
-source common-support files physically carried five inherited pack metadata
-columns: `entry_trade_date`, `entry_filled`, `label_valid`,
-`price_label_valid`, and `va_aux_valid`. These columns never defined pool
-membership or formal feature eligibility, but 1,696 rows on 2025-12-31 had an
-`entry_trade_date` of 2026-01-05, so wildcard projection was unsafe. The
-remediated row-spine contract is version 2 and contains exactly
-`candidate_id, year, trade_date, date_idx, symbol_idx, symbol, security_id`.
-All three new physical feature blocks repeat that explicit identity projection,
-feature loading is registry-whitelist only, and label validity must come only
-from the cutoff memmaps and label flags. Symbol-history mapping is cut off at
-2025-12-31; 16 later history rows are explicitly excluded. The rebuilt package
-preserves all 4,441,395 rows and the frozen common-support hash, documents the
-1,696 source-only future-date rows, and physically verifies zero consumed 2026
-dependencies across every row-spine and feature partition.
 
 ## PIT stock-pool audit
 

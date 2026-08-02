@@ -27,7 +27,7 @@ from quant_data_platform.qdp_v2.manifest import (
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-STUDY_ID = "seq100_quality_liquidity_data_prep_v1"
+STUDY_ID = "seq100_quality_liquidity_data_prep"
 CALENDAR_INPUT_BUILDER_VERSION = 2
 MEMBERSHIP_BUILDER_VERSION = 2
 ATLAS_BUILDER_VERSION = 3
@@ -36,15 +36,15 @@ END_DATE = "2025-12-31"
 YEARS = tuple(range(2010, 2026))
 CALENDAR_PREHISTORY_START = "1990-12-19"
 DEFAULT_STUDY_PATH = (
-    WORKSPACE_ROOT / "daily_research/studies/seq100_quality_liquidity_data_prep_v1.json"
+    WORKSPACE_ROOT / "daily_research/studies/seq100_quality_liquidity_data_prep.json"
 )
 DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
-    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep_v1"
+    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep"
 )
 DEFAULT_REPORT_COVERAGE_PATH = (
     WORKSPACE_ROOT
-    / "quant_data_platform/data/qdp_runtime/research_report_rc_backfill_v1/prepared/report_annual_statistics.parquet"
+    / "quant_data_platform/data/qdp_runtime/research_report_rc_backfill_v2/prepared/report_annual_statistics.parquet"
 )
 CANDIDATE_INDEX = (
     WORKSPACE_ROOT
@@ -223,9 +223,7 @@ def _state_path(output_root: Path) -> Path:
     return output_root / "state.json"
 
 
-def _read_state(
-    output_root: Path, *, study_id: str = STUDY_ID
-) -> dict[str, Any]:
+def _read_state(output_root: Path, *, study_id: str = STUDY_ID) -> dict[str, Any]:
     path = _state_path(output_root)
     if not path.is_file():
         return {
@@ -242,9 +240,7 @@ def _write_state(output_root: Path, state: Mapping[str, Any]) -> None:
     _write_json(_state_path(output_root), state)
 
 
-def _load_config(
-    path: Path, *, expected_study_id: str | None = None
-) -> dict[str, Any]:
+def _load_config(path: Path, *, expected_study_id: str | None = None) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     study_id = str(payload.get("study_id", ""))
     if not study_id or (
@@ -275,7 +271,10 @@ def _qdp_snapshot(
 ) -> tuple[dict[str, str], dict[str, tuple[Path, ...]]]:
     root = qdp_v2_root(workspace)
     datasets = (
-        {str(domain): str(dataset_id) for domain, dataset_id in pinned_dataset_ids.items()}
+        {
+            str(domain): str(dataset_id)
+            for domain, dataset_id in pinned_dataset_ids.items()
+        }
         if pinned_dataset_ids
         else active_dataset_map(read_active_manifest(root))
     )
@@ -1321,8 +1320,7 @@ def _report_sql(
         "ascii"
     ).decode("unicode_escape")
     complete = int(
-        coverage_status
-        in {"observed_full_year_span", "complete_daily_task_ledger"}
+        coverage_status in {"observed_full_year_span", "complete_daily_task_ledger"}
     )
     partial = int(coverage_status == "partial_year_span")
     unavailable = int(coverage_status == "source_unavailable")
@@ -2324,9 +2322,7 @@ def prepare(
     study_id = str(config["study_id"])
     pinned_dataset_ids = {
         str(domain): str(dataset_id)
-        for domain, dataset_id in dict(
-            config.get("qdp_dataset_ids", {}) or {}
-        ).items()
+        for domain, dataset_id in dict(config.get("qdp_dataset_ids", {}) or {}).items()
     }
     report_coverage_value = str(
         dict(config.get("source_artifacts", {}) or {}).get(
@@ -2384,8 +2380,7 @@ def prepare(
     if materialize_daily_quality_pool:
         state["quality_liquidity_pit_hash"] = _quality_support_hash(membership)
         state["quality_liquidity_pit_row_count"] = sum(
-            int(record["quality_support_row_count"])
-            for record in membership.values()
+            int(record["quality_support_row_count"]) for record in membership.values()
         )
     state["status"] = "common_support_prepared"
     state["training_performed"] = False

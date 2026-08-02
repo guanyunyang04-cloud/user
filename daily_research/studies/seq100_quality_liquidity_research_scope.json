@@ -1,9 +1,9 @@
 {
-  "study_id": "seq100_quality_liquidity_research_scope_v2",
+  "study_id": "seq100_quality_liquidity_research_scope",
   "status": "preregistered",
-  "purpose": "Freeze repaired formal 2011-2025 daily and complete quality-liquidity pools while retaining 2010 only as causal burn-in.",
+  "purpose": "Define the current formal 2011-2025 daily and complete quality-liquidity research scopes while retaining 2010 only as causal burn-in.",
   "source_data_prep": {
-    "study_id": "seq100_quality_liquidity_data_prep_v2",
+    "study_id": "seq100_quality_liquidity_data_prep",
     "expected_complete_support_rows": 4476851,
     "expected_daily_support_rows": 4477003,
     "expected_existing_feature_count": 518,

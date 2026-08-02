@@ -14,8 +14,8 @@ import pyarrow.parquet as pq
 from daily_research.path_policy import seq100_quality_liquidity_data_prep as base
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
-STUDY_ID = "seq100_quality_liquidity_research_scope_v1"
-SOURCE_STUDY_ID = "seq100_quality_liquidity_data_prep_v1"
+STUDY_ID = "seq100_quality_liquidity_research_scope"
+SOURCE_STUDY_ID = "seq100_quality_liquidity_data_prep"
 DATA_HISTORY_START = "2010-01-01"
 RESEARCH_START = "2011-01-01"
 END_DATE = "2025-12-31"
@@ -23,25 +23,25 @@ BURN_IN_YEARS = (2010,)
 RESEARCH_YEARS = tuple(range(2011, 2026))
 OOS_YEARS = (2023, 2024, 2025)
 FEATURE_FAMILIES = ("minute", "fundamental", "event")
-EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_441_395
+EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_476_851
 EXPECTED_FEATURE_COUNT = 518
 EXPECTED_TRAINING_ROWS = {
-    2023: 3_206_854,
-    2024: 3_616_558,
-    2025: 4_028_849,
+    2023: 3_242_301,
+    2024: 3_652_008,
+    2025: 4_064_304,
 }
 
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT
-    / "daily_research/studies/seq100_quality_liquidity_research_scope_v1.json"
+    / "daily_research/studies/seq100_quality_liquidity_research_scope.json"
 )
 SOURCE_OUTPUT_ROOT = (
     WORKSPACE_ROOT
-    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep_v1"
+    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep"
 )
 DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
-    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope_v1"
+    / "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope"
 )
 
 
@@ -301,9 +301,7 @@ def _support_manifest(
                 "path": str(Path(membership[str(year)][path_key]).resolve()),
                 "sha256": str(membership[str(year)][hash_key]),
                 "row_count": int(membership[str(year)][row_count_key]),
-                "symbol_count": int(
-                    membership[str(year)][symbol_count_key]
-                ),
+                "symbol_count": int(membership[str(year)][symbol_count_key]),
                 "start_date": str(membership[str(year)]["start_date"]),
                 "end_date": str(membership[str(year)]["end_date"]),
             }
@@ -382,9 +380,7 @@ def _final_manifest(
                 {
                     "quality_liquidity_pit": {
                         "manifest_path": str(daily_support_manifest_path.resolve()),
-                        "manifest_sha256": base._sha256(
-                            daily_support_manifest_path
-                        ),
+                        "manifest_sha256": base._sha256(daily_support_manifest_path),
                         "row_count": int(daily_support_manifest["row_count"]),
                         "support_hash": str(
                             daily_support_manifest["common_support_hash"]
@@ -486,8 +482,7 @@ def prepare(
     daily_support_manifest_path: Path | None = None
     daily_support_manifest: dict[str, Any] | None = None
     if all(
-        membership[str(year)].get("quality_support_path")
-        for year in RESEARCH_YEARS
+        membership[str(year)].get("quality_support_path") for year in RESEARCH_YEARS
     ):
         daily_support_manifest_path = (
             output_root / "quality_liquidity_pit" / "manifest.json"
@@ -579,10 +574,7 @@ def prepare(
     base._write_state(output_root, state)
     report_coverage_value = str(
         dict(
-            dict(source_state.get("config", {}) or {}).get(
-                "source_artifacts", {}
-            )
-            or {}
+            dict(source_state.get("config", {}) or {}).get("source_artifacts", {}) or {}
         ).get(
             "report_annual_statistics_path",
             base.DEFAULT_REPORT_COVERAGE_PATH,
@@ -656,9 +648,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     folds = _rolling_oos_folds(membership)
     config = dict(state.get("config", {}) or {})
     source_config = dict(config.get("source_data_prep", {}) or {})
-    expected_source_study_id = str(
-        source_config.get("study_id", SOURCE_STUDY_ID)
-    )
+    expected_source_study_id = str(source_config.get("study_id", SOURCE_STUDY_ID))
     expected_row_count = int(
         source_config.get(
             "expected_complete_support_rows",
@@ -671,14 +661,12 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     expected_training_rows = {
         int(year): int(count)
         for year, count in dict(
-            config.get("expected_rolling_training_rows", EXPECTED_TRAINING_ROWS)
-            or {}
+            config.get("expected_rolling_training_rows", EXPECTED_TRAINING_ROWS) or {}
         ).items()
     }
     daily_expected = source_config.get("expected_daily_support_rows")
     daily_manifest_record = dict(
-        dict(manifest.get("pools", {}) or {}).get("quality_liquidity_pit", {})
-        or {}
+        dict(manifest.get("pools", {}) or {}).get("quality_liquidity_pit", {}) or {}
     )
     daily_semantics: dict[str, Any] = {}
     if daily_manifest_record:
@@ -700,8 +688,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         "row_count_matches": semantics["row_count"]
         == int(state["common_support_row_count"])
         == int(support_manifest["row_count"]),
-        "expected_row_count": semantics["row_count"]
-        == expected_row_count,
+        "expected_row_count": semantics["row_count"] == expected_row_count,
         "candidate_ids_unique": semantics["row_count"]
         == semantics["unique_candidate_count"],
         "no_pre_scope_rows": semantics["pre_scope_rows"] == 0,
@@ -731,8 +718,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
             or (
                 bool(daily_manifest_record)
                 and daily_semantics.get("row_count") == int(daily_expected)
-                and daily_semantics.get("unique_candidate_count")
-                == int(daily_expected)
+                and daily_semantics.get("unique_candidate_count") == int(daily_expected)
                 and daily_semantics.get("pre_scope_rows") == 0
                 and daily_semantics.get("forbidden_2026_rows") == 0
             )
@@ -757,9 +743,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         "common_support_row_count": semantics["row_count"],
         "common_support_hash": state["common_support_hash"],
         "feature_count": int(atlas_manifest["total_continuous_feature_count"]),
-        "quality_liquidity_pit_row_count": int(
-            daily_semantics.get("row_count", 0)
-        ),
+        "quality_liquidity_pit_row_count": int(daily_semantics.get("row_count", 0)),
         "rolling_oos_folds": folds,
         "training_performed": False,
     }

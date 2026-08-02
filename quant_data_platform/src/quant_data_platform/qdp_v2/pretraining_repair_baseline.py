@@ -69,8 +69,7 @@ def _copy(con: duckdb.DuckDBPyConnection, query: str, path: Path) -> int:
     if temporary.exists():
         temporary.unlink()
     con.execute(
-        f"COPY ({query}) TO '{_sql_path(temporary)}' "
-        "(FORMAT PARQUET, COMPRESSION ZSTD)"
+        f"COPY ({query}) TO '{_sql_path(temporary)}' (FORMAT PARQUET, COMPRESSION ZSTD)"
     )
     temporary.replace(path)
     return int(con.execute(f"SELECT count(*) FROM ({query})").fetchone()[0])
@@ -88,7 +87,7 @@ def _quality_diagnostics(workspace: Path) -> list[Path]:
         / "output"
         / "path_policy"
         / "studies"
-        / "seq100_quality_liquidity_data_prep_v1"
+        / "seq100_quality_liquidity_data_prep"
         / "state.json"
     )
     if not state_path.is_file():
@@ -209,9 +208,7 @@ def freeze_baseline(
             else {}
         )
         v1_years = dict(
-            dict(v1_report_state.get("tushare_report_rc", {}) or {}).get(
-                "years", {}
-            )
+            dict(v1_report_state.get("tushare_report_rc", {}) or {}).get("years", {})
             or {}
         )
         report_gaps = pd.DataFrame(
