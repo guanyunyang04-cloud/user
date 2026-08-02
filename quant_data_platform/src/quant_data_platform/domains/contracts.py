@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Mapping, Protocol
+from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
-
 
 STANDARD_MARKET_COLUMNS = [
     "symbol",
@@ -61,6 +61,7 @@ class DataDomain:
     STK_FACTOR_PRO_RAW = "stk_factor_pro_raw"
     MARGIN_MARKET = "margin_market"
     MARGIN_DETAIL = "margin_detail"
+    MARGIN_ELIGIBILITY = "margin_eligibility"
     MARGIN_SECS = "margin_secs"
     MONEYFLOW_RAW = "moneyflow_raw"
     IWENCAI_SEMANTIC = "iwencai_semantic"
@@ -563,6 +564,23 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "burn_in_only",
         "source",
     ],
+    DataDomain.MARGIN_ELIGIBILITY: [
+        "symbol",
+        "trade_date",
+        "exchange",
+        "eligibility_state",
+        "eligible",
+        "finance_eligible",
+        "securities_lending_eligible",
+        "detail_observed",
+        "source_available",
+        "eligibility_source_available",
+        "detail_source_available",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
     DataDomain.MARGIN_SECS: [
         "security_id",
         "symbol",
@@ -616,7 +634,7 @@ class FetchRequest:
     adjusted_flag: str = "none"
     fields: tuple[str, ...] = tuple(STANDARD_MARKET_COLUMNS)
 
-    def normalized(self) -> "FetchRequest":
+    def normalized(self) -> FetchRequest:
         return FetchRequest(
             symbols=tuple(_normalize_symbol(item) for item in self.symbols if str(item or "").strip()),
             start_date=_normalize_date(self.start_date),
@@ -637,7 +655,7 @@ class DomainFetchRequest:
     fields: tuple[str, ...] = ()
     exchange: str = "SSE"
 
-    def normalized(self) -> "DomainFetchRequest":
+    def normalized(self) -> DomainFetchRequest:
         domain = normalize_domain(self.domain)
         fields = tuple(self.fields or tuple(DOMAIN_STANDARD_COLUMNS.get(domain, ())))
         return DomainFetchRequest(
@@ -665,7 +683,7 @@ class DatePartitionFetchRequest:
     universe_kind: str = "all_a"
     fetch_mode: str = "date_snapshot"
 
-    def normalized(self) -> "DatePartitionFetchRequest":
+    def normalized(self) -> DatePartitionFetchRequest:
         domain = normalize_domain(self.domain)
         universe_kind = str(self.universe_kind or "all_a").strip().lower()
         fetch_mode = str(self.fetch_mode or "date_snapshot").strip().lower()
@@ -707,7 +725,7 @@ class HistoryPageFetchRequest:
     end_at: str
     page_size: int = 8_000
 
-    def normalized(self) -> "HistoryPageFetchRequest":
+    def normalized(self) -> HistoryPageFetchRequest:
         symbol = _normalize_symbol(self.provider_symbol)
         start_at = _normalize_timestamp(self.start_at)
         end_at = _normalize_timestamp(self.end_at)
@@ -864,6 +882,7 @@ def normalize_domain(domain: str) -> str:
         "technical_factor": DataDomain.STK_FACTOR_PRO_RAW,
         "margin_market": DataDomain.MARGIN_MARKET,
         "margin_detail": DataDomain.MARGIN_DETAIL,
+        "margin_eligibility": DataDomain.MARGIN_ELIGIBILITY,
         "margin_secs": DataDomain.MARGIN_SECS,
         "moneyflow": DataDomain.MONEYFLOW_RAW,
         "moneyflow_raw": DataDomain.MONEYFLOW_RAW,
@@ -1212,7 +1231,7 @@ def build_intraday_daily_feature_frame(
         vwap = total_amount / total_volume if total_amount > 0 and total_volume > 0 else np.nan
         close_ret = close_values.pct_change().replace([np.inf, -np.inf], np.nan)
         clocks = day["bar_time"].map(_bar_clock_int)
-        bar_count = int(len(day))
+        bar_count = len(day)
         high_pos = _first_extreme_position(high_values, mode="max")
         low_pos = _first_extreme_position(low_values, mode="min")
         high_time_frac = _position_fraction(high_pos, bar_count)
@@ -1727,7 +1746,7 @@ def valid_market_rows(frame: pd.DataFrame) -> pd.Series:
 def coverage_report_for_frame(frame: pd.DataFrame, request: FetchRequest, *, provider: str) -> dict[str, Any]:
     dates = market_business_dates(request.start_date, request.end_date)
     expected_rows = int(len(request.symbols) * len(dates))
-    row_count = int(len(frame))
+    row_count = len(frame)
     unique_symbols = int(frame["symbol"].nunique()) if "symbol" in frame.columns and not frame.empty else 0
     unique_dates = int(frame["trade_date"].nunique()) if "trade_date" in frame.columns and not frame.empty else 0
     valid_rows = int(valid_market_rows(frame).sum()) if not frame.empty else 0
@@ -1746,11 +1765,11 @@ def coverage_report_for_frame(frame: pd.DataFrame, request: FetchRequest, *, pro
 
 def coverage_report_for_domain(frame: pd.DataFrame, request: DomainFetchRequest, *, provider: str) -> dict[str, Any]:
     request = request.normalized()
-    row_count = int(len(frame))
+    row_count = len(frame)
     unique_symbols = int(frame["symbol"].nunique()) if "symbol" in frame.columns and not frame.empty else 0
     unique_dates = int(frame["trade_date"].nunique()) if "trade_date" in frame.columns and not frame.empty else 0
     if request.domain == DataDomain.TRADING_CALENDAR:
-        expected_rows = int(len(market_business_dates(request.start_date, request.end_date)))
+        expected_rows = len(market_business_dates(request.start_date, request.end_date))
     elif request.symbols:
         expected_rows = int(len(request.symbols) * max(1, len(market_business_dates(request.start_date, request.end_date))))
     else:
@@ -1808,7 +1827,7 @@ def _bar_clock_int(value: Any) -> int:
     text = _normalize_bar_time(value)
     try:
         return int(text[:6])
-    except Exception:
+    except (TypeError, ValueError):
         return 0
 
 
@@ -1852,10 +1871,10 @@ def _first_extreme_position(series: pd.Series, *, mode: str) -> int:
     matches = data.index[data.eq(target)]
     if len(matches) == 0:
         return -1
-    try:
-        return int(matches[0])
-    except Exception:
-        return int(data.index.get_loc(matches[0]))
+    first_match = matches[0]
+    if isinstance(first_match, (int, np.integer)):
+        return int(first_match)
+    return int(data.index.get_loc(first_match))
 
 
 def _position_fraction(position: int, count: int) -> float:
@@ -2161,9 +2180,7 @@ def _to_bool(value: Any) -> bool:
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     text = str(value).strip().lower()
-    if text in {"1", "true", "t", "yes", "y", "open", "交易", "正常", "是"}:
-        return True
-    return False
+    return text in {"1", "true", "t", "yes", "y", "open", "交易", "正常", "是"}
 
 
 def _tag_value(value: Any) -> str:

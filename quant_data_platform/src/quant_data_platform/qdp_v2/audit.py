@@ -7,10 +7,10 @@ from typing import Any
 
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.qdp_v2.manifest import (
+    _manifest_schema_from_arrow,
     atomic_write_json,
     canonical_manifest_schema,
     dataset_manifest_for_id,
-    _manifest_schema_from_arrow,
     qdp_v2_root,
     read_active_manifest,
     read_dataset_manifest,
@@ -86,7 +86,7 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = Fals
                     footer_rows += int(rows)
                     if shard.row_count > 0 and rows > 0 and int(rows) != int(shard.row_count):
                         footer_errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - an audit must report every unreadable shard
                 footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
         if missing_shards:
             errors.append(f"missing_shards:{domain}:{len(missing_shards)}")
@@ -143,6 +143,7 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
     expected_contracts = {
         "market_intraday_5m": "qdp_current_intraday_5m_48_v1",
         "market_daily_raw": "qdp_v2_market_daily_raw_v1",
+        "margin_eligibility": "qdp_v2_margin_eligibility_exchange_tristate_v1",
     }
     expected = expected_contracts.get(domain)
     if expected and contract != expected:
@@ -151,6 +152,7 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
         "qdp_v2_valuation_v1",
         "qdp_v2_valuation_v2",
         "qdp_v2_valuation_strict_pit_v3",
+        "qdp_v2_valuation_formula_v4",
     }
     if domain == "valuation" and contract not in valuation_contracts:
         expected_text = "|".join(sorted(valuation_contracts))
@@ -170,9 +172,8 @@ def _manifest_contract_findings(domain: str, manifest: dict[str, Any]) -> tuple[
         "market_daily_raw",
         "market_intraday_5m",
         "valuation",
-    }:
-        if quality.get("primary_key_unique") not in {True, "checked"}:
-            warnings.append(f"primary_key_uniqueness_not_deep_checked:{domain}:{dataset_id}")
+    } and quality.get("primary_key_unique") not in {True, "checked"}:
+        warnings.append(f"primary_key_uniqueness_not_deep_checked:{domain}:{dataset_id}")
     return errors, warnings
 
 
@@ -181,7 +182,7 @@ def _parquet_row_count(path: Path) -> int:
         import pyarrow.parquet as pq  # type: ignore
 
         return int(pq.ParquetFile(path).metadata.num_rows)
-    except Exception:
+    except Exception:  # noqa: BLE001 - DuckDB is the deliberate fallback for any PyArrow failure
         import duckdb  # type: ignore
 
         with duckdb.connect(":memory:") as con:

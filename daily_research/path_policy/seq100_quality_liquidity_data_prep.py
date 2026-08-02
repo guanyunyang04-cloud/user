@@ -42,6 +42,10 @@ DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
     / "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep_v1"
 )
+DEFAULT_REPORT_COVERAGE_PATH = (
+    WORKSPACE_ROOT
+    / "quant_data_platform/data/qdp_runtime/research_report_rc_backfill_v1/prepared/report_annual_statistics.parquet"
+)
 CANDIDATE_INDEX = (
     WORKSPACE_ROOT
     / "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/candidate_index.parquet"
@@ -219,11 +223,13 @@ def _state_path(output_root: Path) -> Path:
     return output_root / "state.json"
 
 
-def _read_state(output_root: Path) -> dict[str, Any]:
+def _read_state(
+    output_root: Path, *, study_id: str = STUDY_ID
+) -> dict[str, Any]:
     path = _state_path(output_root)
     if not path.is_file():
         return {
-            "study_id": STUDY_ID,
+            "study_id": study_id,
             "status": "pending",
             "start_date": START_DATE,
             "end_date": END_DATE,
@@ -236,13 +242,19 @@ def _write_state(output_root: Path, state: Mapping[str, Any]) -> None:
     _write_json(_state_path(output_root), state)
 
 
-def _load_config(path: Path) -> dict[str, Any]:
+def _load_config(
+    path: Path, *, expected_study_id: str | None = None
+) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("study_id") != STUDY_ID:
+    study_id = str(payload.get("study_id", ""))
+    if not study_id or (
+        expected_study_id is not None and study_id != expected_study_id
+    ):
         raise DataPreparationError("data_prep_study_id_changed")
     period = dict(payload.get("period", {}) or {})
     if (
-        period.get("end_date") != END_DATE
+        period.get("start_date", START_DATE) != START_DATE
+        or period.get("end_date") != END_DATE
         or int(period.get("forbidden_year", 0)) != 2026
     ):
         raise DataPreparationError("data_prep_date_boundary_changed")
@@ -258,13 +270,23 @@ def _load_config(path: Path) -> dict[str, Any]:
 
 def _qdp_snapshot(
     workspace: Path,
+    *,
+    pinned_dataset_ids: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, str], dict[str, tuple[Path, ...]]]:
     root = qdp_v2_root(workspace)
-    datasets = active_dataset_map(read_active_manifest(root))
+    datasets = (
+        {str(domain): str(dataset_id) for domain, dataset_id in pinned_dataset_ids.items()}
+        if pinned_dataset_ids
+        else active_dataset_map(read_active_manifest(root))
+    )
     paths: dict[str, tuple[Path, ...]] = {}
     for domain, dataset_id in datasets.items():
         manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
         if manifest_path is None:
+            if pinned_dataset_ids:
+                raise DataPreparationError(
+                    f"pinned_qdp_dataset_manifest_missing:{domain}:{dataset_id}"
+                )
             continue
         manifest = read_dataset_manifest(manifest_path)
         resolved = tuple(
@@ -272,6 +294,10 @@ def _qdp_snapshot(
         )
         if resolved and all(path.is_file() for path in resolved):
             paths[domain] = resolved
+        elif pinned_dataset_ids:
+            raise DataPreparationError(
+                f"pinned_qdp_dataset_shards_missing:{domain}:{dataset_id}"
+            )
     return datasets, paths
 
 
@@ -765,6 +791,7 @@ def prepare_membership(
     output_root: Path,
     qdp_paths: Mapping[str, Sequence[Path]],
     state: dict[str, Any],
+    materialize_daily_quality_pool: bool = False,
 ) -> dict[str, Any]:
     required = {
         "market_daily_raw",
@@ -800,6 +827,12 @@ def prepare_membership(
             support_path = (
                 output_root / "common_support" / f"year={year}" / "part-0000.parquet"
             )
+            quality_support_path = (
+                output_root
+                / "quality_liquidity_pit"
+                / f"year={year}"
+                / "part-0000.parquet"
+            )
             existing = dict(records.get(str(year), {}) or {})
             valid_existing = (
                 diagnostics_path.is_file()
@@ -808,6 +841,14 @@ def prepare_membership(
                 and existing.get("builder_version") == MEMBERSHIP_BUILDER_VERSION
                 and existing.get("calendar_inputs_hash") == calendar_inputs_hash
                 and existing.get("support_sha256") == _sha256(support_path)
+                and (
+                    not materialize_daily_quality_pool
+                    or (
+                        quality_support_path.is_file()
+                        and existing.get("quality_support_sha256")
+                        == _sha256(quality_support_path)
+                    )
+                )
             )
             if valid_existing:
                 continue
@@ -826,10 +867,19 @@ def prepare_membership(
                 "WHERE quality_liquidity_complete_keep ORDER BY candidate_id"
             )
             _copy_query(connection, support_sql, support_path)
+            if materialize_daily_quality_pool:
+                quality_support_sql = (
+                    "SELECT candidate_id,year,trade_date,date_idx,symbol_idx,symbol,"
+                    "entry_trade_date,entry_filled,label_valid,price_label_valid,va_aux_valid "
+                    f"FROM read_parquet('{str(diagnostics_path).replace(chr(39), chr(39) * 2)}') "
+                    "WHERE quality_liquidity_keep ORDER BY candidate_id"
+                )
+                _copy_query(connection, quality_support_sql, quality_support_path)
             stats = connection.execute(
                 "SELECT count(*),sum(quality_liquidity_keep),sum(minute_complete),"
                 "sum(quality_liquidity_keep AND NOT minute_complete),"
                 "sum(quality_liquidity_complete_keep),"
+                "count(DISTINCT symbol) FILTER(WHERE quality_liquidity_keep),"
                 "count(DISTINCT symbol) FILTER(WHERE quality_liquidity_complete_keep),"
                 "min(trade_date),max(trade_date) "
                 f"FROM read_parquet('{str(diagnostics_path).replace(chr(39), chr(39) * 2)}')"
@@ -843,13 +893,23 @@ def prepare_membership(
                 "minute_complete_candidate_row_count": int(stats[2] or 0),
                 "quality_rows_missing_minute": int(stats[3] or 0),
                 "common_support_row_count": int(stats[4] or 0),
-                "common_support_symbol_count": int(stats[5] or 0),
-                "start_date": str(stats[6]),
-                "end_date": str(stats[7]),
+                "quality_liquidity_symbol_count": int(stats[5] or 0),
+                "common_support_symbol_count": int(stats[6] or 0),
+                "start_date": str(stats[7]),
+                "end_date": str(stats[8]),
                 "diagnostics_path": str(diagnostics_path.resolve()),
                 "diagnostics_sha256": _sha256(diagnostics_path),
                 "support_path": str(support_path.resolve()),
                 "support_sha256": _sha256(support_path),
+                **(
+                    {
+                        "quality_support_path": str(quality_support_path.resolve()),
+                        "quality_support_sha256": _sha256(quality_support_path),
+                        "quality_support_row_count": int(stats[1] or 0),
+                    }
+                    if materialize_daily_quality_pool
+                    else {}
+                ),
             }
             state["membership_years"] = records
             state["status"] = "preparing_membership"
@@ -866,6 +926,20 @@ def _common_support_hash(
     digest = hashlib.sha256()
     for year in years:
         path = Path(records[str(year)]["support_path"])
+        frame = pd.read_parquet(path, columns=["candidate_id", "trade_date", "symbol"])
+        for row in frame.itertuples(index=False):
+            digest.update(
+                f"{int(row.candidate_id)}|{row.trade_date}|{row.symbol}\n".encode()
+            )
+    return digest.hexdigest()
+
+
+def _quality_support_hash(
+    records: Mapping[str, Any], *, years: Sequence[int] = YEARS
+) -> str:
+    digest = hashlib.sha256()
+    for year in years:
+        path = Path(records[str(year)]["quality_support_path"])
         frame = pd.read_parquet(path, columns=["candidate_id", "trade_date", "symbol"])
         for row in frame.itertuples(index=False):
             digest.update(
@@ -1210,11 +1284,9 @@ def _announcement_sql(
     """
 
 
-def _report_coverage_status() -> dict[int, str]:
-    path = (
-        WORKSPACE_ROOT
-        / "quant_data_platform/data/qdp_runtime/research_report_rc_backfill_v1/prepared/report_annual_statistics.parquet"
-    )
+def _report_coverage_status(
+    path: Path = DEFAULT_REPORT_COVERAGE_PATH,
+) -> dict[int, str]:
     if not path.is_file():
         return {year: "unknown" for year in YEARS}
     frame = pd.read_parquet(
@@ -1248,7 +1320,10 @@ def _report_sql(
     negative = "\\u51cf\\u6301|\\u5356\\u51fa|\\u56de\\u907f|underperform|sell".encode(
         "ascii"
     ).decode("unicode_escape")
-    complete = int(coverage_status == "observed_full_year_span")
+    complete = int(
+        coverage_status
+        in {"observed_full_year_span", "complete_daily_task_ledger"}
+    )
     partial = int(coverage_status == "partial_year_span")
     unavailable = int(coverage_status == "source_unavailable")
     return f"""
@@ -1473,6 +1548,7 @@ def _feature_input_fingerprint(
     qdp_paths: Mapping[str, Sequence[Path]],
     minute_source: Path,
     calendar_path: Path,
+    report_coverage_path: Path = DEFAULT_REPORT_COVERAGE_PATH,
 ) -> str:
     block_domains = {
         "minute": (),
@@ -1496,7 +1572,11 @@ def _feature_input_fingerprint(
         digest.update(_path_set_fingerprint(source_paths).encode())
     if block == "event":
         digest.update(_path_set_fingerprint([calendar_path]).encode())
-        digest.update(json.dumps(_report_coverage_status(), sort_keys=True).encode())
+        digest.update(
+            json.dumps(
+                _report_coverage_status(report_coverage_path), sort_keys=True
+            ).encode()
+        )
     return digest.hexdigest()
 
 
@@ -1505,6 +1585,7 @@ def prepare_feature_blocks(
     output_root: Path,
     qdp_paths: Mapping[str, Sequence[Path]],
     state: dict[str, Any],
+    report_coverage_path: Path = DEFAULT_REPORT_COVERAGE_PATH,
 ) -> dict[str, Any]:
     required = {
         "financial_quarterly",
@@ -1520,7 +1601,7 @@ def prepare_feature_blocks(
     if missing:
         raise DataPreparationError(f"feature_qdp_domains_missing:{missing}")
     records = dict(state.get("feature_blocks", {}) or {})
-    coverage = _report_coverage_status()
+    coverage = _report_coverage_status(report_coverage_path)
     calendar_path = output_root / "inputs" / "calendar_positions.parquet"
     changed_domains = set(state.get("qdp_changed_domains", []) or [])
     relevant_domains = {
@@ -1559,6 +1640,7 @@ def prepare_feature_blocks(
                 qdp_paths=qdp_paths,
                 minute_source=minute_source,
                 calendar_path=calendar_path,
+                report_coverage_path=report_coverage_path,
             )
             existing = dict(year_records.get("minute", {}) or {})
             if _feature_block_current(
@@ -1606,6 +1688,7 @@ def prepare_feature_blocks(
                 qdp_paths=qdp_paths,
                 minute_source=minute_source,
                 calendar_path=calendar_path,
+                report_coverage_path=report_coverage_path,
             )
             existing = dict(year_records.get("fundamental", {}) or {})
             if _feature_block_current(
@@ -1656,6 +1739,7 @@ def prepare_feature_blocks(
                 qdp_paths=qdp_paths,
                 minute_source=minute_source,
                 calendar_path=calendar_path,
+                report_coverage_path=report_coverage_path,
             )
             existing = dict(year_records.get("event", {}) or {})
             if _feature_block_current(
@@ -2045,6 +2129,7 @@ def prepare_atlas(
     start_date: str = START_DATE,
     end_date: str = END_DATE,
     future_oos_prediction_years: Sequence[int] = (2023, 2024, 2025),
+    report_coverage_path: Path = DEFAULT_REPORT_COVERAGE_PATH,
 ) -> dict[str, Any]:
     scope_years = tuple(int(year) for year in years)
     if not scope_years or tuple(sorted(set(scope_years))) != scope_years:
@@ -2157,7 +2242,7 @@ def prepare_atlas(
     )
     support_summary_path = atlas_root / "common_support_by_year.parquet"
     _write_frame(support_summary, support_summary_path)
-    all_report_coverage = _report_coverage_status()
+    all_report_coverage = _report_coverage_status(report_coverage_path)
     report_coverage = {
         str(year): all_report_coverage.get(
             str(year), all_report_coverage.get(year, "unknown")
@@ -2236,10 +2321,30 @@ def prepare(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> dict[str, Any]:
     config = _load_config(study_path)
+    study_id = str(config["study_id"])
+    pinned_dataset_ids = {
+        str(domain): str(dataset_id)
+        for domain, dataset_id in dict(
+            config.get("qdp_dataset_ids", {}) or {}
+        ).items()
+    }
+    report_coverage_value = str(
+        dict(config.get("source_artifacts", {}) or {}).get(
+            "report_annual_statistics_path", DEFAULT_REPORT_COVERAGE_PATH
+        )
+    )
+    report_coverage_path = Path(report_coverage_value)
+    if not report_coverage_path.is_absolute():
+        report_coverage_path = WORKSPACE_ROOT / report_coverage_path
     output_root.mkdir(parents=True, exist_ok=True)
-    state = _read_state(output_root)
+    state = _read_state(output_root, study_id=study_id)
+    if state.get("study_id") != study_id:
+        raise DataPreparationError("data_prep_output_study_mismatch")
     previous_datasets = dict(state.get("qdp_dataset_ids", {}) or {})
-    datasets, paths = _qdp_snapshot(WORKSPACE_ROOT)
+    datasets, paths = _qdp_snapshot(
+        WORKSPACE_ROOT,
+        pinned_dataset_ids=pinned_dataset_ids or None,
+    )
     state["qdp_changed_domains"] = sorted(
         domain
         for domain in set(previous_datasets) | set(datasets)
@@ -2261,29 +2366,53 @@ def prepare(
     }
     _write_state(output_root, state)
     prepare_minute_features(output_root=output_root, qdp_paths=paths, state=state)
+    materialize_daily_quality_pool = bool(
+        dict(config.get("common_support", {}) or {}).get(
+            "materialize_quality_liquidity_pit", False
+        )
+    )
     membership = prepare_membership(
-        output_root=output_root, qdp_paths=paths, state=state
+        output_root=output_root,
+        qdp_paths=paths,
+        state=state,
+        materialize_daily_quality_pool=materialize_daily_quality_pool,
     )
     state["common_support_hash"] = _common_support_hash(membership)
     state["common_support_row_count"] = sum(
         int(record["common_support_row_count"]) for record in membership.values()
     )
+    if materialize_daily_quality_pool:
+        state["quality_liquidity_pit_hash"] = _quality_support_hash(membership)
+        state["quality_liquidity_pit_row_count"] = sum(
+            int(record["quality_support_row_count"])
+            for record in membership.values()
+        )
     state["status"] = "common_support_prepared"
     state["training_performed"] = False
     state["feature_set_selected"] = False
     state["config"] = config
     _write_state(output_root, state)
-    prepare_feature_blocks(output_root=output_root, qdp_paths=paths, state=state)
+    prepare_feature_blocks(
+        output_root=output_root,
+        qdp_paths=paths,
+        state=state,
+        report_coverage_path=report_coverage_path,
+    )
     state["status"] = "feature_blocks_prepared"
     _write_state(output_root, state)
-    prepare_atlas(output_root=output_root, state=state)
+    prepare_atlas(
+        output_root=output_root,
+        state=state,
+        study_id=study_id,
+        report_coverage_path=report_coverage_path,
+    )
     return state
 
 
 def status(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     state = _read_state(output_root)
     return {
-        "study_id": STUDY_ID,
+        "study_id": state.get("study_id", STUDY_ID),
         "status": state.get("status", "pending"),
         "minute_year_count": len(dict(state.get("minute_years", {}) or {})),
         "membership_year_count": len(dict(state.get("membership_years", {}) or {})),
@@ -2351,7 +2480,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         raise DataPreparationError(f"feature_atlas_evaluation_failed:{checks}")
     return {
         "status": "ok",
-        "study_id": STUDY_ID,
+        "study_id": state.get("study_id", STUDY_ID),
         "manifest": str(manifest_path.resolve()),
         "checks": checks,
         "feature_count": manifest.get("total_continuous_feature_count"),

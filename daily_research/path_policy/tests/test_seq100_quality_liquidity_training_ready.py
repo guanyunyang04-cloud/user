@@ -350,6 +350,100 @@ def test_margin_block_joins_detail_and_exchange_market_data(tmp_path) -> None:
     assert set(result["margin_eligibility_state"]) == {"source_unavailable"}
 
 
+def test_margin_block_preserves_exchange_tristate_metadata(tmp_path) -> None:
+    spine = tmp_path / "spine.parquet"
+    detail = tmp_path / "detail.parquet"
+    market = tmp_path / "market.parquet"
+    eligibility = tmp_path / "eligibility.parquet"
+    _spine_frame().to_parquet(spine, index=False)
+    pd.DataFrame(
+        {
+            "security_id": ["SZ-1"],
+            "source_date": ["2011-01-04"],
+            "feature_available_date": ["2011-01-05"],
+            "rzye": [10.0],
+        }
+    ).to_parquet(detail, index=False)
+    pd.DataFrame(
+        {
+            "exchange_id": ["SZSE", "SSE"],
+            "source_date": ["2011-01-04", "2011-01-04"],
+            "feature_available_date": ["2011-01-05", "2011-01-05"],
+            "rzrqye": [100.0, 200.0],
+        }
+    ).to_parquet(market, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "600000.SH"],
+            "feature_available_date": ["2011-01-05", "2011-01-05"],
+            "eligibility_state": ["eligible_observed", "known_ineligible"],
+            "eligible": [True, False],
+            "finance_eligible": [True, False],
+            "securities_lending_eligible": [False, False],
+            "detail_observed": [True, False],
+            "source_available": [True, True],
+            "eligibility_source_available": [True, True],
+            "detail_source_available": [True, True],
+        }
+    ).to_parquet(eligibility, index=False)
+
+    with duckdb.connect() as connection:
+        result = connection.execute(
+            ready._margin_block_sql(
+                spine_path=spine,
+                detail_paths=[detail],
+                market_paths=[market],
+                eligibility_paths=[eligibility],
+                eligibility_domain=ready.DataDomain.MARGIN_ELIGIBILITY,
+                detail_fields=["rzye"],
+                market_fields=["rzrqye"],
+            )
+        ).fetchdf()
+
+    assert result["margin_eligibility_state"].tolist() == [
+        "eligible_observed",
+        "known_ineligible",
+    ]
+    assert result["coverage_state"].tolist() == ["observed", "not_applicable"]
+    assert result["margin_eligible"].tolist() == [True, False]
+
+
+def test_balance_extension_uses_next_open_pit_asof_semantics(tmp_path) -> None:
+    spine = tmp_path / "spine.parquet"
+    source = tmp_path / "balance.parquet"
+    _spine_frame().to_parquet(spine, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "feature_available_date": ["2011-01-05"],
+            "source_date": ["2011-01-04"],
+            "report_date": ["2010-12-31"],
+            "report_type": ["1"],
+            "update_flag": [0],
+            "other_receivables_total": [12.0],
+            "other_payables_total": [8.0],
+            "contract_liabilities": [3.0],
+            "customer_advances_and_contract_liabilities": [5.0],
+            "customer_liability_field_state": ["both_observed"],
+            "other_receivables_total_field_state": ["observed"],
+            "other_payables_total_field_state": ["observed"],
+            "contract_liabilities_field_state": ["observed"],
+        }
+    ).to_parquet(source, index=False)
+
+    with duckdb.connect() as connection:
+        result = connection.execute(
+            ready._balance_extension_sql(
+                spine_path=spine,
+                source_paths=[source],
+            )
+        ).fetchdf()
+
+    assert result["coverage_state"].tolist() == ["observed", "warmup_missing"]
+    assert result.loc[0, "balance_contract_liabilities"] == 3.0
+    assert result.loc[0, "balance_customer_liability_field_state"] == "both_observed"
+
+
 def test_self_test_locks_qfq_and_date_boundaries() -> None:
     result = ready.self_test()
 

@@ -2051,6 +2051,7 @@ def run_pending(
     workspace_root: str | Path | None = None,
     phase: str = "all",
     max_workers: int = MAX_WORKERS,
+    seal_runtime: bool = True,
 ) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     result: dict[str, Any] = {"status": "running", "phase": phase}
@@ -2081,6 +2082,15 @@ def run_pending(
         result["commit"] = commit_prepared(
             workspace_root=workspace,
             include_announcements=True,
+        )
+    if seal_runtime and phase in {"all", "reports"}:
+        from quant_data_platform.qdp_v2.runtime_archive import (
+            seal_completed_workflow,
+        )
+
+        result["runtime_archive"] = seal_completed_workflow(
+            UPDATE_ID,
+            workspace_root=workspace,
         )
     result["status"] = "completed"
     return result

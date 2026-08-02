@@ -61,9 +61,9 @@ def _load_config(path: Path) -> dict[str, Any]:
     source = dict(payload.get("source_data_prep", {}) or {})
     burn_in = dict(payload.get("burn_in", {}) or {})
     training = dict(payload.get("training", {}) or {})
-    if payload.get("study_id") != STUDY_ID:
+    if not str(payload.get("study_id", "")):
         raise ResearchScopeError("research_scope_study_id_changed")
-    if source.get("study_id") != SOURCE_STUDY_ID:
+    if not str(source.get("study_id", "")):
         raise ResearchScopeError("research_scope_source_study_changed")
     if (
         period.get("data_history_start") != DATA_HISTORY_START
@@ -87,9 +87,11 @@ def _load_config(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _source_state(source_output_root: Path) -> dict[str, Any]:
+def _source_state(
+    source_output_root: Path, *, expected_study_id: str = SOURCE_STUDY_ID
+) -> dict[str, Any]:
     state = _read_json(source_output_root / "state.json")
-    if state.get("study_id") != SOURCE_STUDY_ID:
+    if state.get("study_id") != expected_study_id:
         raise ResearchScopeError("source_data_prep_study_mismatch")
     if state.get("status") != "completed":
         raise ResearchScopeError("source_data_prep_not_completed")
@@ -134,6 +136,12 @@ def _partition_input_fingerprint(
             str(year): {
                 "support_sha256": membership[str(year)].get("support_sha256", ""),
                 "row_count": membership[str(year)].get("common_support_row_count", 0),
+                "quality_support_sha256": membership[str(year)].get(
+                    "quality_support_sha256", ""
+                ),
+                "quality_row_count": membership[str(year)].get(
+                    "quality_support_row_count", 0
+                ),
             }
             for year in RESEARCH_YEARS
         },
@@ -188,9 +196,12 @@ def _validate_partition_files(
 
 
 def _support_semantics(
-    *, output_root: Path, membership: Mapping[str, Any]
+    *,
+    output_root: Path,
+    membership: Mapping[str, Any],
+    path_key: str = "support_path",
 ) -> dict[str, Any]:
-    paths = [Path(membership[str(year)]["support_path"]) for year in RESEARCH_YEARS]
+    paths = [Path(membership[str(year)][path_key]) for year in RESEARCH_YEARS]
     connection = base._connect(output_root)
     try:
         row = connection.execute(
@@ -261,12 +272,20 @@ def _support_manifest(
     membership: Mapping[str, Any],
     common_support_hash: str,
     semantics: Mapping[str, Any],
+    study_id: str = STUDY_ID,
+    source_study_id: str = SOURCE_STUDY_ID,
+    pool_name: str = "quality_liquidity_complete_pit",
+    path_key: str = "support_path",
+    hash_key: str = "support_sha256",
+    row_count_key: str = "common_support_row_count",
+    symbol_count_key: str = "common_support_symbol_count",
 ) -> dict[str, Any]:
     return {
         "schema": "seq100_quality_liquidity_common_support/v1",
         "status": "completed",
-        "study_id": STUDY_ID,
-        "source_study_id": SOURCE_STUDY_ID,
+        "study_id": study_id,
+        "source_study_id": source_study_id,
+        "pool_name": pool_name,
         "input_fingerprint": input_fingerprint,
         "data_history_start": DATA_HISTORY_START,
         "research_start_date": RESEARCH_START,
@@ -279,11 +298,11 @@ def _support_manifest(
         "partitions": [
             {
                 "year": year,
-                "path": str(Path(membership[str(year)]["support_path"]).resolve()),
-                "sha256": str(membership[str(year)]["support_sha256"]),
-                "row_count": int(membership[str(year)]["common_support_row_count"]),
+                "path": str(Path(membership[str(year)][path_key]).resolve()),
+                "sha256": str(membership[str(year)][hash_key]),
+                "row_count": int(membership[str(year)][row_count_key]),
                 "symbol_count": int(
-                    membership[str(year)]["common_support_symbol_count"]
+                    membership[str(year)][symbol_count_key]
                 ),
                 "start_date": str(membership[str(year)]["start_date"]),
                 "end_date": str(membership[str(year)]["end_date"]),
@@ -318,13 +337,17 @@ def _final_manifest(
     blocks: Mapping[str, Any],
     folds: Sequence[Mapping[str, Any]],
     atlas_manifest_path: Path,
+    study_id: str = STUDY_ID,
+    source_study_id: str = SOURCE_STUDY_ID,
+    daily_support_manifest_path: Path | None = None,
+    daily_support_manifest: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     atlas = _read_json(atlas_manifest_path)
     return {
         "schema": "seq100_quality_liquidity_research_scope/v1",
         "status": "completed",
-        "study_id": STUDY_ID,
-        "source_study_id": SOURCE_STUDY_ID,
+        "study_id": study_id,
+        "source_study_id": source_study_id,
         "input_fingerprint": input_fingerprint,
         "data_history": {
             "start_date": DATA_HISTORY_START,
@@ -347,6 +370,33 @@ def _final_manifest(
             "row_count": int(support_manifest["row_count"]),
             "common_support_hash": str(support_manifest["common_support_hash"]),
         },
+        "pools": {
+            "quality_liquidity_complete_pit": {
+                "manifest_path": str(support_manifest_path.resolve()),
+                "manifest_sha256": base._sha256(support_manifest_path),
+                "row_count": int(support_manifest["row_count"]),
+                "support_hash": str(support_manifest["common_support_hash"]),
+                "requires_complete_5m": True,
+            },
+            **(
+                {
+                    "quality_liquidity_pit": {
+                        "manifest_path": str(daily_support_manifest_path.resolve()),
+                        "manifest_sha256": base._sha256(
+                            daily_support_manifest_path
+                        ),
+                        "row_count": int(daily_support_manifest["row_count"]),
+                        "support_hash": str(
+                            daily_support_manifest["common_support_hash"]
+                        ),
+                        "requires_complete_5m": False,
+                    }
+                }
+                if daily_support_manifest_path is not None
+                and daily_support_manifest is not None
+                else {}
+            ),
+        },
         "feature_partitions": _compact_feature_partitions(blocks),
         "feature_count": int(atlas["total_continuous_feature_count"]),
         "rolling_oos_folds": [dict(fold) for fold in folds],
@@ -366,11 +416,15 @@ def _final_manifest(
 
 
 def _reusable_atlas_state(
-    previous_state: Mapping[str, Any], *, input_fingerprint: str
+    previous_state: Mapping[str, Any],
+    *,
+    input_fingerprint: str,
+    study_id: str = STUDY_ID,
+    source_study_id: str = SOURCE_STUDY_ID,
 ) -> dict[str, Any]:
     if (
-        previous_state.get("study_id") != STUDY_ID
-        or previous_state.get("source_study_id") != SOURCE_STUDY_ID
+        previous_state.get("study_id") != study_id
+        or previous_state.get("source_study_id") != source_study_id
         or previous_state.get("input_fingerprint") != input_fingerprint
     ):
         return {}
@@ -385,7 +439,13 @@ def prepare(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
 ) -> dict[str, Any]:
     config = _load_config(study_path)
-    source_state = _source_state(source_output_root)
+    study_id = str(config["study_id"])
+    source_config = dict(config.get("source_data_prep", {}) or {})
+    source_study_id = str(source_config["study_id"])
+    source_state = _source_state(
+        source_output_root,
+        expected_study_id=source_study_id,
+    )
     membership, blocks = _selected_records(source_state)
     _validate_partition_files(membership, blocks)
     input_fingerprint = _partition_input_fingerprint(
@@ -419,13 +479,62 @@ def prepare(
             membership=membership,
             common_support_hash=common_support_hash,
             semantics=semantics,
+            study_id=study_id,
+            source_study_id=source_study_id,
         )
         base._write_json(support_manifest_path, support_manifest)
+    daily_support_manifest_path: Path | None = None
+    daily_support_manifest: dict[str, Any] | None = None
+    if all(
+        membership[str(year)].get("quality_support_path")
+        for year in RESEARCH_YEARS
+    ):
+        daily_support_manifest_path = (
+            output_root / "quality_liquidity_pit" / "manifest.json"
+        )
+        existing_daily = (
+            _read_json(daily_support_manifest_path)
+            if daily_support_manifest_path.is_file()
+            else {}
+        )
+        if (
+            existing_daily.get("status") == "completed"
+            and existing_daily.get("input_fingerprint") == input_fingerprint
+            and tuple(existing_daily.get("years", ())) == RESEARCH_YEARS
+        ):
+            daily_support_manifest = existing_daily
+        else:
+            daily_semantics = _support_semantics(
+                output_root=output_root,
+                membership=membership,
+                path_key="quality_support_path",
+            )
+            daily_support_hash = base._quality_support_hash(
+                membership,
+                years=RESEARCH_YEARS,
+            )
+            daily_support_manifest = _support_manifest(
+                input_fingerprint=input_fingerprint,
+                membership=membership,
+                common_support_hash=daily_support_hash,
+                semantics=daily_semantics,
+                study_id=study_id,
+                source_study_id=source_study_id,
+                pool_name="quality_liquidity_pit",
+                path_key="quality_support_path",
+                hash_key="quality_support_sha256",
+                row_count_key="quality_support_row_count",
+                symbol_count_key="quality_liquidity_symbol_count",
+            )
+            base._write_json(
+                daily_support_manifest_path,
+                daily_support_manifest,
+            )
     folds = _rolling_oos_folds(membership)
     state = {
-        "study_id": STUDY_ID,
+        "study_id": study_id,
         "status": "scope_prepared",
-        "source_study_id": SOURCE_STUDY_ID,
+        "source_study_id": source_study_id,
         "source_state_path": str((source_output_root / "state.json").resolve()),
         "source_state_sha256": base._sha256(source_output_root / "state.json"),
         "input_fingerprint": input_fingerprint,
@@ -443,25 +552,54 @@ def prepare(
         "common_support_manifest_sha256": base._sha256(support_manifest_path),
         "common_support_row_count": int(support_manifest["row_count"]),
         "common_support_hash": str(support_manifest["common_support_hash"]),
+        "quality_liquidity_pit": (
+            {
+                "manifest_path": str(daily_support_manifest_path.resolve()),
+                "manifest_sha256": base._sha256(daily_support_manifest_path),
+                "row_count": int(daily_support_manifest["row_count"]),
+                "support_hash": str(daily_support_manifest["common_support_hash"]),
+            }
+            if daily_support_manifest_path is not None
+            and daily_support_manifest is not None
+            else {}
+        ),
         "rolling_oos_folds": folds,
         "training_performed": False,
         "feature_set_selected": False,
         "config": config,
     }
     reusable_atlas = _reusable_atlas_state(
-        previous_state, input_fingerprint=input_fingerprint
+        previous_state,
+        input_fingerprint=input_fingerprint,
+        study_id=study_id,
+        source_study_id=source_study_id,
     )
     if reusable_atlas:
         state["atlas"] = reusable_atlas
     base._write_state(output_root, state)
+    report_coverage_value = str(
+        dict(
+            dict(source_state.get("config", {}) or {}).get(
+                "source_artifacts", {}
+            )
+            or {}
+        ).get(
+            "report_annual_statistics_path",
+            base.DEFAULT_REPORT_COVERAGE_PATH,
+        )
+    )
+    report_coverage_path = Path(report_coverage_value)
+    if not report_coverage_path.is_absolute():
+        report_coverage_path = WORKSPACE_ROOT / report_coverage_path
     base.prepare_atlas(
         output_root=output_root,
         state=state,
         years=RESEARCH_YEARS,
-        study_id=STUDY_ID,
+        study_id=study_id,
         start_date=RESEARCH_START,
         end_date=END_DATE,
         future_oos_prediction_years=OOS_YEARS,
+        report_coverage_path=report_coverage_path,
     )
     atlas_manifest_path = output_root / "atlas" / "manifest.json"
     final_manifest = _final_manifest(
@@ -472,6 +610,10 @@ def prepare(
         blocks=blocks,
         folds=folds,
         atlas_manifest_path=atlas_manifest_path,
+        study_id=study_id,
+        source_study_id=source_study_id,
+        daily_support_manifest_path=daily_support_manifest_path,
+        daily_support_manifest=daily_support_manifest,
     )
     manifest_path = output_root / "manifest.json"
     base._write_json(manifest_path, final_manifest)
@@ -488,7 +630,7 @@ def status(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     path = output_root / "state.json"
     state = _read_json(path) if path.is_file() else {}
     return {
-        "study_id": STUDY_ID,
+        "study_id": state.get("study_id", STUDY_ID),
         "status": state.get("status", "pending"),
         "data_history_start": state.get("data_history_start", DATA_HISTORY_START),
         "research_start_date": state.get("research_start_date", RESEARCH_START),
@@ -512,9 +654,43 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
     _validate_partition_files(membership, blocks)
     semantics = _support_semantics(output_root=output_root, membership=membership)
     folds = _rolling_oos_folds(membership)
+    config = dict(state.get("config", {}) or {})
+    source_config = dict(config.get("source_data_prep", {}) or {})
+    expected_source_study_id = str(
+        source_config.get("study_id", SOURCE_STUDY_ID)
+    )
+    expected_row_count = int(
+        source_config.get(
+            "expected_complete_support_rows",
+            EXPECTED_COMMON_SUPPORT_ROW_COUNT,
+        )
+    )
+    expected_feature_count = int(
+        source_config.get("expected_existing_feature_count", EXPECTED_FEATURE_COUNT)
+    )
+    expected_training_rows = {
+        int(year): int(count)
+        for year, count in dict(
+            config.get("expected_rolling_training_rows", EXPECTED_TRAINING_ROWS)
+            or {}
+        ).items()
+    }
+    daily_expected = source_config.get("expected_daily_support_rows")
+    daily_manifest_record = dict(
+        dict(manifest.get("pools", {}) or {}).get("quality_liquidity_pit", {})
+        or {}
+    )
+    daily_semantics: dict[str, Any] = {}
+    if daily_manifest_record:
+        daily_semantics = _support_semantics(
+            output_root=output_root,
+            membership=membership,
+            path_key="quality_support_path",
+        )
     checks = {
         "completed": state.get("status") == "completed",
-        "source_prep_preserved": state.get("source_study_id") == SOURCE_STUDY_ID,
+        "source_prep_preserved": state.get("source_study_id")
+        == expected_source_study_id,
         "burn_in_not_eligible": state.get("burn_in_years") == list(BURN_IN_YEARS)
         and 2010 not in state.get("research_years", []),
         "research_years_exact": tuple(state.get("research_years", ()))
@@ -525,7 +701,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         == int(state["common_support_row_count"])
         == int(support_manifest["row_count"]),
         "expected_row_count": semantics["row_count"]
-        == EXPECTED_COMMON_SUPPORT_ROW_COUNT,
+        == expected_row_count,
         "candidate_ids_unique": semantics["row_count"]
         == semantics["unique_candidate_count"],
         "no_pre_scope_rows": semantics["pre_scope_rows"] == 0,
@@ -547,9 +723,20 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
             )
             for fold in folds
         }
-        == EXPECTED_TRAINING_ROWS,
+        == expected_training_rows,
         "feature_count_exact": int(atlas_manifest["total_continuous_feature_count"])
-        == EXPECTED_FEATURE_COUNT,
+        == expected_feature_count,
+        "dual_pool_contract": (
+            daily_expected is None
+            or (
+                bool(daily_manifest_record)
+                and daily_semantics.get("row_count") == int(daily_expected)
+                and daily_semantics.get("unique_candidate_count")
+                == int(daily_expected)
+                and daily_semantics.get("pre_scope_rows") == 0
+                and daily_semantics.get("forbidden_2026_rows") == 0
+            )
+        ),
         "training_not_performed": state.get("training_performed") is False
         and manifest.get("training_performed") is False
         and atlas_manifest.get("training_performed") is False,
@@ -565,11 +752,14 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         raise ResearchScopeError(f"research_scope_evaluation_failed:{checks}")
     return {
         "status": "ok",
-        "study_id": STUDY_ID,
+        "study_id": state.get("study_id", STUDY_ID),
         "checks": checks,
         "common_support_row_count": semantics["row_count"],
         "common_support_hash": state["common_support_hash"],
         "feature_count": int(atlas_manifest["total_continuous_feature_count"]),
+        "quality_liquidity_pit_row_count": int(
+            daily_semantics.get("row_count", 0)
+        ),
         "rolling_oos_folds": folds,
         "training_performed": False,
     }

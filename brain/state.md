@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-01
+Updated: 2026-08-02
 
 ## Objective
 
@@ -12,7 +12,105 @@ ceiling and candidate-aligned prediction-to-oracle loss audits are complete.
 No score fusion, deployment policy, holding period, stop, deep model, or
 reinforcement-learning policy has been selected.
 
-## Current QDP data state
+## Superseding QDP and pre-training state (2026-08-02)
+
+The pre-training data repair, storage compaction, v2 freeze chain, and
+descriptive feature audit are complete. No model was trained and no final
+feature set was selected. The next decision is which recommended feature
+families to carry into the first quality-liquidity-pool model specification.
+
+The active QDP catalog contains 27 immutable domains. The final quick audit
+and balanced full database audit both have `status=ok` and no errors. The only
+remaining finding is the known medium-severity
+`historical_5m_unavailable_for_restored_daily_symbols`; it is not a pool
+eligibility rule and does not block the frozen complete support.
+
+- Daily-task-closed `report_rc` v2 contains 1,274,918 reports and 2,764,977
+  forecast rows for 2010-2025. Every natural-day task has a terminal state,
+  2021 is restored, full pages are continued by offset, and confirmed empty
+  days require two consistent responses. Reports become visible on the next
+  exchange-open day.
+- `balance_sheet_quarterly__e72d08b1896d5e5071240dda` retains its 179,220
+  PIT rows and adds separately named total other-receivable/payable fields,
+  contract liabilities, a customer-liability combination, and explicit field
+  states. It does not overwrite component fields or turn not-applicable and
+  unknown values into zero.
+- `share_capital__dd8dd0446ecc5d2343606d14` has 10,212,710 rows. Missing
+  `total_share` values were repaired only from same-day provider evidence after
+  converting ten-thousand-share units to shares. Existing non-null values were
+  preserved. `valuation__b94bd77f7ef9b261baf80c5c` was rebuilt so total and
+  float market value equal unadjusted close times the corresponding share
+  count within tolerance.
+- `margin_eligibility__f5dba2ee15dbd0d7a91e11c3` has 9,710,637 exchange-date
+  states with `eligible_observed`, `known_ineligible`, and
+  `source_unavailable` semantics. `margin_detail__2ed8aba21121548425f56b7c`
+  has 3,927,235 rows after evidence-preserving repair. Structural eligibility
+  expansion is not interpreted as ordinary missing data.
+- The external archive repair added 129,116 independently validated stock-days
+  (6,197,568 bars) without overwriting existing keys. Active
+  `market_intraday_5m__2c071f88738b5cdea4695f16` has 472,515,360 rows. The
+  quality pool gained 35,450 complete days and retains 152 explicit minute
+  gaps; only three are in 2023-2025. All accepted days have the standard 48
+  bars and pass daily price plus volume/amount reconciliation.
+- Runtime archive tooling sealed 151 workflow-domain-year units containing
+  73,357 expanded files. Hash verification and a full-year restore check
+  preceded explicit deletion. The archive is about 21.23 GiB and the cleanup
+  receipt estimates 71.66 GiB of exFAT allocation reclaimed. Stable `tmp`
+  artifacts and old large research stores remain untouched because they are
+  still referenced or are not small-file-allocation problems.
+
+The repaired freeze chain is now the source of truth for new research:
+
+- `seq100_quality_liquidity_data_prep_v2` materializes both pools without
+  changing the pool thresholds. The formal 2011-2025 daily pool has 4,477,003
+  rows; the complete daily/minute support has 4,476,851 rows. 2010 is burn-in
+  only and 2026 reads/writes are zero.
+- `seq100_quality_liquidity_research_scope_v2` pins repaired dataset IDs and
+  both row spines. Expanding training counts for the 2023/2024/2025 folds are
+  3,242,301, 3,652,008, and 4,064,304.
+- `seq100_quality_liquidity_training_ready_v2` is
+  `ready_with_documented_optional_gaps`: 518 existing features, 106 new formal
+  candidates, 83 diagnostic-only fields, and four availability-gated numeric
+  fields. QFQ, failed-HFQ, and `net_mf_*` remain diagnostic-only. Availability
+  metadata is separate from economic zero values.
+- All v1 outputs and old v4/QDP research remain readable and were not rebuilt
+  or overwritten. Future model reports using knowledge from all 2011-2025
+  descriptive research are called retrospective rolling OOS rather than
+  untouched confirmatory OOS.
+
+`seq100_quality_liquidity_descriptive_feature_audit_v1` completed on every one
+of the 4,476,851 formal rows and 628 numeric candidates, with overall, annual,
+and three-period views. It used daily cross-sectional Top-1%/Top-5% true MFE
+labels, separate risk/state coordinates, explicit source-state semantics, and
+market-wide time-series deciles where daily cross-sectional deciles would be
+degenerate. Redundancy was the only sampled calculation (4,975 deterministic
+rows); the relationship tables use the full population.
+
+- Eleven families are recommended as `first_model_formal_family`:
+  announcements, daily cross-sectional technical, daily price/volume
+  technical, financial statements, industry context, market state, same-day
+  5-minute, size/liquidity/status, structured financial summary, traditional
+  moneyflow, and traditional technical indicators.
+- Financial-statement extensions, margin detail, margin market, and research
+  reports are `availability_gated_family`; no family is automatically frozen
+  into a model.
+- High 10-day ATR has about 2.48x Top-5 tail lift but materially worse MAE;
+  the highest turnover quintile has 9.73% 10-day Top-5 incidence versus 2.15%
+  in the lowest quintile, again with worse adversity. Smaller eligible
+  capitalization bands show more true tails, but this remains descriptive and
+  confounded rather than evidence to loosen or tighten the frozen pool.
+- The 152 minute-excluded quality rows have higher true-tail incidence and
+  worse MAE, confirming non-random missingness historically; their tiny recent
+  count means the 2023-2025 common-support distortion is negligible.
+
+The human-readable report is
+`daily_research/output/path_policy/studies/seq100_quality_liquidity_descriptive_feature_audit_v1/report.html`.
+Its self-contained artifact, package validation, structural checks, hashes,
+and delivery receipt pass. Enhanced Chromium semantic QA timed out and is
+retained as a documented tooling limitation; no report data or audit result
+depends on that browser check.
+
+## Prior QDP data state (superseded by the 2026-08-02 state above)
 
 The 2026-07-31 incremental QDP repair changed only defective metadata/tables or
 missing rows. The active catalog now contains 26 domains and passes the full
@@ -384,7 +482,7 @@ Retained result:
 - `seq100_post_entry_ab_v1` is retained as v2-only historical evidence. Its
   risk/state rejection is now superseded by the broader v4 five-target result.
 
-## Current decision
+## Prior v4 decision (retained)
 
 Use v4 as a frozen research signal contract and recompute its five coordinates
 daily. Do not create the rejected independent supervised LightGBM holding
@@ -404,7 +502,7 @@ searches without new evidence.
 
 There is no active training process.
 
-## Quality-liquidity pre-training dataset
+## Quality-liquidity pre-training dataset (v1 retained; v2 supersedes it)
 
 `seq100_quality_liquidity_data_prep_v1` is complete and no model was trained.
 It provides the physical 2010-2025 PIT sample for all future daily, minute,

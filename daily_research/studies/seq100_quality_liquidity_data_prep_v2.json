@@ -1,0 +1,77 @@
+{
+  "study_id": "seq100_quality_liquidity_data_prep_v2",
+  "status": "preregistered",
+  "purpose": "Freeze repaired 2010-2025 QDP inputs and materialize both the daily quality pool and complete five-minute common support without training.",
+  "period": {
+    "start_date": "2010-01-01",
+    "end_date": "2025-12-31",
+    "forbidden_year": 2026,
+    "future_oos_prediction_years": [2023, 2024, 2025]
+  },
+  "common_support": {
+    "base": "quality_liquidity_pit",
+    "materialize_quality_liquidity_pit": true,
+    "requires_current_day_complete_5m": true,
+    "required_5m_bars": 48,
+    "complete_pool_name": "quality_liquidity_complete_pit",
+    "missing_5m_action": "drop_stock_day_only",
+    "drop_entire_symbol": false,
+    "daily_fallback": false,
+    "sparse_events_filter_rows": false
+  },
+  "quality_liquidity_rules": {
+    "listed_open_days_minimum": 250,
+    "valid_amount_observations_in_20_minimum": 15,
+    "amount_median_20_cross_section_percentile_minimum": 0.30,
+    "float_market_cap_cross_section_percentile_minimum": 0.20,
+    "financial_report_age_days_maximum": 550,
+    "quality_metrics_nonnull_minimum": 3,
+    "quality_score_percentile_minimum": 0.30,
+    "industry_rank_minimum_group_size": 20,
+    "same_day_forbidden_statuses": ["st", "suspended", "delisted"]
+  },
+  "source_artifacts": {
+    "report_annual_statistics_path": "quant_data_platform/data/qdp_runtime/research_report_rc_backfill_v2/prepared/report_annual_statistics.parquet"
+  },
+  "qdp_dataset_ids": {
+    "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
+    "announcement": "announcement__5519420e9b586c89fa6e9b57",
+    "balance_sheet_quarterly": "balance_sheet_quarterly__e72d08b1896d5e5071240dda",
+    "cash_flow_statement_quarterly": "cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6",
+    "corporate_actions": "corporate_actions__a415e50cd459b3d93cc76e5a",
+    "financial_quarterly": "financial_quarterly__72ba12c395f79a62bd75b70c",
+    "income_statement_quarterly": "income_statement_quarterly__5f863d3f3b37779414651bc8",
+    "index_constituents": "index_constituents__f22406610f67eac361f4c332",
+    "industry_concept": "industry_concept__e80436b5b466c965caf6c6a1",
+    "margin_detail": "margin_detail__2ed8aba21121548425f56b7c",
+    "margin_eligibility": "margin_eligibility__f5dba2ee15dbd0d7a91e11c3",
+    "margin_market": "margin_market__56ef83c719973fea83362f87",
+    "market_daily_raw": "market_daily_raw__0559f722eb9142e5f476854a",
+    "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
+    "moneyflow_raw": "moneyflow_raw__75aeaebe4e2ceeb6c98bb5ba",
+    "name_change": "name_change__801d1567122e27f611ea67ec",
+    "performance_forecast": "performance_forecast__8eae00e6009084051062fa10",
+    "research_report": "research_report__450fc61384a81476d25f0bd0",
+    "research_report_forecast": "research_report_forecast__d1b0976bfcbdd7a2ef97083a",
+    "security_identity": "security_identity__8129272657578fb71c057292",
+    "security_status": "security_status__dd7f01560245387dd417d53d",
+    "share_capital": "share_capital__dd8dd0446ecc5d2343606d14",
+    "stk_factor_pro_raw": "stk_factor_pro_raw__db1c40c047054d43c94dd68d",
+    "symbol_history": "symbol_history__59797a51bc8d3657511bd23e",
+    "trading_calendar": "trading_calendar__8827e0264c6e3ec8b7330a88",
+    "universe_snapshot": "universe_snapshot__f79157008ed647500a73e8b4",
+    "valuation": "valuation__b94bd77f7ef9b261baf80c5c"
+  },
+  "feature_families": [
+    "existing_seq100_base",
+    "same_day_5m_aggregates",
+    "pit_financial_and_statement",
+    "pit_announcement_metadata",
+    "pit_research_report_and_forecast"
+  ],
+  "training": {
+    "performed": false,
+    "feature_set_selected": false,
+    "model_variants_selected": false
+  }
+}

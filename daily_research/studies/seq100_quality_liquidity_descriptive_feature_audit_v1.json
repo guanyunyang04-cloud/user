@@ -1,0 +1,56 @@
+{
+  "study_id": "seq100_quality_liquidity_descriptive_feature_audit_v1",
+  "status": "preregistered",
+  "purpose": "Describe target, risk, state, coverage, drift, and feature-family relationships on the repaired quality-liquidity training-ready v2 package without fitting any model.",
+  "source_training_ready_study_id": "seq100_quality_liquidity_training_ready_v2",
+  "period": {
+    "research_start_date": "2011-01-01",
+    "end_date": "2025-12-31",
+    "burn_in_year": 2010,
+    "forbidden_year": 2026,
+    "years": [2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "eras": {
+      "2011_2015": [2011, 2012, 2013, 2014, 2015],
+      "2016_2020": [2016, 2017, 2018, 2019, 2020],
+      "2021_2025": [2021, 2022, 2023, 2024, 2025]
+    }
+  },
+  "targets": {
+    "horizons": [10, 20],
+    "tail_percentiles": [0.01, 0.05],
+    "tail_definition": "within_trade_date_cross_section_true_mfe_rank",
+    "risk": ["pre_peak_mae_10", "pre_peak_mae_20"],
+    "state": ["state_10", "state_20"]
+  },
+  "feature_relation": {
+    "quantile_tail_fraction": 0.1,
+    "annual_full_population": true,
+    "period_aggregation": "row_count_weighted_annual_sufficient_statistics",
+    "median_aggregation": "weighted_median_of_annual_group_medians",
+    "feature_chunk_size": 24,
+    "minimum_valid_rows": 100
+  },
+  "stability_gate": {
+    "minimum_same_direction_years": 10,
+    "minimum_top5_rate_difference": 0.005,
+    "minimum_risk_difference": 0.002,
+    "minimum_state_high_rate_difference": 0.01,
+    "recent_years": [2023, 2024, 2025],
+    "reject_equal_or_larger_recent_reversal": true,
+    "redundancy_absolute_spearman": 0.995
+  },
+  "redundancy": {
+    "deterministic_candidate_id_modulus": 887,
+    "minimum_pairwise_rows": 100
+  },
+  "pools": {
+    "research_pool": "quality_liquidity_complete_pit",
+    "daily_reference_pool": "quality_liquidity_pit",
+    "excluded_minute_support_rows_expected": 152
+  },
+  "training": {
+    "performed": false,
+    "feature_set_selected": false,
+    "model_variants_selected": false
+  }
+}

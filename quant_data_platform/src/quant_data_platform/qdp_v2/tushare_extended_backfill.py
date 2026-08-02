@@ -1404,6 +1404,7 @@ def run_pending(
     workspace_root: str | Path | None = None,
     domains: str | Sequence[str] | None = None,
     workers: int = MAX_WORKERS,
+    seal_runtime: bool = True,
 ) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     specs = _selected_specs(domains)
@@ -1413,7 +1414,17 @@ def run_pending(
         workers=workers,
     )
     installed = prepare_and_install(workspace_root=workspace, domains=domains)
-    return {"status": "completed", "downloads": downloads, "install": installed}
+    result = {"status": "completed", "downloads": downloads, "install": installed}
+    if seal_runtime:
+        from quant_data_platform.qdp_v2.runtime_archive import (
+            seal_completed_workflow,
+        )
+
+        result["runtime_archive"] = seal_completed_workflow(
+            UPDATE_ID,
+            workspace_root=workspace,
+        )
+    return result
 
 
 def _credential_file_hits(workspace: Path) -> list[str]:
