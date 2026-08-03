@@ -49,6 +49,7 @@ GATED_FAMILIES = ("margin", "research", "financial_extensions")
 RISK_STATE_CORE_VARIANTS = ("legacy_core", "full_core")
 ALL_GATED_VARIANT = "selected_core_plus_all_gated"
 MODEL_INPUT_DIR_NAME = "model_inputs"
+FORMAL_TASK_SCOPE = "core_only"
 
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT / "daily_research/studies/seq100_quality_liquidity_model.json"
@@ -1438,31 +1439,11 @@ def _task_plan(config: Mapping[str, Any]) -> list[dict[str, Any]]:
         for variant in CORE_VARIANTS:
             for year in ROLLING_YEARS:
                 add(stage="mfe_core", target=target, year=year, variant=variant)
-    for target in ("mfe_10", "mfe_20"):
-        for family in GATED_FAMILIES:
-            variant = f"selected_core_plus_{family}"
-            for year in ROLLING_YEARS:
-                add(
-                    stage="mfe_gated",
-                    target=target,
-                    year=year,
-                    variant=variant,
-                    gated_family=family,
-                )
     for target in adaptive_targets:
         for variant in RISK_STATE_CORE_VARIANTS:
             for year in ROLLING_YEARS:
                 add(stage="risk_state_core", target=target, year=year, variant=variant)
-    for target in adaptive_targets:
-        for year in ROLLING_YEARS:
-            add(
-                stage="risk_state_gated",
-                target=target,
-                year=year,
-                variant=ALL_GATED_VARIANT,
-                gated_family="all_gated",
-            )
-    if len(tasks) != 78 or len({task["task_id"] for task in tasks}) != 78:
+    if len(tasks) != 51 or len({task["task_id"] for task in tasks}) != 51:
         raise ModelError(f"task_plan_contract_mismatch:{len(tasks)}")
     return tasks
 
@@ -1858,6 +1839,23 @@ def _completed_results(output_root: Path) -> dict[str, dict[str, Any]]:
         if result.get("status") == "completed":
             results[str(result["task_id"])] = result
     return results
+
+
+def _partition_results(
+    results: Mapping[str, Mapping[str, Any]], tasks: Sequence[Mapping[str, Any]]
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    formal_ids = {str(task["task_id"]) for task in tasks}
+    formal = {
+        task_id: dict(result)
+        for task_id, result in results.items()
+        if task_id in formal_ids
+    }
+    diagnostic = {
+        task_id: dict(result)
+        for task_id, result in results.items()
+        if task_id not in formal_ids
+    }
+    return formal, diagnostic
 
 
 def _results_for(
@@ -2297,34 +2295,21 @@ def _select_risk_state_gated(
 
 
 def _selected_head_contract(output_root: Path, inputs: ModelInputs) -> dict[str, Any]:
-    mfe = _load_selection(output_root / "selection" / "mfe_selected_heads.json")
-    risk = _load_selection(output_root / "selection" / "risk_state_selected_heads.json")
+    mfe = _load_selection(output_root / "selection" / "mfe_core_selection.json")
+    risk = _load_selection(output_root / "selection" / "risk_state_core_selection.json")
     targets: dict[str, Any] = {}
     for target, item in {**mfe["targets"], **risk["targets"]}.items():
-        variant = str(item["selected_variant"])
-        if variant in inputs.feature_groups:
-            count = len(inputs.feature_groups[variant])
-        elif variant.startswith("selected_core_plus_"):
-            base_variant = str(item["selected_core"])
-            family = str(item.get("selected_gated_family") or "all_gated")
-            count = len(
-                {
-                    *inputs.feature_groups[base_variant],
-                    *inputs.feature_groups[family],
-                }
-            )
-            if family == "margin":
-                count += len(_metadata_names(inputs, "margin_features"))
-            elif family == "financial_extensions":
-                count += len(_metadata_names(inputs, "financial_statement_extensions"))
-            elif family == "all_gated":
-                count += len(_metadata_names(inputs))
-        else:
-            count = None
-        targets[target] = {**item, "feature_count": count}
+        variant = str(item["selected_core"])
+        targets[target] = {
+            **item,
+            "selected_variant": variant,
+            "feature_count": len(inputs.feature_groups[variant]),
+            "gated_features_used": False,
+        }
     return {
         "schema": "seq100_quality_liquidity_selected_head_contract/1",
         "study_id": STUDY_ID,
+        "formal_task_scope": FORMAL_TASK_SCOPE,
         "targets": targets,
         "training_semantics": "retrospective_rolling_oos",
         "training_performed": True,
@@ -2340,6 +2325,7 @@ def _root_manifest(
     tasks: Sequence[Mapping[str, Any]],
     status: str,
     files: Mapping[str, Any] | None = None,
+    diagnostic_task_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
     return {
         "schema": "seq100_quality_liquidity_model_manifest/1",
@@ -2353,6 +2339,11 @@ def _root_manifest(
         ),
         "task_count": len(tasks),
         "tasks": [dict(task) for task in tasks],
+        "formal_task_scope": FORMAL_TASK_SCOPE,
+        "preserved_diagnostic_task_count": len(diagnostic_task_ids),
+        "preserved_diagnostic_task_ids": sorted(
+            str(value) for value in diagnostic_task_ids
+        ),
         "outputs": dict(files or {}),
         "training_performed": status in {"training_completed", "evaluated", "audited"},
         "feature_set_selected": status in {"evaluated", "audited"},
@@ -2366,6 +2357,7 @@ def _update_ledger(
     output_root: Path,
     tasks: Sequence[Mapping[str, Any]],
     results: Mapping[str, Mapping[str, Any]],
+    diagnostic_task_ids: Sequence[str] = (),
 ) -> None:
     entries = []
     for task in tasks:
@@ -2388,8 +2380,13 @@ def _update_ledger(
         {
             "schema": "seq100_quality_liquidity_model_task_ledger/1",
             "study_id": STUDY_ID,
+            "formal_task_scope": FORMAL_TASK_SCOPE,
             "task_count": len(tasks),
             "completed_count": sum(item["status"] == "completed" for item in entries),
+            "preserved_diagnostic_task_count": len(diagnostic_task_ids),
+            "preserved_diagnostic_task_ids": sorted(
+                str(value) for value in diagnostic_task_ids
+            ),
             "tasks": entries,
         },
     )
@@ -2414,18 +2411,35 @@ def run(
     tasks = _task_plan(config)
     output_root.mkdir(parents=True, exist_ok=True)
     config_sha256 = _sha256(study_path)
-    results = _completed_results(output_root)
-    _update_ledger(output_root=output_root, tasks=tasks, results=results)
-    stage_order = (
-        "tuning",
-        "mfe_core",
-        "mfe_gated",
-        "risk_state_core",
-        "risk_state_gated",
+    all_results = _completed_results(output_root)
+    results, diagnostic_results = _partition_results(all_results, tasks)
+    diagnostic_task_ids = tuple(sorted(diagnostic_results))
+    _update_ledger(
+        output_root=output_root,
+        tasks=tasks,
+        results=results,
+        diagnostic_task_ids=diagnostic_task_ids,
     )
+    stage_order = ("tuning", "mfe_core", "risk_state_core")
     completed_this_run = 0
     for stage in stage_order:
         for task in [item for item in tasks if item["stage"] == stage]:
+            task_id = str(task["task_id"])
+            if task_id in results:
+                feature_names, _ = _effective_features(
+                    inputs=inputs, task=task, output_root=output_root
+                )
+                fingerprint = _task_fingerprint(
+                    task=task,
+                    feature_names=feature_names,
+                    model_input_fingerprint=str(input_manifest["input_fingerprint"]),
+                    config_sha256=config_sha256,
+                )
+                if _task_complete(
+                    _task_result_path(output_root, task_id), fingerprint=fingerprint
+                ):
+                    continue
+                results.pop(task_id)
             if max_tasks is not None and completed_this_run >= int(max_tasks):
                 break
             result = _run_training_task(
@@ -2435,9 +2449,14 @@ def run(
                 output_root=output_root,
                 config_sha256=config_sha256,
             )
-            results[str(task["task_id"])] = result
+            results[task_id] = result
             completed_this_run += 1
-            _update_ledger(output_root=output_root, tasks=tasks, results=results)
+            _update_ledger(
+                output_root=output_root,
+                tasks=tasks,
+                results=results,
+                diagnostic_task_ids=diagnostic_task_ids,
+            )
         stage_results = [item for item in tasks if item["stage"] == stage]
         if not all(str(item["task_id"]) in results for item in stage_results):
             break
@@ -2445,19 +2464,11 @@ def run(
             _select_mfe_core(
                 results=results, config=config, output_root=output_root, inputs=inputs
             )
-        elif stage == "mfe_gated":
-            _select_mfe_gated(
-                results=results, config=config, output_root=output_root, inputs=inputs
-            )
         elif stage == "risk_state_core":
             _select_risk_state_core(
                 results=results, config=config, output_root=output_root
             )
-        elif stage == "risk_state_gated":
-            _select_risk_state_gated(
-                results=results, config=config, output_root=output_root
-            )
-    all_complete = len(results) >= len(tasks) and all(
+    all_complete = len(results) == len(tasks) and all(
         str(task["task_id"]) in results for task in tasks
     )
     status = "training_completed" if all_complete else "training_in_progress"
@@ -2468,6 +2479,7 @@ def run(
         input_manifest_path=ready_root / MODEL_INPUT_DIR_NAME / "manifest.json",
         tasks=tasks,
         status=status,
+        diagnostic_task_ids=diagnostic_task_ids,
     )
     _write_json(output_root / "manifest.json", manifest)
     if all_complete:
@@ -2479,6 +2491,7 @@ def run(
         "task_count": len(tasks),
         "completed_count": len(results),
         "completed_this_run": completed_this_run,
+        "preserved_diagnostic_task_count": len(diagnostic_task_ids),
         "training_performed": all_complete,
     }
 
@@ -2508,25 +2521,14 @@ def _annual_metrics(results: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
     )
 
 
-def _paired_variant_deltas(
-    *, results: Mapping[str, Mapping[str, Any]], output_root: Path
-) -> pd.DataFrame:
+def _paired_variant_deltas(*, results: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
-    mfe_core = _load_selection(output_root / "selection" / "mfe_core_selection.json")
-    risk_core = _load_selection(
-        output_root / "selection" / "risk_state_core_selection.json"
-    )
     comparisons: list[tuple[str, str, str, str]] = []
     for target in ("mfe_10", "mfe_20"):
         for variant in CORE_VARIANTS[1:]:
             comparisons.append((target, variant, "legacy_core", "core"))
-        reference = str(mfe_core["targets"][target]["selected_core"])
-        for variant in [f"selected_core_plus_{family}" for family in GATED_FAMILIES]:
-            comparisons.append((target, variant, reference, "gated"))
     for target in ("risk_10", "risk_20", "state_10"):
         comparisons.append((target, "full_core", "legacy_core", "core"))
-        reference = str(risk_core["targets"][target]["selected_core"])
-        comparisons.append((target, ALL_GATED_VARIANT, reference, "gated"))
     for target, candidate_variant, reference_variant, comparison_kind in comparisons:
         candidate = _results_for(results, target=target, variant=candidate_variant)
         reference = _results_for(results, target=target, variant=reference_variant)
@@ -2562,12 +2564,13 @@ def evaluate(
     manifest = _read_json(output_root / "manifest.json")
     if manifest.get("status") not in {"training_completed", "evaluated", "audited"}:
         raise ModelError("training_not_completed")
-    results = _completed_results(output_root)
     tasks = _task_plan(config)
+    all_results = _completed_results(output_root)
+    results, diagnostic_results = _partition_results(all_results, tasks)
     if len(results) != len(tasks):
         raise ModelError(f"evaluation_task_count_mismatch:{len(results)}:{len(tasks)}")
     annual = _annual_metrics(results)
-    paired = _paired_variant_deltas(results=results, output_root=output_root)
+    paired = _paired_variant_deltas(results=results)
     importance_parts = []
     for result in results.values():
         importance_parts.append(
@@ -2598,6 +2601,7 @@ def evaluate(
     return {
         "status": "evaluated",
         "task_count": len(results),
+        "preserved_diagnostic_task_count": len(diagnostic_results),
         "annual_metric_rows": len(annual),
         "paired_delta_rows": len(paired),
         "family_importance_rows": len(importance),
@@ -2615,12 +2619,15 @@ def audit(
     del input_checks
     inputs = ModelInputs(input_manifest)
     tasks = _task_plan(config)
-    results = _completed_results(output_root)
+    all_results = _completed_results(output_root)
+    results, diagnostic_results = _partition_results(all_results, tasks)
     task_ids = {str(task["task_id"]) for task in tasks}
     checks: dict[str, Any] = {
         "manifest_status": manifest.get("status")
         in {"training_completed", "evaluated", "audited"},
         "task_count_exact": set(results) == task_ids,
+        "formal_task_scope_core_only": manifest.get("formal_task_scope")
+        == FORMAL_TASK_SCOPE,
         "input_fingerprint_present": bool(input_manifest.get("input_fingerprint")),
         "row_count_exact": inputs.row_count == int(input_manifest["row_count"]),
         "forbidden_2026_rows": not bool(
@@ -2686,6 +2693,7 @@ def audit(
         "created_at": _now(),
         "checks": checks,
         "task_count": len(results),
+        "preserved_diagnostic_task_count": len(diagnostic_results),
         "training_performed": True,
         "evaluation_semantics": "retrospective_rolling_oos",
     }

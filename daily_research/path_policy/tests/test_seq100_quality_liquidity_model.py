@@ -117,15 +117,33 @@ def test_real_feature_contract_has_exact_canonical_counts() -> None:
     assert catalog["feature_name"].eq("listing_age_open_days").sum() == 1
 
 
-def test_task_plan_is_exactly_78_without_parameter_search() -> None:
+def test_task_plan_is_exactly_51_core_only_without_parameter_search() -> None:
     tasks = model._task_plan(model._load_config())
 
-    assert len(tasks) == 78
+    assert len(tasks) == 51
     assert sum(task["stage"] == "tuning" for task in tasks) == 9
     assert sum(task["stage"] == "mfe_core" for task in tasks) == 24
-    assert sum(task["stage"] == "mfe_gated" for task in tasks) == 18
+    assert sum(task["stage"] == "mfe_gated" for task in tasks) == 0
     assert sum(task["stage"] == "risk_state_core" for task in tasks) == 18
-    assert sum(task["stage"] == "risk_state_gated" for task in tasks) == 9
+    assert sum(task["stage"] == "risk_state_gated" for task in tasks) == 0
+
+
+def test_partition_results_preserves_nonformal_tasks_as_diagnostics() -> None:
+    tasks = model._task_plan(model._load_config())
+    formal_task_id = str(tasks[0]["task_id"])
+    diagnostic_task_id = "mfe_gated__mfe_10__selected_core_plus_margin__2023"
+    results = {
+        formal_task_id: {"task_id": formal_task_id, "status": "completed"},
+        diagnostic_task_id: {
+            "task_id": diagnostic_task_id,
+            "status": "completed",
+        },
+    }
+
+    formal, diagnostic = model._partition_results(results, tasks)
+
+    assert set(formal) == {formal_task_id}
+    assert set(diagnostic) == {diagnostic_task_id}
 
 
 def test_fold_uses_horizon_purge_and_target_flags() -> None:
