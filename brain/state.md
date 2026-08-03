@@ -121,12 +121,9 @@ rows); the relationship tables use the full population.
   worse MAE, confirming non-random missingness historically; their tiny recent
   count means the 2023-2025 common-support distortion is negligible.
 
-The human-readable report is
-`daily_research/output/path_policy/studies/seq100_quality_liquidity_descriptive_feature_audit/report.html`.
-Its self-contained artifact, package validation, structural checks, hashes,
-and delivery receipt pass. Enhanced Chromium semantic QA timed out and is
-retained as a documented tooling limitation; no report data or audit result
-depends on that browser check.
+The descriptive audit is retained as machine-readable Parquet and JSON evidence.
+Its findings are explained directly in the working conversation; no HTML report
+is part of the canonical workflow.
 
 ## Prior QDP data state (superseded by the 2026-08-02 state above)
 

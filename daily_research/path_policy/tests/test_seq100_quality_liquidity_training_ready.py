@@ -301,6 +301,60 @@ def test_partition_profile_records_ordered_key_and_null_evidence(tmp_path) -> No
     assert profile["null_rate"]["value"] == 0.5
 
 
+def test_existing_registry_replaces_defective_listing_age_in_place(tmp_path) -> None:
+    catalog_path = tmp_path / "feature_catalog.parquet"
+    pd.DataFrame(
+        {
+            "name": ["feature_a", ready.LEGACY_LISTING_AGE_FIELD],
+            "family": ["F1", "F5"],
+        }
+    ).to_parquet(catalog_path, index=False)
+    atlas_path = tmp_path / "atlas_manifest.json"
+    atlas_path.write_text(
+        json.dumps({"files": {"feature_catalog": {"path": str(catalog_path)}}}),
+        encoding="utf-8",
+    )
+
+    registry = ready._existing_registry(
+        {"atlas": {"manifest_path": str(atlas_path)}}, tmp_path / "output"
+    )
+
+    assert len(registry) == 2
+    assert not registry["feature_name"].eq(ready.LEGACY_LISTING_AGE_FIELD).any()
+    listing = registry.loc[
+        registry["feature_name"].eq(ready.LISTING_AGE_OPEN_DAYS_FIELD)
+    ].iloc[0]
+    assert listing["block"] == "membership_context"
+    assert listing["physical_column"] == ready.LISTING_AGE_OPEN_DAYS_FIELD
+    assert listing["source_field"] == "listed_open_days"
+    assert registry["eligibility"].eq("formal_existing").sum() == 2
+
+
+def test_membership_context_uses_complete_spine_and_open_day_age(tmp_path) -> None:
+    spine = tmp_path / "spine.parquet"
+    diagnostics = tmp_path / "diagnostics.parquet"
+    _spine_frame().to_parquet(spine, index=False)
+    pd.DataFrame(
+        {
+            "candidate_id": [1, 2],
+            "listed_open_days": [250, 1234],
+        }
+    ).to_parquet(diagnostics, index=False)
+
+    with duckdb.connect() as connection:
+        result = connection.execute(
+            ready._membership_context_sql(
+                spine_path=spine, diagnostics_path=diagnostics
+            )
+        ).fetchdf()
+
+    assert tuple(result.columns[: len(ready.ROW_SPINE_COLUMNS)]) == (
+        ready.ROW_SPINE_COLUMNS
+    )
+    assert result[ready.LISTING_AGE_OPEN_DAYS_FIELD].tolist() == [250.0, 1234.0]
+    assert result["coverage_state"].tolist() == ["observed", "observed"]
+
+
 def test_margin_block_joins_detail_and_exchange_market_data(tmp_path) -> None:
     spine = tmp_path / "spine.parquet"
     detail = tmp_path / "detail.parquet"

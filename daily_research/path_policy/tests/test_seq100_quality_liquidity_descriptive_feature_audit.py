@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from daily_research.path_policy import (
     seq100_quality_liquidity_descriptive_feature_audit as audit,
@@ -236,3 +239,120 @@ def test_market_wide_feature_uses_trade_date_time_axis() -> None:
     assert coverage[0]["relation_axis"] == "annual_trade_date_time_series"
     assert relation[0]["high_count"] > 0
     assert relation[0]["low_count"] > 0
+
+
+def test_feature_catalog_uses_canonical_listing_age_and_keeps_count(tmp_path) -> None:
+    legacy_path = tmp_path / "legacy.parquet"
+    legacy_rows = [
+        {
+            "name": f"legacy_{index}",
+            "family": "F1",
+            "source_block": "existing_seq100_base",
+        }
+        for index in range(517)
+    ]
+    legacy_rows.append(
+        {
+            "name": "listing_age_days",
+            "family": "F5",
+            "source_block": "existing_seq100_base",
+        }
+    )
+    pd.DataFrame(legacy_rows).to_parquet(legacy_path, index=False)
+    atlas_manifest = tmp_path / "atlas.json"
+    atlas_manifest.write_text(
+        json.dumps({"files": {"feature_catalog": {"path": str(legacy_path)}}}),
+        encoding="utf-8",
+    )
+    existing_names = [f"legacy_{index}" for index in range(517)] + [
+        "listing_age_open_days"
+    ]
+    registry_rows = [
+        {
+            "feature_name": name,
+            "physical_column": name,
+            "block": "membership_context"
+            if name == "listing_age_open_days"
+            else "existing_atlas_518",
+            "source_domain": "quality_liquidity_membership"
+            if name == "listing_age_open_days"
+            else "existing_seq100_atlas",
+            "source_field": "listed_open_days"
+            if name == "listing_age_open_days"
+            else name,
+            "eligibility": "formal_existing",
+            "eligibility_reason": "test",
+        }
+        for name in existing_names
+    ]
+    registry_rows.extend(
+        {
+            "feature_name": f"candidate_{index}",
+            "physical_column": f"candidate_{index}",
+            "block": "tushare_technical_candidates",
+            "source_domain": "stk_factor_pro_raw",
+            "source_field": f"candidate_{index}",
+            "eligibility": "formal_candidate",
+            "eligibility_reason": "test",
+        }
+        for index in range(110)
+    )
+    registry_path = tmp_path / "registry.parquet"
+    pd.DataFrame(registry_rows).to_parquet(registry_path, index=False)
+    source_manifest = {
+        "existing_atlas_518": {"manifest_path": str(atlas_manifest)},
+        "feature_registry": {"path": str(registry_path)},
+    }
+
+    catalog = audit._feature_catalog(source_manifest, tmp_path)
+
+    assert len(catalog) == 628
+    assert catalog["feature_name"].eq("listing_age_open_days").sum() == 1
+    assert not catalog["feature_name"].eq("listing_age_days").any()
+    listing = catalog.loc[catalog["feature_name"].eq("listing_age_open_days")].iloc[0]
+    assert listing["block"] == "membership_context"
+    assert listing["analytic_family"] == "size_liquidity_and_status"
+
+
+def test_feature_catalog_rejects_legacy_listing_age_in_formal_registry(
+    tmp_path,
+) -> None:
+    legacy_path = tmp_path / "legacy.parquet"
+    pd.DataFrame(
+        {
+            "name": ["listing_age_days"],
+            "family": ["F5"],
+            "source_block": ["existing_seq100_base"],
+        }
+    ).to_parquet(legacy_path, index=False)
+    atlas_manifest = tmp_path / "atlas.json"
+    atlas_manifest.write_text(
+        json.dumps({"files": {"feature_catalog": {"path": str(legacy_path)}}}),
+        encoding="utf-8",
+    )
+    registry_path = tmp_path / "registry.parquet"
+    pd.DataFrame(
+        [
+            {
+                "feature_name": "listing_age_days",
+                "physical_column": "listing_age_days",
+                "block": "existing_atlas_518",
+                "source_domain": "existing_seq100_atlas",
+                "source_field": "listing_age_days",
+                "eligibility": "formal_existing",
+                "eligibility_reason": "test",
+            }
+        ]
+    ).to_parquet(registry_path, index=False)
+
+    with pytest.raises(
+        audit.DescriptiveAuditError,
+        match="canonical_listing_age_field_missing_or_duplicated",
+    ):
+        audit._feature_catalog(
+            {
+                "existing_atlas_518": {"manifest_path": str(atlas_manifest)},
+                "feature_registry": {"path": str(registry_path)},
+            },
+            tmp_path,
+        )

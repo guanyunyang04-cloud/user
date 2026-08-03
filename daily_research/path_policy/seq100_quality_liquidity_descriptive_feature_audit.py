@@ -219,6 +219,8 @@ def _analytic_family(
         return "traditional_moneyflow"
     if block == "financial_statement_extensions":
         return "financial_statement_extensions"
+    if block == "membership_context":
+        return "size_liquidity_and_status"
     return block
 
 
@@ -228,16 +230,24 @@ def _feature_catalog(
     legacy_path = Path(source_manifest["existing_atlas_518"]["manifest_path"])
     legacy_manifest = _read_json(legacy_path)
     catalog_path = Path(legacy_manifest["files"]["feature_catalog"]["path"])
-    existing = pd.read_parquet(catalog_path).rename(columns={"name": "feature_name"})
-    existing["physical_column"] = existing["feature_name"]
-    existing["block"] = existing["source_block"]
-    existing["source_domain"] = existing["source_block"]
-    existing["source_field"] = existing["feature_name"]
-    existing["eligibility"] = "formal_existing"
-    existing["eligibility_reason"] = "frozen_existing_seq100_feature"
-    existing["legacy_family"] = existing["family"]
-
     registry = pd.read_parquet(Path(source_manifest["feature_registry"]["path"]))
+    legacy = pd.read_parquet(catalog_path).rename(columns={"name": "feature_name"})
+    legacy_family = legacy.set_index("feature_name")["family"].astype(str)
+    legacy_block = legacy.set_index("feature_name")["source_block"].astype(str)
+    existing = registry[registry["eligibility"].eq("formal_existing")].copy()
+    existing["legacy_family"] = existing["feature_name"].map(legacy_family).fillna("")
+    mapped_blocks = existing["feature_name"].map(legacy_block)
+    existing.loc[mapped_blocks.notna(), "block"] = mapped_blocks[mapped_blocks.notna()]
+    existing.loc[mapped_blocks.notna(), "source_domain"] = mapped_blocks[
+        mapped_blocks.notna()
+    ]
+    replacement = existing["feature_name"].eq("listing_age_open_days")
+    if int(replacement.sum()) != 1:
+        raise DescriptiveAuditError("canonical_listing_age_field_missing_or_duplicated")
+    existing.loc[replacement, "legacy_family"] = "F5"
+    if bool(existing["feature_name"].eq("listing_age_days").any()):
+        raise DescriptiveAuditError("defective_listing_age_field_remains_formal")
+
     registry["legacy_family"] = ""
     eligible = registry[
         registry["eligibility"].isin(["formal_candidate", "availability_gated"])
@@ -728,6 +738,7 @@ def _physical_sources(source_manifest: Mapping[str, Any], year: int) -> dict[str
     }
     source_blocks = source_manifest["blocks"]
     for block in (
+        "membership_context",
         "tushare_technical_candidates",
         "margin_features",
         "traditional_moneyflow_features",

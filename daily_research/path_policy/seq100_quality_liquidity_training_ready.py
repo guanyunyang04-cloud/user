@@ -72,6 +72,8 @@ BALANCE_EXTENSION_STATE_FIELDS = (
     "contract_liabilities_field_state",
 )
 BALANCE_EXTENSION_CONFLICT_FIELD = "balance_extension_source_conflict"
+LEGACY_LISTING_AGE_FIELD = "listing_age_days"
+LISTING_AGE_OPEN_DAYS_FIELD = "listing_age_open_days"
 
 DEFAULT_SCOPE_OUTPUT_ROOT = (
     WORKSPACE_ROOT
@@ -758,10 +760,113 @@ def _existing_registry(
             "availability_lag": "existing_pit_contract",
         }
     )
+    listing = output["feature_name"].eq(LEGACY_LISTING_AGE_FIELD)
+    if int(listing.sum()) != 1:
+        raise TrainingReadyError("legacy_listing_age_field_missing_or_duplicated")
+    output.loc[listing, "feature_name"] = LISTING_AGE_OPEN_DAYS_FIELD
+    output.loc[listing, "physical_column"] = LISTING_AGE_OPEN_DAYS_FIELD
+    output.loc[listing, "block"] = "membership_context"
+    output.loc[listing, "source_domain"] = "quality_liquidity_membership"
+    output.loc[listing, "source_field"] = "listed_open_days"
+    output.loc[listing, "eligibility_reason"] = (
+        "canonical_exchange_open_day_listing_age"
+    )
+    output.loc[listing, "availability_lag"] = "same_signal_close"
     path = output_root / "feature_registry" / "existing_atlas_registry.parquet"
     path.parent.mkdir(parents=True, exist_ok=True)
     output.to_parquet(path, index=False, compression="zstd")
     return output
+
+
+def _membership_context_sql(*, spine_path: Path, diagnostics_path: Path) -> str:
+    identity = _projection("s", ROW_SPINE_COLUMNS)
+    spine = str(spine_path).replace("'", "''")
+    diagnostics = str(diagnostics_path).replace("'", "''")
+    return f"""
+    SELECT {identity},
+           CASE WHEN d.listed_open_days IS NULL
+                THEN 'source_unavailable' ELSE 'observed' END AS coverage_state,
+           try_cast(d.listed_open_days AS DOUBLE) AS {LISTING_AGE_OPEN_DAYS_FIELD}
+    FROM read_parquet('{spine}') s
+    LEFT JOIN read_parquet('{diagnostics}') d USING(candidate_id)
+    ORDER BY s.candidate_id
+    """
+
+
+def _build_membership_context_block(
+    *,
+    scope_state: Mapping[str, Any],
+    output_root: Path,
+    row_spines: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    membership = dict(scope_state.get("membership_years", {}) or {})
+    partitions: dict[str, Any] = {}
+    for year in RESEARCH_YEARS:
+        spine_path = Path(str(row_spines[str(year)]["path"]))
+        diagnostics_path = Path(str(membership[str(year)]["diagnostics_path"]))
+        output_path = (
+            output_root
+            / "features"
+            / "membership_context"
+            / f"year={year}"
+            / "part-0000.parquet"
+        )
+        with duckdb.connect() as connection:
+            _copy_query(
+                connection,
+                _membership_context_sql(
+                    spine_path=spine_path, diagnostics_path=diagnostics_path
+                ),
+                output_path,
+            )
+            literal = str(output_path).replace("'", "''")
+            row_count, unique_count, missing_count, minimum_age = connection.execute(
+                "SELECT count(*),count(DISTINCT candidate_id),"
+                f"count(*) FILTER(WHERE {LISTING_AGE_OPEN_DAYS_FIELD} IS NULL),"
+                f"min({LISTING_AGE_OPEN_DAYS_FIELD}) "
+                f"FROM read_parquet('{literal}')"
+            ).fetchone()
+            coverage = connection.execute(
+                f"SELECT coverage_state,count(*) FROM read_parquet('{literal}') "
+                "GROUP BY coverage_state ORDER BY coverage_state"
+            ).fetchall()
+        expected = int(row_spines[str(year)]["row_count"])
+        _assert_safe_feature_identity_schema(output_path)
+        forbidden_dependency_count = _forbidden_date_row_count(output_path)
+        if (
+            int(row_count) != expected
+            or int(unique_count) != expected
+            or int(missing_count) != 0
+            or float(minimum_age) < 250.0
+            or forbidden_dependency_count
+        ):
+            raise TrainingReadyError(
+                "membership_context_contract_failed:"
+                f"{year}:{row_count}:{unique_count}:{missing_count}:{minimum_age}"
+            )
+        _assert_same_row_keys(block_path=output_path, spine_path=spine_path)
+        profile = _partition_profile(
+            path=output_path,
+            profile_path=output_path.with_suffix(".profile.json"),
+            row_key_hash=str(row_spines[str(year)]["row_key_hash"]),
+        )
+        partitions[str(year)] = {
+            "path": str(output_path.resolve()),
+            "sha256": _sha256(output_path),
+            "row_count": int(row_count),
+            "field_count": 1,
+            "coverage_counts": {str(key): int(value) for key, value in coverage},
+            "minimum_listing_age_open_days": float(minimum_age),
+            "forbidden_dependency_row_count": forbidden_dependency_count,
+            **profile,
+        }
+    return {
+        "status": "completed",
+        "domain": "quality_liquidity_membership",
+        "fields": [LISTING_AGE_OPEN_DAYS_FIELD],
+        "partitions": partitions,
+        "lagged": False,
+    }
 
 
 def _source_fields(
@@ -1580,6 +1685,11 @@ def prepare(
     ]
     eligibility_domain = DataDomain.MARGIN_ELIGIBILITY
     blocks = {
+        "membership_context": _build_membership_context_block(
+            scope_state=scope_state,
+            output_root=output_root,
+            row_spines=row_spines,
+        ),
         "tushare_technical_candidates": _build_feature_block(
             workspace=workspace_root,
             output_root=output_root,
@@ -2195,9 +2305,11 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         )
         == EXPECTED_FACTOR_FIELD_COUNT,
         "existing_atlas_fields_exact": int(
-            (registry["block"] == "existing_atlas_518").sum()
+            (registry["eligibility"] == "formal_existing").sum()
         )
-        == expected_existing_feature_count,
+        == expected_existing_feature_count
+        and int(registry["feature_name"].eq(LEGACY_LISTING_AGE_FIELD).sum()) == 0
+        and int(registry["feature_name"].eq(LISTING_AGE_OPEN_DAYS_FIELD).sum()) == 1,
         "dual_pool_contract": (
             not bool(config.get("require_dual_pool_manifest", False))
             or (
