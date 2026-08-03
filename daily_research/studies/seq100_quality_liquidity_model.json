@@ -1,6 +1,6 @@
 {
   "study_id": "seq100_quality_liquidity_model",
-  "purpose": "First rolling LightGBM comparison for the repaired quality-liquidity pool.",
+  "purpose": "Rolling LightGBM baseline on the repaired compact quality-liquidity input.",
   "source": {
     "training_ready_study_id": "seq100_quality_liquidity_training_ready",
     "descriptive_audit_study_id": "seq100_quality_liquidity_descriptive_feature_audit",
@@ -30,15 +30,13 @@
     "rolling_prediction_years": [2023, 2024, 2025]
   },
   "feature_contract": {
-    "numeric_field_count": 628,
-    "legacy_core_count": 493,
-    "traditional_technical_count": 78,
-    "traditional_moneyflow_count": 16,
-    "full_core_count": 587,
-    "availability_gated_numeric_count": 41,
-    "availability_metadata_count": 13,
-    "base_reuse_count": 295,
-    "extra_numeric_count": 333,
+    "audited_numeric_field_count": 628,
+    "source_full_core_count": 587,
+    "compact_core_count": 562,
+    "constant_drop_count": 14,
+    "semantic_redundancy_drop_count": 11,
+    "financial_semantic_replacement_count": 3,
+    "runtime_base_cache_dependency": false,
     "forbidden_feature_names": [
       "listing_age_days"
     ],

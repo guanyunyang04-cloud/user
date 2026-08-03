@@ -21,7 +21,7 @@ from daily_research.path_policy import seq100_quality_liquidity_data_prep as dat
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_quality_liquidity_descriptive_feature_audit"
 SOURCE_STUDY_ID = "seq100_quality_liquidity_training_ready"
-BUILDER_VERSION = "seq100_quality_liquidity_descriptive_feature_audit/1.0"
+BUILDER_VERSION = "seq100_quality_liquidity_descriptive_feature_audit/1.1"
 YEARS = tuple(range(2011, 2026))
 HORIZONS = (10, 20)
 DEFAULT_STUDY_PATH = (
@@ -278,6 +278,50 @@ def _feature_catalog(
     if len(combined) != 628:
         raise DescriptiveAuditError(f"unexpected_numeric_feature_count:{len(combined)}")
     return combined
+
+
+def _compact_model_inputs(
+    *, source_root: Path, source_manifest: Mapping[str, Any]
+) -> tuple[dict[str, Any], np.memmap, dict[str, int], dict[int, np.ndarray]]:
+    manifest_path = source_root / "model_inputs" / "manifest.json"
+    manifest = _read_json(manifest_path)
+    names = list(dict(manifest.get("feature_groups", {}) or {}).get("compact_core", []))
+    if len(names) != 562 or len(set(names)) != 562:
+        raise DescriptiveAuditError("compact_model_input_feature_contract_mismatch")
+    record = dict(dict(manifest.get("storage", {}) or {}).get("compact", {}) or {})
+    path = Path(str(record.get("path", "")))
+    shape = tuple(int(value) for value in record.get("shape", ()))
+    expected_rows = int(source_manifest["common_support"]["row_count"])
+    if shape != (expected_rows, 562) or not path.is_file():
+        raise DescriptiveAuditError("compact_model_input_storage_mismatch")
+    expected_size = int(np.prod(shape)) * np.dtype("float32").itemsize
+    if path.stat().st_size != expected_size:
+        raise DescriptiveAuditError("compact_model_input_size_mismatch")
+    row_index = pd.read_parquet(Path(manifest["row_index"]["path"]))
+    if len(row_index) != expected_rows or not row_index["candidate_id"].is_unique:
+        raise DescriptiveAuditError("compact_model_input_row_index_mismatch")
+    positions: dict[int, np.ndarray] = {}
+    for year in YEARS:
+        current = np.flatnonzero(
+            row_index["trade_date"].astype(str).str.startswith(f"{year}-").to_numpy()
+        ).astype(np.int64, copy=False)
+        expected_ids = pd.read_parquet(
+            Path(source_manifest["row_spine"][str(year)]["path"]),
+            columns=["candidate_id"],
+        )["candidate_id"].to_numpy(dtype=np.int64)
+        if not np.array_equal(
+            row_index.loc[current, "candidate_id"].to_numpy(dtype=np.int64),
+            expected_ids,
+        ):
+            raise DescriptiveAuditError(f"compact_model_input_year_alignment:{year}")
+        positions[year] = current
+    values = np.memmap(path, dtype=np.float32, mode="r", shape=shape)
+    return (
+        manifest,
+        values,
+        {name: index for index, name in enumerate(names)},
+        positions,
+    )
 
 
 def _label_memmaps() -> tuple[dict[str, Any], np.memmap, np.memmap, np.memmap]:
@@ -629,8 +673,7 @@ def _context_and_strata(
     diagnostics_path: Path,
     spine: pd.DataFrame,
     bundle: Mapping[str, np.ndarray],
-    base_values: np.memmap,
-    turnover_column: int,
+    turnover_values: np.ndarray,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     columns = [
         "candidate_id",
@@ -649,8 +692,9 @@ def _context_and_strata(
         how="left",
         validate="one_to_one",
     )
-    candidate_ids = spine["candidate_id"].to_numpy(dtype=np.int64)
-    turnover = np.asarray(base_values[candidate_ids, turnover_column], dtype=np.float64)
+    turnover = np.asarray(turnover_values, dtype=np.float64)
+    if len(turnover) != len(spine):
+        raise DescriptiveAuditError(f"turnover_alignment_failed:{year}")
     diagnostics["turnover_daily_rank"] = _rank_within_date(
         turnover, spine["date_idx"].to_numpy(dtype=np.int32)
     )
@@ -873,6 +917,9 @@ def _prepare_year(
     states: np.memmap,
     base_values: np.memmap,
     base_catalog: Mapping[str, int],
+    compact_values: np.memmap,
+    compact_catalog: Mapping[str, int],
+    compact_positions: np.ndarray,
     config: Mapping[str, Any],
 ) -> dict[str, Any]:
     year_root = output_root / "annual" / f"year={year}"
@@ -889,14 +936,15 @@ def _prepare_year(
     target_summary = pd.DataFrame(_target_summary_rows(year=year, bundle=bundle))
     _write_frame(target_summary, year_root / "target_summary.parquet")
 
-    turnover_column = base_catalog["log_turnover_rate"]
     context, strata = _context_and_strata(
         year=year,
         diagnostics_path=_diagnostics_path(source_manifest, year),
         spine=spine,
         bundle=bundle,
-        base_values=base_values,
-        turnover_column=turnover_column,
+        turnover_values=np.asarray(
+            compact_values[compact_positions, compact_catalog["log_turnover_rate"]],
+            dtype=np.float32,
+        ),
     )
     _write_frame(strata, year_root / "strata.parquet")
 
@@ -918,14 +966,26 @@ def _prepare_year(
     for names in _chunks(
         base_features["feature_name"].astype(str).tolist(), chunk_size
     ):
-        indices = [base_catalog[name] for name in names]
-        values = pd.DataFrame(
-            np.asarray(
-                base_values[candidate_ids[:, None], np.asarray(indices)[None, :]],
+        values = pd.DataFrame(index=np.arange(len(candidate_ids)))
+        compact_names = [name for name in names if name in compact_catalog]
+        if compact_names:
+            compact_indices = np.asarray(
+                [compact_catalog[name] for name in compact_names], dtype=np.int32
+            )
+            values[compact_names] = np.asarray(
+                compact_values[np.ix_(compact_positions, compact_indices)],
                 dtype=np.float32,
-            ),
-            columns=names,
-        )
+            )
+        legacy_names = [name for name in names if name not in compact_catalog]
+        if legacy_names:
+            legacy_indices = np.asarray(
+                [base_catalog[name] for name in legacy_names], dtype=np.int32
+            )
+            values[legacy_names] = np.asarray(
+                base_values[np.ix_(candidate_ids, legacy_indices)],
+                dtype=np.float32,
+            )
+        values = values[names]
         relations, coverage = _relation_rows_for_chunk(
             year=year,
             values=values,
@@ -1877,6 +1937,13 @@ def prepare(
         str(item["name"]): int(item["column_index"])
         for item in base_manifest["continuous_catalog"]
     }
+    compact_manifest, compact_values, compact_catalog, compact_positions = (
+        _compact_model_inputs(
+            source_root=source_root,
+            source_manifest=source_manifest,
+        )
+    )
+    compact_manifest_path = source_root / "model_inputs" / "manifest.json"
     catalog = _feature_catalog(source_manifest, source_root)
     registry = pd.read_parquet(Path(source_manifest["feature_registry"]["path"]))
     input_fingerprint = _stable_hash(
@@ -1886,6 +1953,7 @@ def prepare(
             "source_manifest_sha256": _sha256(source_manifest_path),
             "source_readiness_sha256": _sha256(source_root / "readiness.json"),
             "base_feature_manifest_sha256": _sha256(BASE_FEATURE_MANIFEST),
+            "compact_model_input_manifest_sha256": _sha256(compact_manifest_path),
             "label_manifest_sha256": _sha256(LABEL_MANIFEST),
         }
     )
@@ -1926,6 +1994,9 @@ def prepare(
             states=states,
             base_values=base_values,
             base_catalog=base_catalog,
+            compact_values=compact_values,
+            compact_catalog=compact_catalog,
+            compact_positions=compact_positions[year],
             config=config,
         )
         state["completed_years"][str(year)] = result
@@ -1987,6 +2058,11 @@ def prepare(
             "study_id": SOURCE_STUDY_ID,
             "manifest": _record(source_manifest_path),
             "readiness": _record(source_root / "readiness.json"),
+            "compact_model_inputs": _record(
+                compact_manifest_path,
+                row_count=int(compact_manifest["row_count"]),
+                feature_count=len(compact_catalog),
+            ),
         },
         "scope": {
             "years": list(YEARS),

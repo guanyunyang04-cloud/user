@@ -129,61 +129,59 @@ is part of the canonical workflow.
 ## Quality-liquidity core model (2026-08-03)
 
 `seq100_quality_liquidity_model` completed the 2023-2025 retrospective rolling
-study on the 4,476,851-row complete support. It contains 51 formal core tasks:
-9 time-consistent capacity tasks, 24 MFE core comparisons, and 18 risk/state
-core comparisons. All 51 tasks completed. Five earlier MFE gated tasks are
-retained only as negative diagnostic evidence and are excluded from formal
-selection, metrics, and audit counts. No remaining gated task is scheduled.
+study on the 4,476,851-row complete support. The canonical input is one
+self-contained row-major `compact_core` cache with 562 fields. It starts from
+the 587-field core, removes 14 frozen-support constants and 11 conservative
+semantic duplicates, and replaces three component financial fields with their
+more complete statement semantics. It includes daily/minute technical,
+financial statement, market-state, industry, size/liquidity, announcement,
+traditional technical, and traditional moneyflow information. Margin and
+research-report fields and availability metadata are not model inputs.
 
-The final core-only head contract is:
+There are exactly 24 formal tasks: nine time-consistent capacity tasks, six
+MFE rolling tasks, and nine risk/state rolling tasks. All completed and the
+model audit has `status=ok`. The prior 56 variant/gated task directories, old
+selection directory, and obsolete extra/availability caches were removed;
+6,415,905,694 logical bytes were reclaimed. The canonical output contains no
+preserved diagnostic task.
 
-- `mfe_10`: `legacy_core`, 493 fields.
-- `mfe_20`: `legacy_plus_moneyflow`, 509 fields.
-- `risk_10`, `risk_20`, and `state_10`: `full_core`, 587 fields.
-- No margin, research-report, financial-extension, or availability-metadata
-  field is used by a selected head.
+MFE has material but incomplete opportunity learnability:
 
-Selected MFE heads have material but incomplete tail learnability. D10 Rank IC
-is `0.1039/0.0978/0.1722` and daily Top-5% true-tail capture is
-`18.78%/14.67%/17.40%` in 2023/2024/2025. D20 Rank IC is
-`0.1175/0.1319/0.1984` and Top-5% capture is
-`15.78%/13.21%/14.24%`. The corresponding Top-1% captures are
-`9.59%/7.24%/7.72%` and `6.34%/5.21%/6.81%`, materially above random
-1%/5% overlap but still far from oracle identification. MFE means maximum
-future upside excursion; it identifies upside opportunity, not a sustained
-trend, executable exit, or realized return by itself.
+- D10 Rank IC is `0.0992/0.0968/0.1730` and daily Top-5 true-tail capture is
+  `18.36%/14.89%/17.59%` in 2023/2024/2025, or `3.67x/2.98x/3.52x` random.
+  Top-1 capture is `9.77%/7.31%/7.42%`, or `9.77x/7.31x/7.42x` random.
+- D20 Rank IC is `0.1155/0.1305/0.1930`; Top-5 capture is
+  `16.06%/13.68%/13.59%` (`3.21x/2.74x/2.72x` random), and Top-1 capture is
+  `6.73%/4.93%/5.65%`.
+- Predicted D10 Top-5 names realize mean MFE of `6.43%/8.00%/8.86%` versus
+  the full evaluation population's `3.39%/5.33%/4.94%`. D20 is
+  `9.85%/13.56%/13.46%` versus `5.52%/9.15%/8.56%`.
 
-Traditional technical indicators and the combined full core do not pass the
-D10 or D20 MFE gates. Traditional moneyflow passes only for D20, with a modest
-three-year median Rank IC gain of `0.00106`; its Top-5% capture change is
-`-0.12/+0.10/+0.32` percentage points. The selected risk heads have Rank IC
-around `0.19-0.24` and deep-adverse PR-AUC around `0.33-0.39` against a 20%
-event prevalence. Full core passes the risk gates, but its improvement over
-legacy core is small. The selected state head also passes its safety gate, but
-ordinal IC falls from `0.0618` in 2023 to `0.0277` in 2025, so state remains a
-weak auxiliary coordinate rather than a primary selector.
+MFE is maximum future upside excursion. These results establish useful upside
+opportunity selection, not sustained trend, legal exit timing, executable
+return, or economic monetization. Predicted Top-5 D10 paths still have median
+pre-peak adversity around `2.47%/2.97%/2.68%`; risk and state must remain
+separate coordinates.
 
-Gain attribution is dominated by existing market-state and daily
-price/volume families. Their combined median share is roughly 85%-96% across
-selected heads; traditional technical indicators contribute about 0.6%-1.4%
-to risk/state gain, and traditional moneyflow contributes about 0.5% to D20
-MFE gain. Individual gain rankings are not interpreted causally because the
-input contains highly correlated fields.
+Risk D10/D20 Rank IC is about `0.19-0.24`; deep-adverse PR-AUC is
+`0.328-0.388` against a 20% daily event prevalence. State ordinal IC is only
+`0.0617/0.0629/0.0356`, while selecting the highest predicted state
+probabilities raises high-state incidence by `10.42/7.00/11.64` percentage
+points. State is useful as an auxiliary coordinate but remains much weaker
+than risk or MFE.
 
-The preserved gated diagnostics reinforce the core-only decision. Margin
-features worsen D10 Rank IC and Top-5% capture in all three years; in 2025,
-Top-5% capture falls from `17.40%` to `10.74%`. Research-report additions also
-worsen D10 Rank IC and Top-5% capture in both completed years. No further gated
-training is justified by this evidence.
+Gain attribution is dominated by market state plus daily price/volume:
+roughly 86%-96% across the five heads. Financial statements contribute more to
+D20 MFE than D10 (`6.89%` versus `2.81%` median gain share); same-day 5-minute
+features contribute about `1.0%-2.0%`; traditional technical about
+`0.6%-1.5%`; traditional moneyflow is below `0.5%`. These are conditional model
+gain shares, not causal feature-family ablations, because correlated fields can
+substitute for one another.
 
-The model audit has `status=ok`: the 51-task set is exact, input and output
-hashes pass, prediction candidate IDs match each evaluation year, horizon
-purges pass, the corrected listing-age field is used, and 2026 rows are zero.
-The annual-decile Spearman metric is saturated at 1.0 for every MFE core
-variant and has no selection value; conclusions use Rank IC, Top-1%/Top-5%
-capture, realized MFE in predicted tails, and adversity instead. No economic
-replay, position policy, exit policy, ensemble, or deployable strategy was
-selected in this study.
+Input and output hashes pass, prediction candidate IDs match each evaluation
+year, horizon purges pass, the corrected listing-age field is used, 2010 is not
+formal, and 2026 rows are zero. No economic replay, position policy, exit
+policy, ensemble, or deployable strategy was selected in this study.
 
 ## Prior QDP data state (superseded by the 2026-08-02 state above)
 

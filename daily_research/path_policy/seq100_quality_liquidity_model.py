@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -39,17 +40,68 @@ STATE_HORIZON = 10
 FLAG_MFE_PRE_PEAK_MAE_VALID = 128
 FLAG_STATE_ASSIGNED = 256
 TARGETS = ("mfe_10", "mfe_20", "risk_10", "risk_20", "state_10")
-CORE_VARIANTS = (
-    "legacy_core",
-    "legacy_plus_technical",
-    "legacy_plus_moneyflow",
-    "full_core",
-)
-GATED_FAMILIES = ("margin", "research", "financial_extensions")
-RISK_STATE_CORE_VARIANTS = ("legacy_core", "full_core")
-ALL_GATED_VARIANT = "selected_core_plus_all_gated"
+COMPACT_VARIANT = "compact_core"
 MODEL_INPUT_DIR_NAME = "model_inputs"
-FORMAL_TASK_SCOPE = "core_only"
+FORMAL_TASK_SCOPE = "compact_core_only"
+
+COMPACT_CONSTANT_DROPS = (
+    "market_csi300__st_rate",
+    "market_sse50__st_rate",
+    "is_st_today",
+    "is_suspended_today",
+    "is_delisted_today",
+    "financial_present",
+    "income_report_type",
+    "income_statement_present",
+    "balance_report_type",
+    "balance_sheet_present",
+    "cashflow_report_type",
+    "cash_flow_statement_present",
+    "announcement_source_covered",
+    "share_capital_missing",
+)
+COMPACT_REDUNDANCY_DROPS = (
+    "income_period_type",
+    "balance_period_type",
+    "income_revenue_signed_log",
+    "income_parent_net_income_signed_log",
+    "balance_total_assets_log",
+    "balance_total_liabilities_log",
+    "cashflow_operating_signed_log",
+    "cashflow_free_signed_log",
+    "return_1d",
+    "technical_boll_mid_bfq",
+    "technical_xsii_td2_bfq",
+)
+COMPACT_FINANCIAL_REPLACEMENTS = {
+    "balance_other_receivables": "balance_other_receivables_total",
+    "balance_other_payables": "balance_other_payables_total",
+    "balance_advances_from_customers": (
+        "balance_customer_advances_and_contract_liabilities"
+    ),
+}
+REFRESHED_BASE_FEATURES = (
+    "industry_ret1_mean",
+    "industry_ret5_mean",
+    "industry_breadth_ret1_positive",
+    "industry_ret1_dispersion",
+    "industry_relative_ret5",
+    "industry_relative_ret20",
+    "industry_member_count_log",
+    "industry_source_age_days",
+    "industry_missing",
+    "log_total_market_value",
+    "log_circulating_market_value",
+    "circulating_market_value_ratio",
+    "signed_log_pe",
+    "signed_log_pb",
+    "log_turnover_rate",
+    "log_total_share",
+    "log_float_share",
+    "float_share_ratio",
+    "share_source_age_days",
+    "valuation_missing",
+)
 
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT / "daily_research/studies/seq100_quality_liquidity_model.json"
@@ -196,8 +248,8 @@ def _audit_manifest(audit_root: Path = DEFAULT_AUDIT_ROOT) -> dict[str, Any]:
 def _catalog_and_registry(
     *, ready_root: Path, audit_root: Path, ready_manifest: Mapping[str, Any]
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    audit_catalog_path = audit_root / "numeric_feature_catalog.parquet"
-    catalog = pd.read_parquet(audit_catalog_path)
+    del audit_root
+    catalog = descriptive._feature_catalog(ready_manifest, ready_root)
     registry = pd.read_parquet(Path(ready_manifest["feature_registry"]["path"]))
     required = {
         "feature_name",
@@ -244,16 +296,11 @@ def _label_manifest() -> dict[str, Any]:
 def _feature_contract(
     *, catalog: pd.DataFrame, registry: pd.DataFrame, base_manifest: Mapping[str, Any]
 ) -> dict[str, Any]:
+    del registry
     base_catalog = pd.DataFrame(base_manifest["continuous_catalog"])
     base_names = base_catalog["name"].astype(str).tolist()
     if ready.LEGACY_LISTING_AGE_FIELD not in base_names:
         raise ModelError("base_manifest_listing_age_field_missing")
-    base_valid_names = [
-        name for name in base_names if name != ready.LEGACY_LISTING_AGE_FIELD
-    ]
-    base_rows = catalog[catalog["block"].eq("existing_seq100_base")].copy()
-    if len(base_rows) != 295 or set(base_rows["feature_name"]) != set(base_valid_names):
-        raise ModelError("base_reuse_feature_contract_mismatch")
     base_index = dict(
         zip(
             base_catalog["name"].astype(str),
@@ -261,15 +308,6 @@ def _feature_contract(
             strict=True,
         )
     )
-    base_valid_names.sort(key=lambda name: base_index[name])
-    extra = catalog[~catalog["block"].eq("existing_seq100_base")].copy()
-    if len(extra) != 333:
-        raise ModelError("extra_numeric_feature_contract_mismatch")
-    extra_names = extra["feature_name"].astype(str).tolist()
-    extra_index = {name: index for index, name in enumerate(extra_names)}
-    metadata = registry[registry["eligibility"].eq("availability_metadata")].copy()
-    if len(metadata) != 13 or metadata["feature_name"].duplicated().any():
-        raise ModelError("availability_metadata_contract_mismatch")
 
     def names_where(mask: pd.Series) -> list[str]:
         return catalog.loc[mask, "feature_name"].astype(str).tolist()
@@ -286,54 +324,62 @@ def _feature_contract(
         catalog["block"].eq("traditional_moneyflow_features")
         & catalog["eligibility"].eq("formal_candidate")
     )
-    margin = names_where(
-        catalog["block"].eq("margin_features")
-        & catalog["eligibility"].eq("formal_candidate")
-    )
-    research = names_where(catalog["analytic_family"].eq("research_reports"))
-    financial = names_where(
-        catalog["block"].eq("financial_statement_extensions")
-        & catalog["eligibility"].eq("availability_gated")
-    )
     full_core = [*legacy, *technical, *moneyflow]
-    gated = [*margin, *research, *financial]
-    groups = {
-        "legacy_core": legacy,
-        "legacy_plus_technical": [*legacy, *technical],
-        "legacy_plus_moneyflow": [*legacy, *moneyflow],
-        "full_core": full_core,
-        "margin": margin,
-        "research": research,
-        "financial_extensions": financial,
-        "all_gated": gated,
-    }
-    expected = {
-        "legacy_core": 493,
-        "legacy_plus_technical": 571,
-        "legacy_plus_moneyflow": 509,
-        "full_core": 587,
-        "margin": 12,
-        "research": 25,
-        "financial_extensions": 4,
-        "all_gated": 41,
-    }
-    for name, count in expected.items():
-        if len(groups[name]) != count:
-            raise ModelError(
-                f"feature_group_count_mismatch:{name}:{len(groups[name])}:{count}"
+    if len(full_core) != 587 or len(set(full_core)) != 587:
+        raise ModelError("full_core_source_contract_mismatch")
+    catalog_by_name = catalog.set_index("feature_name", drop=False)
+    drops = set(COMPACT_CONSTANT_DROPS) | set(COMPACT_REDUNDANCY_DROPS)
+    if not drops.issubset(full_core):
+        raise ModelError(f"compact_drop_missing:{sorted(drops - set(full_core))}")
+    if not set(COMPACT_FINANCIAL_REPLACEMENTS).issubset(full_core):
+        raise ModelError("compact_replacement_source_missing")
+    replacement_names = set(COMPACT_FINANCIAL_REPLACEMENTS.values())
+    if not replacement_names.issubset(catalog_by_name.index):
+        raise ModelError(
+            f"compact_replacement_target_missing:{sorted(replacement_names - set(catalog_by_name.index))}"
+        )
+
+    compact_names: list[str] = []
+    compact_rows: list[dict[str, Any]] = []
+    decisions: list[dict[str, str]] = []
+    for name in full_core:
+        if name in drops:
+            reason = (
+                "constant_on_frozen_2011_2025_support"
+                if name in COMPACT_CONSTANT_DROPS
+                else "conservative_semantic_redundancy"
             )
-    if len(set(full_core + gated)) != 628:
-        raise ModelError("feature_group_union_count_mismatch")
+            decisions.append({"feature_name": name, "action": "drop", "reason": reason})
+            continue
+        selected_name = COMPACT_FINANCIAL_REPLACEMENTS.get(name, name)
+        row = dict(catalog_by_name.loc[selected_name])
+        compact_names.append(selected_name)
+        compact_rows.append(row)
+        if selected_name != name:
+            decisions.append(
+                {
+                    "feature_name": name,
+                    "action": "replace",
+                    "replacement": selected_name,
+                    "reason": "complete_statement_semantics",
+                }
+            )
+    compact_catalog = pd.DataFrame(compact_rows).reset_index(drop=True)
+    if len(compact_names) != 562 or len(set(compact_names)) != 562:
+        raise ModelError(
+            f"compact_core_count_or_uniqueness_mismatch:{len(compact_names)}:{len(set(compact_names))}"
+        )
+    if set(REFRESHED_BASE_FEATURES) - set(compact_names):
+        raise ModelError(
+            f"refreshed_base_feature_not_selected:{sorted(set(REFRESHED_BASE_FEATURES) - set(compact_names))}"
+        )
     return {
-        "base_names": base_valid_names,
         "base_index": base_index,
-        "extra_names": extra_names,
-        "extra_index": extra_index,
-        "metadata": metadata[
-            ["feature_name", "physical_column", "block", "source_field"]
-        ].to_dict("records"),
-        "groups": groups,
-        "catalog": catalog,
+        "groups": {COMPACT_VARIANT: compact_names},
+        "catalog": compact_catalog,
+        "decisions": decisions,
+        "source_full_core_count": len(full_core),
+        "compact_feature_count": len(compact_names),
     }
 
 
@@ -405,73 +451,241 @@ def _as_numeric(frame: pd.DataFrame, columns: Sequence[str]) -> np.ndarray:
     return np.column_stack(values).astype(np.float32, copy=False)
 
 
-def _metadata_mapping(values: pd.Series) -> tuple[str, dict[str, int]]:
-    nonnull = values.dropna()
-    if nonnull.empty:
-        return "string", {}
-    if pd.api.types.is_bool_dtype(values) or (
-        pd.api.types.is_numeric_dtype(values)
-        and set(pd.to_numeric(nonnull, errors="coerce").dropna().unique()).issubset(
-            {0, 1}
-        )
-    ):
-        return "boolean", {"0": 0, "1": 1, "False": 0, "True": 1}
-    normalized = nonnull.astype(str).str.strip()
-    unknown = {"", "unknown", "nan", "none", "<na>"}
-    categories = sorted({value for value in normalized if value.lower() not in unknown})
-    return "string", {value: index for index, value in enumerate(categories)}
-
-
-def _encode_metadata(
-    values: pd.Series, *, kind: str, mapping: Mapping[str, int]
-) -> np.ndarray:
-    if kind == "boolean":
-        numeric = pd.to_numeric(values, errors="coerce")
-        if pd.api.types.is_bool_dtype(values):
-            numeric = values.astype("Float64")
-        output = numeric.to_numpy(dtype=np.float64, na_value=np.nan)
-        invalid = np.isfinite(output) & ~np.isin(output, (0.0, 1.0))
-        if bool(invalid.any()):
-            raise ModelError("availability_boolean_value_outside_0_1")
-        return np.where(np.isfinite(output), output, -1).astype(np.int8)
-    normalized = values.astype("string").str.strip()
-    output = np.full(len(values), -1, dtype=np.int8)
-    for value, code in mapping.items():
-        matches = normalized.eq(value).fillna(False).to_numpy(dtype=bool)
-        output[matches] = np.int8(code)
-    unknown = normalized.isna() | normalized.str.lower().isin(
-        {"", "unknown", "nan", "none", "<na>"}
-    )
-    unknown_mask = unknown.fillna(True).to_numpy(dtype=bool)
-    output[unknown_mask] = -1
-    unmatched = ~unknown_mask & (output == -1)
-    if bool(unmatched.any()):
-        raise ModelError("availability_string_value_unmapped")
+def _safe_divide_array(numerator: np.ndarray, denominator: np.ndarray) -> np.ndarray:
+    left = np.asarray(numerator, dtype=np.float64)
+    right = np.asarray(denominator, dtype=np.float64)
+    output = np.full(left.shape, np.nan, dtype=np.float32)
+    valid = np.isfinite(left) & np.isfinite(right) & (np.abs(right) > 1e-12)
+    output[valid] = (left[valid] / right[valid]).astype(np.float32)
     return output
 
 
-def _metadata_mappings(
-    *, ready_manifest: Mapping[str, Any], metadata: Sequence[Mapping[str, Any]]
-) -> dict[str, dict[str, Any]]:
-    result: dict[str, dict[str, Any]] = {}
-    for item in metadata:
-        name = str(item["feature_name"])
-        block = str(item["block"])
-        physical = str(item["physical_column"])
-        values: list[pd.Series] = []
-        for year in YEARS:
-            path = _source_paths(ready_manifest, year)[block]
-            values.append(pd.read_parquet(path, columns=[physical])[physical])
-        combined = pd.concat(values, ignore_index=True)
-        kind, mapping = _metadata_mapping(combined)
-        result[name] = {
-            "kind": kind,
-            "mapping": mapping,
-            "physical_column": physical,
-            "block": block,
-            "source_field": str(item["source_field"]),
+def _signed_log1p_array(values: np.ndarray) -> np.ndarray:
+    array = np.asarray(values, dtype=np.float64)
+    return (np.sign(array) * np.log1p(np.abs(array))).astype(np.float32)
+
+
+def _current_size_source_frame(
+    *,
+    ready_manifest: Mapping[str, Any],
+    year: int,
+    expected_ids: np.ndarray,
+) -> pd.DataFrame:
+    dataset_ids = dict(ready_manifest["qdp_dataset_ids"])
+    spine_path = Path(ready_manifest["row_spine"][str(year)]["path"])
+    valuation_scan = data_prep._scan(
+        ready._active_paths(WORKSPACE_ROOT, "valuation", dataset_ids)
+    )
+    share_scan = data_prep._scan(
+        ready._active_paths(WORKSPACE_ROOT, "share_capital", dataset_ids)
+    )
+    industry_scan = data_prep._scan(
+        ready._active_paths(WORKSPACE_ROOT, "industry_concept", dataset_ids)
+    )
+    spine = str(spine_path).replace("'", "''")
+    sql = f"""
+      SELECT s.candidate_id,s.trade_date,
+             try_cast(v.total_mv AS DOUBLE) AS total_mv,
+             try_cast(v.circ_mv AS DOUBLE) AS circ_mv,
+             try_cast(v.pe AS DOUBLE) AS pe,
+             try_cast(v.pb AS DOUBLE) AS pb,
+             try_cast(v.turnover_rate AS DOUBLE) AS turnover_rate,
+             CASE WHEN sc.total_share_source_date<>''
+                        AND sc.total_share_source_date<=s.trade_date
+                  THEN try_cast(sc.total_share AS DOUBLE) END AS total_share,
+             CASE WHEN sc.float_share_source_date<>''
+                        AND sc.float_share_source_date<=s.trade_date
+                  THEN try_cast(sc.float_share AS DOUBLE) END AS float_share,
+             CASE WHEN sc.float_share_source_date<>''
+                        AND sc.float_share_source_date<=s.trade_date
+                  THEN datediff('day',try_cast(sc.float_share_source_date AS DATE),
+                                      try_cast(s.trade_date AS DATE)) END
+                  AS share_source_age_days,
+             CASE WHEN i.industry_source_date<>''
+                        AND i.industry_source_date<=s.trade_date
+                  THEN datediff('day',try_cast(i.industry_source_date AS DATE),
+                                      try_cast(s.trade_date AS DATE)) END
+                  AS industry_source_age_days
+      FROM read_parquet('{spine}') s
+      LEFT JOIN {valuation_scan} v
+        ON v.symbol=s.symbol AND v.trade_date=s.trade_date
+      LEFT JOIN {share_scan} sc
+        ON sc.symbol=s.symbol AND sc.trade_date=s.trade_date
+      LEFT JOIN {industry_scan} i
+        ON i.symbol=s.symbol AND i.trade_date=s.trade_date
+      ORDER BY s.candidate_id
+    """
+    with duckdb.connect() as connection:
+        frame = connection.execute(sql).fetchdf()
+    return _align_source_frame(frame, expected_ids)
+
+
+def _refreshed_industry_frame(
+    *,
+    ready_manifest: Mapping[str, Any],
+    year: int,
+    expected_ids: np.ndarray,
+    base: np.memmap,
+    base_index: Mapping[str, int],
+) -> pd.DataFrame:
+    diagnostics_path = descriptive._diagnostics_path(ready_manifest, year)
+    diagnostics = pd.read_parquet(
+        diagnostics_path,
+        columns=["candidate_id", "date_idx", "industry"],
+    )
+    candidate_ids = diagnostics["candidate_id"].to_numpy(dtype=np.int64)
+    return_names = ("return_1d", "return_5d", "return_20d")
+    return_columns = np.asarray(
+        [int(base_index[name]) for name in return_names], dtype=np.int32
+    )
+    returns = np.asarray(base[np.ix_(candidate_ids, return_columns)], dtype=np.float32)
+    diagnostics["ret1"] = returns[:, 0]
+    diagnostics["ret5"] = returns[:, 1]
+    diagnostics["ret20"] = returns[:, 2]
+    normalized = diagnostics["industry"].astype("string").str.strip()
+    known = normalized.notna() & ~normalized.str.lower().isin(
+        {"", "unknown", "unavailable", "unclassified", "nan", "none"}
+    )
+    work = diagnostics.loc[known].copy()
+    work["industry"] = normalized.loc[known]
+    ret1 = work["ret1"].to_numpy(dtype=np.float64)
+    work["ret1_square"] = np.square(ret1)
+    work["ret1_positive"] = np.where(
+        np.isfinite(ret1), (ret1 > 0.0).astype(np.float64), np.nan
+    )
+    grouped = work.groupby(["date_idx", "industry"], sort=False, observed=True)
+    aggregates = grouped.agg(
+        industry_ret1_mean=("ret1", "mean"),
+        industry_ret5_mean=("ret5", "mean"),
+        industry_ret20_mean=("ret20", "mean"),
+        industry_ret1_second_moment=("ret1_square", "mean"),
+        industry_breadth_ret1_positive=("ret1_positive", "mean"),
+        industry_member_count=("candidate_id", "size"),
+    ).reset_index()
+    variance = aggregates["industry_ret1_second_moment"].to_numpy(
+        dtype=np.float64
+    ) - np.square(aggregates["industry_ret1_mean"].to_numpy(dtype=np.float64))
+    aggregates["industry_ret1_dispersion"] = np.sqrt(np.maximum(variance, 0.0))
+    aggregates["industry_member_count_log"] = np.log1p(
+        aggregates["industry_member_count"].to_numpy(dtype=np.float64)
+    )
+
+    selected = _align_source_frame(
+        diagnostics[["candidate_id", "date_idx", "industry", "ret5", "ret20"]],
+        expected_ids,
+    )
+    selected["industry"] = selected["industry"].astype("string").str.strip()
+    selected = selected.merge(
+        aggregates,
+        on=["date_idx", "industry"],
+        how="left",
+        sort=False,
+        validate="many_to_one",
+    )
+    if not np.array_equal(
+        selected["candidate_id"].to_numpy(dtype=np.int64), expected_ids
+    ):
+        raise ModelError(f"refreshed_industry_alignment_failed:{year}")
+    selected["industry_relative_ret5"] = (
+        selected["ret5"] - selected["industry_ret5_mean"]
+    )
+    selected["industry_relative_ret20"] = (
+        selected["ret20"] - selected["industry_ret20_mean"]
+    )
+    selected["industry_missing"] = (
+        selected["industry"].isna()
+        | selected["industry"]
+        .str.lower()
+        .isin({"", "unknown", "unavailable", "unclassified", "nan", "none"})
+    ).astype(np.float32)
+    return selected[
+        [
+            "candidate_id",
+            "industry_ret1_mean",
+            "industry_ret5_mean",
+            "industry_breadth_ret1_positive",
+            "industry_ret1_dispersion",
+            "industry_relative_ret5",
+            "industry_relative_ret20",
+            "industry_member_count_log",
+            "industry_missing",
+        ]
+    ]
+
+
+def _refreshed_base_frame(
+    *,
+    ready_manifest: Mapping[str, Any],
+    year: int,
+    expected_ids: np.ndarray,
+    base: np.memmap,
+    base_index: Mapping[str, int],
+) -> pd.DataFrame:
+    source = _current_size_source_frame(
+        ready_manifest=ready_manifest,
+        year=year,
+        expected_ids=expected_ids,
+    )
+    total_mv = pd.to_numeric(source["total_mv"], errors="coerce").to_numpy(
+        dtype=np.float64
+    )
+    circ_mv = pd.to_numeric(source["circ_mv"], errors="coerce").to_numpy(
+        dtype=np.float64
+    )
+    pe = pd.to_numeric(source["pe"], errors="coerce").to_numpy(dtype=np.float64)
+    pb = pd.to_numeric(source["pb"], errors="coerce").to_numpy(dtype=np.float64)
+    turnover = pd.to_numeric(source["turnover_rate"], errors="coerce").to_numpy(
+        dtype=np.float64
+    )
+    total_share = pd.to_numeric(source["total_share"], errors="coerce").to_numpy(
+        dtype=np.float64
+    )
+    float_share = pd.to_numeric(source["float_share"], errors="coerce").to_numpy(
+        dtype=np.float64
+    )
+    refreshed = pd.DataFrame(
+        {
+            "candidate_id": expected_ids,
+            "log_total_market_value": np.log1p(np.maximum(total_mv, 0.0)),
+            "log_circulating_market_value": np.log1p(np.maximum(circ_mv, 0.0)),
+            "circulating_market_value_ratio": _safe_divide_array(circ_mv, total_mv),
+            "signed_log_pe": _signed_log1p_array(pe),
+            "signed_log_pb": _signed_log1p_array(pb),
+            "log_turnover_rate": np.log1p(np.maximum(turnover, 0.0)),
+            "log_total_share": np.log1p(np.maximum(total_share, 0.0)),
+            "log_float_share": np.log1p(np.maximum(float_share, 0.0)),
+            "float_share_ratio": _safe_divide_array(float_share, total_share),
+            "share_source_age_days": pd.to_numeric(
+                source["share_source_age_days"], errors="coerce"
+            ),
+            "industry_source_age_days": pd.to_numeric(
+                source["industry_source_age_days"], errors="coerce"
+            ),
+            "valuation_missing": ~(
+                np.isfinite(total_mv)
+                & np.isfinite(circ_mv)
+                & np.isfinite(pe)
+                & np.isfinite(pb)
+            ),
         }
-    return result
+    )
+    industry = _refreshed_industry_frame(
+        ready_manifest=ready_manifest,
+        year=year,
+        expected_ids=expected_ids,
+        base=base,
+        base_index=base_index,
+    )
+    refreshed = refreshed.merge(
+        industry,
+        on="candidate_id",
+        how="left",
+        sort=False,
+        validate="one_to_one",
+    )
+    if set(REFRESHED_BASE_FEATURES) - set(refreshed.columns):
+        raise ModelError(f"refreshed_base_columns_missing:{year}")
+    return refreshed[["candidate_id", *REFRESHED_BASE_FEATURES]]
 
 
 def _write_feature_storage(
@@ -482,142 +696,141 @@ def _write_feature_storage(
     input_dir: Path,
 ) -> dict[str, Any]:
     row_count = len(row_index)
-    extra_names = list(contract["extra_names"])
-    extra_index = dict(contract["extra_index"])
+    compact_names = list(contract["groups"][COMPACT_VARIANT])
+    compact_index = {name: index for index, name in enumerate(compact_names)}
     catalog = pd.DataFrame(contract["catalog"])
-    extra_path = input_dir / "extra_numeric.float32.dat"
-    extra_partial = input_dir / "extra_numeric.float32.dat.partial"
-    availability_path = input_dir / "availability.int8.dat"
-    availability_partial = input_dir / "availability.int8.dat.partial"
-    extra_mm = np.memmap(
-        extra_partial, dtype=np.float32, mode="w+", shape=(len(extra_names), row_count)
+    compact_path = input_dir / "compact_core.float32.dat"
+    compact_partial = input_dir / "compact_core.float32.dat.partial"
+    compact_mm = np.memmap(
+        compact_partial,
+        dtype=np.float32,
+        mode="w+",
+        shape=(row_count, len(compact_names)),
     )
-    extra_mm[:] = np.nan
-    metadata = list(contract["metadata"])
-    metadata_mappings = _metadata_mappings(
-        ready_manifest=ready_manifest, metadata=metadata
+    base_manifest = _base_manifest()
+    base_record = base_manifest["files"]["continuous"]
+    base = np.memmap(
+        Path(base_record["path"]),
+        dtype=np.float32,
+        mode="r",
+        shape=tuple(int(value) for value in base_manifest["continuous_shape"]),
     )
-    availability_mm = np.memmap(
-        availability_partial, dtype=np.int8, mode="w+", shape=(len(metadata), row_count)
+    base_index = dict(contract["base_index"])
+    refreshed_names = set(REFRESHED_BASE_FEATURES)
+    base_rows = catalog[catalog["block"].eq("existing_seq100_base")]
+    direct_base_names = [
+        name
+        for name in base_rows["feature_name"].astype(str)
+        if name not in refreshed_names
+    ]
+    direct_source_columns = np.asarray(
+        [int(base_index[name]) for name in direct_base_names], dtype=np.int32
     )
-    availability_mm[:] = -1
-    metadata_index = {
-        str(item["feature_name"]): index for index, item in enumerate(metadata)
-    }
+    direct_target_columns = np.asarray(
+        [int(compact_index[name]) for name in direct_base_names], dtype=np.int32
+    )
     block_order = [
         "minute",
         "fundamental",
         "event",
         "membership_context",
         "tushare_technical_candidates",
-        "margin_features",
         "traditional_moneyflow_features",
         "financial_statement_extensions",
     ]
+    yearly_profiles: dict[str, Any] = {}
     for year in YEARS:
         year_rows = row_index["trade_date"].str.startswith(f"{year}-").to_numpy()
         positions = np.flatnonzero(year_rows)
+        if not positions.size or not np.array_equal(
+            positions, np.arange(positions[0], positions[-1] + 1, dtype=np.int64)
+        ):
+            raise ModelError(f"model_input_year_rows_not_contiguous:{year}")
         expected_ids = row_index.loc[positions, "candidate_id"].to_numpy(dtype=np.int64)
+        for start in range(0, len(positions), 65_536):
+            stop = min(start + 65_536, len(positions))
+            source_ids = expected_ids[start:stop]
+            values = np.asarray(
+                base[np.ix_(source_ids, direct_source_columns)], dtype=np.float32
+            )
+            target_rows = positions[start:stop]
+            compact_mm[np.ix_(target_rows, direct_target_columns)] = values
+        refreshed = _refreshed_base_frame(
+            ready_manifest=ready_manifest,
+            year=year,
+            expected_ids=expected_ids,
+            base=base,
+            base_index=base_index,
+        )
+        for name in REFRESHED_BASE_FEATURES:
+            compact_mm[positions, compact_index[name]] = pd.to_numeric(
+                refreshed[name], errors="coerce"
+            ).to_numpy(dtype=np.float32, na_value=np.nan)
         paths = _source_paths(ready_manifest, year)
         for block in block_order:
             block_features = catalog[catalog["block"].eq(block)]
-            block_metadata = [item for item in metadata if str(item["block"]) == block]
-            if block_features.empty and not block_metadata:
+            if block_features.empty:
                 continue
             path = paths.get(block)
             if path is None:
                 raise ModelError(f"source_block_path_missing:{year}:{block}")
             physical = block_features["physical_column"].astype(str).tolist()
-            metadata_physical = [
-                str(item["physical_column"]) for item in block_metadata
-            ]
-            columns = list(
-                dict.fromkeys(["candidate_id", *physical, *metadata_physical])
-            )
+            columns = list(dict.fromkeys(["candidate_id", *physical]))
             frame = _align_source_frame(
                 pd.read_parquet(path, columns=columns), expected_ids
             )
-            if physical:
-                numeric = _as_numeric(frame, physical)
-                for offset, name in enumerate(
-                    block_features["feature_name"].astype(str)
-                ):
-                    extra_mm[extra_index[name], positions] = numeric[:, offset]
-            for item in block_metadata:
-                name = str(item["feature_name"])
-                encoded = _encode_metadata(
-                    frame[str(item["physical_column"])],
-                    kind=str(metadata_mappings[name]["kind"]),
-                    mapping=metadata_mappings[name]["mapping"],
-                )
-                availability_mm[metadata_index[name], positions] = encoded
+            numeric = _as_numeric(frame, physical)
+            for offset, name in enumerate(block_features["feature_name"].astype(str)):
+                compact_mm[positions, compact_index[name]] = numeric[:, offset]
             del frame
-        extra_mm.flush()
-        availability_mm.flush()
-    extra_sample_rows = np.asarray([0, row_count // 2, row_count - 1], dtype=np.int64)
-    extra_sample_hash = _stable_hash(
-        extra_mm[:, extra_sample_rows].astype(np.float32).tolist()
-    )
-    availability_sample_hash = _stable_hash(
-        availability_mm[:, extra_sample_rows].astype(np.int8).tolist()
-    )
-    del extra_mm, availability_mm
+        compact_mm.flush()
+        yearly_profiles[str(year)] = {
+            "row_count": len(positions),
+            "refreshed_base_missing": {
+                name: int(pd.to_numeric(refreshed[name], errors="coerce").isna().sum())
+                for name in REFRESHED_BASE_FEATURES
+            },
+            "industry_missing_nonzero_count": int(
+                (
+                    pd.to_numeric(refreshed["industry_missing"], errors="coerce")
+                    .fillna(1)
+                    .ne(0)
+                ).sum()
+            ),
+        }
+        del refreshed
+    sample_rows = np.asarray([0, row_count // 2, row_count - 1], dtype=np.int64)
+    sample_hash = _stable_hash(compact_mm[sample_rows, :].astype(np.float32).tolist())
+    del compact_mm, base
     gc.collect()
     return {
-        "extra": {
-            "path": str(extra_partial.resolve()),
-            "final_path": str(extra_path.resolve()),
+        "compact": {
+            "path": str(compact_partial.resolve()),
+            "final_path": str(compact_path.resolve()),
             "dtype": "float32",
-            "shape": [len(extra_names), row_count],
-            "sha256": _sha256(extra_partial),
-            "sample_rows": extra_sample_rows.tolist(),
-            "sample_hash": extra_sample_hash,
+            "layout": "row_major",
+            "shape": [row_count, len(compact_names)],
+            "sha256": _sha256(compact_partial),
+            "sample_rows": sample_rows.tolist(),
+            "sample_hash": sample_hash,
         },
-        "availability": {
-            "path": str(availability_partial.resolve()),
-            "final_path": str(availability_path.resolve()),
-            "dtype": "int8",
-            "shape": [len(metadata), row_count],
-            "sha256": _sha256(availability_partial),
-            "sample_rows": extra_sample_rows.tolist(),
-            "sample_hash": availability_sample_hash,
-            "mappings": metadata_mappings,
-        },
+        "yearly_profiles": yearly_profiles,
     }
 
 
 def _feature_records(contract: Mapping[str, Any]) -> list[dict[str, Any]]:
     catalog = pd.DataFrame(contract["catalog"])
-    base_index = dict(contract["base_index"])
-    extra_index = dict(contract["extra_index"])
-    metadata = {str(item["feature_name"]): item for item in contract["metadata"]}
     rows: list[dict[str, Any]] = []
-    for row in catalog.to_dict("records"):
+    for index, row in enumerate(catalog.to_dict("records")):
         name = str(row["feature_name"])
-        if name in base_index and name != ready.LEGACY_LISTING_AGE_FIELD:
-            storage, index = "base", int(base_index[name])
-        else:
-            storage, index = "extra", int(extra_index[name])
         rows.append(
             {
                 "feature_name": name,
-                "storage": storage,
+                "storage": "compact",
                 "column_index": index,
                 "block": str(row["block"]),
                 "analytic_family": str(row["analytic_family"]),
                 "eligibility": str(row["eligibility"]),
-                "physical_column": str(row["physical_column"]),
-            }
-        )
-    for name, row in metadata.items():
-        rows.append(
-            {
-                "feature_name": name,
-                "storage": "availability",
-                "column_index": int(list(metadata).index(name)),
-                "block": str(row["block"]),
-                "analytic_family": "availability_metadata",
-                "eligibility": "availability_metadata",
                 "physical_column": str(row["physical_column"]),
             }
         )
@@ -631,13 +844,13 @@ def _model_input_fingerprint(
     audit_root: Path,
     contract: Mapping[str, Any],
 ) -> str:
+    del audit_root
     return _stable_hash(
         {
             "study_id": STUDY_ID,
             "config_sha256": _sha256(config_path),
             "ready_manifest_sha256": _sha256(ready_root / "manifest.json"),
             "ready_readiness_sha256": _sha256(ready_root / "readiness.json"),
-            "audit_manifest_sha256": _sha256(audit_root / "manifest.json"),
             "base_feature_manifest_sha256": _sha256(data_prep.BASE_FEATURE_MANIFEST),
             "label_manifest_sha256": _sha256(data_prep.LABEL_MANIFEST),
             "numeric_feature_names": pd.DataFrame(contract["catalog"])["feature_name"]
@@ -674,27 +887,38 @@ def _verify_model_input_files(
         or not row_index["candidate_id"].is_unique
     ):
         raise ModelError("model_input_row_index_count_or_key_mismatch")
-    for key in ("extra", "availability"):
-        record = dict(manifest["storage"][key])
-        path = Path(record["path"])
-        if not path.is_file() or (full_hash and _sha256(path) != record["sha256"]):
-            raise ModelError(f"model_input_{key}_hash_mismatch")
-        expected_size = (
-            int(np.prod(record["shape"])) * np.dtype(record["dtype"]).itemsize
-        )
-        if int(path.stat().st_size) != expected_size:
-            raise ModelError(f"model_input_{key}_size_mismatch")
-        values = np.memmap(
-            path,
-            mode="r",
-            dtype=np.dtype(record["dtype"]),
-            shape=tuple(int(value) for value in record["shape"]),
-        )
-        sample_rows = np.asarray(record["sample_rows"], dtype=np.int64)
-        sample_hash = _stable_hash(values[:, sample_rows].tolist())
-        del values
-        if sample_hash != record["sample_hash"]:
-            raise ModelError(f"model_input_{key}_sample_hash_mismatch")
+    record = dict(manifest["storage"]["compact"])
+    path = Path(record["path"])
+    if not path.is_file() or (full_hash and _sha256(path) != record["sha256"]):
+        raise ModelError("model_input_compact_hash_mismatch")
+    expected_size = int(np.prod(record["shape"])) * np.dtype(record["dtype"]).itemsize
+    if int(path.stat().st_size) != expected_size:
+        raise ModelError("model_input_compact_size_mismatch")
+    values = np.memmap(
+        path,
+        mode="r",
+        dtype=np.dtype(record["dtype"]),
+        shape=tuple(int(value) for value in record["shape"]),
+    )
+    sample_rows = np.asarray(record["sample_rows"], dtype=np.int64)
+    sample_hash = _stable_hash(values[sample_rows, :].tolist())
+    del values
+    if sample_hash != record["sample_hash"]:
+        raise ModelError("model_input_compact_sample_hash_mismatch")
+    contract_record = dict(manifest["compact_feature_contract"])
+    contract_path = Path(contract_record["path"])
+    if not contract_path.is_file() or (
+        full_hash and _sha256(contract_path) != contract_record["sha256"]
+    ):
+        raise ModelError("model_input_feature_contract_hash_mismatch")
+    contract = pd.read_parquet(contract_path)
+    if (
+        len(contract) != 562
+        or contract["feature_name"].duplicated().any()
+        or contract["feature_name"].astype(str).tolist()
+        != list(manifest["feature_groups"][COMPACT_VARIANT])
+    ):
+        raise ModelError("model_input_feature_contract_content_mismatch")
     return {"row_index": row_index}
 
 
@@ -707,7 +931,6 @@ def prepare(
 ) -> dict[str, Any]:
     _load_config(study_path)
     ready_manifest = _source_manifest(ready_root)
-    _audit_manifest(audit_root)
     catalog, registry = _catalog_and_registry(
         ready_root=ready_root, audit_root=audit_root, ready_manifest=ready_manifest
     )
@@ -735,19 +958,16 @@ def prepare(
     row_index = _row_index(ready_manifest)
     row_partial = input_dir / "row_index.parquet.partial"
     row_path = input_dir / "row_index.parquet"
+    contract_partial = input_dir / "compact_feature_contract.parquet.partial"
+    contract_path = input_dir / "compact_feature_contract.parquet"
     _write_parquet(row_index, row_partial)
+    _write_parquet(pd.DataFrame(contract["catalog"]), contract_partial)
     storage = _write_feature_storage(
         ready_manifest=ready_manifest,
         row_index=row_index,
         contract=contract,
         input_dir=input_dir,
     )
-    base_record = {
-        "path": str(data_prep.BASE_FEATURE_MANIFEST.resolve()),
-        "sha256": _sha256(data_prep.BASE_FEATURE_MANIFEST),
-        "shape": list(base_manifest["continuous_shape"]),
-        "dtype": "float32",
-    }
     label_record = {
         "path": str(data_prep.LABEL_MANIFEST.resolve()),
         "sha256": _sha256(data_prep.LABEL_MANIFEST),
@@ -766,15 +986,25 @@ def prepare(
             columns=list(row_index.columns),
             row_count=len(row_index),
         ),
-        "base_feature_manifest": base_record,
         "label_manifest": label_record,
         "storage": storage,
         "features": features,
         "feature_groups": contract["groups"],
-        "metadata_mappings": storage["availability"]["mappings"],
+        "compact_feature_contract": _file_record(
+            contract_partial,
+            row_count=len(contract["catalog"]),
+            decisions=contract["decisions"],
+            source_full_core_count=contract["source_full_core_count"],
+        ),
+        "build_sources": {
+            "legacy_base_feature_manifest": {
+                "path": str(data_prep.BASE_FEATURE_MANIFEST.resolve()),
+                "sha256": _sha256(data_prep.BASE_FEATURE_MANIFEST),
+                "use": "copy_unaffected_columns_and_recompute_repaired_columns",
+            }
+        },
         "source": {
             "training_ready_manifest": _file_record(ready_root / "manifest.json"),
-            "descriptive_audit_manifest": _file_record(audit_root / "manifest.json"),
             "maximum_outcome_date": MAXIMUM_OUTCOME_DATE,
             "forbidden_year": FORBIDDEN_YEAR,
         },
@@ -784,10 +1014,11 @@ def prepare(
     _verify_model_input_files(manifest, full_hash=False)
     os.replace(row_partial, row_path)
     manifest["row_index"]["path"] = str(row_path.resolve())
-    for key in ("extra", "availability"):
-        record = manifest["storage"][key]
-        os.replace(Path(record["path"]), Path(record["final_path"]))
-        record["path"] = record.pop("final_path")
+    os.replace(contract_partial, contract_path)
+    manifest["compact_feature_contract"]["path"] = str(contract_path.resolve())
+    record = manifest["storage"]["compact"]
+    os.replace(Path(record["path"]), Path(record["final_path"]))
+    record["path"] = record.pop("final_path")
     _write_json(manifest_path, manifest)
     return manifest
 
@@ -807,27 +1038,12 @@ class ModelInputs:
         self.years = (
             self.row_index["trade_date"].str.slice(0, 4).astype(np.int16).to_numpy()
         )
-        self.base_manifest = _read_json(Path(manifest["base_feature_manifest"]["path"]))
-        base_record = self.base_manifest["files"]["continuous"]
-        self.base = np.memmap(
-            Path(base_record["path"]),
+        compact_record = manifest["storage"]["compact"]
+        self.compact = np.memmap(
+            Path(compact_record["path"]),
             dtype=np.float32,
             mode="r",
-            shape=tuple(int(value) for value in self.base_manifest["continuous_shape"]),
-        )
-        extra_record = manifest["storage"]["extra"]
-        self.extra = np.memmap(
-            Path(extra_record["path"]),
-            dtype=np.float32,
-            mode="r",
-            shape=tuple(int(value) for value in extra_record["shape"]),
-        )
-        availability_record = manifest["storage"]["availability"]
-        self.availability = np.memmap(
-            Path(availability_record["path"]),
-            dtype=np.int8,
-            mode="r",
-            shape=tuple(int(value) for value in availability_record["shape"]),
+            shape=tuple(int(value) for value in compact_record["shape"]),
         )
         label_manifest = _read_json(Path(manifest["label_manifest"]["path"]))
         self.label_manifest = label_manifest
@@ -865,7 +1081,6 @@ class ModelInputs:
             str(name): list(values)
             for name, values in dict(manifest["feature_groups"]).items()
         }
-        self.metadata_mappings = dict(manifest.get("metadata_mappings", {}) or {})
         self._target_cache: dict[str, np.ndarray] = {}
         self._valid_cache: dict[str, np.ndarray] = {}
 
@@ -954,71 +1169,18 @@ class ModelInputs:
                 raise ModelError(f"model_feature_not_registered:{name}")
             records.append(self.feature_map[name])
         positions: dict[str, list[tuple[int, int]]] = {
-            "base": [],
-            "extra": [],
-            "availability": [],
+            "compact": [],
         }
         for position, record in enumerate(records):
             positions[str(record["storage"])].append(
                 (position, int(record["column_index"]))
             )
-        categorical_positions = [
-            position
-            for position, record in enumerate(records)
-            if record["storage"] == "availability"
-        ]
         return {
             "feature_names": names,
             "records": records,
             "positions": positions,
-            "categorical_positions": categorical_positions,
+            "categorical_positions": [],
         }
-
-    def availability_mask(self, family: str, rows: np.ndarray) -> np.ndarray:
-        local = np.asarray(rows, dtype=np.int64)
-
-        def values(name: str) -> np.ndarray:
-            record = self.feature_map[name]
-            if record["storage"] != "availability":
-                raise ModelError(f"availability_feature_not_metadata:{name}")
-            return np.asarray(
-                self.availability[int(record["column_index"]), local], dtype=np.int8
-            )
-
-        if family == "margin":
-            return values("margin_eligibility_eligible") == 1
-        if family == "research":
-            names = (
-                "research_metadata_source_covered",
-                "research_forecast_source_complete",
-                "research_forecast_source_partial",
-            )
-            result = np.zeros(len(local), dtype=bool)
-            for name in names:
-                if (
-                    name in self.feature_map
-                    and self.feature_map[name]["storage"] == "extra"
-                ):
-                    value = np.asarray(
-                        self.extra[int(self.feature_map[name]["column_index"]), local]
-                    )
-                    result |= np.isfinite(value) & (value > 0)
-            return result
-        if family == "financial_extensions":
-            conflict = values("balance_extension_source_conflict")
-            result = np.zeros(len(local), dtype=bool)
-            for name in self.feature_groups["financial_extensions"]:
-                record = self.feature_map[name]
-                value = np.asarray(self.extra[int(record["column_index"]), local])
-                result |= np.isfinite(value)
-            return result & (conflict != 1)
-        if family == "all_gated":
-            return (
-                self.availability_mask("margin", local)
-                | self.availability_mask("research", local)
-                | self.availability_mask("financial_extensions", local)
-            )
-        raise ModelError(f"unknown_availability_family:{family}")
 
 
 def _make_sequence(
@@ -1049,20 +1211,12 @@ def _make_sequence(
                     [pair[0] for pair in pairs], dtype=np.int64
                 )
                 columns = np.asarray([pair[1] for pair in pairs], dtype=np.int32)
-                if storage == "base":
-                    values = np.asarray(
-                        inputs.base[np.ix_(inputs.candidate_ids[global_rows], columns)],
-                        dtype=np.float64,
-                    )
-                elif storage == "extra":
-                    values = np.asarray(
-                        inputs.extra[np.ix_(columns, global_rows)].T, dtype=np.float64
-                    )
-                else:
-                    values = np.asarray(
-                        inputs.availability[np.ix_(columns, global_rows)].T,
-                        dtype=np.float64,
-                    )
+                if storage != "compact":
+                    raise ModelError(f"unknown_model_storage:{storage}")
+                values = np.asarray(
+                    inputs.compact[np.ix_(global_rows, columns)],
+                    dtype=np.float64,
+                )
                 output[:, target_positions] = values
             return output
 
@@ -1434,16 +1588,19 @@ def _task_plan(config: Mapping[str, Any]) -> list[dict[str, Any]]:
     adaptive_targets = ("risk_10", "risk_20", "state_10")
     for target in adaptive_targets:
         for year in ROLLING_YEARS:
-            add(stage="tuning", target=target, year=year, variant="legacy_core")
+            add(stage="tuning", target=target, year=year, variant=COMPACT_VARIANT)
     for target in ("mfe_10", "mfe_20"):
-        for variant in CORE_VARIANTS:
-            for year in ROLLING_YEARS:
-                add(stage="mfe_core", target=target, year=year, variant=variant)
+        for year in ROLLING_YEARS:
+            add(stage="mfe_core", target=target, year=year, variant=COMPACT_VARIANT)
     for target in adaptive_targets:
-        for variant in RISK_STATE_CORE_VARIANTS:
-            for year in ROLLING_YEARS:
-                add(stage="risk_state_core", target=target, year=year, variant=variant)
-    if len(tasks) != 51 or len({task["task_id"] for task in tasks}) != 51:
+        for year in ROLLING_YEARS:
+            add(
+                stage="risk_state_core",
+                target=target,
+                year=year,
+                variant=COMPACT_VARIANT,
+            )
+    if len(tasks) != 24 or len({task["task_id"] for task in tasks}) != 24:
         raise ModelError(f"task_plan_contract_mismatch:{len(tasks)}")
     return tasks
 
@@ -1496,21 +1653,6 @@ def _task_complete(path: Path, *, fingerprint: str) -> bool:
         return False
 
 
-def _metadata_names(inputs: ModelInputs, block: str | None = None) -> list[str]:
-    return [
-        str(item["feature_name"])
-        for item in inputs.feature_records
-        if item["storage"] == "availability"
-        and (block is None or str(item["block"]) == block)
-    ]
-
-
-def _load_selection(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ModelError(f"required_selection_missing:{path}")
-    return _read_json(path)
-
-
 def _effective_features(
     *,
     inputs: ModelInputs,
@@ -1519,32 +1661,8 @@ def _effective_features(
 ) -> tuple[list[str], str]:
     variant = str(task["variant"])
     stage = str(task["stage"])
-    target = str(task["target"])
     if stage in {"tuning", "mfe_core", "risk_state_core"}:
         return list(inputs.feature_groups[variant]), variant
-    if stage == "mfe_gated":
-        selection = _load_selection(
-            output_root / "selection" / "mfe_core_selection.json"
-        )
-        base_variant = str(selection["targets"][target]["selected_core"])
-        family = str(task["gated_family"])
-        names = [*inputs.feature_groups[base_variant], *inputs.feature_groups[family]]
-        if family == "margin":
-            names.extend(_metadata_names(inputs, "margin_features"))
-        elif family == "financial_extensions":
-            names.extend(_metadata_names(inputs, "financial_statement_extensions"))
-        return list(dict.fromkeys(names)), base_variant
-    if stage == "risk_state_gated":
-        selection = _load_selection(
-            output_root / "selection" / "risk_state_core_selection.json"
-        )
-        base_variant = str(selection["targets"][target]["selected_core"])
-        names = [
-            *inputs.feature_groups[base_variant],
-            *inputs.feature_groups["all_gated"],
-            *_metadata_names(inputs),
-        ]
-        return list(dict.fromkeys(names)), base_variant
     raise ModelError(f"unknown_task_stage:{stage}")
 
 
@@ -1582,24 +1700,8 @@ def _observed_subset_metrics(
     rows: np.ndarray,
     prediction: np.ndarray,
 ) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for family in (*GATED_FAMILIES, "all_gated"):
-        mask = inputs.availability_mask(family, rows)
-        selected_rows = rows[mask]
-        if int(mask.sum()) < 100:
-            result[family] = {"row_count": int(mask.sum()), "metrics": None}
-            continue
-        try:
-            _, metrics = _evaluate_prediction(
-                inputs=inputs,
-                task=task,
-                rows=selected_rows,
-                prediction=np.asarray(prediction)[mask],
-            )
-        except ModelError:
-            metrics = None
-        result[family] = {"row_count": int(mask.sum()), "metrics": metrics}
-    return result
+    del inputs, task, rows, prediction
+    return {}
 
 
 def _importance_frame(
@@ -1619,8 +1721,6 @@ def _importance_frame(
     for name, gain_value, split_value in zip(feature_names, gain, split, strict=True):
         record = inputs.feature_map[str(name)]
         family = str(record["analytic_family"])
-        if record["storage"] == "availability":
-            family = f"availability_{record['block']}"
         rows.append(
             {
                 "task_id": str(task["task_id"]),
@@ -1711,7 +1811,7 @@ def _run_training_task(
         if task["kind"] == "mfe":
             iterations = int(config["model"]["fixed_mfe_rounds"])
         else:
-            tuning_id = f"tuning__{task['target']}__legacy_core__{outer_year}"
+            tuning_id = f"tuning__{task['target']}__{COMPACT_VARIANT}__{outer_year}"
             tuning = _read_json(_task_result_path(output_root, tuning_id))
             iterations = int(tuning["best_iteration"])
         model = lgb.train(
@@ -1788,12 +1888,7 @@ def _run_training_task(
         "gated_family": task.get("gated_family"),
         "feature_count": len(feature_names),
         "feature_names": feature_names,
-        "availability_feature_count": int(
-            sum(
-                inputs.feature_map[name]["storage"] == "availability"
-                for name in feature_names
-            )
-        ),
+        "availability_feature_count": 0,
         "train_row_count": len(fold["train_rows"]),
         "evaluation_row_count": len(fold["evaluation_rows"]),
         "candidate_prediction_row_count": len(prediction_rows),
@@ -1858,454 +1953,16 @@ def _partition_results(
     return formal, diagnostic
 
 
-def _results_for(
-    results: Mapping[str, Mapping[str, Any]], *, target: str, variant: str
-) -> dict[int, dict[str, Any]]:
-    selected: dict[int, dict[str, Any]] = {}
-    for result in results.values():
-        if (
-            result.get("target") == target
-            and result.get("variant") == variant
-            and result.get("stage") not in {"tuning"}
-        ):
-            selected[int(result["model_year"])] = dict(result)
-    return selected
-
-
-def _metric_deltas(
-    candidate: Mapping[int, Mapping[str, Any]],
-    reference: Mapping[int, Mapping[str, Any]],
-    metric: str,
-) -> list[float]:
-    return [
-        float(candidate[year]["metrics"][metric])
-        - float(reference[year]["metrics"][metric])
-        for year in ROLLING_YEARS
-    ]
-
-
-def _observed_deltas(
-    candidate: Mapping[int, Mapping[str, Any]],
-    reference: Mapping[int, Mapping[str, Any]],
-    family: str,
-    metric: str,
-) -> list[float] | None:
-    values: list[float] = []
-    for year in ROLLING_YEARS:
-        candidate_metrics = (
-            candidate[year].get("observed_subset_metrics", {}).get(family, {})
-        )
-        reference_metrics = (
-            reference[year].get("observed_subset_metrics", {}).get(family, {})
-        )
-        if not candidate_metrics.get("metrics") or not reference_metrics.get("metrics"):
-            return None
-        values.append(
-            float(candidate_metrics["metrics"][metric])
-            - float(reference_metrics["metrics"][metric])
-        )
-    return values
-
-
-def _mfe_gate(
-    *,
-    candidate: Mapping[int, Mapping[str, Any]],
-    reference: Mapping[int, Mapping[str, Any]],
-    config: Mapping[str, Any],
-    observed_family: str | None = None,
-) -> dict[str, Any]:
-    rules = dict(config["selection"]["mfe"])
-    rank = _metric_deltas(candidate, reference, "rank_ic")
-    top5_mfe = _metric_deltas(candidate, reference, "top5_mfe_mean")
-    capture = _metric_deltas(candidate, reference, "top5_capture")
-    top1 = _metric_deltas(candidate, reference, "top1_capture")
-    adverse = _metric_deltas(candidate, reference, "top5_adverse_median")
-    checks = {
-        "rank_deltas": rank,
-        "rank_improved_years": sum(value > 0 for value in rank),
-        "rank_median_delta": float(np.median(rank)),
-        "rank_worst_delta": float(min(rank)),
-        "top5_mfe_deltas": top5_mfe,
-        "top5_mfe_improved_years": sum(value > 0 for value in top5_mfe),
-        "top5_mfe_worst_delta": float(min(top5_mfe)),
-        "top5_capture_deltas": capture,
-        "top5_capture_improved_years": sum(value > 0 for value in capture),
-        "top5_capture_worst_delta": float(min(capture)),
-        "top5_adverse_worst_increase": float(max(adverse)),
-        "top5_adverse_deltas": adverse,
-        "top1_capture_deltas": top1,
-    }
-    passed = bool(
-        checks["rank_improved_years"] >= int(rules["minimum_improved_years"])
-        and checks["rank_median_delta"] >= float(rules["minimum_rank_ic_median_delta"])
-        and checks["rank_worst_delta"] >= float(rules["minimum_worst_rank_ic_delta"])
-        and checks["top5_mfe_improved_years"]
-        >= int(rules["minimum_top5_mfe_improved_years"])
-        and checks["top5_mfe_worst_delta"]
-        >= -float(rules["maximum_worst_top5_mfe_decline"])
-        and checks["top5_capture_improved_years"]
-        >= int(rules["minimum_top5_capture_improved_years"])
-        and checks["top5_capture_worst_delta"]
-        >= -float(rules["maximum_worst_top5_capture_decline"])
-        and checks["top5_adverse_worst_increase"]
-        <= float(rules["maximum_worst_top5_adverse_median_increase"])
-        and (
-            not bool(rules["top1_cannot_decline_all_years"])
-            or not all(value < 0 for value in top1)
-        )
-    )
-    if observed_family is not None:
-        observed_rank = _observed_deltas(
-            candidate, reference, observed_family, "rank_ic"
-        )
-        observed_capture = _observed_deltas(
-            candidate, reference, observed_family, "top5_capture"
-        )
-        checks["observed_rank_ic_deltas"] = observed_rank
-        checks["observed_top5_capture_deltas"] = observed_capture
-        observed_direction = (
-            observed_capture if observed_capture is not None else observed_rank
-        )
-        passed = bool(
-            passed
-            and observed_direction is not None
-            and sum(value >= 0 for value in observed_direction)
-            >= int(config["selection"]["gated_observed_minimum_nonreversed_years"])
-        )
-    checks["passed"] = passed
-    return checks
-
-
-def _risk_gate(
-    *,
-    candidate: Mapping[int, Mapping[str, Any]],
-    reference: Mapping[int, Mapping[str, Any]],
-    config: Mapping[str, Any],
-    observed_family: str | None = None,
-) -> dict[str, Any]:
-    rules = dict(config["selection"]["risk"])
-    rank = _metric_deltas(candidate, reference, "rank_ic")
-    mae_harm = [
-        (
-            float(candidate[year]["metrics"]["mae"])
-            - float(reference[year]["metrics"]["mae"])
-        )
-        / max(abs(float(reference[year]["metrics"]["mae"])), 1.0e-12)
-        for year in ROLLING_YEARS
-    ]
-    pr_auc = _metric_deltas(candidate, reference, "deep_adverse_pr_auc")
-    checks = {
-        "rank_median_delta": float(np.median(rank)),
-        "rank_worst_delta": float(min(rank)),
-        "relative_mae_harm": mae_harm,
-        "relative_mae_median": float(np.median(mae_harm)),
-        "relative_mae_worst": float(max(mae_harm)),
-        "deep_adverse_pr_auc_deltas": pr_auc,
-        "deep_adverse_pr_auc_nonnegative_years": sum(value >= 0 for value in pr_auc),
-        "deep_adverse_pr_auc_worst_delta": float(min(pr_auc)),
-    }
-    passed = bool(
-        checks["rank_median_delta"] >= float(rules["minimum_rank_ic_median_delta"])
-        and checks["rank_worst_delta"] >= float(rules["minimum_worst_rank_ic_delta"])
-        and checks["relative_mae_median"]
-        <= float(rules["maximum_median_relative_mae_harm"])
-        and checks["relative_mae_worst"]
-        <= float(rules["maximum_worst_relative_mae_harm"])
-        and checks["deep_adverse_pr_auc_nonnegative_years"]
-        >= int(rules["minimum_nonnegative_deep_adverse_pr_auc_years"])
-        and checks["deep_adverse_pr_auc_worst_delta"]
-        >= -float(rules["maximum_worst_deep_adverse_pr_auc_decline"])
-    )
-    if observed_family is not None:
-        observed = _observed_deltas(candidate, reference, observed_family, "rank_ic")
-        checks["observed_rank_ic_deltas"] = observed
-        passed = bool(
-            passed
-            and observed is not None
-            and sum(value >= 0 for value in observed)
-            >= int(config["selection"]["gated_observed_minimum_nonreversed_years"])
-        )
-    checks["passed"] = passed
-    return checks
-
-
-def _state_gate(
-    *,
-    candidate: Mapping[int, Mapping[str, Any]],
-    reference: Mapping[int, Mapping[str, Any]],
-    config: Mapping[str, Any],
-    observed_family: str | None = None,
-) -> dict[str, Any]:
-    rules = dict(config["selection"]["state"])
-    ordinal = _metric_deltas(candidate, reference, "ordinal_ic")
-    high = _metric_deltas(candidate, reference, "high_state_top5_lift")
-    brier_harm = [
-        (
-            float(candidate[year]["metrics"]["brier"])
-            - float(reference[year]["metrics"]["brier"])
-        )
-        / max(abs(float(reference[year]["metrics"]["brier"])), 1.0e-12)
-        for year in ROLLING_YEARS
-    ]
-    logloss_harm = [
-        (
-            float(candidate[year]["metrics"]["logloss"])
-            - float(reference[year]["metrics"]["logloss"])
-        )
-        / max(abs(float(reference[year]["metrics"]["logloss"])), 1.0e-12)
-        for year in ROLLING_YEARS
-    ]
-    checks = {
-        "ordinal_ic_median_delta": float(np.median(ordinal)),
-        "ordinal_ic_worst_delta": float(min(ordinal)),
-        "high_state_top5_deltas": high,
-        "high_state_top5_nonnegative_years": sum(value >= 0 for value in high),
-        "high_state_top5_worst_delta": float(min(high)),
-        "relative_brier_harm": brier_harm,
-        "relative_brier_median": float(np.median(brier_harm)),
-        "relative_brier_worst": float(max(brier_harm)),
-        "relative_logloss_harm": logloss_harm,
-        "relative_logloss_median": float(np.median(logloss_harm)),
-        "relative_logloss_worst": float(max(logloss_harm)),
-    }
-    passed = bool(
-        checks["ordinal_ic_median_delta"]
-        >= float(rules["minimum_ordinal_ic_median_delta"])
-        and checks["ordinal_ic_worst_delta"]
-        >= float(rules["minimum_worst_ordinal_ic_delta"])
-        and checks["high_state_top5_nonnegative_years"]
-        >= int(rules["minimum_nonnegative_high_state_top5_years"])
-        and checks["high_state_top5_worst_delta"]
-        >= -float(rules["maximum_worst_high_state_top5_decline"])
-        and checks["relative_brier_median"]
-        <= float(rules["maximum_median_relative_brier_harm"])
-        and checks["relative_brier_worst"]
-        <= float(rules["maximum_worst_relative_brier_harm"])
-        and checks["relative_logloss_median"]
-        <= float(rules["maximum_median_relative_logloss_harm"])
-        and checks["relative_logloss_worst"]
-        <= float(rules["maximum_worst_relative_logloss_harm"])
-    )
-    if observed_family is not None:
-        observed = _observed_deltas(candidate, reference, observed_family, "ordinal_ic")
-        checks["observed_ordinal_ic_deltas"] = observed
-        passed = bool(
-            passed
-            and observed is not None
-            and sum(value >= 0 for value in observed)
-            >= int(config["selection"]["gated_observed_minimum_nonreversed_years"])
-        )
-    checks["passed"] = passed
-    return checks
-
-
-def _write_selection(path: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
-    _write_json(path, payload)
-    return dict(payload)
-
-
-def _select_mfe_core(
-    *,
-    results: Mapping[str, Mapping[str, Any]],
-    config: Mapping[str, Any],
-    output_root: Path,
-    inputs: ModelInputs,
-) -> dict[str, Any]:
-    output: dict[str, Any] = {
-        "schema": "seq100_quality_liquidity_mfe_core_selection/1",
-        "targets": {},
-    }
-    for target in ("mfe_10", "mfe_20"):
-        reference = _results_for(results, target=target, variant="legacy_core")
-        if set(reference) != set(ROLLING_YEARS):
-            raise ModelError(f"mfe_core_reference_incomplete:{target}")
-        candidates: list[dict[str, Any]] = []
-        for variant in CORE_VARIANTS[1:]:
-            candidate = _results_for(results, target=target, variant=variant)
-            if set(candidate) != set(ROLLING_YEARS):
-                raise ModelError(f"mfe_core_candidate_incomplete:{target}:{variant}")
-            gate = _mfe_gate(candidate=candidate, reference=reference, config=config)
-            candidates.append(
-                {
-                    "variant": variant,
-                    "feature_count": len(inputs.feature_groups[variant]),
-                    "gate": gate,
-                }
-            )
-        passed = [item for item in candidates if item["gate"]["passed"]]
-        if passed:
-            selected = max(
-                passed,
-                key=lambda item: (
-                    float(np.median(item["gate"]["top5_capture_deltas"])),
-                    float(np.median(item["gate"]["top1_capture_deltas"])),
-                    float(item["gate"]["rank_median_delta"]),
-                    -int(item["feature_count"]),
-                ),
-            )
-            selected_variant = str(selected["variant"])
-        else:
-            selected_variant = "legacy_core"
-        output["targets"][target] = {
-            "selected_core": selected_variant,
-            "candidates": candidates,
-            "reference_variant": "legacy_core",
-        }
-    return _write_selection(
-        output_root / "selection" / "mfe_core_selection.json", output
-    )
-
-
-def _select_mfe_gated(
-    *,
-    results: Mapping[str, Mapping[str, Any]],
-    config: Mapping[str, Any],
-    output_root: Path,
-    inputs: ModelInputs,
-) -> dict[str, Any]:
-    core = _load_selection(output_root / "selection" / "mfe_core_selection.json")
-    output: dict[str, Any] = {
-        "schema": "seq100_quality_liquidity_mfe_head_selection/1",
-        "targets": {},
-    }
-    for target in ("mfe_10", "mfe_20"):
-        base_variant = str(core["targets"][target]["selected_core"])
-        reference = _results_for(results, target=target, variant=base_variant)
-        candidates: list[dict[str, Any]] = []
-        for family in GATED_FAMILIES:
-            variant = f"selected_core_plus_{family}"
-            candidate = _results_for(results, target=target, variant=variant)
-            gate = _mfe_gate(
-                candidate=candidate,
-                reference=reference,
-                config=config,
-                observed_family=family,
-            )
-            candidates.append(
-                {
-                    "variant": variant,
-                    "family": family,
-                    "feature_count": len(inputs.feature_groups[base_variant])
-                    + len(inputs.feature_groups[family])
-                    + (
-                        len(_metadata_names(inputs, "margin_features"))
-                        if family == "margin"
-                        else len(
-                            _metadata_names(inputs, "financial_statement_extensions")
-                        )
-                        if family == "financial_extensions"
-                        else 0
-                    ),
-                    "gate": gate,
-                }
-            )
-        passed = [item for item in candidates if item["gate"]["passed"]]
-        if passed:
-            selected = max(
-                passed,
-                key=lambda item: (
-                    float(np.median(item["gate"]["top5_capture_deltas"])),
-                    float(np.median(item["gate"]["top1_capture_deltas"])),
-                    float(item["gate"]["rank_median_delta"]),
-                    -int(item["feature_count"]),
-                ),
-            )
-            selected_variant = str(selected["variant"])
-            selected_family = str(selected["family"])
-        else:
-            selected_variant = base_variant
-            selected_family = None
-        output["targets"][target] = {
-            "selected_core": base_variant,
-            "selected_variant": selected_variant,
-            "selected_gated_family": selected_family,
-            "candidates": candidates,
-        }
-    return _write_selection(
-        output_root / "selection" / "mfe_selected_heads.json", output
-    )
-
-
-def _select_risk_state_core(
-    *,
-    results: Mapping[str, Mapping[str, Any]],
-    config: Mapping[str, Any],
-    output_root: Path,
-) -> dict[str, Any]:
-    output: dict[str, Any] = {
-        "schema": "seq100_quality_liquidity_risk_state_core_selection/1",
-        "targets": {},
-    }
-    for target in ("risk_10", "risk_20", "state_10"):
-        reference = _results_for(results, target=target, variant="legacy_core")
-        candidate = _results_for(results, target=target, variant="full_core")
-        if target.startswith("risk"):
-            gate = _risk_gate(candidate=candidate, reference=reference, config=config)
-        else:
-            gate = _state_gate(candidate=candidate, reference=reference, config=config)
-        selected = "full_core" if gate["passed"] else "legacy_core"
-        output["targets"][target] = {
-            "selected_core": selected,
-            "reference_variant": "legacy_core",
-            "full_core_gate": gate,
-        }
-    return _write_selection(
-        output_root / "selection" / "risk_state_core_selection.json", output
-    )
-
-
-def _select_risk_state_gated(
-    *,
-    results: Mapping[str, Mapping[str, Any]],
-    config: Mapping[str, Any],
-    output_root: Path,
-) -> dict[str, Any]:
-    core = _load_selection(output_root / "selection" / "risk_state_core_selection.json")
-    output: dict[str, Any] = {
-        "schema": "seq100_quality_liquidity_risk_state_selection/1",
-        "targets": {},
-    }
-    for target in ("risk_10", "risk_20", "state_10"):
-        base_variant = str(core["targets"][target]["selected_core"])
-        reference = _results_for(results, target=target, variant=base_variant)
-        candidate = _results_for(results, target=target, variant=ALL_GATED_VARIANT)
-        if target.startswith("risk"):
-            gate = _risk_gate(
-                candidate=candidate,
-                reference=reference,
-                config=config,
-                observed_family="all_gated",
-            )
-        else:
-            gate = _state_gate(
-                candidate=candidate,
-                reference=reference,
-                config=config,
-                observed_family="all_gated",
-            )
-        selected = ALL_GATED_VARIANT if gate["passed"] else base_variant
-        output["targets"][target] = {
-            "selected_core": base_variant,
-            "selected_variant": selected,
-            "full_gated_gate": gate,
-        }
-    return _write_selection(
-        output_root / "selection" / "risk_state_selected_heads.json", output
-    )
-
-
 def _selected_head_contract(output_root: Path, inputs: ModelInputs) -> dict[str, Any]:
-    mfe = _load_selection(output_root / "selection" / "mfe_core_selection.json")
-    risk = _load_selection(output_root / "selection" / "risk_state_core_selection.json")
-    targets: dict[str, Any] = {}
-    for target, item in {**mfe["targets"], **risk["targets"]}.items():
-        variant = str(item["selected_core"])
-        targets[target] = {
-            **item,
-            "selected_variant": variant,
-            "feature_count": len(inputs.feature_groups[variant]),
+    del output_root
+    targets = {
+        target: {
+            "selected_variant": COMPACT_VARIANT,
+            "feature_count": len(inputs.feature_groups[COMPACT_VARIANT]),
             "gated_features_used": False,
         }
+        for target in TARGETS
+    }
     return {
         "schema": "seq100_quality_liquidity_selected_head_contract/1",
         "study_id": STUDY_ID,
@@ -2401,6 +2058,7 @@ def run(
     max_tasks: int | None = None,
 ) -> dict[str, Any]:
     config = _load_config(study_path)
+    _audit_manifest(audit_root)
     input_manifest = prepare(
         study_path=study_path,
         ready_root=ready_root,
@@ -2460,14 +2118,6 @@ def run(
         stage_results = [item for item in tasks if item["stage"] == stage]
         if not all(str(item["task_id"]) in results for item in stage_results):
             break
-        if stage == "mfe_core":
-            _select_mfe_core(
-                results=results, config=config, output_root=output_root, inputs=inputs
-            )
-        elif stage == "risk_state_core":
-            _select_risk_state_core(
-                results=results, config=config, output_root=output_root
-            )
     all_complete = len(results) == len(tasks) and all(
         str(task["task_id"]) in results for task in tasks
     )
@@ -2522,39 +2172,16 @@ def _annual_metrics(results: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
 
 
 def _paired_variant_deltas(*, results: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
-    comparisons: list[tuple[str, str, str, str]] = []
-    for target in ("mfe_10", "mfe_20"):
-        for variant in CORE_VARIANTS[1:]:
-            comparisons.append((target, variant, "legacy_core", "core"))
-    for target in ("risk_10", "risk_20", "state_10"):
-        comparisons.append((target, "full_core", "legacy_core", "core"))
-    for target, candidate_variant, reference_variant, comparison_kind in comparisons:
-        candidate = _results_for(results, target=target, variant=candidate_variant)
-        reference = _results_for(results, target=target, variant=reference_variant)
-        for year in ROLLING_YEARS:
-            if year not in candidate or year not in reference:
-                continue
-            row = {
-                "target": target,
-                "year": year,
-                "candidate_variant": candidate_variant,
-                "reference_variant": reference_variant,
-                "comparison_kind": comparison_kind,
-            }
-            keys = set(candidate[year]["metrics"]) | set(reference[year]["metrics"])
-            for key in sorted(keys):
-                if (
-                    key in candidate[year]["metrics"]
-                    and key in reference[year]["metrics"]
-                ):
-                    row[f"candidate_{key}"] = candidate[year]["metrics"][key]
-                    row[f"reference_{key}"] = reference[year]["metrics"][key]
-                    row[f"delta_{key}"] = float(
-                        candidate[year]["metrics"][key]
-                    ) - float(reference[year]["metrics"][key])
-            rows.append(row)
-    return pd.DataFrame(rows)
+    del results
+    return pd.DataFrame(
+        columns=[
+            "target",
+            "year",
+            "candidate_variant",
+            "reference_variant",
+            "comparison_kind",
+        ]
+    )
 
 
 def evaluate(
@@ -2626,18 +2253,28 @@ def audit(
         "manifest_status": manifest.get("status")
         in {"training_completed", "evaluated", "audited"},
         "task_count_exact": set(results) == task_ids,
-        "formal_task_scope_core_only": manifest.get("formal_task_scope")
+        "formal_task_scope_compact_core_only": manifest.get("formal_task_scope")
         == FORMAL_TASK_SCOPE,
         "input_fingerprint_present": bool(input_manifest.get("input_fingerprint")),
         "row_count_exact": inputs.row_count == int(input_manifest["row_count"]),
         "forbidden_2026_rows": not bool(
             np.char.startswith(inputs.trade_date, "2026-").any()
         ),
-        "feature_contract_counts": input_manifest.get("feature_groups", {}).get(
-            "full_core"
+        "feature_contract_counts": len(
+            input_manifest.get("feature_groups", {}).get(COMPACT_VARIANT, [])
         )
-        is not None
-        and len(input_manifest.get("feature_groups", {}).get("full_core", [])) == 587,
+        == 562,
+        "self_contained_feature_storage": set(input_manifest.get("storage", {}))
+        == {"compact", "yearly_profiles"}
+        and all(
+            str(item.get("storage")) == "compact"
+            for item in input_manifest.get("features", [])
+        ),
+        "repaired_quality_pool_context": all(
+            int(profile["refreshed_base_missing"]["log_total_share"]) == 0
+            and int(profile["industry_missing_nonzero_count"]) == 0
+            for profile in input_manifest["storage"]["yearly_profiles"].values()
+        ),
         "forbidden_listing_age": not any(
             str(item.get("feature_name")) == "listing_age_days"
             for item in input_manifest.get("features", [])

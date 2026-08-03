@@ -43,6 +43,20 @@ def test_quality_rank_direction_rewards_low_debt() -> None:
     assert "ORDER BY debt DESC" in debt
 
 
+def test_safe_ratio_parenthesizes_composite_expressions() -> None:
+    expression = prep._safe_ratio_sql("a+b", "assets")
+    connection = duckdb.connect()
+    try:
+        actual = connection.execute(
+            f"SELECT {expression} FROM (SELECT 20.0 AS a, 10.0 AS b, 100.0 AS assets)"
+        ).fetchone()[0]
+    finally:
+        connection.close()
+
+    assert actual == 0.3
+    assert "THEN (a+b)/(assets)" in expression
+
+
 def test_config_forbids_symbol_deletion_and_daily_fallback(tmp_path) -> None:
     source = {
         "study_id": "seq100_quality_liquidity_data_prep",

@@ -31,6 +31,11 @@ STUDY_ID = "seq100_quality_liquidity_data_prep"
 CALENDAR_INPUT_BUILDER_VERSION = 2
 MEMBERSHIP_BUILDER_VERSION = 2
 ATLAS_BUILDER_VERSION = 3
+FEATURE_TRANSFORM_VERSIONS = {
+    "minute": 1,
+    "fundamental": 2,
+    "event": 1,
+}
 START_DATE = "2010-01-01"
 END_DATE = "2025-12-31"
 YEARS = tuple(range(2010, 2026))
@@ -949,8 +954,8 @@ def _quality_support_hash(
 
 def _safe_ratio_sql(numerator: str, denominator: str) -> str:
     return (
-        f"CASE WHEN {denominator} IS NOT NULL AND abs({denominator})>1e-12 "
-        f"THEN {numerator}/{denominator} END"
+        f"CASE WHEN ({denominator}) IS NOT NULL AND abs(({denominator}))>1e-12 "
+        f"THEN ({numerator})/({denominator}) END"
     )
 
 
@@ -1560,7 +1565,12 @@ def _feature_input_fingerprint(
         "event": ("announcement", "research_report", "research_report_forecast"),
     }
     digest = hashlib.sha256()
-    digest.update(f"{block}|{_sha256(support_path)}\n".encode())
+    digest.update(
+        (
+            f"{block}|transform={FEATURE_TRANSFORM_VERSIONS[block]}|"
+            f"{_sha256(support_path)}\n"
+        ).encode()
+    )
     if block == "minute":
         digest.update(_path_set_fingerprint([minute_source]).encode())
     else:

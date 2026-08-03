@@ -5,6 +5,7 @@ import json
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
+import pytest
 
 from daily_research.path_policy import seq100_quality_liquidity_model as model
 
@@ -50,50 +51,6 @@ def _fake_inputs() -> model.ModelInputs:
     return inputs
 
 
-def _metric_results(kind: str, *, improvement: float) -> tuple[dict, dict]:
-    reference: dict[int, dict] = {}
-    candidate: dict[int, dict] = {}
-    for year in model.ROLLING_YEARS:
-        if kind == "mfe":
-            base = {
-                "rank_ic": 0.05,
-                "top5_mfe_mean": 0.08,
-                "top5_capture": 0.20,
-                "top1_capture": 0.10,
-                "top5_adverse_median": 0.02,
-            }
-            changed = {
-                **base,
-                "rank_ic": base["rank_ic"] + improvement,
-                "top5_mfe_mean": base["top5_mfe_mean"] + improvement,
-                "top5_capture": base["top5_capture"] + improvement,
-                "top1_capture": base["top1_capture"] + improvement,
-            }
-        elif kind == "risk":
-            base = {"rank_ic": 0.05, "mae": 0.02, "deep_adverse_pr_auc": 0.30}
-            changed = {
-                "rank_ic": base["rank_ic"] + improvement,
-                "mae": base["mae"] - improvement / 10,
-                "deep_adverse_pr_auc": base["deep_adverse_pr_auc"] + improvement,
-            }
-        else:
-            base = {
-                "ordinal_ic": 0.05,
-                "high_state_top5_lift": 0.10,
-                "brier": 0.50,
-                "logloss": 0.80,
-            }
-            changed = {
-                "ordinal_ic": base["ordinal_ic"] + improvement,
-                "high_state_top5_lift": base["high_state_top5_lift"] + improvement,
-                "brier": base["brier"] - improvement / 10,
-                "logloss": base["logloss"] - improvement / 10,
-            }
-        reference[year] = {"metrics": base}
-        candidate[year] = {"metrics": changed}
-    return candidate, reference
-
-
 def test_real_feature_contract_has_exact_canonical_counts() -> None:
     ready_manifest = model._source_manifest()
     catalog, registry = model._catalog_and_registry(
@@ -107,25 +64,73 @@ def test_real_feature_contract_has_exact_canonical_counts() -> None:
         base_manifest=model._base_manifest(),
     )
 
-    assert len(contract["base_names"]) == 295
-    assert len(contract["extra_names"]) == 333
-    assert len(contract["metadata"]) == 13
-    assert len(contract["groups"]["legacy_core"]) == 493
-    assert len(contract["groups"]["full_core"]) == 587
-    assert len(contract["groups"]["all_gated"]) == 41
+    compact = contract["groups"][model.COMPACT_VARIANT]
+    assert len(compact) == 562
+    assert len(set(compact)) == 562
+    assert len(contract["decisions"]) == 28
+    assert "balance_other_receivables" not in compact
+    assert "balance_other_receivables_total" in compact
+    assert "balance_other_payables" not in compact
+    assert "balance_other_payables_total" in compact
+    assert "balance_advances_from_customers" not in compact
+    assert "balance_customer_advances_and_contract_liabilities" in compact
+    assert set(model.COMPACT_CONSTANT_DROPS).isdisjoint(compact)
+    assert set(model.COMPACT_REDUNDANCY_DROPS).isdisjoint(compact)
     assert "listing_age_days" not in catalog["feature_name"].tolist()
     assert catalog["feature_name"].eq("listing_age_open_days").sum() == 1
 
 
-def test_task_plan_is_exactly_51_core_only_without_parameter_search() -> None:
+def test_refreshed_industry_features_use_current_industry_groups(
+    monkeypatch, tmp_path
+) -> None:
+    diagnostics = tmp_path / "diagnostics.parquet"
+    pd.DataFrame(
+        {
+            "candidate_id": [0, 1, 2, 3],
+            "date_idx": [10, 10, 10, 10],
+            "industry": ["A", "A", "B", "Unknown"],
+        }
+    ).to_parquet(diagnostics, index=False)
+    monkeypatch.setattr(
+        model.descriptive,
+        "_diagnostics_path",
+        lambda source_manifest, year: diagnostics,
+    )
+    base = np.asarray(
+        [
+            [0.10, 0.15, 0.30],
+            [-0.10, 0.05, 0.10],
+            [0.20, 0.25, 0.40],
+            [0.30, 0.35, 0.50],
+        ],
+        dtype=np.float32,
+    )
+
+    frame = model._refreshed_industry_frame(
+        ready_manifest={},
+        year=2020,
+        expected_ids=np.asarray([0, 1, 3], dtype=np.int64),
+        base=base,
+        base_index={"return_1d": 0, "return_5d": 1, "return_20d": 2},
+    )
+
+    assert frame.loc[0, "industry_ret1_mean"] == pytest.approx(0.0)
+    assert frame.loc[0, "industry_breadth_ret1_positive"] == pytest.approx(0.5)
+    assert frame.loc[0, "industry_ret1_dispersion"] == pytest.approx(0.1)
+    assert frame.loc[0, "industry_relative_ret5"] == pytest.approx(0.05)
+    assert frame.loc[1, "industry_relative_ret20"] == pytest.approx(-0.1)
+    assert frame.loc[2, "industry_missing"] == 1
+    assert np.isnan(frame.loc[2, "industry_ret1_mean"])
+
+
+def test_task_plan_is_exactly_24_compact_core_tasks() -> None:
     tasks = model._task_plan(model._load_config())
 
-    assert len(tasks) == 51
+    assert len(tasks) == 24
     assert sum(task["stage"] == "tuning" for task in tasks) == 9
-    assert sum(task["stage"] == "mfe_core" for task in tasks) == 24
-    assert sum(task["stage"] == "mfe_gated" for task in tasks) == 0
-    assert sum(task["stage"] == "risk_state_core" for task in tasks) == 18
-    assert sum(task["stage"] == "risk_state_gated" for task in tasks) == 0
+    assert sum(task["stage"] == "mfe_core" for task in tasks) == 6
+    assert sum(task["stage"] == "risk_state_core" for task in tasks) == 9
+    assert {task["variant"] for task in tasks} == {model.COMPACT_VARIANT}
 
 
 def test_partition_results_preserves_nonformal_tasks_as_diagnostics() -> None:
@@ -171,17 +176,14 @@ def test_target_and_valid_arrays_are_cached() -> None:
 def test_sequence_supports_arbitrary_rows_and_variant_layout() -> None:
     inputs = object.__new__(model.ModelInputs)
     inputs.candidate_ids = np.arange(4, dtype=np.int64)
-    inputs.base = np.arange(12, dtype=np.float32).reshape(4, 3)
-    inputs.extra = np.asarray([[10, 20, 30, 40], [11, 21, 31, 41]], dtype=np.float32)
-    inputs.availability = np.asarray([[-1, 0, 1, 1]], dtype=np.int8)
+    inputs.compact = np.asarray(
+        [[0, 10, -1], [3, 20, 0], [6, 30, 1], [9, 40, 1]],
+        dtype=np.float32,
+    )
     inputs.feature_records = [
-        {"feature_name": "base_1", "storage": "base", "column_index": 1},
-        {"feature_name": "extra_0", "storage": "extra", "column_index": 0},
-        {
-            "feature_name": "available",
-            "storage": "availability",
-            "column_index": 0,
-        },
+        {"feature_name": "base_1", "storage": "compact", "column_index": 0},
+        {"feature_name": "extra_0", "storage": "compact", "column_index": 1},
+        {"feature_name": "available", "storage": "compact", "column_index": 2},
     ]
     inputs.feature_map = {item["feature_name"]: item for item in inputs.feature_records}
     layout = inputs.layout(["extra_0", "base_1", "available"])
@@ -194,36 +196,9 @@ def test_sequence_supports_arbitrary_rows_and_variant_layout() -> None:
 
     assert np.array_equal(
         sequence[:],
-        np.asarray([[40.0, 10.0, 1.0], [20.0, 4.0, 0.0]], dtype=np.float64),
+        np.asarray([[40.0, 9.0, 1.0], [20.0, 3.0, 0.0]], dtype=np.float64),
     )
-    assert layout["categorical_positions"] == [2]
-
-
-def test_availability_encoding_preserves_unknown_as_minus_one() -> None:
-    values = pd.Series(["eligible_observed", "known_ineligible", None, "unknown"])
-    kind, mapping = model._metadata_mapping(values)
-    encoded = model._encode_metadata(values, kind=kind, mapping=mapping)
-
-    assert encoded[2:].tolist() == [-1, -1]
-    assert encoded[0] != encoded[1]
-    assert set(encoded[:2]) >= {0, 1}
-
-
-def test_selection_gates_accept_consistent_improvement() -> None:
-    config = model._load_config()
-    mfe_candidate, mfe_reference = _metric_results("mfe", improvement=0.01)
-    risk_candidate, risk_reference = _metric_results("risk", improvement=0.01)
-    state_candidate, state_reference = _metric_results("state", improvement=0.01)
-
-    assert model._mfe_gate(
-        candidate=mfe_candidate, reference=mfe_reference, config=config
-    )["passed"]
-    assert model._risk_gate(
-        candidate=risk_candidate, reference=risk_reference, config=config
-    )["passed"]
-    assert model._state_gate(
-        candidate=state_candidate, reference=state_reference, config=config
-    )["passed"]
+    assert layout["categorical_positions"] == []
 
 
 def test_task_completion_is_resumable_and_hash_bound(tmp_path) -> None:
@@ -282,9 +257,7 @@ def test_training_task_runs_through_sequence_and_resumes(tmp_path) -> None:
     inputs.date_idx = date_idx
     inputs.years = np.where(date_idx < 80, 2022, 2023).astype(np.int16)
     inputs.date_values = np.asarray([f"date-{value:03d}" for value in range(100)])
-    inputs.base = features
-    inputs.extra = np.empty((0, row_count), dtype=np.float32)
-    inputs.availability = np.full((2, row_count), -1, dtype=np.int8)
+    inputs.compact = features
     inputs.labels = np.full((row_count, 15), np.nan, dtype=np.float32)
     inputs.labels[:, 4] = 0.08 + 0.02 * features[:, 0] - 0.01 * features[:, 1]
     inputs.labels[:, 5] = -0.02 - 0.005 * np.abs(features[:, 1])
@@ -313,37 +286,22 @@ def test_training_task_runs_through_sequence_and_resumes(tmp_path) -> None:
     inputs.feature_records = [
         {
             "feature_name": "feature_0",
-            "storage": "base",
+            "storage": "compact",
             "column_index": 0,
             "block": "existing_seq100_base",
             "analytic_family": "fixture",
         },
         {
             "feature_name": "feature_1",
-            "storage": "base",
+            "storage": "compact",
             "column_index": 1,
             "block": "existing_seq100_base",
             "analytic_family": "fixture",
         },
-        {
-            "feature_name": "margin_eligibility_eligible",
-            "storage": "availability",
-            "column_index": 0,
-            "block": "margin_features",
-            "analytic_family": "availability_metadata",
-        },
-        {
-            "feature_name": "balance_extension_source_conflict",
-            "storage": "availability",
-            "column_index": 1,
-            "block": "financial_statement_extensions",
-            "analytic_family": "availability_metadata",
-        },
     ]
     inputs.feature_map = {item["feature_name"]: item for item in inputs.feature_records}
     inputs.feature_groups = {
-        "legacy_core": ["feature_0", "feature_1"],
-        "financial_extensions": [],
+        model.COMPACT_VARIANT: ["feature_0", "feature_1"],
     }
 
     config = json.loads(json.dumps(model._load_config()))
@@ -358,13 +316,13 @@ def test_training_task_runs_through_sequence_and_resumes(tmp_path) -> None:
     )
     config["model"]["working_set_trim"]["enabled"] = False
     task = {
-        "task_id": "mfe_core__mfe_10__legacy_core__2023",
+        "task_id": f"mfe_core__mfe_10__{model.COMPACT_VARIANT}__2023",
         "stage": "mfe_core",
         "target": "mfe_10",
         "kind": "mfe",
         "horizon": 10,
         "year": 2023,
-        "variant": "legacy_core",
+        "variant": model.COMPACT_VARIANT,
         "gated_family": None,
     }
 
