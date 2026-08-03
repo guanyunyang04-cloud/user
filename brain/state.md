@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-03
+Updated: 2026-08-04
 
 ## Objective
 
@@ -198,6 +198,63 @@ Input and output hashes pass, prediction candidate IDs match each evaluation
 year, horizon purges pass, the corrected listing-age field is used, 2010 is not
 formal, and 2026 rows are zero. No economic replay, position policy, exit
 policy, ensemble, or deployable strategy was selected in this study.
+
+## Quality-liquidity execution research (2026-08-04)
+
+`seq100_quality_liquidity_execution` completed a 72-task continuous-account
+replay of the canonical 557-field model over 2023-2025. All five prediction
+heads use the exact same ordered 557-field contract. The six signal families
+were tested at 6/12/24 slots, two replacement buffers, and base/stress costs.
+Signals were formed at the close and executed at the next open with T+1,
+100-share lots, sell-before-buy, failed-order handling, no leverage, and the
+existing pack cost schedule. New trading stopped after the 2025-12-03 signal;
+positions were marked through 2025-12-31 with terminal exit costs accrued.
+
+The audit is `ok`: 72/72 tasks, 727 signal dates, 1,234,550 candidate rows,
+cash/position conservation, actual order cutoff, output dates, hashes, no HTML,
+and zero 2026 rows all pass. The quality-pool equal-weight benchmark returned
+`-4.00%/+5.40%/+26.30%` by year and about `+27.80%` cumulatively.
+
+Formal conclusion:
+
+`compact_model_not_monetized_by_simple_execution_surface`
+
+No cell passed the absolute-return and benchmark-excess requirements under
+both base and stress costs, and there was no isolated or adjacent passing
+region. The best base-cost cell was dual MFE plus risk veto, K=6, buffer=0.5:
+terminal return `-40.99%`, relative excess `-53.83%`, gross same-sequence return
+`-3.34%`, turnover `279.4x` starting cash, and maximum drawdown `-73.36%`.
+Its annual net returns were `-60.19%/-11.23%/+67.22%`; the 2025 improvement does
+not repair the severe 2023 failure. The corresponding best stress result was
+`-60.51%`.
+
+Risk prediction is economically useful but not sufficient. Relative to plain
+dual-MFE cells, the risk veto improved median base terminal return by about
+29.3 percentage points and median gross return by 42.4 points. State-only veto
+improved them by about 7.7 and 12.3 points. Adding state to risk was mixed at
+K=6 and helpful at K=12/24, matching the model evidence that state is the
+weaker auxiliary coordinate. The 0.5 buffer usually reduced turnover and
+improved return, especially for the risk-veto family, but remained far too
+small to create a profitable region.
+
+Tail-path diagnostics show an objective/execution mismatch rather than absent
+opportunity. Overall predicted Top-1% D10/D20 mean MFE is about `9.03%/14.23%`,
+roughly double the pool baseline, but its D10/D20 fixed-endpoint mean return is
+`-0.66%/-0.82%` and median return is `-3.05%/-4.40%`. Typical predicted-tail
+peaks occur around D5 for D10 and D8-D9 for D20. The account's best cells hold
+positions only about 2-3 days because daily reranking is unstable; holding all
+the way to the target endpoint is also too late after the opportunity fades.
+Base costs then widen the best gross-to-net gap by roughly 37.6 percentage
+points. Fill and capacity constraints are not the primary cause at CNY 1
+million: the best cell's buy/sell failure rates are about `0.74%/1.36%`, and
+only about 7.8% of filled orders exceed 0.1% of trailing median amount.
+
+This result does not justify changing the 557-feature input or retraining. The
+next bounded research should keep the frozen predictions and test a small,
+horizon-aligned retention/exit surface around dual-MFE plus risk veto: explicit
+minimum holding periods, limited D5/D10-style time exits, and materially wider
+replacement hysteresis. It should not reopen broad feature search, claim a
+production policy, or consume 2026.
 
 ## Prior QDP data state (superseded by the 2026-08-02 state above)
 

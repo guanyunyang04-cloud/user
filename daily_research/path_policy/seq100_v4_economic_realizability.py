@@ -1201,6 +1201,13 @@ def plan_orders(
     day: int,
     positions: Mapping[int, Position],
 ) -> PendingOrders:
+    trading_allowed = getattr(book, "trading_allowed", None)
+    if callable(trading_allowed) and not bool(trading_allowed(int(day))):
+        return PendingOrders(
+            signal_day=int(day),
+            sells=(),
+            unpaired_buys=(),
+        )
     selector_column = book.selector_column(spec.family)
     ordered = book.symbols_for_day(spec.family, day)
     if len(ordered) == 0:

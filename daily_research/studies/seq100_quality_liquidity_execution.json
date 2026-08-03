@@ -1,0 +1,105 @@
+{
+  "study_id": "seq100_quality_liquidity_execution",
+  "purpose": "Retrospective 2023-2025 economic execution research for the canonical 557-field rolling model.",
+  "sources": {
+    "model_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "row_index": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
+  },
+  "period": {
+    "signal_years": [2023, 2024, 2025],
+    "first_signal_date": "2023-01-03",
+    "last_entry_signal_date": "2025-12-03",
+    "last_mark_date": "2025-12-31",
+    "continuous_account": true,
+    "annual_reset": false,
+    "forbidden_year": 2026,
+    "research_semantics": "retrospective_rolling_execution_research"
+  },
+  "model_contract": {
+    "variant": "compact_core",
+    "feature_count": 557,
+    "targets": ["mfe_10", "mfe_20", "risk_10", "risk_20", "state_10"],
+    "prediction_years": [2023, 2024, 2025],
+    "all_557_inputs_used_by_every_head": true
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "slot_counts": [6, 12, 24],
+    "equal_target_slots": true,
+    "daily_weight_rebalance": false,
+    "allow_pyramiding": false,
+    "allow_leverage": false,
+    "cash_interest_rate": 0.0,
+    "board_lot": 100,
+    "terminal_liquidation": false,
+    "terminal_exit_cost_accrual": true
+  },
+  "policies": {
+    "families": [
+      "mfe10_primary",
+      "mfe20_primary",
+      "dual_mfe_maximin",
+      "dual_mfe_state_veto",
+      "dual_mfe_risk_veto",
+      "dual_mfe_state_risk_veto"
+    ],
+    "exposure_mode": "target_full",
+    "buffer_multipliers": [0.0, 0.5],
+    "dual_score": "daily_rank_of_minimum_mfe10_and_mfe20_percentile_ranks",
+    "state_badness": "daily_rank_of_probability_low_minus_probability_high",
+    "risk_safety": "daily_minimum_of_risk10_and_risk20_percentile_ranks",
+    "auxiliary_top_fraction": 0.05,
+    "auxiliary_retention_fraction": 0.8,
+    "auxiliary_pair_tolerance": 0.2,
+    "strong_entry_rank": 0.99,
+    "strong_retention_rank": 0.95,
+    "auxiliary_veto_never_forces_exit": true,
+    "same_open_replacement_after_failed_buy": false,
+    "tie_break": "ascending_symbol_idx"
+  },
+  "execution": {
+    "decision_time": "signal_date_close",
+    "execution_time": "next_trading_date_open",
+    "sell_before_buy": true,
+    "failed_sell_cancels_paired_buy": true,
+    "failed_buy_retains_cash": true,
+    "t_plus_one": true,
+    "freeze_holdings_after_last_entry_signal": true,
+    "cost_scenarios": {"base": 1.0, "stress": 2.0},
+    "expected_pack_costs": {
+      "lot_size": 100,
+      "commission_bps": 3.0,
+      "minimum_commission_cny": 5.0,
+      "transfer_fee_bps": 0.1,
+      "slippage_bps": 7.0,
+      "stress_slippage_multiplier": 2.0,
+      "stamp_tax_schedule": [
+        {"effective_date": "1900-01-01", "stamp_tax_bps": 10.0},
+        {"effective_date": "2023-08-28", "stamp_tax_bps": 5.0}
+      ]
+    },
+    "amount_participation_thresholds": [0.001, 0.005, 0.01]
+  },
+  "diagnostics": {
+    "tail_fractions": [0.01, 0.05, 0.10, 1.0],
+    "horizons": [10, 20],
+    "families": ["mfe10_primary", "mfe20_primary", "dual_mfe_maximin"]
+  },
+  "selection": {
+    "minimum_positive_absolute_years": 2,
+    "minimum_positive_excess_years": 2,
+    "require_positive_base_terminal_return": true,
+    "require_positive_stress_terminal_return": true,
+    "require_positive_base_terminal_excess": true,
+    "require_positive_stress_terminal_excess": true,
+    "minimum_adjacent_passing_slot_count": 2,
+    "single_cell_winner_forbidden": true
+  },
+  "outputs": {
+    "output_dir": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+    "expected_task_count": 72,
+    "html_report": false
+  }
+}
