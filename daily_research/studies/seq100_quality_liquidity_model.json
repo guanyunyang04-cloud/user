@@ -32,9 +32,10 @@
   "feature_contract": {
     "audited_numeric_field_count": 628,
     "source_full_core_count": 587,
-    "compact_core_count": 562,
+    "compact_core_count": 557,
     "constant_drop_count": 14,
     "semantic_redundancy_drop_count": 11,
+    "coverage_stability_drop_count": 5,
     "financial_semantic_replacement_count": 3,
     "runtime_base_cache_dependency": false,
     "forbidden_feature_names": [

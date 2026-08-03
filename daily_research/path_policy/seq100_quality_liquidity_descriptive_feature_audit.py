@@ -286,13 +286,13 @@ def _compact_model_inputs(
     manifest_path = source_root / "model_inputs" / "manifest.json"
     manifest = _read_json(manifest_path)
     names = list(dict(manifest.get("feature_groups", {}) or {}).get("compact_core", []))
-    if len(names) != 562 or len(set(names)) != 562:
+    if not names or len(names) != len(set(names)):
         raise DescriptiveAuditError("compact_model_input_feature_contract_mismatch")
     record = dict(dict(manifest.get("storage", {}) or {}).get("compact", {}) or {})
     path = Path(str(record.get("path", "")))
     shape = tuple(int(value) for value in record.get("shape", ()))
     expected_rows = int(source_manifest["common_support"]["row_count"])
-    if shape != (expected_rows, 562) or not path.is_file():
+    if shape != (expected_rows, len(names)) or not path.is_file():
         raise DescriptiveAuditError("compact_model_input_storage_mismatch")
     expected_size = int(np.prod(shape)) * np.dtype("float32").itemsize
     if path.stat().st_size != expected_size:

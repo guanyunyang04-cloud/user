@@ -73,6 +73,14 @@ COMPACT_REDUNDANCY_DROPS = (
     "technical_boll_mid_bfq",
     "technical_xsii_td2_bfq",
 )
+COMPACT_COVERAGE_STABILITY_DROPS = (
+    "income_ebitda",
+    "cashflow_net_profit",
+    "income_research_development_expense",
+    "income_rd_intensity",
+    "income_continuing_net_income",
+)
+COMPACT_FEATURE_COUNT = 557
 COMPACT_FINANCIAL_REPLACEMENTS = {
     "balance_other_receivables": "balance_other_receivables_total",
     "balance_other_payables": "balance_other_payables_total",
@@ -328,7 +336,11 @@ def _feature_contract(
     if len(full_core) != 587 or len(set(full_core)) != 587:
         raise ModelError("full_core_source_contract_mismatch")
     catalog_by_name = catalog.set_index("feature_name", drop=False)
-    drops = set(COMPACT_CONSTANT_DROPS) | set(COMPACT_REDUNDANCY_DROPS)
+    drops = (
+        set(COMPACT_CONSTANT_DROPS)
+        | set(COMPACT_REDUNDANCY_DROPS)
+        | set(COMPACT_COVERAGE_STABILITY_DROPS)
+    )
     if not drops.issubset(full_core):
         raise ModelError(f"compact_drop_missing:{sorted(drops - set(full_core))}")
     if not set(COMPACT_FINANCIAL_REPLACEMENTS).issubset(full_core):
@@ -344,11 +356,12 @@ def _feature_contract(
     decisions: list[dict[str, str]] = []
     for name in full_core:
         if name in drops:
-            reason = (
-                "constant_on_frozen_2011_2025_support"
-                if name in COMPACT_CONSTANT_DROPS
-                else "conservative_semantic_redundancy"
-            )
+            if name in COMPACT_CONSTANT_DROPS:
+                reason = "constant_on_frozen_2011_2025_support"
+            elif name in COMPACT_REDUNDANCY_DROPS:
+                reason = "conservative_semantic_redundancy"
+            else:
+                reason = "insufficient_cross_year_coverage_stability"
             decisions.append({"feature_name": name, "action": "drop", "reason": reason})
             continue
         selected_name = COMPACT_FINANCIAL_REPLACEMENTS.get(name, name)
@@ -365,7 +378,10 @@ def _feature_contract(
                 }
             )
     compact_catalog = pd.DataFrame(compact_rows).reset_index(drop=True)
-    if len(compact_names) != 562 or len(set(compact_names)) != 562:
+    if (
+        len(compact_names) != COMPACT_FEATURE_COUNT
+        or len(set(compact_names)) != COMPACT_FEATURE_COUNT
+    ):
         raise ModelError(
             f"compact_core_count_or_uniqueness_mismatch:{len(compact_names)}:{len(set(compact_names))}"
         )
@@ -913,7 +929,7 @@ def _verify_model_input_files(
         raise ModelError("model_input_feature_contract_hash_mismatch")
     contract = pd.read_parquet(contract_path)
     if (
-        len(contract) != 562
+        len(contract) != COMPACT_FEATURE_COUNT
         or contract["feature_name"].duplicated().any()
         or contract["feature_name"].astype(str).tolist()
         != list(manifest["feature_groups"][COMPACT_VARIANT])
@@ -2263,7 +2279,7 @@ def audit(
         "feature_contract_counts": len(
             input_manifest.get("feature_groups", {}).get(COMPACT_VARIANT, [])
         )
-        == 562,
+        == COMPACT_FEATURE_COUNT,
         "self_contained_feature_storage": set(input_manifest.get("storage", {}))
         == {"compact", "yearly_profiles"}
         and all(

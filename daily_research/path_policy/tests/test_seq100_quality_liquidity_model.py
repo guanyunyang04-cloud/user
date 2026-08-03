@@ -65,9 +65,9 @@ def test_real_feature_contract_has_exact_canonical_counts() -> None:
     )
 
     compact = contract["groups"][model.COMPACT_VARIANT]
-    assert len(compact) == 562
-    assert len(set(compact)) == 562
-    assert len(contract["decisions"]) == 28
+    assert len(compact) == model.COMPACT_FEATURE_COUNT == 557
+    assert len(set(compact)) == model.COMPACT_FEATURE_COUNT
+    assert len(contract["decisions"]) == 33
     assert "balance_other_receivables" not in compact
     assert "balance_other_receivables_total" in compact
     assert "balance_other_payables" not in compact
@@ -76,6 +76,13 @@ def test_real_feature_contract_has_exact_canonical_counts() -> None:
     assert "balance_customer_advances_and_contract_liabilities" in compact
     assert set(model.COMPACT_CONSTANT_DROPS).isdisjoint(compact)
     assert set(model.COMPACT_REDUNDANCY_DROPS).isdisjoint(compact)
+    assert set(model.COMPACT_COVERAGE_STABILITY_DROPS).isdisjoint(compact)
+    assert {
+        "income_discontinued_net_income",
+        "balance_goodwill",
+        "balance_bonds_payable",
+        "performance_forecast_profit_mid",
+    }.issubset(compact)
     assert "listing_age_days" not in catalog["feature_name"].tolist()
     assert catalog["feature_name"].eq("listing_age_open_days").sum() == 1
 

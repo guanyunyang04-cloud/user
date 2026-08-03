@@ -126,14 +126,18 @@ The descriptive audit is retained as machine-readable Parquet and JSON evidence.
 Its findings are explained directly in the working conversation; no HTML report
 is part of the canonical workflow.
 
-## Quality-liquidity core model (2026-08-03)
+## Quality-liquidity core model (2026-08-04)
 
 `seq100_quality_liquidity_model` completed the 2023-2025 retrospective rolling
 study on the 4,476,851-row complete support. The canonical input is one
-self-contained row-major `compact_core` cache with 562 fields. It starts from
+self-contained row-major `compact_core` cache with 557 fields. It starts from
 the 587-field core, removes 14 frozen-support constants and 11 conservative
-semantic duplicates, and replaces three component financial fields with their
-more complete statement semantics. It includes daily/minute technical,
+semantic duplicates, removes five coverage-unstable financial fields, and
+replaces three component financial fields with their more complete statement
+semantics. The removed coverage-unstable fields are `income_ebitda`,
+`cashflow_net_profit`, `income_research_development_expense`,
+`income_rd_intensity`, and `income_continuing_net_income`. QDP retains their raw
+evidence. The model input includes daily/minute technical,
 financial statement, market-state, industry, size/liquidity, announcement,
 traditional technical, and traditional moneyflow information. Margin and
 research-report fields and availability metadata are not model inputs.
@@ -147,32 +151,44 @@ preserved diagnostic task.
 
 MFE has material but incomplete opportunity learnability:
 
-- D10 Rank IC is `0.0992/0.0968/0.1730` and daily Top-5 true-tail capture is
-  `18.36%/14.89%/17.59%` in 2023/2024/2025, or `3.67x/2.98x/3.52x` random.
-  Top-1 capture is `9.77%/7.31%/7.42%`, or `9.77x/7.31x/7.42x` random.
-- D20 Rank IC is `0.1155/0.1305/0.1930`; Top-5 capture is
-  `16.06%/13.68%/13.59%` (`3.21x/2.74x/2.72x` random), and Top-1 capture is
-  `6.73%/4.93%/5.65%`.
-- Predicted D10 Top-5 names realize mean MFE of `6.43%/8.00%/8.86%` versus
+- D10 Rank IC is `0.1049/0.0979/0.1718` and daily Top-5 true-tail capture is
+  `18.63%/14.83%/17.31%` in 2023/2024/2025, or `3.73x/2.97x/3.46x` random.
+  Top-1 capture is `10.03%/7.22%/7.23%`.
+- D20 Rank IC is `0.1193/0.1353/0.1914`; Top-5 capture is
+  `16.12%/13.52%/13.55%`, and Top-1 capture is `6.51%/5.64%/4.67%`.
+- Predicted D10 Top-5 names realize mean MFE of `6.52%/7.93%/8.71%` versus
   the full evaluation population's `3.39%/5.33%/4.94%`. D20 is
-  `9.85%/13.56%/13.46%` versus `5.52%/9.15%/8.56%`.
+  `9.80%/13.50%/13.44%` versus `5.52%/9.15%/8.56%`.
 
 MFE is maximum future upside excursion. These results establish useful upside
 opportunity selection, not sustained trend, legal exit timing, executable
 return, or economic monetization. Predicted Top-5 D10 paths still have median
-pre-peak adversity around `2.47%/2.97%/2.68%`; risk and state must remain
+pre-peak adversity around `2.45%/2.97%/2.65%`; risk and state must remain
 separate coordinates.
 
-Risk D10/D20 Rank IC is about `0.19-0.24`; deep-adverse PR-AUC is
-`0.328-0.388` against a 20% daily event prevalence. State ordinal IC is only
-`0.0617/0.0629/0.0356`, while selecting the highest predicted state
-probabilities raises high-state incidence by `10.42/7.00/11.64` percentage
-points. State is useful as an auxiliary coordinate but remains much weaker
-than risk or MFE.
+Risk D10 Rank IC is `0.2087/0.1928/0.2422`; D20 is
+`0.2089/0.1889/0.2409`. Deep-adverse PR-AUC is `0.328-0.388` against a 20%
+daily event prevalence. State ordinal IC is only `0.0648/0.0648/0.0414`, while
+selecting the highest predicted state probabilities raises high-state incidence
+by `10.61/7.10/11.99` percentage points. State is useful as an auxiliary
+coordinate but remains much weaker than risk or MFE.
+
+The matched 562-to-557 retraining is not a lossless-equivalence result. Removing
+the five fields improved MFE Rank IC in 2023-2024, D10 risk ranking and
+deep-adverse PR-AUC in all three years, and both state ranking and high-state
+Top-5 lift in all three years. However, D20 predicted-Top-5 mean MFE fell
+slightly in every year, recent D10 tail strength weakened in 2024-2025, and
+D20 risk failed its prior safety gate because 2025 MAE rose by 2.07% while
+deep-adverse PR-AUC declined slightly in all three years. The 557-field input is
+the current owner-requested canonical set, but the experiment does not prove
+that every removed field was useless. `income_rd_intensity` is the leading
+targeted add-back candidate: it has roughly 88%-89% coverage in 2021-2025 and
+distinct recent univariate opportunity information. No add-back has been
+selected or trained yet.
 
 Gain attribution is dominated by market state plus daily price/volume:
 roughly 86%-96% across the five heads. Financial statements contribute more to
-D20 MFE than D10 (`6.89%` versus `2.81%` median gain share); same-day 5-minute
+D20 MFE than D10 (about `5.6%` versus `2.3%` mean gain share); same-day 5-minute
 features contribute about `1.0%-2.0%`; traditional technical about
 `0.6%-1.5%`; traditional moneyflow is below `0.5%`. These are conditional model
 gain shares, not causal feature-family ablations, because correlated fields can
