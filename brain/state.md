@@ -719,3 +719,34 @@ condition.
 Retained result:
 
 - `daily_research/research_records/seq100/seq100_v4_pit_stock_pool_audit_v1/result.json`
+
+## Original D1 T+1 execution audit
+
+The original `g_1` return model was replayed without retraining under a
+continuous CNY 1 million account. The signal is ranked at the signal-date
+close; buys occur at the next open (or the validated first 5-minute VWAP), and
+sales begin at the following open so every filled sale satisfies A-share T+1.
+The account keeps a selected symbol when it remains in the target Top-K and
+retries blocked sales without filling a replacement. The final five trading
+days of 2025 are liquidation-only, so no 2026 data is read.
+
+The 140-cell surface covered K=`1/2/3/5/10`, replacement buffers equivalent to
+Top `0/1/2/5/10/20/50 K`, open/VWAP entry, and base/stress costs. All tasks
+passed the execution audit (T+1, position limits, cash conservation, terminal
+flatness, and zero 2026 reads), but no cell passed the preregistered stability
+gate. The best stress terminal return was approximately `-56.5%` (open, K=10,
+buffer=20 K); the best low-position alternatives were materially worse.
+
+The loss decomposition is structural: predicted Top-K D1 open-to-close returns
+are positive on average, while the same names lose roughly `1.0%` to `1.5%`
+from that close to the next open. T+1 prevents realizing the label's close
+exit, and daily turnover adds about `13.3 bps` of realized base cost per traded
+notional. First-5-minute VWAP entry and wider rank buffers reduce turnover but
+do not produce a stable positive net account. Treat `g_1` as a predictive
+diagnostic, not a production execution signal; a future executable model must
+train an open-to-open or otherwise T+1-compatible target.
+
+Retained result:
+
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/d1_execution/manifest.json`
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/d1_execution/audit.json`

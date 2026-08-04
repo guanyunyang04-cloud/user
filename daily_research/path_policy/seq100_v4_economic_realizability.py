@@ -1505,6 +1505,68 @@ def _attempt_row(
     }
 
 
+def _entry_is_buyable(
+    *,
+    book: SignalBook,
+    spec: TaskSpec,
+    signal_day: int,
+    symbol_idx: int,
+) -> bool:
+    custom = getattr(book, "entry_is_buyable", None)
+    if callable(custom):
+        return bool(
+            custom(
+                spec=spec,
+                signal_day=int(signal_day),
+                symbol_idx=int(symbol_idx),
+            )
+        )
+    return bool(book.next_buyable[int(signal_day), int(symbol_idx)])
+
+
+def _entry_prices(
+    *,
+    book: SignalBook,
+    spec: TaskSpec,
+    signal_day: int,
+    execution_date_idx: int,
+    symbol_idx: int,
+) -> tuple[float, float]:
+    custom = getattr(book, "entry_prices", None)
+    if callable(custom):
+        raw_price, adjusted_price = custom(
+            spec=spec,
+            signal_day=int(signal_day),
+            execution_date_idx=int(execution_date_idx),
+            symbol_idx=int(symbol_idx),
+        )
+        return float(raw_price), float(adjusted_price)
+    return (
+        float(book.raw_open[int(execution_date_idx), int(symbol_idx)]),
+        float(book.adjusted_open[int(execution_date_idx), int(symbol_idx)]),
+    )
+
+
+def _planned_orders(
+    *,
+    book: SignalBook,
+    spec: TaskSpec,
+    day: int,
+    positions: Mapping[int, Position],
+) -> PendingOrders:
+    custom = getattr(book, "plan_orders", None)
+    if callable(custom):
+        orders = custom(
+            spec=spec,
+            day=int(day),
+            positions=positions,
+        )
+        if not isinstance(orders, PendingOrders):
+            raise TypeError("custom order planner returned an invalid value")
+        return orders
+    return plan_orders(book=book, spec=spec, day=day, positions=positions)
+
+
 def simulate_task(
     *,
     book: SignalBook,
@@ -1650,7 +1712,12 @@ def simulate_task(
                         )
                     )
                     continue
-                buyable = bool(book.next_buyable[pending.signal_day, symbol_idx])
+                buyable = _entry_is_buyable(
+                    book=book,
+                    spec=spec,
+                    signal_day=pending.signal_day,
+                    symbol_idx=symbol_idx,
+                )
                 if not buyable:
                     counters["failed_buy_count"] += 1
                     attempts.append(
@@ -1666,8 +1733,13 @@ def simulate_task(
                         )
                     )
                     continue
-                raw_open = float(book.raw_open[date_idx, symbol_idx])
-                adjusted_open = float(adjusted_open_row[symbol_idx])
+                raw_open, adjusted_open = _entry_prices(
+                    book=book,
+                    spec=spec,
+                    signal_day=pending.signal_day,
+                    execution_date_idx=date_idx,
+                    symbol_idx=symbol_idx,
+                )
                 allocation = _position_allocation(
                     book=book,
                     spec=spec,
@@ -1828,7 +1900,7 @@ def simulate_task(
         previous_equity = float(equity)
         previous_gross_equity = float(gross_equity)
         pending = (
-            plan_orders(
+            _planned_orders(
                 book=book,
                 spec=spec,
                 day=day,
