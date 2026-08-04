@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Prepare and run the first rolling quality-liquidity LightGBM comparison."""
+"""Prepare and run the canonical rolling quality-liquidity LightGBM studies."""
 
 import argparse
 import gc
@@ -35,14 +35,25 @@ ROLLING_YEARS = (2023, 2024, 2025)
 FORBIDDEN_YEAR = 2026
 MAXIMUM_OUTCOME_DATE = "2025-12-31"
 HORIZONS = (10, 20)
-LABEL_HORIZON_INDEX = {10: 1, 20: 2}
+LABEL_HORIZON_INDEX = {5: 0, 10: 1, 20: 2}
 STATE_HORIZON = 10
+FLAG_G_VALID = 64
 FLAG_MFE_PRE_PEAK_MAE_VALID = 128
 FLAG_STATE_ASSIGNED = 256
 TARGETS = ("mfe_10", "mfe_20", "risk_10", "risk_20", "state_10")
 COMPACT_VARIANT = "compact_core"
 MODEL_INPUT_DIR_NAME = "model_inputs"
 FORMAL_TASK_SCOPE = "compact_core_only"
+
+RETURN_HORIZONS = (1, 3, 5, 10, 20)
+RETURN_TARGETS = tuple(f"return_{horizon}" for horizon in RETURN_HORIZONS)
+RETURN_TASK_STAGE = "return_zscore"
+RETURN_TASK_COUNT = len(RETURN_HORIZONS) * len(ROLLING_YEARS)
+RETURN_WINSOR_LOWER = 0.01
+RETURN_WINSOR_UPPER = 0.99
+RETURN_MIN_CROSS_SECTION = 20
+SHORT_FLAG_G_VALID = 16
+DIRECT_RETURN_DIR_NAME = "direct_returns"
 
 COMPACT_CONSTANT_DROPS = (
     "market_csi300__st_rate",
@@ -125,6 +136,10 @@ DEFAULT_AUDIT_ROOT = (
 DEFAULT_OUTPUT_ROOT = (
     WORKSPACE_ROOT
     / "daily_research/output/path_policy/studies/seq100_quality_liquidity_model"
+)
+DEFAULT_SHORT_LABEL_MANIFEST = (
+    WORKSPACE_ROOT
+    / "tmp/seq100_short_horizon_target_reaudit/attempt_001/labels/short_label_manifest.json"
 )
 
 
@@ -1039,6 +1054,49 @@ def prepare(
     return manifest
 
 
+def _winsorized_zscore_by_date(
+    *,
+    values: np.ndarray,
+    date_idx: np.ndarray,
+    valid: np.ndarray,
+    lower: float = RETURN_WINSOR_LOWER,
+    upper: float = RETURN_WINSOR_UPPER,
+    minimum_count: int = RETURN_MIN_CROSS_SECTION,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Normalize a target within each signal-date cross section."""
+
+    raw = np.asarray(values, dtype=np.float64)
+    dates = np.asarray(date_idx, dtype=np.int32)
+    source_valid = np.asarray(valid, dtype=bool) & np.isfinite(raw)
+    if raw.ndim != 1 or dates.shape != raw.shape or source_valid.shape != raw.shape:
+        raise ModelError("return_normalization_shape_mismatch")
+    if not 0.0 <= float(lower) < float(upper) <= 1.0:
+        raise ModelError("return_winsor_quantiles_invalid")
+    if int(minimum_count) < 3:
+        raise ModelError("return_minimum_cross_section_invalid")
+    boundaries = _date_boundaries(dates)
+    normalized = np.full(len(raw), np.nan, dtype=np.float32)
+    normalized_valid = np.zeros(len(raw), dtype=bool)
+    for left, right in itertools.pairwise(boundaries):
+        local_valid = source_valid[left:right]
+        positions = np.flatnonzero(local_valid)
+        if len(positions) < int(minimum_count):
+            continue
+        local = raw[left:right][positions]
+        low, high = np.quantile(local, [float(lower), float(upper)], method="nearest")
+        clipped = np.clip(local, low, high)
+        mean = float(clipped.mean())
+        scale = float(clipped.std(ddof=0))
+        if not np.isfinite(scale) or scale <= 1.0e-12:
+            continue
+        global_positions = left + positions
+        normalized[global_positions] = ((clipped - mean) / scale).astype(
+            np.float32, copy=False
+        )
+        normalized_valid[global_positions] = True
+    return normalized, normalized_valid
+
+
 class ModelInputs:
     """Read the compact model inputs while retaining candidate-id label semantics."""
 
@@ -1099,6 +1157,10 @@ class ModelInputs:
         }
         self._target_cache: dict[str, np.ndarray] = {}
         self._valid_cache: dict[str, np.ndarray] = {}
+        self._raw_return_cache: dict[int, np.ndarray] = {}
+        self._raw_return_valid_cache: dict[int, np.ndarray] = {}
+        self._return_cache: dict[int, np.ndarray] = {}
+        self._return_valid_cache: dict[int, np.ndarray] = {}
 
     def rows_for_year(self, year: int) -> np.ndarray:
         rows = np.flatnonzero(self.years == int(year)).astype(np.int64, copy=False)
@@ -1113,7 +1175,9 @@ class ModelInputs:
             self._target_cache = cache
         if target in cache:
             return cache[target]
-        if target.startswith("state"):
+        if target.startswith("return_"):
+            values = self.return_values(int(target.rsplit("_", 1)[1]))
+        elif target.startswith("state"):
             values = np.asarray(
                 self.states[self.candidate_ids, LABEL_HORIZON_INDEX[STATE_HORIZON]],
                 dtype=np.int8,
@@ -1135,6 +1199,10 @@ class ModelInputs:
             self._valid_cache = cache
         if target in cache:
             return cache[target]
+        if target.startswith("return_"):
+            valid = self.return_valid_mask(int(target.rsplit("_", 1)[1]))
+            cache[target] = valid
+            return valid
         horizon_index = LABEL_HORIZON_INDEX[int(target.rsplit("_", 1)[1])]
         flags = np.asarray(
             self.flags[self.candidate_ids, horizon_index], dtype=np.uint16
@@ -1147,6 +1215,112 @@ class ModelInputs:
             valid = ((flags & FLAG_MFE_PRE_PEAK_MAE_VALID) != 0) & np.isfinite(values)
         cache[target] = valid
         return valid
+
+    def _ensure_short_return_labels(self) -> None:
+        if hasattr(self, "short_labels") and hasattr(self, "short_flags"):
+            return
+        manifest = _read_json(DEFAULT_SHORT_LABEL_MANIFEST)
+        if (
+            manifest.get("status") != "completed"
+            or int(manifest.get("candidate_count", -1)) <= int(self.candidate_ids.max())
+            or int(manifest.get("forbidden_outcome_year", -1)) != FORBIDDEN_YEAR
+            or str(manifest.get("maximum_outcome_date_read")) != MAXIMUM_OUTCOME_DATE
+        ):
+            raise ModelError("short_return_label_contract_mismatch")
+        files = dict(manifest["files"])
+        labels = dict(files["short_labels"])
+        flags = dict(files["flags"])
+        self.short_label_manifest = manifest
+        self.short_labels = np.memmap(
+            Path(labels["path"]),
+            dtype=np.dtype(labels["dtype"]),
+            mode="r",
+            shape=tuple(int(value) for value in labels["shape"]),
+        )
+        self.short_flags = np.memmap(
+            Path(flags["path"]),
+            dtype=np.dtype(flags["dtype"]),
+            mode="r",
+            shape=tuple(int(value) for value in flags["shape"]),
+        )
+
+    def raw_return_values(self, horizon: int) -> np.ndarray:
+        horizon = int(horizon)
+        cache = getattr(self, "_raw_return_cache", None)
+        if cache is None:
+            cache = {}
+            self._raw_return_cache = cache
+        if horizon in cache:
+            return cache[horizon]
+        if horizon in {1, 3}:
+            self._ensure_short_return_labels()
+            column = self.short_label_manifest["label_columns"].index(f"g_{horizon}")
+            values = np.asarray(
+                self.short_labels[self.candidate_ids, column], dtype=np.float32
+            )
+        elif horizon in {5, 10, 20}:
+            column = self.label_manifest["label_columns"].index(f"g_{horizon}")
+            values = np.asarray(
+                self.labels[self.candidate_ids, column], dtype=np.float32
+            )
+        else:
+            raise ModelError(f"unsupported_return_horizon:{horizon}")
+        cache[horizon] = values
+        return values
+
+    def raw_return_valid_mask(self, horizon: int) -> np.ndarray:
+        horizon = int(horizon)
+        cache = getattr(self, "_raw_return_valid_cache", None)
+        if cache is None:
+            cache = {}
+            self._raw_return_valid_cache = cache
+        if horizon in cache:
+            return cache[horizon]
+        values = self.raw_return_values(horizon)
+        if horizon in {1, 3}:
+            flag_column = 0 if horizon == 1 else 1
+            flags = np.asarray(
+                self.short_flags[self.candidate_ids, flag_column], dtype=np.uint16
+            )
+            valid = ((flags & SHORT_FLAG_G_VALID) != 0) & np.isfinite(values)
+        else:
+            flags = np.asarray(
+                self.flags[self.candidate_ids, LABEL_HORIZON_INDEX[horizon]],
+                dtype=np.uint16,
+            )
+            valid = ((flags & FLAG_G_VALID) != 0) & np.isfinite(values)
+        cache[horizon] = valid
+        return valid
+
+    def return_values(self, horizon: int) -> np.ndarray:
+        horizon = int(horizon)
+        cache = getattr(self, "_return_cache", None)
+        if cache is None:
+            cache = {}
+            self._return_cache = cache
+        if horizon not in cache:
+            values, valid = _winsorized_zscore_by_date(
+                values=self.raw_return_values(horizon),
+                date_idx=self.date_idx,
+                valid=self.raw_return_valid_mask(horizon),
+            )
+            cache[horizon] = values
+            valid_cache = getattr(self, "_return_valid_cache", None)
+            if valid_cache is None:
+                valid_cache = {}
+                self._return_valid_cache = valid_cache
+            valid_cache[horizon] = valid
+        return cache[horizon]
+
+    def return_valid_mask(self, horizon: int) -> np.ndarray:
+        horizon = int(horizon)
+        cache = getattr(self, "_return_valid_cache", None)
+        if cache is None:
+            cache = {}
+            self._return_valid_cache = cache
+        if horizon not in cache:
+            self.return_values(horizon)
+        return cache[horizon]
 
     def fold(self, *, year: int, horizon: int, target: str) -> dict[str, Any]:
         year_rows = self.rows_for_year(year)
@@ -1284,6 +1458,8 @@ def _target_parameters(config: Mapping[str, Any], kind: str) -> dict[str, Any]:
                 "alpha": float(model["huber_alpha"]),
             }
         )
+    elif kind == "return":
+        parameters.update({"objective": "regression", "metric": "l2"})
     elif kind == "state":
         parameters.update(
             {"objective": "multiclass", "metric": "multi_logloss", "num_class": 3}
@@ -1494,6 +1670,92 @@ def _mfe_daily_metrics(
     return frame, summary
 
 
+def _return_daily_metrics(
+    *,
+    date_idx: np.ndarray,
+    actual_raw: np.ndarray,
+    actual_zscore: np.ndarray,
+    prediction: np.ndarray,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    boundaries = _date_boundaries(date_idx)
+    decile_columns = [f"decile_{index}_return_mean" for index in range(1, 11)]
+    for left, right in itertools.pairwise(boundaries):
+        raw = np.asarray(actual_raw[left:right], dtype=np.float64)
+        zscore = np.asarray(actual_zscore[left:right], dtype=np.float64)
+        score = np.asarray(prediction[left:right], dtype=np.float64)
+        valid = np.isfinite(raw) & np.isfinite(zscore) & np.isfinite(score)
+        if int(valid.sum()) < RETURN_MIN_CROSS_SECTION:
+            continue
+        raw = raw[valid]
+        zscore = zscore[valid]
+        score = score[valid]
+        order_pred = np.argsort(score, kind="mergesort")
+        order_true = np.argsort(raw, kind="mergesort")
+        count = len(raw)
+        top1_count = max(1, math.ceil(0.01 * count))
+        top5_count = max(1, math.ceil(0.05 * count))
+        top1_pred = order_pred[-top1_count:]
+        top5_pred = order_pred[-top5_count:]
+        top1_true = set(order_true[-top1_count:].tolist())
+        top5_true = set(order_true[-top5_count:].tolist())
+        universe_mean = float(raw.mean())
+        top1_mean = float(raw[top1_pred].mean())
+        top5_mean = float(raw[top5_pred].mean())
+        decile = np.asarray(
+            [float(raw[part].mean()) for part in np.array_split(order_pred, 10)],
+            dtype=np.float64,
+        )
+        record = {
+            "date_idx": int(date_idx[left]),
+            "rank_ic": _safe_spearman(raw, score),
+            "universe_return_mean": universe_mean,
+            "top1_return_mean": top1_mean,
+            "top5_return_mean": top5_mean,
+            "top1_return_median": float(np.median(raw[top1_pred])),
+            "top5_return_median": float(np.median(raw[top5_pred])),
+            "top1_excess_mean": top1_mean - universe_mean,
+            "top5_excess_mean": top5_mean - universe_mean,
+            "top1_capture": float(
+                len(top1_true.intersection(set(top1_pred.tolist()))) / len(top1_true)
+            ),
+            "top5_capture": float(
+                len(top5_true.intersection(set(top5_pred.tolist()))) / len(top5_true)
+            ),
+            "decile_spearman": _safe_spearman(np.arange(10, dtype=np.float64), decile),
+            "zscore_mse": float(np.mean(np.square(zscore - score))),
+            "row_count": int(count),
+        }
+        record.update(dict(zip(decile_columns, decile.tolist(), strict=True)))
+        records.append(record)
+    frame = pd.DataFrame(records)
+    if frame.empty:
+        raise ModelError("return_metrics_no_valid_dates")
+    metric_columns = [
+        "rank_ic",
+        "universe_return_mean",
+        "top1_return_mean",
+        "top5_return_mean",
+        "top1_return_median",
+        "top5_return_median",
+        "top1_excess_mean",
+        "top5_excess_mean",
+        "top1_capture",
+        "top5_capture",
+        "decile_spearman",
+        "zscore_mse",
+        *decile_columns,
+    ]
+    summary = {"date_count": len(frame)}
+    summary.update(
+        {
+            column: float(pd.to_numeric(frame[column], errors="coerce").mean())
+            for column in metric_columns
+        }
+    )
+    return frame, summary
+
+
 def _risk_daily_metrics(
     *, date_idx: np.ndarray, actual: np.ndarray, prediction: np.ndarray
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
@@ -1621,6 +1883,33 @@ def _task_plan(config: Mapping[str, Any]) -> list[dict[str, Any]]:
     return tasks
 
 
+def _direct_return_task_plan() -> list[dict[str, Any]]:
+    tasks = [
+        {
+            "task_id": (
+                f"{RETURN_TASK_STAGE}__g_{horizon:02d}__{COMPACT_VARIANT}__{year}"
+            ),
+            "stage": RETURN_TASK_STAGE,
+            "target": f"return_{horizon}",
+            "source_label": f"g_{horizon}",
+            "kind": "return",
+            "horizon": int(horizon),
+            "year": int(year),
+            "variant": COMPACT_VARIANT,
+            "gated_family": None,
+            "label_transform": "signal_date_winsor_01_99_zscore",
+        }
+        for horizon in RETURN_HORIZONS
+        for year in ROLLING_YEARS
+    ]
+    if (
+        len(tasks) != RETURN_TASK_COUNT
+        or len({str(task["task_id"]) for task in tasks}) != RETURN_TASK_COUNT
+    ):
+        raise ModelError(f"direct_return_task_plan_contract_mismatch:{len(tasks)}")
+    return tasks
+
+
 def _save_npy(path: Path, values: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".partial")
@@ -1639,15 +1928,17 @@ def _task_fingerprint(
     feature_names: Sequence[str],
     model_input_fingerprint: str,
     config_sha256: str,
+    experiment_fingerprint: str | None = None,
 ) -> str:
-    return _stable_hash(
-        {
-            "task": dict(task),
-            "feature_names": list(feature_names),
-            "model_input_fingerprint": model_input_fingerprint,
-            "config_sha256": config_sha256,
-        }
-    )
+    payload = {
+        "task": dict(task),
+        "feature_names": list(feature_names),
+        "model_input_fingerprint": model_input_fingerprint,
+        "config_sha256": config_sha256,
+    }
+    if experiment_fingerprint is not None:
+        payload["experiment_fingerprint"] = str(experiment_fingerprint)
+    return _stable_hash(payload)
 
 
 def _task_complete(path: Path, *, fingerprint: str) -> bool:
@@ -1677,7 +1968,7 @@ def _effective_features(
 ) -> tuple[list[str], str]:
     variant = str(task["variant"])
     stage = str(task["stage"])
-    if stage in {"tuning", "mfe_core", "risk_state_core"}:
+    if stage in {"tuning", "mfe_core", "risk_state_core", RETURN_TASK_STAGE}:
         return list(inputs.feature_groups[variant]), variant
     raise ModelError(f"unknown_task_stage:{stage}")
 
@@ -1692,6 +1983,14 @@ def _evaluate_prediction(
     target = str(task["target"])
     kind = str(task["kind"])
     actual = inputs.task_values(target)[rows]
+    if kind == "return":
+        horizon = int(task["horizon"])
+        return _return_daily_metrics(
+            date_idx=inputs.date_idx[rows],
+            actual_raw=inputs.raw_return_values(horizon)[rows],
+            actual_zscore=actual,
+            prediction=prediction,
+        )
     if kind == "mfe":
         risk = inputs.task_values(f"risk_{int(task['horizon'])}")[rows]
         return _mfe_daily_metrics(
@@ -1775,6 +2074,7 @@ def _run_training_task(
     config: Mapping[str, Any],
     output_root: Path,
     config_sha256: str,
+    experiment_fingerprint: str | None = None,
 ) -> dict[str, Any]:
     import lightgbm as lgb
 
@@ -1786,6 +2086,7 @@ def _run_training_task(
         feature_names=feature_names,
         model_input_fingerprint=str(inputs.manifest["input_fingerprint"]),
         config_sha256=config_sha256,
+        experiment_fingerprint=experiment_fingerprint,
     )
     result_path = _task_result_path(output_root, str(task["task_id"]))
     if _task_complete(result_path, fingerprint=fingerprint):
@@ -1824,7 +2125,7 @@ def _run_training_task(
         )
         iterations = int(model.best_iteration)
     else:
-        if task["kind"] == "mfe":
+        if task["kind"] in {"mfe", "return"}:
             iterations = int(config["model"]["fixed_mfe_rounds"])
         else:
             tuning_id = f"tuning__{task['target']}__{COMPACT_VARIANT}__{outer_year}"
@@ -1902,6 +2203,8 @@ def _run_training_task(
         "variant": str(task["variant"]),
         "base_variant": base_variant,
         "gated_family": task.get("gated_family"),
+        "source_label": task.get("source_label"),
+        "label_transform": task.get("label_transform"),
         "feature_count": len(feature_names),
         "feature_names": feature_names,
         "availability_feature_count": 0,
@@ -2170,6 +2473,7 @@ def _annual_metrics(results: Mapping[str, Mapping[str, Any]]) -> pd.DataFrame:
             "stage": result["stage"],
             "target": result["target"],
             "kind": result["kind"],
+            "horizon": int(result["horizon"]),
             "model_year": int(result["model_year"]),
             "evaluation_year": int(result["evaluation_year"]),
             "variant": result["variant"],
@@ -2359,6 +2663,610 @@ def audit(
     return audit_payload
 
 
+def _direct_return_root(output_root: Path) -> Path:
+    return output_root / DIRECT_RETURN_DIR_NAME
+
+
+def _verify_return_label_sources(
+    *, main_manifest: Mapping[str, Any], short_manifest: Mapping[str, Any]
+) -> None:
+    candidate_count = int(main_manifest.get("candidate_count", -1))
+    if (
+        candidate_count <= 0
+        or int(short_manifest.get("candidate_count", -2)) != candidate_count
+        or str(main_manifest.get("outcome_cutoff")) != MAXIMUM_OUTCOME_DATE
+        or int(main_manifest.get("forbidden_outcome_year", -1)) != FORBIDDEN_YEAR
+        or str(short_manifest.get("maximum_outcome_date_read")) != MAXIMUM_OUTCOME_DATE
+        or int(short_manifest.get("forbidden_outcome_year", -1)) != FORBIDDEN_YEAR
+        or short_manifest.get("status") != "completed"
+    ):
+        raise ModelError("direct_return_label_source_contract_mismatch")
+    if not {"g_5", "g_10", "g_20"}.issubset(main_manifest["label_columns"]):
+        raise ModelError("main_return_labels_missing")
+    if not {"g_1", "g_3"}.issubset(short_manifest["label_columns"]):
+        raise ModelError("short_return_labels_missing")
+    records = [
+        main_manifest["files"]["candidate_labels"],
+        main_manifest["files"]["label_flags"],
+        short_manifest["files"]["short_labels"],
+        short_manifest["files"]["flags"],
+    ]
+    for record in records:
+        path = Path(record["path"])
+        expected_size = (
+            int(np.prod(record["shape"])) * np.dtype(record["dtype"]).itemsize
+        )
+        if (
+            not path.is_file()
+            or int(path.stat().st_size) != expected_size
+            or int(record.get("size", expected_size)) != expected_size
+        ):
+            raise ModelError(f"direct_return_label_file_invalid:{path}")
+
+
+def _direct_return_fingerprint(
+    *,
+    input_manifest: Mapping[str, Any],
+    study_path: Path,
+    main_manifest_path: Path,
+    short_manifest_path: Path,
+) -> str:
+    return _stable_hash(
+        {
+            "schema": "seq100_quality_liquidity_direct_returns/1",
+            "model_input_fingerprint": str(input_manifest["input_fingerprint"]),
+            "config_sha256": _sha256(study_path),
+            "main_label_manifest_sha256": _sha256(main_manifest_path),
+            "short_label_manifest_sha256": _sha256(short_manifest_path),
+            "feature_variant": COMPACT_VARIANT,
+            "feature_count": COMPACT_FEATURE_COUNT,
+            "horizons": list(RETURN_HORIZONS),
+            "rolling_years": list(ROLLING_YEARS),
+            "objective": "regression_l2",
+            "rounds": 512,
+            "label_transform": {
+                "group": "signal_trade_date",
+                "winsor_lower": RETURN_WINSOR_LOWER,
+                "winsor_upper": RETURN_WINSOR_UPPER,
+                "quantile_method": "nearest",
+                "zscore_ddof": 0,
+                "minimum_cross_section": RETURN_MIN_CROSS_SECTION,
+            },
+        }
+    )
+
+
+def _label_file_contract(record: Mapping[str, Any]) -> dict[str, Any]:
+    path = Path(record["path"])
+    return {
+        "path": str(path.resolve()),
+        "size": int(path.stat().st_size),
+        "shape": [int(value) for value in record["shape"]],
+        "dtype": str(record["dtype"]),
+    }
+
+
+def _return_label_coverage(inputs: ModelInputs) -> pd.DataFrame:
+    records: list[dict[str, Any]] = []
+    for horizon in RETURN_HORIZONS:
+        raw_valid = inputs.raw_return_valid_mask(horizon)
+        normalized_valid = inputs.return_valid_mask(horizon)
+        for year in YEARS:
+            rows = inputs.rows_for_year(year)
+            raw = raw_valid[rows]
+            normalized = normalized_valid[rows]
+            valid_dates = np.unique(inputs.date_idx[rows[normalized]])
+            records.append(
+                {
+                    "horizon": int(horizon),
+                    "year": int(year),
+                    "row_count": len(rows),
+                    "raw_valid_count": int(raw.sum()),
+                    "normalized_valid_count": int(normalized.sum()),
+                    "raw_coverage": float(raw.mean()),
+                    "normalized_coverage": float(normalized.mean()),
+                    "normalized_date_count": len(valid_dates),
+                    "first_normalized_trade_date": (
+                        str(inputs.date_values[int(valid_dates[0])])
+                        if len(valid_dates)
+                        else None
+                    ),
+                    "last_normalized_trade_date": (
+                        str(inputs.date_values[int(valid_dates[-1])])
+                        if len(valid_dates)
+                        else None
+                    ),
+                }
+            )
+    return pd.DataFrame(records).sort_values(["horizon", "year"])
+
+
+def prepare_returns(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    ready_root: Path = DEFAULT_READY_ROOT,
+    audit_root: Path = DEFAULT_AUDIT_ROOT,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+) -> dict[str, Any]:
+    config = _load_config(study_path)
+    _audit_manifest(audit_root)
+    input_manifest = prepare(
+        study_path=study_path,
+        ready_root=ready_root,
+        audit_root=audit_root,
+        output_root=output_root,
+    )
+    main_manifest_path = Path(input_manifest["label_manifest"]["path"])
+    short_manifest_path = DEFAULT_SHORT_LABEL_MANIFEST.resolve()
+    main_manifest = _read_json(main_manifest_path)
+    short_manifest = _read_json(short_manifest_path)
+    _verify_return_label_sources(
+        main_manifest=main_manifest, short_manifest=short_manifest
+    )
+    fingerprint = _direct_return_fingerprint(
+        input_manifest=input_manifest,
+        study_path=study_path,
+        main_manifest_path=main_manifest_path,
+        short_manifest_path=short_manifest_path,
+    )
+    direct_root = _direct_return_root(output_root)
+    direct_root.mkdir(parents=True, exist_ok=True)
+    contract_path = direct_root / "label_contract.json"
+    coverage_path = direct_root / "label_coverage.parquet"
+    manifest_path = direct_root / "manifest.json"
+    if contract_path.is_file() and coverage_path.is_file():
+        existing_contract = _read_json(contract_path)
+        if existing_contract.get("experiment_fingerprint") == fingerprint:
+            manifest = _read_json(manifest_path)
+            if manifest.get("experiment_fingerprint") != fingerprint:
+                raise ModelError("direct_return_manifest_fingerprint_mismatch")
+            return {
+                "status": "prepared",
+                "study_id": STUDY_ID,
+                "stage": DIRECT_RETURN_DIR_NAME,
+                "experiment_fingerprint": fingerprint,
+                "task_count": RETURN_TASK_COUNT,
+                "feature_count": COMPACT_FEATURE_COUNT,
+                "label_coverage": str(coverage_path.resolve()),
+                "existing_status": manifest.get("status"),
+            }
+    inputs = ModelInputs(input_manifest)
+    coverage = _return_label_coverage(inputs)
+    _write_parquet(coverage, coverage_path)
+    label_contract = {
+        "schema": "seq100_quality_liquidity_direct_return_labels/1",
+        "status": "completed",
+        "created_at": _now(),
+        "study_id": STUDY_ID,
+        "experiment_fingerprint": fingerprint,
+        "feature_variant": COMPACT_VARIANT,
+        "feature_count": COMPACT_FEATURE_COUNT,
+        "horizons": list(RETURN_HORIZONS),
+        "signal_timing": "after_signal_day_close",
+        "entry": "next_trading_day_open",
+        "exit": "D_h_close",
+        "raw_label": "gross_simple_return_from_next_open_to_D_h_close",
+        "training_transform": {
+            "group": "signal_trade_date_cross_section",
+            "winsor_quantiles": [RETURN_WINSOR_LOWER, RETURN_WINSOR_UPPER],
+            "quantile_method": "nearest",
+            "zscore_ddof": 0,
+            "minimum_cross_section": RETURN_MIN_CROSS_SECTION,
+        },
+        "evaluation_target": "original_unstandardized_return",
+        "sources": {
+            "main_manifest": _file_record(main_manifest_path),
+            "main_labels": _label_file_contract(
+                main_manifest["files"]["candidate_labels"]
+            ),
+            "main_flags": _label_file_contract(main_manifest["files"]["label_flags"]),
+            "short_manifest": _file_record(short_manifest_path),
+            "short_labels": _label_file_contract(
+                short_manifest["files"]["short_labels"]
+            ),
+            "short_flags": _label_file_contract(short_manifest["files"]["flags"]),
+        },
+        "coverage": _file_record(coverage_path, row_count=len(coverage)),
+        "formal_years": list(YEARS),
+        "rolling_years": list(ROLLING_YEARS),
+        "burn_in_year": 2010,
+        "forbidden_year": FORBIDDEN_YEAR,
+        "maximum_outcome_date": MAXIMUM_OUTCOME_DATE,
+        "training_performed": False,
+    }
+    _write_json(contract_path, label_contract)
+    tasks = _direct_return_task_plan()
+    manifest = {
+        "schema": "seq100_quality_liquidity_direct_return_manifest/1",
+        "study_id": STUDY_ID,
+        "stage": DIRECT_RETURN_DIR_NAME,
+        "status": "prepared",
+        "created_at": _now(),
+        "experiment_fingerprint": fingerprint,
+        "config": _file_record(study_path),
+        "model_inputs": _file_record(
+            ready_root / MODEL_INPUT_DIR_NAME / "manifest.json",
+            input_fingerprint=str(input_manifest["input_fingerprint"]),
+        ),
+        "label_contract": _file_record(contract_path),
+        "label_coverage": _file_record(coverage_path, row_count=len(coverage)),
+        "task_count": len(tasks),
+        "tasks": tasks,
+        "outputs": {},
+        "training_performed": False,
+        "feature_set_selected": False,
+        "evaluation_semantics": "retrospective_rolling_oos",
+        "forbidden_year": FORBIDDEN_YEAR,
+        "model_parameters": {
+            "objective": "regression",
+            "metric": "l2",
+            "rounds": int(config["model"]["fixed_mfe_rounds"]),
+        },
+    }
+    _write_json(manifest_path, manifest)
+    return {
+        "status": "prepared",
+        "study_id": STUDY_ID,
+        "stage": DIRECT_RETURN_DIR_NAME,
+        "experiment_fingerprint": fingerprint,
+        "task_count": len(tasks),
+        "feature_count": COMPACT_FEATURE_COUNT,
+        "label_coverage": str(coverage_path.resolve()),
+    }
+
+
+def _update_return_ledger(
+    *,
+    direct_root: Path,
+    tasks: Sequence[Mapping[str, Any]],
+    results: Mapping[str, Mapping[str, Any]],
+) -> None:
+    entries = []
+    for task in tasks:
+        task_id = str(task["task_id"])
+        result = results.get(task_id)
+        entries.append(
+            {
+                **dict(task),
+                "status": "completed" if result is not None else "pending",
+                "result_path": (
+                    str(_task_result_path(direct_root, task_id).resolve())
+                    if result is not None
+                    else None
+                ),
+                "best_iteration": result.get("best_iteration") if result else None,
+                "updated_at": _now(),
+            }
+        )
+    _write_json(
+        direct_root / "task_ledger.json",
+        {
+            "schema": "seq100_quality_liquidity_direct_return_ledger/1",
+            "study_id": STUDY_ID,
+            "task_count": len(tasks),
+            "completed_count": sum(item["status"] == "completed" for item in entries),
+            "tasks": entries,
+        },
+    )
+
+
+def run_returns(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    ready_root: Path = DEFAULT_READY_ROOT,
+    audit_root: Path = DEFAULT_AUDIT_ROOT,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    max_tasks: int | None = None,
+) -> dict[str, Any]:
+    config = _load_config(study_path)
+    prepare_returns(
+        study_path=study_path,
+        ready_root=ready_root,
+        audit_root=audit_root,
+        output_root=output_root,
+    )
+    direct_root = _direct_return_root(output_root)
+    manifest_path = direct_root / "manifest.json"
+    manifest = _read_json(manifest_path)
+    input_manifest = _read_json(Path(manifest["model_inputs"]["path"]))
+    inputs = ModelInputs(input_manifest)
+    tasks = _direct_return_task_plan()
+    results, diagnostic = _partition_results(_completed_results(direct_root), tasks)
+    if diagnostic:
+        raise ModelError(f"unexpected_direct_return_tasks:{sorted(diagnostic)}")
+    _update_return_ledger(direct_root=direct_root, tasks=tasks, results=results)
+    completed_this_run = 0
+    fingerprint = str(manifest["experiment_fingerprint"])
+    config_sha256 = _sha256(study_path)
+    for task in tasks:
+        task_id = str(task["task_id"])
+        if task_id in results:
+            feature_names, _ = _effective_features(
+                inputs=inputs, task=task, output_root=direct_root
+            )
+            task_fingerprint = _task_fingerprint(
+                task=task,
+                feature_names=feature_names,
+                model_input_fingerprint=str(input_manifest["input_fingerprint"]),
+                config_sha256=config_sha256,
+                experiment_fingerprint=fingerprint,
+            )
+            if _task_complete(
+                _task_result_path(direct_root, task_id), fingerprint=task_fingerprint
+            ):
+                continue
+            results.pop(task_id)
+        if max_tasks is not None and completed_this_run >= int(max_tasks):
+            break
+        result = _run_training_task(
+            task=task,
+            inputs=inputs,
+            config=config,
+            output_root=direct_root,
+            config_sha256=config_sha256,
+            experiment_fingerprint=fingerprint,
+        )
+        results[task_id] = result
+        completed_this_run += 1
+        _update_return_ledger(direct_root=direct_root, tasks=tasks, results=results)
+    all_complete = len(results) == len(tasks)
+    manifest["status"] = (
+        "training_completed" if all_complete else "training_in_progress"
+    )
+    manifest["updated_at"] = _now()
+    manifest["training_performed"] = all_complete
+    manifest["feature_set_selected"] = False
+    if not all_complete:
+        manifest["outputs"] = {}
+    _write_json(manifest_path, manifest)
+    return {
+        "status": manifest["status"],
+        "study_id": STUDY_ID,
+        "stage": DIRECT_RETURN_DIR_NAME,
+        "task_count": len(tasks),
+        "completed_count": len(results),
+        "completed_this_run": completed_this_run,
+        "training_performed": all_complete,
+    }
+
+
+def _return_monthly_metrics(
+    results: Mapping[str, Mapping[str, Any]],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for result in results.values():
+        daily = pd.read_parquet(Path(result["files"]["daily_metrics"]["path"]))
+        daily["month"] = daily["trade_date"].astype(str).str.slice(0, 7)
+        metric_columns = [
+            column
+            for column in daily.select_dtypes(include=[np.number]).columns
+            if column not in {"date_idx", "row_count"}
+        ]
+        for month, part in daily.groupby("month", sort=True):
+            row = {
+                "task_id": str(result["task_id"]),
+                "target": str(result["target"]),
+                "horizon": int(result["horizon"]),
+                "year": int(result["evaluation_year"]),
+                "month": str(month),
+                "date_count": len(part),
+                "row_count": int(part["row_count"].sum()),
+            }
+            row.update(
+                {
+                    column: float(pd.to_numeric(part[column], errors="coerce").mean())
+                    for column in metric_columns
+                }
+            )
+            rows.append(row)
+    return pd.DataFrame(rows).sort_values(["horizon", "month"])
+
+
+def _return_horizon_summary(annual: pd.DataFrame) -> pd.DataFrame:
+    metrics = [
+        "rank_ic",
+        "top1_return_mean",
+        "top5_return_mean",
+        "top1_excess_mean",
+        "top5_excess_mean",
+        "top1_capture",
+        "top5_capture",
+        "decile_spearman",
+        "zscore_mse",
+    ]
+    rows: list[dict[str, Any]] = []
+    for horizon, part in annual.groupby("horizon", sort=True):
+        row: dict[str, Any] = {
+            "horizon": int(horizon),
+            "year_count": len(part),
+            "positive_rank_ic_years": int(part["rank_ic"].gt(0.0).sum()),
+        }
+        for metric in metrics:
+            values = pd.to_numeric(part[metric], errors="coerce")
+            row[f"{metric}_mean"] = float(values.mean())
+            row[f"{metric}_median"] = float(values.median())
+            row[f"{metric}_worst"] = float(
+                values.max() if metric == "zscore_mse" else values.min()
+            )
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values("horizon")
+
+
+def evaluate_returns(
+    *, output_root: Path = DEFAULT_OUTPUT_ROOT, study_path: Path = DEFAULT_STUDY_PATH
+) -> dict[str, Any]:
+    _load_config(study_path)
+    direct_root = _direct_return_root(output_root)
+    manifest_path = direct_root / "manifest.json"
+    manifest = _read_json(manifest_path)
+    if manifest.get("status") not in {"training_completed", "evaluated", "audited"}:
+        raise ModelError("direct_return_training_not_completed")
+    tasks = _direct_return_task_plan()
+    results, diagnostic = _partition_results(_completed_results(direct_root), tasks)
+    if len(results) != len(tasks) or diagnostic:
+        raise ModelError(
+            f"direct_return_evaluation_task_count_mismatch:{len(results)}:{len(diagnostic)}"
+        )
+    annual = _annual_metrics(results)
+    monthly = _return_monthly_metrics(results)
+    horizon = _return_horizon_summary(annual)
+    importance = pd.concat(
+        [
+            pd.read_parquet(Path(result["files"]["family_importance"]["path"]))
+            for result in results.values()
+        ],
+        ignore_index=True,
+    )
+    paths = {
+        "annual_metrics": direct_root / "annual_metrics.parquet",
+        "monthly_metrics": direct_root / "monthly_metrics.parquet",
+        "horizon_summary": direct_root / "horizon_summary.parquet",
+        "family_importance": direct_root / "family_importance.parquet",
+    }
+    for frame, path in (
+        (annual, paths["annual_metrics"]),
+        (monthly, paths["monthly_metrics"]),
+        (horizon, paths["horizon_summary"]),
+        (importance, paths["family_importance"]),
+    ):
+        _write_parquet(frame, path)
+    manifest["status"] = "evaluated"
+    manifest["updated_at"] = _now()
+    manifest["training_performed"] = True
+    manifest["feature_set_selected"] = False
+    manifest["selection_status"] = "pending_horizon_review"
+    manifest["outputs"] = {
+        name: _file_record(path, row_count=len(frame))
+        for name, path, frame in (
+            ("annual_metrics", paths["annual_metrics"], annual),
+            ("monthly_metrics", paths["monthly_metrics"], monthly),
+            ("horizon_summary", paths["horizon_summary"], horizon),
+            ("family_importance", paths["family_importance"], importance),
+        )
+    }
+    _write_json(manifest_path, manifest)
+    return {
+        "status": "evaluated",
+        "task_count": len(results),
+        "annual_metric_rows": len(annual),
+        "monthly_metric_rows": len(monthly),
+        "horizon_summary_rows": len(horizon),
+        "family_importance_rows": len(importance),
+    }
+
+
+def audit_returns(
+    *, output_root: Path = DEFAULT_OUTPUT_ROOT, study_path: Path = DEFAULT_STUDY_PATH
+) -> dict[str, Any]:
+    _load_config(study_path)
+    direct_root = _direct_return_root(output_root)
+    manifest_path = direct_root / "manifest.json"
+    manifest = _read_json(manifest_path)
+    input_manifest = _read_json(Path(manifest["model_inputs"]["path"]))
+    _verify_model_input_files(input_manifest, full_hash=False)
+    main_manifest_path = Path(input_manifest["label_manifest"]["path"])
+    main_manifest = _read_json(main_manifest_path)
+    short_manifest = _read_json(DEFAULT_SHORT_LABEL_MANIFEST)
+    _verify_return_label_sources(
+        main_manifest=main_manifest, short_manifest=short_manifest
+    )
+    expected_fingerprint = _direct_return_fingerprint(
+        input_manifest=input_manifest,
+        study_path=study_path,
+        main_manifest_path=main_manifest_path,
+        short_manifest_path=DEFAULT_SHORT_LABEL_MANIFEST,
+    )
+    inputs = ModelInputs(input_manifest)
+    tasks = _direct_return_task_plan()
+    results, diagnostic = _partition_results(_completed_results(direct_root), tasks)
+    checks: dict[str, bool] = {
+        "manifest_status": manifest.get("status")
+        in {"training_completed", "evaluated", "audited"},
+        "experiment_fingerprint": str(manifest.get("experiment_fingerprint"))
+        == expected_fingerprint,
+        "task_count_exact": len(results) == RETURN_TASK_COUNT and not diagnostic,
+        "feature_count_exact": len(inputs.feature_groups[COMPACT_VARIANT])
+        == COMPACT_FEATURE_COUNT,
+        "formal_rows_exclude_2010": not bool((inputs.years == 2010).any()),
+        "forbidden_2026_rows": not bool(
+            np.char.startswith(inputs.trade_date, "2026-").any()
+        ),
+        "task_files_valid": True,
+        "purge_valid": True,
+        "outputs_hashed": True,
+    }
+    config_sha256 = _sha256(study_path)
+    for task in tasks:
+        task_id = str(task["task_id"])
+        result = results.get(task_id)
+        if result is None:
+            checks["task_files_valid"] = False
+            continue
+        try:
+            feature_names, _ = _effective_features(
+                inputs=inputs, task=task, output_root=direct_root
+            )
+            fingerprint = _task_fingerprint(
+                task=task,
+                feature_names=feature_names,
+                model_input_fingerprint=str(input_manifest["input_fingerprint"]),
+                config_sha256=config_sha256,
+                experiment_fingerprint=expected_fingerprint,
+            )
+            checks["task_files_valid"] &= _task_complete(
+                _task_result_path(direct_root, task_id), fingerprint=fingerprint
+            )
+            prediction = np.load(
+                Path(result["files"]["prediction"]["path"]),
+                mmap_mode="r",
+                allow_pickle=False,
+            )
+            candidate_ids = np.load(
+                Path(result["files"]["candidate_id"]["path"]),
+                mmap_mode="r",
+                allow_pickle=False,
+            )
+            expected_rows = inputs.rows_for_year(int(result["evaluation_year"]))
+            checks["task_files_valid"] &= np.array_equal(
+                candidate_ids, inputs.candidate_ids[expected_rows]
+            ) and prediction.shape[0] == len(expected_rows)
+            fold = inputs.fold(
+                year=int(result["evaluation_year"]),
+                horizon=int(result["horizon"]),
+                target=str(result["target"]),
+            )
+            checks["purge_valid"] &= int(
+                result["maximum_train_signal_date_idx"]
+            ) == int(fold["maximum_train_signal_date_idx"])
+        except (ModelError, OSError, KeyError, ValueError, TypeError, IndexError):
+            checks["task_files_valid"] = False
+    for record in dict(manifest.get("outputs", {}) or {}).values():
+        path = Path(record["path"])
+        checks["outputs_hashed"] &= path.is_file() and _sha256(path) == record["sha256"]
+    payload = {
+        "schema": "seq100_quality_liquidity_direct_return_audit/1",
+        "study_id": STUDY_ID,
+        "stage": DIRECT_RETURN_DIR_NAME,
+        "status": "ok" if all(checks.values()) else "failed",
+        "created_at": _now(),
+        "checks": checks,
+        "task_count": len(results),
+        "horizons": list(RETURN_HORIZONS),
+        "rolling_years": list(ROLLING_YEARS),
+        "training_performed": True,
+        "evaluation_semantics": "retrospective_rolling_oos",
+    }
+    audit_path = direct_root / "audit.json"
+    _write_json(audit_path, payload)
+    if payload["status"] != "ok":
+        raise ModelError("direct_return_audit_failed")
+    manifest["status"] = "audited"
+    manifest["audit"] = _file_record(audit_path)
+    manifest["updated_at"] = _now()
+    _write_json(manifest_path, manifest)
+    return payload
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study-path", type=Path, default=DEFAULT_STUDY_PATH)
@@ -2370,13 +3278,38 @@ def _parser() -> argparse.ArgumentParser:
     modes.add_argument("--run", action="store_true")
     modes.add_argument("--evaluate", action="store_true")
     modes.add_argument("--audit", action="store_true")
+    modes.add_argument("--prepare-returns", action="store_true")
+    modes.add_argument("--run-returns", action="store_true")
+    modes.add_argument("--evaluate-returns", action="store_true")
+    modes.add_argument("--audit-returns", action="store_true")
     parser.add_argument("--max-tasks", type=int, default=None)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.prepare:
+    if args.prepare_returns:
+        result = prepare_returns(
+            study_path=args.study_path,
+            ready_root=args.ready_root,
+            audit_root=args.audit_root,
+            output_root=args.output_root,
+        )
+    elif args.run_returns:
+        result = run_returns(
+            study_path=args.study_path,
+            ready_root=args.ready_root,
+            audit_root=args.audit_root,
+            output_root=args.output_root,
+            max_tasks=args.max_tasks,
+        )
+    elif args.evaluate_returns:
+        result = evaluate_returns(
+            output_root=args.output_root, study_path=args.study_path
+        )
+    elif args.audit_returns:
+        result = audit_returns(output_root=args.output_root, study_path=args.study_path)
+    elif args.prepare:
         result = prepare(
             study_path=args.study_path,
             ready_root=args.ready_root,
@@ -2400,6 +3333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         0
         if result.get("status")
         in {
+            "prepared",
             "completed",
             "training_completed",
             "training_in_progress",
