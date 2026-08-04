@@ -251,10 +251,54 @@ only about 7.8% of filled orders exceed 0.1% of trailing median amount.
 
 This result does not justify changing the 557-feature input or retraining. The
 next bounded research should keep the frozen predictions and test a small,
-horizon-aligned retention/exit surface around dual-MFE plus risk veto: explicit
-minimum holding periods, limited D5/D10-style time exits, and materially wider
-replacement hysteresis. It should not reopen broad feature search, claim a
-production policy, or consume 2026.
+horizon-aligned retention/exit surface around dual-MFE plus risk veto. That
+bounded test is now recorded below. It should not reopen broad feature search,
+claim a production policy, or consume 2026.
+
+## Quality-liquidity profit-timeout research (2026-08-04)
+
+`seq100_quality_liquidity_profit_timeout` reused the audited 557-field signal
+book without retraining or QDP reads. It ran 32 continuous-account tasks over
+2023-2025: dual-MFE plus risk veto, 6/12 slots, D10/D20 vertical exits,
+take-profit levels of none/5%/8%/10%, and base/stress costs. Entries use the
+next open; a standing take-profit becomes active on D2 for A-share T+1; an
+unhit position exits at the precommitted D10/D20 close; blocked exits defer to
+the next sellable open. Candidate selection does not inspect next-open
+buyability.
+
+Formal research conclusion:
+
+`profit_timeout_has_robust_research_candidate`
+
+The only robust region is 8% take-profit plus D20 timeout at both slot counts:
+
+- K=6 base/stress terminal return is `+70.02%/+54.94%`, with relative excess
+  `+33.03%/+21.23%`; base annual return is `+1.26%/+13.19%/+48.33%`.
+- K=12 base/stress terminal return is `+81.48%/+65.73%`, with relative excess
+  `+42.00%/+29.67%`; base annual return is `-6.64%/+12.24%/+73.20%`.
+- The same-timeout D20 baseline returns `+42.96%` at K=6 and `-3.48%` at K=12.
+  The 8% barrier improves terminal return by `+27.06/+84.96` percentage points
+  under base costs and by `+18.02/+75.19` points under stress. Its paired
+  annual return improves in at least two years for both K values and costs.
+
+This is not a production selection. Maximum drawdown remains
+`-42.00%/-42.79%` at K=6/12 and the common peak-to-trough period runs from
+June 2023 to 2024-02-07, recovering only in October 2024. The barrier succeeds
+about 66.5% of completed positions with a median D4 hit, but D20 timeout exits
+average about `-13.12%` gross and cluster in weak months. K=6/12 complete
+407/821 round trips; mean holding is 9.58/9.45 trading-index days, turnover is
+162.6x/155.0x starting cash, and base costs consume CNY 212k/202k. Top-five
+single-symbol absolute PnL concentration is only 6.3%/4.1%, so the result is
+not carried by a few names.
+
+The audit is `ok`: all 32 tasks, hashes, source 557-field contract, T+1,
+timeout boundaries, accounting conservation, output dates, no HTML, absent
+fixed stop loss, and zero 2026 rows pass. Fixed 5%-20% stop-loss diagnostics
+remain rejected as the primary realization rule because they materially cut
+later winners. The next question is whether timeout-loser clustering and the
+roughly 43% account drawdown can be reduced without destroying the barrier's
+paired advantage; do not retrain the model merely because this execution rule
+worked retrospectively.
 
 ## Prior QDP data state (superseded by the 2026-08-02 state above)
 

@@ -1,0 +1,68 @@
+{
+  "study_id": "seq100_quality_liquidity_profit_timeout",
+  "purpose": "Retrospective 2023-2025 finite-capital take-profit and timeout execution research for the canonical 557-field model.",
+  "sources": {
+    "execution_study": "daily_research/studies/seq100_quality_liquidity_execution.json",
+    "execution_output": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution"
+  },
+  "period": {
+    "signal_years": [2023, 2024, 2025],
+    "first_signal_date": "2023-01-03",
+    "last_entry_signal_date": "2025-12-03",
+    "last_mark_date": "2025-12-31",
+    "forbidden_year": 2026,
+    "research_semantics": "retrospective_rolling_profit_timeout_research"
+  },
+  "signal": {
+    "family": "dual_mfe_risk_veto",
+    "feature_count": 557,
+    "future_buyability_used_for_selection": false,
+    "same_open_replacement_after_failed_buy": false
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "slot_counts": [6, 12],
+    "equal_target_slots": true,
+    "daily_weight_rebalance": false,
+    "allow_pyramiding": false,
+    "allow_leverage": false,
+    "board_lot": 100,
+    "terminal_liquidation": false,
+    "terminal_exit_cost_accrual": true
+  },
+  "policies": {
+    "timeout_days": [10, 20],
+    "take_profit_levels": [null, 0.05, 0.08, 0.10],
+    "stop_loss": null,
+    "take_profit_active_from_day": 2,
+    "take_profit_fill": "standing_limit_gap_open_else_threshold",
+    "timeout_fill": "precommitted_close",
+    "blocked_exit": "next_sellable_open",
+    "intraday_same_bar_ambiguity": "not_applicable_without_stop_loss"
+  },
+  "execution": {
+    "decision_time": "signal_date_close",
+    "entry_time": "next_trading_date_open",
+    "t_plus_one": true,
+    "sell_before_buy": true,
+    "cost_scenarios": ["base", "stress"],
+    "amount_participation_thresholds": [0.001, 0.005, 0.01]
+  },
+  "selection": {
+    "minimum_positive_absolute_years": 2,
+    "minimum_positive_excess_years": 2,
+    "require_positive_base_terminal_return": true,
+    "require_positive_stress_terminal_return": true,
+    "require_positive_base_terminal_excess": true,
+    "require_positive_stress_terminal_excess": true,
+    "require_take_profit_improvement_over_matching_timeout": true,
+    "minimum_positive_paired_years": 2,
+    "require_both_slot_counts": true,
+    "production_selection_allowed": false
+  },
+  "outputs": {
+    "output_dir": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution/profit_timeout",
+    "expected_task_count": 32,
+    "html_report": false
+  }
+}
