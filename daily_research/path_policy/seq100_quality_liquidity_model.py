@@ -18,6 +18,7 @@ from typing import Any
 import duckdb
 import numpy as np
 import pandas as pd
+from quant_data_platform.qdp_v2.manifest import qdp_v2_root
 from scipy import stats
 from sklearn.metrics import average_precision_score
 
@@ -54,6 +55,14 @@ RETURN_WINSOR_UPPER = 0.99
 RETURN_MIN_CROSS_SECTION = 20
 SHORT_FLAG_G_VALID = 16
 DIRECT_RETURN_DIR_NAME = "direct_returns"
+CLOSE_D1_DIR_NAME = "close_to_close_d1"
+CLOSE_D1_TASK_STAGE = "close_d1_zscore"
+CLOSE_D1_TARGET = "return_close_1"
+CLOSE_D1_TASK_COUNT = len(ROLLING_YEARS)
+FIRST_5M_BAR_TIME = "093500000"
+LAST_5M_BAR_TIME = "150000000"
+VWAP_OHLC_RELATIVE_TOLERANCE = 0.02
+MINIMUM_VWAP_COVERAGE = 0.999
 
 COMPACT_CONSTANT_DROPS = (
     "market_csi300__st_rate",
@@ -1373,6 +1382,40 @@ class ModelInputs:
         }
 
 
+class CloseD1ModelInputs(ModelInputs):
+    """Use the isolated close-to-close D1 cache as the horizon-one return target."""
+
+    def __init__(
+        self, manifest: Mapping[str, Any], label_contract: Mapping[str, Any]
+    ) -> None:
+        super().__init__(manifest)
+        if int(label_contract.get("row_count", -1)) != self.row_count:
+            raise ModelError("close_d1_label_row_count_mismatch")
+        values_record = dict(label_contract["files"]["values"])
+        valid_record = dict(label_contract["files"]["valid"])
+        values_shape = tuple(int(value) for value in values_record["shape"])
+        valid_shape = tuple(int(value) for value in valid_record["shape"])
+        if values_shape != (self.row_count,) or valid_shape != (self.row_count,):
+            raise ModelError("close_d1_label_shape_mismatch")
+        values_path = Path(values_record["path"])
+        valid_path = Path(valid_record["path"])
+        if not values_path.is_file() or not valid_path.is_file():
+            raise ModelError("close_d1_label_file_missing")
+        self._raw_return_cache[1] = np.memmap(
+            values_path,
+            dtype=np.dtype(values_record["dtype"]),
+            mode="r",
+            shape=values_shape,
+        )
+        valid_values = np.memmap(
+            valid_path,
+            dtype=np.dtype(valid_record["dtype"]),
+            mode="r",
+            shape=valid_shape,
+        )
+        self._raw_return_valid_cache[1] = np.asarray(valid_values, dtype=bool)
+
+
 def _make_sequence(
     *, inputs: ModelInputs, rows: np.ndarray, layout: Mapping[str, Any], batch_size: int
 ) -> Any:
@@ -1910,6 +1953,30 @@ def _direct_return_task_plan() -> list[dict[str, Any]]:
     return tasks
 
 
+def _close_d1_task_plan() -> list[dict[str, Any]]:
+    tasks = [
+        {
+            "task_id": f"{CLOSE_D1_TASK_STAGE}__close_01__{COMPACT_VARIANT}__{year}",
+            "stage": CLOSE_D1_TASK_STAGE,
+            "target": CLOSE_D1_TARGET,
+            "source_label": "future_ohlcva_path.day_0.close",
+            "kind": "return",
+            "horizon": 1,
+            "year": int(year),
+            "variant": COMPACT_VARIANT,
+            "gated_family": None,
+            "label_transform": "signal_date_winsor_01_99_zscore",
+        }
+        for year in ROLLING_YEARS
+    ]
+    if (
+        len(tasks) != CLOSE_D1_TASK_COUNT
+        or len({str(task["task_id"]) for task in tasks}) != CLOSE_D1_TASK_COUNT
+    ):
+        raise ModelError(f"close_d1_task_plan_contract_mismatch:{len(tasks)}")
+    return tasks
+
+
 def _save_npy(path: Path, values: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".partial")
@@ -1968,7 +2035,13 @@ def _effective_features(
 ) -> tuple[list[str], str]:
     variant = str(task["variant"])
     stage = str(task["stage"])
-    if stage in {"tuning", "mfe_core", "risk_state_core", RETURN_TASK_STAGE}:
+    if stage in {
+        "tuning",
+        "mfe_core",
+        "risk_state_core",
+        RETURN_TASK_STAGE,
+        CLOSE_D1_TASK_STAGE,
+    }:
         return list(inputs.feature_groups[variant]), variant
     raise ModelError(f"unknown_task_stage:{stage}")
 
@@ -3267,6 +3340,1336 @@ def audit_returns(
     return payload
 
 
+def _close_d1_root(output_root: Path) -> Path:
+    return _direct_return_root(output_root) / CLOSE_D1_DIR_NAME
+
+
+def _close_d1_source_context(*, input_manifest: Mapping[str, Any]) -> dict[str, Any]:
+    training_manifest_path = Path(
+        input_manifest["source"]["training_ready_manifest"]["path"]
+    ).resolve()
+    training_manifest = _read_json(training_manifest_path)
+    dataset_id = str(
+        dict(training_manifest.get("qdp_dataset_ids", {}) or {}).get(
+            "market_intraday_5m", ""
+        )
+    )
+    if not dataset_id.startswith("market_intraday_5m__"):
+        raise ModelError("close_d1_pinned_intraday_dataset_missing")
+    qdp_root = qdp_v2_root(WORKSPACE_ROOT).resolve()
+    intraday_manifest_path = (
+        qdp_root / "datasets" / "market_intraday_5m" / dataset_id / "dataset.json"
+    )
+    intraday_manifest = _read_json(intraday_manifest_path)
+    if str(intraday_manifest.get("dataset_id")) != dataset_id:
+        raise ModelError("close_d1_intraday_dataset_id_mismatch")
+    label_manifest_path = Path(input_manifest["label_manifest"]["path"]).resolve()
+    label_manifest = _read_json(label_manifest_path)
+    pack_manifest_path = Path(label_manifest["source"]["pack_manifest"]).resolve()
+    pack_manifest = _read_json(pack_manifest_path)
+    return {
+        "training_manifest_path": training_manifest_path,
+        "training_manifest": training_manifest,
+        "label_manifest_path": label_manifest_path,
+        "label_manifest": label_manifest,
+        "pack_manifest_path": pack_manifest_path,
+        "pack_manifest": pack_manifest,
+        "qdp_root": qdp_root,
+        "intraday_dataset_id": dataset_id,
+        "intraday_manifest_path": intraday_manifest_path,
+        "intraday_manifest": intraday_manifest,
+    }
+
+
+def _close_d1_experiment_fingerprint(
+    *,
+    input_manifest: Mapping[str, Any],
+    study_path: Path,
+    sources: Mapping[str, Any],
+) -> str:
+    return _stable_hash(
+        {
+            "schema": "seq100_quality_liquidity_close_d1/1",
+            "model_input_fingerprint": str(input_manifest["input_fingerprint"]),
+            "config_sha256": _sha256(study_path),
+            "pack_manifest_sha256": _sha256(Path(sources["pack_manifest_path"])),
+            "short_label_manifest_sha256": _sha256(DEFAULT_SHORT_LABEL_MANIFEST),
+            "intraday_dataset_id": str(sources["intraday_dataset_id"]),
+            "intraday_manifest_sha256": _sha256(
+                Path(sources["intraday_manifest_path"])
+            ),
+            "feature_variant": COMPACT_VARIANT,
+            "feature_count": COMPACT_FEATURE_COUNT,
+            "rolling_years": list(ROLLING_YEARS),
+            "objective": "regression_l2",
+            "rounds": 512,
+            "label": "signal_close_to_next_close_back_adjusted_return",
+            "valid_support": "existing_g_1_flag_16",
+            "label_transform": {
+                "group": "signal_trade_date",
+                "winsor_lower": RETURN_WINSOR_LOWER,
+                "winsor_upper": RETURN_WINSOR_UPPER,
+                "quantile_method": "nearest",
+                "zscore_ddof": 0,
+                "minimum_cross_section": RETURN_MIN_CROSS_SECTION,
+            },
+            "execution_outcomes": [
+                "signal_close_to_next_close",
+                "next_open_to_next_close",
+                "next_first_5m_vwap_to_next_close",
+            ],
+        }
+    )
+
+
+def _record_file_valid(record: Mapping[str, Any], *, verify_hash: bool = True) -> bool:
+    path = Path(record["path"])
+    if not path.is_file() or int(path.stat().st_size) != int(record["size"]):
+        return False
+    return not verify_hash or _sha256(path) == str(record["sha256"])
+
+
+def _build_close_d1_label_cache(
+    *,
+    inputs: ModelInputs,
+    pack_manifest: Mapping[str, Any],
+    output_root: Path,
+    experiment_fingerprint: str,
+) -> dict[str, Any]:
+    arrays = dict(pack_manifest.get("label_arrays", {}) or {})
+    path_contract = dict(arrays.get("future_ohlcva_path", {}) or {})
+    fields = [str(value) for value in path_contract.get("fields", ())]
+    expected_shape = (
+        len(inputs.date_values),
+        len(pack_manifest.get("symbol_values", ())),
+        60,
+        6,
+    )
+    if (
+        tuple(int(value) for value in path_contract.get("shape", ())) != expected_shape
+        or fields != ["open", "high", "low", "close", "volume", "amount"]
+        or str(path_contract.get("anchor")) != "signal_day_close"
+    ):
+        raise ModelError("close_d1_future_path_contract_mismatch")
+    price_semantics = str(
+        dict(pack_manifest.get("label_semantics", {}) or {}).get("future_ohlc_path", "")
+    )
+    if "back_adjust" not in price_semantics:
+        raise ModelError("close_d1_future_path_adjustment_mismatch")
+
+    label_root = output_root / "labels"
+    label_root.mkdir(parents=True, exist_ok=True)
+    values_path = label_root / "close_to_close_d1.float32.dat"
+    valid_path = label_root / "close_to_close_d1_valid.uint8.dat"
+    values_partial = Path(str(values_path) + ".partial")
+    valid_partial = Path(str(valid_path) + ".partial")
+    values_partial.unlink(missing_ok=True)
+    valid_partial.unlink(missing_ok=True)
+    values = np.memmap(
+        values_partial, dtype=np.float32, mode="w+", shape=(inputs.row_count,)
+    )
+    valid_store = np.memmap(
+        valid_partial, dtype=np.uint8, mode="w+", shape=(inputs.row_count,)
+    )
+    values[:] = np.nan
+    valid_store[:] = 0
+
+    symbols = pd.Index([str(value) for value in pack_manifest["symbol_values"]])
+    symbol_idx = symbols.get_indexer(inputs.row_index["symbol"].astype(str))
+    if bool((symbol_idx < 0).any()):
+        raise ModelError("close_d1_symbol_not_in_path_pack")
+    support = np.asarray(inputs.raw_return_valid_mask(1), dtype=bool)
+    g_1 = np.asarray(inputs.raw_return_values(1), dtype=np.float32)
+    outcome_idx = inputs.date_idx[support] + 1
+    if (
+        not bool(support.any())
+        or int(outcome_idx.max()) >= len(inputs.date_values)
+        or str(inputs.date_values[int(outcome_idx.max())]) > MAXIMUM_OUTCOME_DATE
+        or bool(
+            np.char.startswith(
+                inputs.date_values[outcome_idx].astype(str), "2026-"
+            ).any()
+        )
+    ):
+        raise ModelError("close_d1_outcome_boundary_violation")
+
+    extracted_count = 0
+    maximum_identity_error = 0.0
+    source_shard_count = 0
+    for shard in path_contract.get("shards", ()):
+        shard = dict(shard)
+        start = int(shard["date_start_idx"])
+        end = int(shard["date_end_idx"])
+        left = int(np.searchsorted(inputs.date_idx, start, side="left"))
+        right = int(np.searchsorted(inputs.date_idx, end, side="right"))
+        if left >= right:
+            continue
+        rows = np.arange(left, right, dtype=np.int64)
+        rows = rows[support[rows]]
+        if not len(rows):
+            continue
+        shard_path = Path(shard["path"])
+        shape = tuple(int(value) for value in shard["shape"])
+        if not shard_path.is_file() or int(shard_path.stat().st_size) != int(
+            np.prod(shape) * np.dtype(np.float32).itemsize
+        ):
+            raise ModelError(f"close_d1_path_shard_invalid:{shard_path}")
+        source = np.memmap(shard_path, dtype=np.float32, mode="r", shape=shape)
+        local_date = inputs.date_idx[rows] - start
+        local_symbol = symbol_idx[rows]
+        open_return = np.asarray(
+            source[local_date, local_symbol, 0, fields.index("open")],
+            dtype=np.float32,
+        )
+        close_return = np.asarray(
+            source[local_date, local_symbol, 0, fields.index("close")],
+            dtype=np.float32,
+        )
+        reconstructed = (1.0 + close_return.astype(np.float64)) / (
+            1.0 + open_return.astype(np.float64)
+        ) - 1.0
+        identity_error = np.abs(reconstructed - g_1[rows].astype(np.float64))
+        valid_values = (
+            np.isfinite(open_return)
+            & np.isfinite(close_return)
+            & np.isfinite(identity_error)
+            & (open_return > -1.0)
+            & (close_return > -1.0)
+        )
+        if not bool(valid_values.all()) or bool((identity_error > 1.0e-5).any()):
+            raise ModelError(
+                f"close_d1_path_identity_failed:{int((~valid_values).sum())}:"
+                f"{float(np.nanmax(identity_error))}"
+            )
+        values[rows] = close_return
+        valid_store[rows] = 1
+        extracted_count += len(rows)
+        maximum_identity_error = max(
+            maximum_identity_error, float(identity_error.max(initial=0.0))
+        )
+        source_shard_count += 1
+        del source
+
+    if extracted_count != int(support.sum()) or int(valid_store.sum()) != int(
+        support.sum()
+    ):
+        raise ModelError(
+            f"close_d1_support_not_fully_extracted:{extracted_count}:"
+            f"{int(support.sum())}"
+        )
+    values.flush()
+    valid_store.flush()
+    del values, valid_store
+    os.replace(values_partial, values_path)
+    os.replace(valid_partial, valid_path)
+    contract = {
+        "schema": "seq100_quality_liquidity_close_d1_labels/1",
+        "status": "completed",
+        "created_at": _now(),
+        "experiment_fingerprint": experiment_fingerprint,
+        "row_count": inputs.row_count,
+        "valid_count": int(support.sum()),
+        "invalid_count": int((~support).sum()),
+        "valid_support": "short_label_g_1_flag_16_and_finite",
+        "raw_label": "back_adjusted_next_close_over_signal_close_minus_one",
+        "path_day_index": 0,
+        "path_field_index": fields.index("close"),
+        "source_shard_count": source_shard_count,
+        "source_logical_row_read_count": extracted_count,
+        "maximum_open_close_identity_error": maximum_identity_error,
+        "maximum_signal_trade_date_read": str(inputs.trade_date[support][-1]),
+        "maximum_outcome_date_read": str(inputs.date_values[int(outcome_idx.max())]),
+        "forbidden_2026_read_count": 0,
+        "files": {
+            "values": _file_record(
+                values_path,
+                shape=[inputs.row_count],
+                dtype=str(np.dtype(np.float32)),
+            ),
+            "valid": _file_record(
+                valid_path,
+                shape=[inputs.row_count],
+                dtype=str(np.dtype(np.uint8)),
+            ),
+        },
+    }
+    return contract
+
+
+def _intraday_paths_for_period(
+    *, sources: Mapping[str, Any], start_date: str, end_date: str
+) -> list[str]:
+    paths: list[str] = []
+    qdp_root = Path(sources["qdp_root"])
+    for record in sources["intraday_manifest"].get("shards", ()):
+        record = dict(record)
+        if (
+            str(record.get("end_date", "")) < start_date
+            or str(record.get("start_date", "")) > end_date
+        ):
+            continue
+        path = (qdp_root / str(record["path"])).resolve()
+        if not path.is_file():
+            raise ModelError(f"close_d1_intraday_shard_missing:{path}")
+        paths.append(str(path))
+    paths = list(dict.fromkeys(paths))
+    if not paths:
+        raise ModelError("close_d1_intraday_period_has_no_shards")
+    return paths
+
+
+def _validate_vwap_execution_frame(
+    frame: pd.DataFrame, *, existing_open_to_close: np.ndarray
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    result = frame.copy()
+    first_count = pd.to_numeric(result["first_count"], errors="coerce").fillna(0)
+    last_count = pd.to_numeric(result["last_count"], errors="coerce").fillna(0)
+    unique_bars = first_count.eq(1) & last_count.eq(1)
+    numeric_columns = [
+        "first_open",
+        "first_high",
+        "first_low",
+        "first_volume",
+        "first_amount",
+        "last_close",
+    ]
+    numeric = np.column_stack(
+        [pd.to_numeric(result[column], errors="coerce") for column in numeric_columns]
+    )
+    finite = np.isfinite(numeric).all(axis=1)
+    first_open = numeric[:, 0]
+    first_high = numeric[:, 1]
+    first_low = numeric[:, 2]
+    first_volume = numeric[:, 3]
+    first_amount = numeric[:, 4]
+    last_close = numeric[:, 5]
+    valid_numeric = (
+        finite
+        & (first_open > 0.0)
+        & (first_low > 0.0)
+        & (first_high >= first_low)
+        & (first_open >= first_low * (1.0 - 1.0e-8))
+        & (first_open <= first_high * (1.0 + 1.0e-8))
+        & (first_volume > 0.0)
+        & (first_amount > 0.0)
+        & (last_close > 0.0)
+    )
+    vwap = np.divide(
+        first_amount,
+        first_volume,
+        out=np.full(len(result), np.nan, dtype=np.float64),
+        where=first_volume > 0.0,
+    )
+    strict_inside = (
+        valid_numeric
+        & (vwap >= first_low * (1.0 - 1.0e-8))
+        & (vwap <= first_high * (1.0 + 1.0e-8))
+    )
+    within_tolerance = (
+        valid_numeric
+        & (vwap >= first_low * (1.0 - VWAP_OHLC_RELATIVE_TOLERANCE))
+        & (vwap <= first_high * (1.0 + VWAP_OHLC_RELATIVE_TOLERANCE))
+    )
+    minute_open_to_close = (
+        np.divide(
+            last_close,
+            first_open,
+            out=np.full(len(result), np.nan, dtype=np.float64),
+            where=first_open > 0.0,
+        )
+        - 1.0
+    )
+    existing = np.asarray(existing_open_to_close, dtype=np.float64)
+    if existing.shape != (len(result),):
+        raise ModelError("close_d1_open_return_reconciliation_shape_mismatch")
+    reconciliation_error = np.abs(minute_open_to_close - existing)
+    reconciled = np.isfinite(reconciliation_error) & (
+        reconciliation_error <= VWAP_OHLC_RELATIVE_TOLERANCE
+    )
+    valid = (
+        unique_bars.to_numpy(dtype=bool) & valid_numeric & within_tolerance & reconciled
+    )
+    state = np.full(len(result), "observed", dtype=object)
+    state[~unique_bars.to_numpy(dtype=bool)] = "missing_or_duplicate_bar"
+    state[unique_bars.to_numpy(dtype=bool) & ~valid_numeric] = "invalid_numeric_bar"
+    state[unique_bars.to_numpy(dtype=bool) & valid_numeric & ~within_tolerance] = (
+        "vwap_outside_ohlc_tolerance"
+    )
+    state[
+        unique_bars.to_numpy(dtype=bool)
+        & valid_numeric
+        & within_tolerance
+        & ~reconciled
+    ] = "open_close_reconciliation_failed"
+    vwap_return = (
+        np.divide(
+            last_close,
+            vwap,
+            out=np.full(len(result), np.nan, dtype=np.float64),
+            where=valid,
+        )
+        - 1.0
+    )
+    result["first_5m_vwap"] = vwap.astype(np.float32)
+    result["next_close_raw"] = last_close.astype(np.float32)
+    result["minute_open_to_close_return"] = minute_open_to_close.astype(np.float32)
+    result["existing_open_to_close_return"] = existing.astype(np.float32)
+    result["open_close_reconciliation_abs_error"] = reconciliation_error.astype(
+        np.float32
+    )
+    result["first_5m_vwap_to_close_return"] = vwap_return.astype(np.float32)
+    result["vwap_strictly_inside_ohlc"] = strict_inside
+    result["outcome_valid"] = valid
+    result["source_state"] = state
+    coverage = float(valid.mean()) if len(valid) else 0.0
+    finite_errors = reconciliation_error[np.isfinite(reconciliation_error)]
+    validation = {
+        "row_count": len(result),
+        "valid_count": int(valid.sum()),
+        "coverage": coverage,
+        "first_bar_duplicate_count": int((first_count > 1).sum()),
+        "last_bar_duplicate_count": int((last_count > 1).sum()),
+        "missing_or_duplicate_count": int((~unique_bars).sum()),
+        "invalid_numeric_count": int((unique_bars & ~valid_numeric).sum()),
+        "strict_inside_count": int(strict_inside.sum()),
+        "vwap_outside_tolerance_count": int((valid_numeric & ~within_tolerance).sum()),
+        "open_close_reconciliation_failure_count": int(
+            (valid_numeric & within_tolerance & ~reconciled).sum()
+        ),
+        "maximum_open_close_reconciliation_abs_error": (
+            float(finite_errors.max()) if len(finite_errors) else None
+        ),
+        "source_validation_passed": bool(
+            coverage >= MINIMUM_VWAP_COVERAGE
+            and not bool((first_count > 1).any())
+            and not bool((last_count > 1).any())
+            and not bool((valid_numeric & ~within_tolerance).any())
+            and not bool((valid_numeric & within_tolerance & ~reconciled).any())
+        ),
+    }
+    return result, validation
+
+
+def _build_vwap_execution_cache(
+    *,
+    inputs: ModelInputs,
+    sources: Mapping[str, Any],
+    output_root: Path,
+    experiment_fingerprint: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    support = np.asarray(inputs.raw_return_valid_mask(1), dtype=bool)
+    oos = np.isin(inputs.years, np.asarray(ROLLING_YEARS, dtype=np.int16))
+    rows = np.flatnonzero(support & oos).astype(np.int64, copy=False)
+    entry_idx = inputs.date_idx[rows] + 1
+    entry_dates = inputs.date_values[entry_idx].astype(str)
+    if (
+        not len(rows)
+        or str(entry_dates[-1]) > MAXIMUM_OUTCOME_DATE
+        or bool(np.char.startswith(entry_dates, "2026-").any())
+    ):
+        raise ModelError("close_d1_vwap_outcome_boundary_violation")
+    keys = pd.DataFrame(
+        {
+            "local_row": rows,
+            "candidate_id": inputs.candidate_ids[rows],
+            "signal_trade_date": inputs.trade_date[rows],
+            "signal_year": inputs.years[rows],
+            "symbol": inputs.row_index.loc[rows, "symbol"].astype(str).to_numpy(),
+            "entry_trade_date": entry_dates,
+        }
+    )
+    start_date = str(entry_dates[0])
+    end_date = str(entry_dates[-1])
+    paths = _intraday_paths_for_period(
+        sources=sources, start_date=start_date, end_date=end_date
+    )
+    connection = duckdb.connect()
+    connection.execute("PRAGMA threads=8")
+    connection.execute("PRAGMA memory_limit='8GB'")
+    connection.register("close_d1_keys", keys)
+    connection.read_parquet(paths).filter(
+        f"trade_date BETWEEN '{start_date}' AND '{end_date}' "
+        f"AND bar_time IN ('{FIRST_5M_BAR_TIME}','{LAST_5M_BAR_TIME}')"
+    ).project(
+        "symbol, trade_date, bar_time, open, high, low, close, volume, amount, source"
+    ).create_view("close_d1_bars")
+    bars = connection.execute(
+        f"""
+        SELECT
+            k.local_row,
+            count(*) FILTER (WHERE b.bar_time='{FIRST_5M_BAR_TIME}') AS first_count,
+            count(*) FILTER (WHERE b.bar_time='{LAST_5M_BAR_TIME}') AS last_count,
+            max(b.open) FILTER (WHERE b.bar_time='{FIRST_5M_BAR_TIME}') AS first_open,
+            max(b.high) FILTER (WHERE b.bar_time='{FIRST_5M_BAR_TIME}') AS first_high,
+            max(b.low) FILTER (WHERE b.bar_time='{FIRST_5M_BAR_TIME}') AS first_low,
+            max(b.volume) FILTER (WHERE b.bar_time='{FIRST_5M_BAR_TIME}') AS first_volume,
+            max(b.amount) FILTER (WHERE b.bar_time='{FIRST_5M_BAR_TIME}') AS first_amount,
+            max(b.close) FILTER (WHERE b.bar_time='{LAST_5M_BAR_TIME}') AS last_close,
+            max(b.source) FILTER (WHERE b.bar_time='{FIRST_5M_BAR_TIME}') AS first_source,
+            max(b.source) FILTER (WHERE b.bar_time='{LAST_5M_BAR_TIME}') AS last_source
+        FROM close_d1_keys k
+        LEFT JOIN close_d1_bars b
+          ON b.symbol=k.symbol AND b.trade_date=k.entry_trade_date
+        GROUP BY k.local_row
+        ORDER BY k.local_row
+        """
+    ).fetchdf()
+    connection.close()
+    if not np.array_equal(bars["local_row"].to_numpy(dtype=np.int64), rows):
+        raise ModelError("close_d1_vwap_query_row_alignment_failed")
+    frame = keys.merge(bars, on="local_row", how="left", validate="one_to_one")
+    frame, validation = _validate_vwap_execution_frame(
+        frame, existing_open_to_close=inputs.raw_return_values(1)[rows]
+    )
+    validation.update(
+        {
+            "schema": "seq100_quality_liquidity_close_d1_vwap_validation/1",
+            "status": ("ok" if validation["source_validation_passed"] else "failed"),
+            "created_at": _now(),
+            "experiment_fingerprint": experiment_fingerprint,
+            "intraday_dataset_id": str(sources["intraday_dataset_id"]),
+            "logical_date_start": start_date,
+            "logical_date_end": end_date,
+            "first_bar_time": FIRST_5M_BAR_TIME,
+            "last_bar_time": LAST_5M_BAR_TIME,
+            "vwap_definition": "first_5m_amount_divided_by_first_5m_volume",
+            "vwap_ohlc_relative_tolerance": VWAP_OHLC_RELATIVE_TOLERANCE,
+            "minimum_coverage": MINIMUM_VWAP_COVERAGE,
+            "parquet_shard_count": len(paths),
+            "forbidden_2026_query_row_count": 0,
+        }
+    )
+    if not validation["source_validation_passed"]:
+        raise ModelError("close_d1_vwap_source_validation_failed")
+    outcomes_path = output_root / "execution_outcomes.parquet"
+    coverage_path = output_root / "execution_coverage.parquet"
+    validation_path = output_root / "minute_source_validation.json"
+    output_columns = [
+        "local_row",
+        "candidate_id",
+        "signal_trade_date",
+        "signal_year",
+        "symbol",
+        "entry_trade_date",
+        "first_count",
+        "last_count",
+        "first_open",
+        "first_high",
+        "first_low",
+        "first_volume",
+        "first_amount",
+        "first_5m_vwap",
+        "next_close_raw",
+        "minute_open_to_close_return",
+        "existing_open_to_close_return",
+        "open_close_reconciliation_abs_error",
+        "first_5m_vwap_to_close_return",
+        "vwap_strictly_inside_ohlc",
+        "outcome_valid",
+        "source_state",
+        "first_source",
+        "last_source",
+    ]
+    _write_parquet(frame[output_columns], outcomes_path)
+    coverage = (
+        frame.groupby("signal_year", as_index=False)
+        .agg(
+            row_count=("local_row", "size"),
+            valid_count=("outcome_valid", "sum"),
+            strict_inside_count=("vwap_strictly_inside_ohlc", "sum"),
+        )
+        .sort_values("signal_year")
+    )
+    coverage["coverage"] = coverage["valid_count"] / coverage["row_count"]
+    _write_parquet(coverage, coverage_path)
+    _write_json(validation_path, validation)
+    files = {
+        "execution_outcomes": _file_record(outcomes_path, row_count=len(frame)),
+        "execution_coverage": _file_record(coverage_path, row_count=len(coverage)),
+        "minute_source_validation": _file_record(validation_path),
+    }
+    return files, validation
+
+
+def _close_d1_label_coverage(inputs: CloseD1ModelInputs) -> pd.DataFrame:
+    raw_valid = np.asarray(inputs.raw_return_valid_mask(1), dtype=bool)
+    normalized_valid = np.asarray(inputs.return_valid_mask(1), dtype=bool)
+    records: list[dict[str, Any]] = []
+    for year in YEARS:
+        rows = inputs.rows_for_year(year)
+        valid_dates = np.unique(inputs.date_idx[rows[normalized_valid[rows]]])
+        records.append(
+            {
+                "year": int(year),
+                "row_count": len(rows),
+                "raw_valid_count": int(raw_valid[rows].sum()),
+                "normalized_valid_count": int(normalized_valid[rows].sum()),
+                "raw_coverage": float(raw_valid[rows].mean()),
+                "normalized_coverage": float(normalized_valid[rows].mean()),
+                "normalized_date_count": len(valid_dates),
+                "first_normalized_trade_date": (
+                    str(inputs.date_values[int(valid_dates[0])])
+                    if len(valid_dates)
+                    else None
+                ),
+                "last_normalized_trade_date": (
+                    str(inputs.date_values[int(valid_dates[-1])])
+                    if len(valid_dates)
+                    else None
+                ),
+            }
+        )
+    return pd.DataFrame(records).sort_values("year")
+
+
+def prepare_close_d1(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    ready_root: Path = DEFAULT_READY_ROOT,
+    audit_root: Path = DEFAULT_AUDIT_ROOT,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+) -> dict[str, Any]:
+    config = _load_config(study_path)
+    _audit_manifest(audit_root)
+    prepare(
+        study_path=study_path,
+        ready_root=ready_root,
+        audit_root=audit_root,
+        output_root=output_root,
+    )
+    input_manifest_path = ready_root / MODEL_INPUT_DIR_NAME / "manifest.json"
+    input_manifest = _read_json(input_manifest_path)
+    sources = _close_d1_source_context(input_manifest=input_manifest)
+    fingerprint = _close_d1_experiment_fingerprint(
+        input_manifest=input_manifest, study_path=study_path, sources=sources
+    )
+    close_root = _close_d1_root(output_root)
+    close_root.mkdir(parents=True, exist_ok=True)
+    manifest_path = close_root / "manifest.json"
+    label_contract_path = close_root / "label_contract.json"
+    if manifest_path.is_file():
+        existing = _read_json(manifest_path)
+        if str(existing.get("experiment_fingerprint")) != fingerprint:
+            raise ModelError("close_d1_existing_experiment_fingerprint_mismatch")
+        if label_contract_path.is_file():
+            contract = _read_json(label_contract_path)
+            preparation_files = dict(existing.get("preparation_files", {}) or {})
+            if (
+                str(contract.get("experiment_fingerprint")) == fingerprint
+                and all(
+                    _record_file_valid(record)
+                    for record in dict(contract.get("files", {}) or {}).values()
+                )
+                and all(
+                    _record_file_valid(record) for record in preparation_files.values()
+                )
+            ):
+                return {
+                    "status": "prepared",
+                    "study_id": STUDY_ID,
+                    "stage": CLOSE_D1_DIR_NAME,
+                    "experiment_fingerprint": fingerprint,
+                    "task_count": CLOSE_D1_TASK_COUNT,
+                    "feature_count": COMPACT_FEATURE_COUNT,
+                    "existing_status": existing.get("status"),
+                }
+
+    base_inputs = ModelInputs(input_manifest)
+    label_contract = _build_close_d1_label_cache(
+        inputs=base_inputs,
+        pack_manifest=sources["pack_manifest"],
+        output_root=close_root,
+        experiment_fingerprint=fingerprint,
+    )
+    label_contract["sources"] = {
+        "pack_manifest": _file_record(Path(sources["pack_manifest_path"])),
+        "short_label_manifest": _file_record(DEFAULT_SHORT_LABEL_MANIFEST),
+    }
+    label_contract["training_transform"] = {
+        "group": "signal_trade_date_cross_section",
+        "winsor_quantiles": [RETURN_WINSOR_LOWER, RETURN_WINSOR_UPPER],
+        "quantile_method": "nearest",
+        "zscore_ddof": 0,
+        "minimum_cross_section": RETURN_MIN_CROSS_SECTION,
+    }
+    _write_json(label_contract_path, label_contract)
+    close_inputs = CloseD1ModelInputs(input_manifest, label_contract)
+    coverage = _close_d1_label_coverage(close_inputs)
+    coverage_path = close_root / "label_coverage.parquet"
+    _write_parquet(coverage, coverage_path)
+    execution_files, source_validation = _build_vwap_execution_cache(
+        inputs=base_inputs,
+        sources=sources,
+        output_root=close_root,
+        experiment_fingerprint=fingerprint,
+    )
+    preparation_files = {
+        "label_coverage": _file_record(coverage_path, row_count=len(coverage)),
+        **execution_files,
+    }
+    tasks = _close_d1_task_plan()
+    manifest = {
+        "schema": "seq100_quality_liquidity_close_d1_manifest/1",
+        "study_id": STUDY_ID,
+        "stage": CLOSE_D1_DIR_NAME,
+        "status": "prepared",
+        "created_at": _now(),
+        "experiment_fingerprint": fingerprint,
+        "config": _file_record(study_path),
+        "model_inputs": _file_record(
+            input_manifest_path,
+            input_fingerprint=str(input_manifest["input_fingerprint"]),
+        ),
+        "label_contract": _file_record(label_contract_path),
+        "preparation_files": preparation_files,
+        "intraday_dataset": {
+            "dataset_id": str(sources["intraday_dataset_id"]),
+            "manifest": _file_record(Path(sources["intraday_manifest_path"])),
+            "source_validation_passed": bool(
+                source_validation["source_validation_passed"]
+            ),
+        },
+        "baseline_direct_returns_root": str(_direct_return_root(output_root).resolve()),
+        "task_count": len(tasks),
+        "tasks": tasks,
+        "outputs": {},
+        "training_performed": False,
+        "feature_set_selected": False,
+        "evaluation_semantics": "retrospective_rolling_oos",
+        "formal_years": list(YEARS),
+        "rolling_years": list(ROLLING_YEARS),
+        "burn_in_year": 2010,
+        "forbidden_year": FORBIDDEN_YEAR,
+        "maximum_outcome_date": MAXIMUM_OUTCOME_DATE,
+        "model_parameters": {
+            "objective": "regression",
+            "metric": "l2",
+            "rounds": int(config["model"]["fixed_mfe_rounds"]),
+            "feature_count": COMPACT_FEATURE_COUNT,
+        },
+    }
+    _write_json(manifest_path, manifest)
+    return {
+        "status": "prepared",
+        "study_id": STUDY_ID,
+        "stage": CLOSE_D1_DIR_NAME,
+        "experiment_fingerprint": fingerprint,
+        "task_count": len(tasks),
+        "feature_count": COMPACT_FEATURE_COUNT,
+        "label_valid_count": int(label_contract["valid_count"]),
+        "vwap_valid_count": int(source_validation["valid_count"]),
+    }
+
+
+def _update_close_d1_ledger(
+    *,
+    close_root: Path,
+    tasks: Sequence[Mapping[str, Any]],
+    results: Mapping[str, Mapping[str, Any]],
+) -> None:
+    entries = []
+    for task in tasks:
+        task_id = str(task["task_id"])
+        result = results.get(task_id)
+        entries.append(
+            {
+                **dict(task),
+                "status": "completed" if result is not None else "pending",
+                "result_path": (
+                    str(_task_result_path(close_root, task_id).resolve())
+                    if result is not None
+                    else None
+                ),
+                "best_iteration": result.get("best_iteration") if result else None,
+                "updated_at": _now(),
+            }
+        )
+    _write_json(
+        close_root / "task_ledger.json",
+        {
+            "schema": "seq100_quality_liquidity_close_d1_ledger/1",
+            "study_id": STUDY_ID,
+            "task_count": len(tasks),
+            "completed_count": sum(item["status"] == "completed" for item in entries),
+            "tasks": entries,
+        },
+    )
+
+
+def run_close_d1(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    ready_root: Path = DEFAULT_READY_ROOT,
+    audit_root: Path = DEFAULT_AUDIT_ROOT,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    max_tasks: int | None = None,
+) -> dict[str, Any]:
+    config = _load_config(study_path)
+    prepare_close_d1(
+        study_path=study_path,
+        ready_root=ready_root,
+        audit_root=audit_root,
+        output_root=output_root,
+    )
+    close_root = _close_d1_root(output_root)
+    manifest_path = close_root / "manifest.json"
+    manifest = _read_json(manifest_path)
+    input_manifest = _read_json(Path(manifest["model_inputs"]["path"]))
+    label_contract = _read_json(Path(manifest["label_contract"]["path"]))
+    inputs = CloseD1ModelInputs(input_manifest, label_contract)
+    tasks = _close_d1_task_plan()
+    results, diagnostic = _partition_results(_completed_results(close_root), tasks)
+    if diagnostic:
+        raise ModelError(f"unexpected_close_d1_tasks:{sorted(diagnostic)}")
+    _update_close_d1_ledger(close_root=close_root, tasks=tasks, results=results)
+    completed_this_run = 0
+    fingerprint = str(manifest["experiment_fingerprint"])
+    config_sha256 = _sha256(study_path)
+    for task in tasks:
+        task_id = str(task["task_id"])
+        if task_id in results:
+            feature_names, _ = _effective_features(
+                inputs=inputs, task=task, output_root=close_root
+            )
+            task_fingerprint = _task_fingerprint(
+                task=task,
+                feature_names=feature_names,
+                model_input_fingerprint=str(input_manifest["input_fingerprint"]),
+                config_sha256=config_sha256,
+                experiment_fingerprint=fingerprint,
+            )
+            if _task_complete(
+                _task_result_path(close_root, task_id), fingerprint=task_fingerprint
+            ):
+                continue
+            results.pop(task_id)
+        if max_tasks is not None and completed_this_run >= int(max_tasks):
+            break
+        result = _run_training_task(
+            task=task,
+            inputs=inputs,
+            config=config,
+            output_root=close_root,
+            config_sha256=config_sha256,
+            experiment_fingerprint=fingerprint,
+        )
+        results[task_id] = result
+        completed_this_run += 1
+        _update_close_d1_ledger(close_root=close_root, tasks=tasks, results=results)
+    all_complete = len(results) == len(tasks)
+    manifest["status"] = (
+        "training_completed" if all_complete else "training_in_progress"
+    )
+    manifest["updated_at"] = _now()
+    manifest["training_performed"] = all_complete
+    if not all_complete:
+        manifest["outputs"] = {}
+    _write_json(manifest_path, manifest)
+    return {
+        "status": manifest["status"],
+        "study_id": STUDY_ID,
+        "stage": CLOSE_D1_DIR_NAME,
+        "task_count": len(tasks),
+        "completed_count": len(results),
+        "completed_this_run": completed_this_run,
+        "training_performed": all_complete,
+    }
+
+
+def _baseline_d1_results(
+    *,
+    output_root: Path,
+    inputs: ModelInputs,
+    study_path: Path,
+) -> dict[int, dict[str, Any]]:
+    direct_root = _direct_return_root(output_root)
+    direct_manifest = _read_json(direct_root / "manifest.json")
+    if direct_manifest.get("status") not in {
+        "training_completed",
+        "evaluated",
+        "audited",
+    }:
+        raise ModelError("close_d1_baseline_direct_returns_not_completed")
+    direct_tasks = _direct_return_task_plan()
+    results, diagnostic = _partition_results(
+        _completed_results(direct_root), direct_tasks
+    )
+    if len(results) != RETURN_TASK_COUNT or diagnostic:
+        raise ModelError("close_d1_baseline_direct_return_task_count_mismatch")
+    selected: dict[int, dict[str, Any]] = {}
+    for task in direct_tasks:
+        if int(task["horizon"]) != 1:
+            continue
+        result = results[str(task["task_id"])]
+        feature_names, _ = _effective_features(
+            inputs=inputs, task=task, output_root=direct_root
+        )
+        fingerprint = _task_fingerprint(
+            task=task,
+            feature_names=feature_names,
+            model_input_fingerprint=str(inputs.manifest["input_fingerprint"]),
+            config_sha256=_sha256(study_path),
+            experiment_fingerprint=str(direct_manifest["experiment_fingerprint"]),
+        )
+        if not _task_complete(
+            _task_result_path(direct_root, str(task["task_id"])),
+            fingerprint=fingerprint,
+        ):
+            raise ModelError(f"close_d1_baseline_task_invalid:{task['task_id']}")
+        selected[int(task["year"])] = result
+    if set(selected) != set(ROLLING_YEARS):
+        raise ModelError("close_d1_baseline_d1_years_missing")
+    return selected
+
+
+def _load_year_prediction(
+    *, result: Mapping[str, Any], inputs: ModelInputs, year: int
+) -> tuple[np.ndarray, np.ndarray]:
+    rows = inputs.rows_for_year(year)
+    candidate_ids = np.load(
+        Path(result["files"]["candidate_id"]["path"]),
+        mmap_mode="r",
+        allow_pickle=False,
+    )
+    prediction = np.load(
+        Path(result["files"]["prediction"]["path"]),
+        mmap_mode="r",
+        allow_pickle=False,
+    )
+    if not np.array_equal(candidate_ids, inputs.candidate_ids[rows]) or len(
+        prediction
+    ) != len(rows):
+        raise ModelError(f"close_d1_prediction_alignment_failed:{year}")
+    return rows, np.asarray(prediction)
+
+
+def _cross_outcome_monthly(daily: pd.DataFrame) -> pd.DataFrame:
+    frame = daily.copy()
+    frame["month"] = frame["trade_date"].astype(str).str.slice(0, 7)
+    excluded = {"date_idx", "row_count", "evaluation_year"}
+    metric_columns = [
+        column
+        for column in frame.select_dtypes(include=[np.number]).columns
+        if column not in excluded
+    ]
+    rows: list[dict[str, Any]] = []
+    group_columns = ["model_training_target", "outcome", "evaluation_year", "month"]
+    for keys, part in frame.groupby(group_columns, sort=True):
+        model_target, outcome, year, month = keys
+        record: dict[str, Any] = {
+            "model_training_target": str(model_target),
+            "outcome": str(outcome),
+            "evaluation_year": int(year),
+            "month": str(month),
+            "date_count": len(part),
+            "row_count": int(part["row_count"].sum()),
+        }
+        record.update(
+            {
+                column: float(pd.to_numeric(part[column], errors="coerce").mean())
+                for column in metric_columns
+            }
+        )
+        rows.append(record)
+    return pd.DataFrame(rows).sort_values(group_columns)
+
+
+def _paired_model_deltas(annual: pd.DataFrame) -> pd.DataFrame:
+    metrics = [
+        "rank_ic",
+        "top1_return_mean",
+        "top5_return_mean",
+        "top1_excess_mean",
+        "top5_excess_mean",
+        "top1_capture",
+        "top5_capture",
+        "decile_spearman",
+        "zscore_mse",
+    ]
+    rows: list[dict[str, Any]] = []
+    for (outcome, year), part in annual.groupby(
+        ["outcome", "evaluation_year"], sort=True
+    ):
+        indexed = part.set_index("model_training_target")
+        candidate = indexed.loc["close_to_close"]
+        baseline = indexed.loc["next_open_to_close"]
+        for metric in metrics:
+            candidate_value = float(candidate[metric])
+            baseline_value = float(baseline[metric])
+            rows.append(
+                {
+                    "outcome": str(outcome),
+                    "evaluation_year": int(year),
+                    "metric": metric,
+                    "close_trained_value": candidate_value,
+                    "open_trained_value": baseline_value,
+                    "close_minus_open": candidate_value - baseline_value,
+                }
+            )
+    return pd.DataFrame(rows).sort_values(["outcome", "metric", "evaluation_year"])
+
+
+def _cross_outcome_summary(annual: pd.DataFrame) -> pd.DataFrame:
+    metrics = [
+        "rank_ic",
+        "top1_return_mean",
+        "top5_return_mean",
+        "top1_excess_mean",
+        "top5_excess_mean",
+        "top1_capture",
+        "top5_capture",
+        "decile_spearman",
+        "zscore_mse",
+    ]
+    rows: list[dict[str, Any]] = []
+    for (model_target, outcome), part in annual.groupby(
+        ["model_training_target", "outcome"], sort=True
+    ):
+        record: dict[str, Any] = {
+            "model_training_target": str(model_target),
+            "outcome": str(outcome),
+            "year_count": len(part),
+            "positive_rank_ic_years": int(part["rank_ic"].gt(0.0).sum()),
+            "positive_top5_excess_years": int(part["top5_excess_mean"].gt(0.0).sum()),
+        }
+        for metric in metrics:
+            values = pd.to_numeric(part[metric], errors="coerce")
+            record[f"{metric}_mean"] = float(values.mean())
+            record[f"{metric}_median"] = float(values.median())
+        rows.append(record)
+    return pd.DataFrame(rows).sort_values(["outcome", "model_training_target"])
+
+
+def evaluate_close_d1(
+    *, output_root: Path = DEFAULT_OUTPUT_ROOT, study_path: Path = DEFAULT_STUDY_PATH
+) -> dict[str, Any]:
+    _load_config(study_path)
+    close_root = _close_d1_root(output_root)
+    manifest_path = close_root / "manifest.json"
+    manifest = _read_json(manifest_path)
+    if manifest.get("status") not in {"training_completed", "evaluated", "audited"}:
+        raise ModelError("close_d1_training_not_completed")
+    input_manifest = _read_json(Path(manifest["model_inputs"]["path"]))
+    label_contract = _read_json(Path(manifest["label_contract"]["path"]))
+    base_inputs = ModelInputs(input_manifest)
+    close_inputs = CloseD1ModelInputs(input_manifest, label_contract)
+    tasks = _close_d1_task_plan()
+    close_results, diagnostic = _partition_results(
+        _completed_results(close_root), tasks
+    )
+    if len(close_results) != CLOSE_D1_TASK_COUNT or diagnostic:
+        raise ModelError("close_d1_evaluation_task_count_mismatch")
+    close_by_year = {
+        int(result["evaluation_year"]): result for result in close_results.values()
+    }
+    baseline_by_year = _baseline_d1_results(
+        output_root=output_root, inputs=base_inputs, study_path=study_path
+    )
+
+    vwap_frame = pd.read_parquet(
+        Path(manifest["preparation_files"]["execution_outcomes"]["path"]),
+        columns=[
+            "local_row",
+            "first_5m_vwap_to_close_return",
+            "outcome_valid",
+        ],
+    )
+    vwap_values = np.full(base_inputs.row_count, np.nan, dtype=np.float32)
+    vwap_valid = np.zeros(base_inputs.row_count, dtype=bool)
+    vwap_rows = vwap_frame["local_row"].to_numpy(dtype=np.int64)
+    vwap_values[vwap_rows] = vwap_frame["first_5m_vwap_to_close_return"].to_numpy(
+        dtype=np.float32
+    )
+    vwap_valid[vwap_rows] = vwap_frame["outcome_valid"].to_numpy(dtype=bool)
+    outcomes = {
+        "close_to_close": (
+            np.asarray(close_inputs.raw_return_values(1)),
+            np.asarray(close_inputs.raw_return_valid_mask(1), dtype=bool),
+        ),
+        "next_open_to_close": (
+            np.asarray(base_inputs.raw_return_values(1)),
+            np.asarray(base_inputs.raw_return_valid_mask(1), dtype=bool),
+        ),
+        "first_5m_vwap_to_close": (vwap_values, vwap_valid),
+    }
+    models = {
+        "close_to_close": close_by_year,
+        "next_open_to_close": baseline_by_year,
+    }
+    annual_records: list[dict[str, Any]] = []
+    daily_parts: list[pd.DataFrame] = []
+    baseline_references: list[dict[str, Any]] = []
+    for model_target, results_by_year in models.items():
+        for year in ROLLING_YEARS:
+            result = results_by_year[year]
+            year_rows, prediction = _load_year_prediction(
+                result=result, inputs=base_inputs, year=year
+            )
+            if model_target == "next_open_to_close":
+                baseline_references.append(
+                    {
+                        "year": int(year),
+                        "task_id": str(result["task_id"]),
+                        "task_result": _file_record(
+                            _task_result_path(
+                                _direct_return_root(output_root), str(result["task_id"])
+                            )
+                        ),
+                    }
+                )
+            for outcome, (raw_values, raw_valid) in outcomes.items():
+                local_raw = np.asarray(raw_values[year_rows], dtype=np.float32)
+                local_valid = np.asarray(raw_valid[year_rows], dtype=bool)
+                normalized, normalized_valid = _winsorized_zscore_by_date(
+                    values=local_raw,
+                    date_idx=base_inputs.date_idx[year_rows],
+                    valid=local_valid,
+                )
+                positions = np.flatnonzero(
+                    normalized_valid & np.isfinite(prediction)
+                ).astype(np.int64, copy=False)
+                if not len(positions):
+                    raise ModelError(
+                        f"close_d1_outcome_has_no_valid_rows:{model_target}:"
+                        f"{outcome}:{year}"
+                    )
+                daily, metrics = _return_daily_metrics(
+                    date_idx=base_inputs.date_idx[year_rows][positions],
+                    actual_raw=local_raw[positions],
+                    actual_zscore=normalized[positions],
+                    prediction=prediction[positions],
+                )
+                daily.insert(
+                    1,
+                    "trade_date",
+                    [
+                        str(base_inputs.date_values[int(value)])
+                        for value in daily["date_idx"]
+                    ],
+                )
+                daily.insert(0, "evaluation_year", int(year))
+                daily.insert(0, "outcome", outcome)
+                daily.insert(0, "model_training_target", model_target)
+                daily_parts.append(daily)
+                record = {
+                    "model_training_target": model_target,
+                    "outcome": outcome,
+                    "evaluation_year": int(year),
+                    "task_id": str(result["task_id"]),
+                    "feature_count": int(result["feature_count"]),
+                    "best_iteration": int(result["best_iteration"]),
+                    "year_row_count": len(year_rows),
+                    "outcome_valid_count": int(normalized_valid.sum()),
+                    "outcome_coverage": float(normalized_valid.mean()),
+                }
+                record.update(metrics)
+                annual_records.append(record)
+    annual = pd.DataFrame(annual_records).sort_values(
+        ["outcome", "evaluation_year", "model_training_target"]
+    )
+    daily = pd.concat(daily_parts, ignore_index=True).sort_values(
+        ["outcome", "evaluation_year", "trade_date", "model_training_target"]
+    )
+    monthly = _cross_outcome_monthly(daily)
+    paired = _paired_model_deltas(annual)
+    summary = _cross_outcome_summary(annual)
+    importance = pd.concat(
+        [
+            pd.read_parquet(Path(result["files"]["family_importance"]["path"]))
+            for result in close_results.values()
+        ],
+        ignore_index=True,
+    )
+    paths = {
+        "annual_metrics": close_root / "annual_metrics.parquet",
+        "monthly_metrics": close_root / "monthly_metrics.parquet",
+        "daily_metrics": close_root / "cross_outcome_daily_metrics.parquet",
+        "paired_model_deltas": close_root / "paired_model_deltas.parquet",
+        "outcome_summary": close_root / "outcome_summary.parquet",
+        "family_importance": close_root / "family_importance.parquet",
+        "baseline_task_references": close_root / "baseline_task_references.json",
+    }
+    for frame, path in (
+        (annual, paths["annual_metrics"]),
+        (monthly, paths["monthly_metrics"]),
+        (daily, paths["daily_metrics"]),
+        (paired, paths["paired_model_deltas"]),
+        (summary, paths["outcome_summary"]),
+        (importance, paths["family_importance"]),
+    ):
+        _write_parquet(frame, path)
+    _write_json(
+        paths["baseline_task_references"],
+        {
+            "schema": "seq100_quality_liquidity_close_d1_baselines/1",
+            "study_id": STUDY_ID,
+            "source_stage": DIRECT_RETURN_DIR_NAME,
+            "task_count": len(baseline_references),
+            "tasks": baseline_references,
+        },
+    )
+    manifest["status"] = "evaluated"
+    manifest["updated_at"] = _now()
+    manifest["training_performed"] = True
+    manifest["feature_set_selected"] = False
+    frames = {
+        "annual_metrics": annual,
+        "monthly_metrics": monthly,
+        "daily_metrics": daily,
+        "paired_model_deltas": paired,
+        "outcome_summary": summary,
+        "family_importance": importance,
+    }
+    manifest["outputs"] = {
+        name: _file_record(paths[name], row_count=len(frame))
+        for name, frame in frames.items()
+    }
+    manifest["outputs"]["baseline_task_references"] = _file_record(
+        paths["baseline_task_references"]
+    )
+    _write_json(manifest_path, manifest)
+    return {
+        "status": "evaluated",
+        "trained_task_count": len(close_results),
+        "reused_baseline_task_count": len(baseline_references),
+        "annual_metric_rows": len(annual),
+        "monthly_metric_rows": len(monthly),
+        "paired_delta_rows": len(paired),
+    }
+
+
+def audit_close_d1(
+    *, output_root: Path = DEFAULT_OUTPUT_ROOT, study_path: Path = DEFAULT_STUDY_PATH
+) -> dict[str, Any]:
+    _load_config(study_path)
+    close_root = _close_d1_root(output_root)
+    manifest_path = close_root / "manifest.json"
+    manifest = _read_json(manifest_path)
+    input_manifest = _read_json(Path(manifest["model_inputs"]["path"]))
+    _verify_model_input_files(input_manifest, full_hash=False)
+    sources = _close_d1_source_context(input_manifest=input_manifest)
+    expected_fingerprint = _close_d1_experiment_fingerprint(
+        input_manifest=input_manifest, study_path=study_path, sources=sources
+    )
+    label_contract = _read_json(Path(manifest["label_contract"]["path"]))
+    inputs = CloseD1ModelInputs(input_manifest, label_contract)
+    tasks = _close_d1_task_plan()
+    results, diagnostic = _partition_results(_completed_results(close_root), tasks)
+    validation = _read_json(
+        Path(manifest["preparation_files"]["minute_source_validation"]["path"])
+    )
+    checks: dict[str, bool] = {
+        "manifest_status": manifest.get("status")
+        in {"training_completed", "evaluated", "audited"},
+        "experiment_fingerprint": str(manifest.get("experiment_fingerprint"))
+        == expected_fingerprint,
+        "label_fingerprint": str(label_contract.get("experiment_fingerprint"))
+        == expected_fingerprint,
+        "label_files_valid": all(
+            _record_file_valid(record)
+            for record in dict(label_contract.get("files", {}) or {}).values()
+        ),
+        "label_support_exact": int(label_contract.get("valid_count", -1))
+        == int(inputs.raw_return_valid_mask(1).sum()),
+        "task_count_exact": len(results) == CLOSE_D1_TASK_COUNT and not diagnostic,
+        "feature_count_exact": len(inputs.feature_groups[COMPACT_VARIANT])
+        == COMPACT_FEATURE_COUNT,
+        "formal_rows_exclude_2010": not bool((inputs.years == 2010).any()),
+        "forbidden_2026_rows": not bool(
+            np.char.startswith(inputs.trade_date, "2026-").any()
+        ),
+        "forbidden_2026_label_reads": int(
+            label_contract.get("forbidden_2026_read_count", -1)
+        )
+        == 0,
+        "forbidden_2026_minute_query_rows": int(
+            validation.get("forbidden_2026_query_row_count", -1)
+        )
+        == 0,
+        "minute_source_validation_passed": bool(
+            validation.get("source_validation_passed", False)
+        ),
+        "preparation_files_valid": all(
+            _record_file_valid(record)
+            for record in dict(manifest.get("preparation_files", {}) or {}).values()
+        ),
+        "task_files_valid": True,
+        "purge_valid": True,
+        "outputs_hashed": bool(manifest.get("outputs")),
+        "existing_direct_return_plan_unchanged": len(_direct_return_task_plan())
+        == RETURN_TASK_COUNT,
+    }
+    config_sha256 = _sha256(study_path)
+    for task in tasks:
+        task_id = str(task["task_id"])
+        result = results.get(task_id)
+        if result is None:
+            checks["task_files_valid"] = False
+            continue
+        try:
+            feature_names, _ = _effective_features(
+                inputs=inputs, task=task, output_root=close_root
+            )
+            fingerprint = _task_fingerprint(
+                task=task,
+                feature_names=feature_names,
+                model_input_fingerprint=str(input_manifest["input_fingerprint"]),
+                config_sha256=config_sha256,
+                experiment_fingerprint=expected_fingerprint,
+            )
+            checks["task_files_valid"] &= _task_complete(
+                _task_result_path(close_root, task_id), fingerprint=fingerprint
+            )
+            prediction = np.load(
+                Path(result["files"]["prediction"]["path"]),
+                mmap_mode="r",
+                allow_pickle=False,
+            )
+            candidate_ids = np.load(
+                Path(result["files"]["candidate_id"]["path"]),
+                mmap_mode="r",
+                allow_pickle=False,
+            )
+            expected_rows = inputs.rows_for_year(int(result["evaluation_year"]))
+            checks["task_files_valid"] &= np.array_equal(
+                candidate_ids, inputs.candidate_ids[expected_rows]
+            ) and len(prediction) == len(expected_rows)
+            fold = inputs.fold(
+                year=int(result["evaluation_year"]),
+                horizon=1,
+                target=CLOSE_D1_TARGET,
+            )
+            checks["purge_valid"] &= int(
+                result["maximum_train_signal_date_idx"]
+            ) == int(fold["maximum_train_signal_date_idx"])
+        except (ModelError, OSError, KeyError, ValueError, TypeError, IndexError):
+            checks["task_files_valid"] = False
+    for record in dict(manifest.get("outputs", {}) or {}).values():
+        checks["outputs_hashed"] &= _record_file_valid(record)
+    payload = {
+        "schema": "seq100_quality_liquidity_close_d1_audit/1",
+        "study_id": STUDY_ID,
+        "stage": CLOSE_D1_DIR_NAME,
+        "status": "ok" if all(checks.values()) else "failed",
+        "created_at": _now(),
+        "checks": checks,
+        "trained_task_count": len(results),
+        "reused_existing_direct_d1_task_count": len(ROLLING_YEARS),
+        "rolling_years": list(ROLLING_YEARS),
+        "training_performed": True,
+        "evaluation_semantics": "retrospective_rolling_oos",
+    }
+    audit_path = close_root / "audit.json"
+    _write_json(audit_path, payload)
+    if payload["status"] != "ok":
+        raise ModelError("close_d1_audit_failed")
+    manifest["status"] = "audited"
+    manifest["audit"] = _file_record(audit_path)
+    manifest["updated_at"] = _now()
+    _write_json(manifest_path, manifest)
+    return payload
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study-path", type=Path, default=DEFAULT_STUDY_PATH)
@@ -3282,13 +4685,40 @@ def _parser() -> argparse.ArgumentParser:
     modes.add_argument("--run-returns", action="store_true")
     modes.add_argument("--evaluate-returns", action="store_true")
     modes.add_argument("--audit-returns", action="store_true")
+    modes.add_argument("--prepare-close-d1", action="store_true")
+    modes.add_argument("--run-close-d1", action="store_true")
+    modes.add_argument("--evaluate-close-d1", action="store_true")
+    modes.add_argument("--audit-close-d1", action="store_true")
     parser.add_argument("--max-tasks", type=int, default=None)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.prepare_returns:
+    if args.prepare_close_d1:
+        result = prepare_close_d1(
+            study_path=args.study_path,
+            ready_root=args.ready_root,
+            audit_root=args.audit_root,
+            output_root=args.output_root,
+        )
+    elif args.run_close_d1:
+        result = run_close_d1(
+            study_path=args.study_path,
+            ready_root=args.ready_root,
+            audit_root=args.audit_root,
+            output_root=args.output_root,
+            max_tasks=args.max_tasks,
+        )
+    elif args.evaluate_close_d1:
+        result = evaluate_close_d1(
+            output_root=args.output_root, study_path=args.study_path
+        )
+    elif args.audit_close_d1:
+        result = audit_close_d1(
+            output_root=args.output_root, study_path=args.study_path
+        )
+    elif args.prepare_returns:
         result = prepare_returns(
             study_path=args.study_path,
             ready_root=args.ready_root,
