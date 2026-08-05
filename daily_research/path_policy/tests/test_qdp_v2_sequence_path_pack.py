@@ -81,6 +81,36 @@ def test_explicit_empty_year_set_does_not_restore_the_default_test_year() -> Non
     assert _parse_years(None, default=(2025,)) == (2025,)
 
 
+def test_status_panel_marks_nullable_status_as_invalid() -> None:
+    frame = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000002.SZ"],
+            "trade_date": ["2024-01-02", "2024-01-02"],
+            "is_st": pd.Series([True, pd.NA], dtype="boolean"),
+            "is_suspended": [False, False],
+            "is_delisted": [False, False],
+        }
+    )
+    shape = (1, 2)
+    status_valid = np.ones(shape, dtype=bool)
+    is_st = np.zeros(shape, dtype=bool)
+    is_suspended = np.zeros(shape, dtype=bool)
+    is_delisted = np.zeros(shape, dtype=bool)
+
+    sequence_pack._write_status_panels(
+        frame=frame,
+        status_valid=status_valid,
+        is_st=is_st,
+        is_suspended=is_suspended,
+        is_delisted=is_delisted,
+        date_to_idx={"2024-01-02": 0},
+        symbol_to_idx={"000001.SZ": 0, "000002.SZ": 1},
+    )
+
+    assert status_valid.tolist() == [[True, False]]
+    assert is_st.tolist() == [[True, False]]
+
+
 def _daily_limit_fixture(
     raw_close: np.ndarray,
     factor: np.ndarray,

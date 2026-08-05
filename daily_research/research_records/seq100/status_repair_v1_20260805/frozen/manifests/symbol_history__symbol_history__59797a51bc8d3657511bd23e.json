@@ -1,0 +1,115 @@
+{
+  "contract_version": "qdp_current_symbol_history_v1",
+  "created_at": "2026-07-22T20:22:12+00:00",
+  "dataset_id": "symbol_history__59797a51bc8d3657511bd23e",
+  "domain": "symbol_history",
+  "end_date": "",
+  "frequency": "event",
+  "layer": "canonical_pit",
+  "notes": [
+    "mutate_active_shards_from_parquet:restrict QDP to current listed main-board survivors and apply targeted 2026-07-17 quality corrections",
+    "append_active_shard:append BaoStock core facts 2026-07-12..2026-07-21",
+    "composite_restore:pit_historical_mainboard_v2",
+    "mutate_active_shards_from_parquet:remove duplicate generic identities for officially documented 000022/001872 and 000043/001914 code changes"
+  ],
+  "primary_key": [
+    "security_id",
+    "effective_from"
+  ],
+  "quality": {
+    "pit_historical_scope_includes_delisted": true,
+    "pit_status_is_signal_date_asof": true,
+    "scope": "point_in_time_historical_mainboard",
+    "scope_as_of_date": "2026-07-21",
+    "scope_rewrite": "qdp_current_store_repair_20260717",
+    "scope_security_id_count": 0,
+    "scope_symbol_count": 3419,
+    "survivorship_bias_free_mainboard_daily": true
+  },
+  "row_count": 4882,
+  "schema": [
+    {
+      "name": "security_id",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "symbol",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "effective_from",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "effective_to",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "name_on_date",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "board_on_date",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "evidence_source",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "official_document_hash",
+      "type": "VARCHAR"
+    }
+  ],
+  "shards": [
+    {
+      "end_date": "",
+      "file_size": 36045,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/symbol_history/symbol_history__336ee8789b4ad33bd1732f5c/shards/repair_mutate_replace_4105d014_d39ad790f22c0fed.parquet"
+      },
+      "path": "datasets/symbol_history/symbol_history__336ee8789b4ad33bd1732f5c/shards/repair_mutate_replace_c33281d9_1c4ba958f94c180c.parquet",
+      "row_count": 4442,
+      "start_date": "",
+      "status": "stored"
+    },
+    {
+      "end_date": "",
+      "file_size": 6059,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/symbol_history/symbol_history__336ee8789b4ad33bd1732f5c/shards/repair_append_d8c0264a5d55163dd3b7be9c.parquet"
+      },
+      "path": "datasets/symbol_history/symbol_history__336ee8789b4ad33bd1732f5c/shards/repair_mutate_replace_70307964_55d01a2f0a0e3a13.parquet",
+      "row_count": 287,
+      "start_date": "",
+      "status": "stored"
+    },
+    {
+      "end_date": "",
+      "file_size": 8405,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\symbol_history.code_change_identity.prepared.parquet",
+        "repair_reason": "remove duplicate generic identities for officially documented 000022/001872 and 000043/001914 code changes",
+        "replaces": "datasets/symbol_history/symbol_history__59797a51bc8d3657511bd23e/shards/pit_restore_4288343df8aa69f8.parquet"
+      },
+      "path": "datasets/symbol_history/symbol_history__59797a51bc8d3657511bd23e/shards/repair_mutate_replace_3636787f_0ce4628decf277a8.parquet",
+      "row_count": 153,
+      "start_date": "",
+      "status": "stored"
+    }
+  ],
+  "source": {
+    "last_repair_action": "mutate_active_shards_from_parquet",
+    "last_repair_at": "2026-07-22T21:50:56+00:00",
+    "last_repair_reason": "remove duplicate generic identities for officially documented 000022/001872 and 000043/001914 code changes",
+    "pit_history_restored_at": "2026-07-22T20:22:12+00:00",
+    "scope": "point_in_time_historical_mainboard",
+    "scope_metadata_reconciled_at": "2026-07-30T14:05:19+00:00",
+    "survivorship_policy": "include_when_listed_then_apply_same_day_status"
+  },
+  "start_date": ""
+}

@@ -1,0 +1,2 @@
+﻿symbol,trade_date,archive_is_st,official_is_st,tushare_is_st,tushare_start_date,tushare_end_date,status_source
+600530.SH,2020-04-29,False,,True,2020-04-29,2020-05-05,baostock_archive.daily_isST

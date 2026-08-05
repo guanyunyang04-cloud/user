@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 import requests
 
+from quant_data_platform.core.security_status import st_status_from_name
 from quant_data_platform.domains.contracts import (
     DataDomain,
     DatePartitionFetchRequest,
@@ -2803,13 +2804,20 @@ def _baostock_bulk_daily_domain_frame(raw: pd.DataFrame, *, domain: str, query_d
         if missing:
             raise RuntimeError(f"baostock_bulk_daily_status_schema_error:missing={missing}")
         trade_status = raw["tradestatus"].fillna("").astype(str).str.strip()
+        raw_is_st = raw["isST"].fillna("").astype(str).str.strip().str.lower()
+        is_st = raw_is_st.map(
+            {"1": True, "true": True, "0": False, "false": False}
+        ).astype("boolean")
+        is_suspended = trade_status.map({"0": True, "1": False}).astype(
+            "boolean"
+        )
         return pd.DataFrame(
             {
                 "trade_date": raw["date"].astype(str),
                 "provider_symbol": provider_symbol,
                 "tradestatus": trade_status,
-                "is_st": raw["isST"].fillna("").astype(str).str.strip().eq("1"),
-                "is_suspended": trade_status.ne("1"),
+                "is_st": is_st,
+                "is_suspended": is_suspended,
                 "status_source": "baostock.query_daily_history_k_AStock",
                 "source": "baostock",
             }
@@ -2935,9 +2943,8 @@ def _baostock_board(value: Any) -> str:
     return "unknown"
 
 
-def _baostock_name_is_st(value: Any) -> bool:
-    name = str(value or "").strip().upper()
-    return name.startswith(("ST", "*ST"))
+def _baostock_name_is_st(value: Any) -> bool | None:
+    return st_status_from_name(value)
 
 
 def _baostock_all_stock_raw_frame(query: Any) -> pd.DataFrame:
@@ -2957,6 +2964,7 @@ def _baostock_all_stock_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
     raw = _baostock_all_stock_raw_frame(query)
     if raw.empty:
         return pd.DataFrame()
+    trade_status = raw["tradeStatus"].fillna("").astype(str).str.strip()
     frame = pd.DataFrame(
         {
             "symbol": raw["symbol"],
@@ -2969,8 +2977,10 @@ def _baostock_all_stock_frame(query: Any, *, trade_date: str) -> pd.DataFrame:
             "delist_date": "",
             # QDP v3's audit-specific accessor preserves these extension
             # columns.  The normal universe contract still drops them.
-            "trade_status": raw["tradeStatus"],
-            "is_suspended": raw["tradeStatus"].eq("0"),
+            "trade_status": trade_status,
+            "is_suspended": trade_status.map({"0": True, "1": False}).astype(
+                "boolean"
+            ),
             "source": "baostock",
         }
     )
@@ -2986,8 +2996,10 @@ def _baostock_status_frame_from_all_stock(query: Any, *, trade_date: str) -> pd.
         {
             "symbol": raw["symbol"],
             "trade_date": str(trade_date),
-            "is_st": raw["name"].map(_baostock_name_is_st),
-            "is_suspended": trade_status.eq("0"),
+            "is_st": raw["name"].map(_baostock_name_is_st).astype("boolean"),
+            "is_suspended": trade_status.map({"0": True, "1": False}).astype(
+                "boolean"
+            ),
             "is_delisted": False,
             "status_reason": "tradeStatus=" + trade_status,
             "source": "baostock",

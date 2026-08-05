@@ -1,0 +1,101 @@
+{
+  "backup": {
+    "errors": [],
+    "root": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\backup_pre_repair",
+    "status": "verified"
+  },
+  "created_at": "2026-08-05T12:28:28.137037+00:00",
+  "name_change": {
+    "dataset_id": "name_change__801d1567122e27f611ea67ec",
+    "deleted_shard_paths": [
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_replace_37422d38_d5788f9d1ab822f9.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_replace_b85d1a27_cb603b817085c4fa.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_replace_28baeb3b_0eb2a18b12227756.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_append_4dc0bc5f416d02001e7f39a3.parquet"
+    ],
+    "domain": "name_change",
+    "installed_shard_paths": [
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_replace_20260805T122824_277625_0000.parquet"
+    ],
+    "retained_old_shard_paths": [],
+    "row_count": 2876,
+    "shard_count": 1,
+    "status": "replaced"
+  },
+  "security_status": {
+    "dataset_id": "security_status__dd7f01560245387dd417d53d",
+    "deleted_shard_paths": [
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e57f752c_90c9a90ff73a6b28.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_1e47173b_548a695b7a6910fa.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_7096f118_c626d65926274131.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_cc537368_c5605d56ce85f521.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_2155a9ee_46b660f0a6471cfd.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e4fa10ef_48213af8ddb59fa6.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_66341a31_27ec5f667277d4bd.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_122ee9df_5e6f772d29d91fbc.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_26db8232_18e0b55d01729c90.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_4d695d69_a6773d1e3a0b207b.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e3a49201_6987be170616bfd6.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_a72878ec_84bb951931e2ac99.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_8be5fec5_8ffcda22651a1af0.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_c30bfb72_633ac59e6ea1c088.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_7d354dc2_4638301e4f3bfd87.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_1bba4d0f_01d881196ae7c94e.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_49b08077_d2f38b271d89c7fb.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_ed296045_9f9683d931a45537.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_bff80fac_38e20e10f0f0816b.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_af5c1cd8_ef56b8a7d5045e58.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_06b80501_4b57645009a9fb48.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_323886b4_50f2778e744ebda4.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_53acc6e2_7c5d6de6036eb816.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_45eb125c_c39b2c2a60d5a3f8.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_de868a9f_d09d18d553ae3401.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_da10efe9_e9b01f6f7186de6d.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_a82dbb7d_90fb9f8f1cabbf59.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e762f747_10fa3020660e9310.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_4e28ac3b_a80252fa3e8357a7.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_3bd26dd3_d2c3abcad6e1c924.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_9e205649_ce7630d674f5cc88.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e0bdd8c0_afb71f7977d7acc7.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_668cef97_e99859a71ba08452.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_0ce4b87a_16e5082ad7099dd8.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_8d1030f9_097898efc6ead15b.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_98358a48_71252d564314ebdb.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_append_a3f883bf6dff412ee8d9d678.parquet"
+    ],
+    "domain": "security_status",
+    "installed_shard_paths": [
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_352644_0000.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_369643_0001.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_384645_0002.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_399651_0003.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_417643_0004.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_432654_0005.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_448865_0006.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_464866_0007.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_481863_0008.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_496864_0009.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_512871_0010.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_526874_0011.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_542383_0012.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_559389_0013.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_574393_0014.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_593394_0015.parquet",
+      "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_replace_20260805T122823_611389_0016.parquet"
+    ],
+    "retained_old_shard_paths": [],
+    "row_count": 10556784,
+    "shard_count": 17,
+    "status": "replaced"
+  },
+  "status": "applied_and_verified",
+  "verification": {
+    "active_pointer_sha256_unchanged": true,
+    "dataset_ids_unchanged": true,
+    "name_change_synthetic_rows": 0,
+    "passed": true,
+    "security_status_difference_rows": 0,
+    "security_status_primary_key_duplicates": 0,
+    "security_status_row_count": 10556784
+  }
+}

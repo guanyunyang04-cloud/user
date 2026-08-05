@@ -1,0 +1,1511 @@
+{
+  "active_manifest": {
+    "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\active\\active.json",
+    "sha256": "5c1c6e48d022ac6b097d06d665b8b3b385b67eb34a0d9de21cf80dbc19fa20eb",
+    "size": 5569
+  },
+  "created_at": "2026-08-05T11:33:33.630879+00:00",
+  "datasets": {
+    "market_daily_raw": {
+      "dataset_id": "market_daily_raw__0559f722eb9142e5f476854a",
+      "manifest_copy": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\frozen\\manifests\\market_daily_raw__market_daily_raw__0559f722eb9142e5f476854a.json",
+      "manifest_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\dataset.json",
+      "manifest_sha256": "e6a8a7998512d5ea545c9bd59c728f8f8b6d54bc8aecd4fed1c7285989846982",
+      "manifest_size": 32930,
+      "row_count": 10212710,
+      "shards": [
+        {
+          "end_date": "2026-06-26",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_c5568979_df74a81394467a40.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_c5568979_df74a81394467a40.parquet",
+          "row_count": 8375623,
+          "sha256": "df74a81394467a407577685bb882b32eddd458d1b734454184d10c617f888d23",
+          "size": 135244514,
+          "start_date": "2011-11-22"
+        },
+        {
+          "end_date": "2010-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_f4569502_b3f84f75a0c3496d.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_f4569502_b3f84f75a0c3496d.parquet",
+          "row_count": 348535,
+          "sha256": "b3f84f75a0c3496db871efdd8aae49046c88b84d6713b6b0433327a09a4cf853",
+          "size": 5788143,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2011-12-30",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_eebaaa9b_e59df118e211efec.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_eebaaa9b_e59df118e211efec.parquet",
+          "row_count": 342291,
+          "sha256": "e59df118e211efec14c04fc082e26ac0f860afa9a66748445a30d8df8f573ece",
+          "size": 5622220,
+          "start_date": "2011-01-04"
+        },
+        {
+          "end_date": "2012-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_de0e8796_b21652396febd0f3.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_de0e8796_b21652396febd0f3.parquet",
+          "row_count": 1181,
+          "sha256": "b21652396febd0f3bf2372145fbdfa1c271dd524387f9968f629ee0d4a1cfb25",
+          "size": 24839,
+          "start_date": "2012-01-04"
+        },
+        {
+          "end_date": "2013-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_6cab4315_6b28be5c24d0ec33.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_6cab4315_6b28be5c24d0ec33.parquet",
+          "row_count": 1153,
+          "sha256": "6b28be5c24d0ec33526914eb602d5f5e689b99907d8a752179015118c75ec42a",
+          "size": 24325,
+          "start_date": "2013-01-04"
+        },
+        {
+          "end_date": "2014-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_48ec3f27_568a871914ced658.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_48ec3f27_568a871914ced658.parquet",
+          "row_count": 1085,
+          "sha256": "568a871914ced65805696727b2a1f54ac5ba0151304ff3d61183188664d8c94f",
+          "size": 23209,
+          "start_date": "2014-01-02"
+        },
+        {
+          "end_date": "2015-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_e2801098_335dcaff132cde8b.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_e2801098_335dcaff132cde8b.parquet",
+          "row_count": 1013,
+          "sha256": "335dcaff132cde8b836d65d1ac19f9e1a15e5c8d8fd68bf6b62ac8bc55d0a9f3",
+          "size": 24233,
+          "start_date": "2015-01-05"
+        },
+        {
+          "end_date": "2016-12-30",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_a459afee_26823d8c0c3abb73.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_a459afee_26823d8c0c3abb73.parquet",
+          "row_count": 1104,
+          "sha256": "26823d8c0c3abb733d4c18683be9b3095905c76e432278d506ed73e9a1bb780d",
+          "size": 24384,
+          "start_date": "2016-01-04"
+        },
+        {
+          "end_date": "2017-12-29",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_f247f296_0b69f5c9815fbeb3.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_f247f296_0b69f5c9815fbeb3.parquet",
+          "row_count": 1440,
+          "sha256": "0b69f5c9815fbeb3456f4497946d4e159ec992326cd6c316f6562228dd8b2c4f",
+          "size": 30616,
+          "start_date": "2017-01-03"
+        },
+        {
+          "end_date": "2018-12-28",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_32e8fa24_520a018ce7af6c98.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_32e8fa24_520a018ce7af6c98.parquet",
+          "row_count": 1581,
+          "sha256": "520a018ce7af6c981d5e064d593154e25152d7b2d9b27aeaee18be4be07858e1",
+          "size": 32119,
+          "start_date": "2018-01-02"
+        },
+        {
+          "end_date": "2019-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_94de1fc6_cd6b08ce451e84aa.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_94de1fc6_cd6b08ce451e84aa.parquet",
+          "row_count": 1707,
+          "sha256": "cd6b08ce451e84aa2de25ab68892a368c57936d8496dad11f799e0e2af906aed",
+          "size": 33948,
+          "start_date": "2019-01-02"
+        },
+        {
+          "end_date": "2020-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_0306598c_a4c67f5c34821a67.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_0306598c_a4c67f5c34821a67.parquet",
+          "row_count": 1686,
+          "sha256": "a4c67f5c34821a677c5bc05aa2777e5194ef71da87b0fd8500c22b15fd66f196",
+          "size": 32990,
+          "start_date": "2020-01-02"
+        },
+        {
+          "end_date": "2021-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_6f93ab5d_42304536bbe56353.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_6f93ab5d_42304536bbe56353.parquet",
+          "row_count": 1698,
+          "sha256": "42304536bbe56353f42443a890b02bdfe6812b350ca3cc245a793fd5692c0e71",
+          "size": 32133,
+          "start_date": "2021-01-04"
+        },
+        {
+          "end_date": "2022-12-30",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_62c45861_89ebac9ca168ba63.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_62c45861_89ebac9ca168ba63.parquet",
+          "row_count": 1692,
+          "sha256": "89ebac9ca168ba63ff0d83a4b69bba4b93f4b798a045dc5adddacaaf900477bd",
+          "size": 32742,
+          "start_date": "2022-01-04"
+        },
+        {
+          "end_date": "2023-12-29",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_b19f78bb_48c87374a2eef974.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_b19f78bb_48c87374a2eef974.parquet",
+          "row_count": 1681,
+          "sha256": "48c87374a2eef9740768a2b411d48efbe9fe8581ab4c59da07ba0581c478d997",
+          "size": 31517,
+          "start_date": "2023-01-03"
+        },
+        {
+          "end_date": "2024-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_a5e803c7_c04e2a5269d1c571.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_a5e803c7_c04e2a5269d1c571.parquet",
+          "row_count": 1682,
+          "sha256": "c04e2a5269d1c571cd4f11543e8d97c61c1227a56d285538c78b689d98c9d763",
+          "size": 32972,
+          "start_date": "2024-01-02"
+        },
+        {
+          "end_date": "2025-12-31",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_7db4b61b_05656294b8b32dd5.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_7db4b61b_05656294b8b32dd5.parquet",
+          "row_count": 1668,
+          "sha256": "05656294b8b32dd54171e72afdc290c0a79da9a8aea956a4f43d7ce00d5a6836",
+          "size": 32525,
+          "start_date": "2025-01-02"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_6b684450_f629905a4953e7be.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_6b684450_f629905a4953e7be.parquet",
+          "row_count": 31134,
+          "sha256": "f629905a4953e7beb9df6f2d930c82966c3781362c81e79f40e27b1726a42a82",
+          "size": 629688,
+          "start_date": "2026-01-05"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_cbe14ccb_2889798b67b4014b.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_cbe14ccb_2889798b67b4014b.parquet",
+          "row_count": 178,
+          "sha256": "2889798b67b4014b535846a7d50cd73ddfed8ac90bee15d4bfb75c92dc42382e",
+          "size": 6357,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_20062288_f7dc1bd3437bcbf1.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_20062288_f7dc1bd3437bcbf1.parquet",
+          "row_count": 186,
+          "sha256": "f7dc1bd3437bcbf10533bbdc1daad918908b7b4c0db87d36a2ee151636332bb6",
+          "size": 6486,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_97aa764d_3c62fab4c3a114ac.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_97aa764d_3c62fab4c3a114ac.parquet",
+          "row_count": 186,
+          "sha256": "3c62fab4c3a114ace37ca9402d7c1a1910e07a51a9f760db62ff7dbc6784ed9a",
+          "size": 6513,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_3a5d795b_9c8769ec5ac7b184.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_3a5d795b_9c8769ec5ac7b184.parquet",
+          "row_count": 188,
+          "sha256": "9c8769ec5ac7b1840ecb36180e2605478217b343f2c334c1863fb39ce72352d7",
+          "size": 6553,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_66e16d9a_40da26f10f75c2a7.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_66e16d9a_40da26f10f75c2a7.parquet",
+          "row_count": 181,
+          "sha256": "40da26f10f75c2a71f9b7e7a4d294c5b3866dda2051a95d4799fc747c39b201b",
+          "size": 6364,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_1ff19a10_1e3a80516e088bcc.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_1ff19a10_1e3a80516e088bcc.parquet",
+          "row_count": 188,
+          "sha256": "1e3a80516e088bcc0cb392071e6737ab47a7555ad11e3bf0a461437d5add66d3",
+          "size": 6537,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_49c9690f_3b67016c00a67775.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_49c9690f_3b67016c00a67775.parquet",
+          "row_count": 196,
+          "sha256": "3b67016c00a6777553f5242a549fceeacec29978e72b0f9c31f20857d62a2c4c",
+          "size": 6705,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_45b1a9df_2ab11866335da7e1.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_45b1a9df_2ab11866335da7e1.parquet",
+          "row_count": 205,
+          "sha256": "2ab11866335da7e17d59cb7bb955e295f9521e4eeb5c5e3f3a5caa3d4cfafd2c",
+          "size": 6933,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_8a9ab990_b8951d0da1b41c25.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_8a9ab990_b8951d0da1b41c25.parquet",
+          "row_count": 203,
+          "sha256": "b8951d0da1b41c254553ed5ede795770b797ca1ebc0b4531ed92f13987a72e80",
+          "size": 6845,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_7416c995_747a645510f73332.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_7416c995_747a645510f73332.parquet",
+          "row_count": 214,
+          "sha256": "747a645510f73332645f221a46042a6473f6175b55cc081384b077b3768afd93",
+          "size": 7095,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_d4604153_0709aaa6fbc02a9e.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_d4604153_0709aaa6fbc02a9e.parquet",
+          "row_count": 173,
+          "sha256": "0709aaa6fbc02a9ee063b56e6f4333a397d28bc39d94275348d4c764721d17f4",
+          "size": 6177,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_315b8755_f946a566f33fb0cc.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_315b8755_f946a566f33fb0cc.parquet",
+          "row_count": 192,
+          "sha256": "f946a566f33fb0cc7cafa849f855781776bd2812a9f4600077f7ff2c771e8e10",
+          "size": 6642,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_27ed769a_d1adcf67b70cc6a3.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_27ed769a_d1adcf67b70cc6a3.parquet",
+          "row_count": 186,
+          "sha256": "d1adcf67b70cc6a3b66b076fc91dc99115ff48e5e2d2a24319464577d6ba7052",
+          "size": 6502,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_1d09d758_4338ee1252a3ce69.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_1d09d758_4338ee1252a3ce69.parquet",
+          "row_count": 178,
+          "sha256": "4338ee1252a3ce6957481200f61a81decce7102baec5cd5c3835d68448922310",
+          "size": 6350,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_9bd7542a_7ddc57016972c142.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_9bd7542a_7ddc57016972c142.parquet",
+          "row_count": 191,
+          "sha256": "7ddc57016972c142a36e71c27dfa4bee10a9013ab347880783eff079b4d9f992",
+          "size": 6590,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_66eb3c8c_7360ed2ad2c4609c.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__d01f0ca92a2d55c0c0e9888d\\shards\\repair_mutate_replace_66eb3c8c_7360ed2ad2c4609c.parquet",
+          "row_count": 187,
+          "sha256": "7360ed2ad2c4609ce455664e43764295422d0977ececc7b0dcf0387599b1624b",
+          "size": 6540,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-16",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_55362085_469e1275cdc56822.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_55362085_469e1275cdc56822.parquet",
+          "row_count": 9114,
+          "sha256": "469e1275cdc56822bec648bdf759e684194cce51bd79fc399b6a953e828a1bdd",
+          "size": 199961,
+          "start_date": "2026-07-14"
+        },
+        {
+          "end_date": "2010-08-10",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_3c6ddab8_cd341f95d2429091.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_3c6ddab8_cd341f95d2429091.parquet",
+          "row_count": 74,
+          "sha256": "cd341f95d242909171ffc17b290ccceb9a41e2c292d548ff355a0f47d1b691ea",
+          "size": 3339,
+          "start_date": "2010-08-10"
+        },
+        {
+          "end_date": "2015-11-23",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_cf6a46fd_f867e853694fd833.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_cf6a46fd_f867e853694fd833.parquet",
+          "row_count": 218,
+          "sha256": "f867e853694fd83333e0eee5e16c9e10fd31a6fb26ab3ec8e8649ce4db694641",
+          "size": 5668,
+          "start_date": "2015-11-23"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_96261400_99613312285606b3.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_96261400_99613312285606b3.parquet",
+          "row_count": 9119,
+          "sha256": "99613312285606b38da0cb2c58170149f2f7ce903fc9d033553a889c3cb01c90",
+          "size": 200714,
+          "start_date": "2026-07-13"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_d00bcd6f_89880d73fe282ea4.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_replace_d00bcd6f_89880d73fe282ea4.parquet",
+          "row_count": 1065551,
+          "sha256": "89880d73fe282ea41b0d1fce3c93474f6052544f18735350bfc5e6fc96d7a328",
+          "size": 17462571,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_append_e7e9a9dc26884beab2b524d8.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\market_daily_raw\\market_daily_raw__0559f722eb9142e5f476854a\\shards\\repair_mutate_append_e7e9a9dc26884beab2b524d8.parquet",
+          "row_count": 7648,
+          "sha256": "e7e9a9dc26884beab2b524d8d4656f32c424a9a79c88bc7e479de28092795cc6",
+          "size": 150054,
+          "start_date": "2010-01-04"
+        }
+      ]
+    },
+    "name_change": {
+      "dataset_id": "name_change__801d1567122e27f611ea67ec",
+      "manifest_copy": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\frozen\\manifests\\name_change__name_change__801d1567122e27f611ea67ec.json",
+      "manifest_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\dataset.json",
+      "manifest_sha256": "cf2c8ab06a8b1b8989f2dad6146090807bc296d886754f0682e767ab75c921e9",
+      "manifest_size": 6493,
+      "row_count": 2900,
+      "shards": [
+        {
+          "end_date": "2026-07-14",
+          "exists": true,
+          "manifest_path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_replace_37422d38_d5788f9d1ab822f9.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_replace_37422d38_d5788f9d1ab822f9.parquet",
+          "row_count": 2218,
+          "sha256": "d5788f9d1ab822f9853889519ecd82af1d009a8c9705dfa87571eaf5e851b361",
+          "size": 36310,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2026-06-29",
+          "exists": true,
+          "manifest_path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_replace_b85d1a27_cb603b817085c4fa.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_replace_b85d1a27_cb603b817085c4fa.parquet",
+          "row_count": 6,
+          "sha256": "cb603b817085c4faca33d0aec0d927d2c806e7e80210d2d21f0db4a32ae3631d",
+          "size": 1478,
+          "start_date": "2011-11-22"
+        },
+        {
+          "end_date": "2026-07-20",
+          "exists": true,
+          "manifest_path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_replace_28baeb3b_0eb2a18b12227756.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_replace_28baeb3b_0eb2a18b12227756.parquet",
+          "row_count": 655,
+          "sha256": "0eb2a18b12227756351cfb13a80574932e1474f6e21f318b65aae42c07220224",
+          "size": 10574,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2026-07-14",
+          "exists": true,
+          "manifest_path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_append_4dc0bc5f416d02001e7f39a3.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\name_change\\name_change__801d1567122e27f611ea67ec\\shards\\repair_mutate_append_4dc0bc5f416d02001e7f39a3.parquet",
+          "row_count": 21,
+          "sha256": "4dc0bc5f416d02001e7f39a36fd240cfbd0bef8ef2ed2fa3b4730fb9db3fc478",
+          "size": 1867,
+          "start_date": "2010-08-10"
+        }
+      ]
+    },
+    "security_identity": {
+      "dataset_id": "security_identity__8129272657578fb71c057292",
+      "manifest_copy": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\frozen\\manifests\\security_identity__security_identity__8129272657578fb71c057292.json",
+      "manifest_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_identity\\security_identity__8129272657578fb71c057292\\dataset.json",
+      "manifest_sha256": "ad325bbfa5f1beaf276843da0219393ee9dc19f2cf631cbf082d048e049036ef",
+      "manifest_size": 4388,
+      "row_count": 3481,
+      "shards": [
+        {
+          "end_date": "",
+          "exists": true,
+          "manifest_path": "datasets/security_identity/security_identity__bb23e412debb8caf67faae42/shards/repair_mutate_replace_60d5105a_ef057ef621d639ed.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_identity\\security_identity__bb23e412debb8caf67faae42\\shards\\repair_mutate_replace_60d5105a_ef057ef621d639ed.parquet",
+          "row_count": 3041,
+          "sha256": "ef057ef621d639ede9afbefa16ca2bdf55ff51f67e7a59c0228f8c0113782a7d",
+          "size": 40036,
+          "start_date": ""
+        },
+        {
+          "end_date": "",
+          "exists": true,
+          "manifest_path": "datasets/security_identity/security_identity__bb23e412debb8caf67faae42/shards/repair_mutate_replace_96999593_0607c38e5e3c4107.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_identity\\security_identity__bb23e412debb8caf67faae42\\shards\\repair_mutate_replace_96999593_0607c38e5e3c4107.parquet",
+          "row_count": 287,
+          "sha256": "0607c38e5e3c4107a600305734e86034e3a079eb36fc581615815710428490fc",
+          "size": 5775,
+          "start_date": ""
+        },
+        {
+          "end_date": "",
+          "exists": true,
+          "manifest_path": "datasets/security_identity/security_identity__8129272657578fb71c057292/shards/repair_mutate_replace_ce3362a5_8941a771c6c53b1f.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_identity\\security_identity__8129272657578fb71c057292\\shards\\repair_mutate_replace_ce3362a5_8941a771c6c53b1f.parquet",
+          "row_count": 153,
+          "sha256": "8941a771c6c53b1fecbf89aa6135c9bd8aab6f3f9cf35929a8d39ddefae81087",
+          "size": 7681,
+          "start_date": ""
+        }
+      ]
+    },
+    "security_status": {
+      "dataset_id": "security_status__dd7f01560245387dd417d53d",
+      "manifest_copy": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\frozen\\manifests\\security_status__security_status__dd7f01560245387dd417d53d.json",
+      "manifest_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\dataset.json",
+      "manifest_sha256": "52dbf166fcb51680f5ed500ecc1e8653309921a8366167921906db22d90be24b",
+      "manifest_size": 32421,
+      "row_count": 10556784,
+      "shards": [
+        {
+          "end_date": "2011-12-30",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_e57f752c_90c9a90ff73a6b28.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e57f752c_90c9a90ff73a6b28.parquet",
+          "row_count": 49989,
+          "sha256": "90c9a90ff73a6b2865f68dd601b3692f46c55e3639bb5817338f18994259f54f",
+          "size": 15800,
+          "start_date": "2011-11-22"
+        },
+        {
+          "end_date": "2012-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_1e47173b_548a695b7a6910fa.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_1e47173b_548a695b7a6910fa.parquet",
+          "row_count": 431431,
+          "sha256": "548a695b7a6910fa6bc850665248a2b5c8137ce9342f7d3a73a3a7747cc29219",
+          "size": 36357,
+          "start_date": "2012-01-04"
+        },
+        {
+          "end_date": "2013-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_7096f118_c626d65926274131.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_7096f118_c626d65926274131.parquet",
+          "row_count": 428715,
+          "sha256": "c626d659262741313f99a216dea2095ba56183b2af3e60ff719d29dfbd00e459",
+          "size": 24460,
+          "start_date": "2013-01-04"
+        },
+        {
+          "end_date": "2014-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_cc537368_c5605d56ce85f521.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_cc537368_c5605d56ce85f521.parquet",
+          "row_count": 448734,
+          "sha256": "c5605d56ce85f521711e7086c3dbd910dcceccb40a8f41a12b0c181ee9c6f5db",
+          "size": 30388,
+          "start_date": "2014-01-02"
+        },
+        {
+          "end_date": "2015-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_2155a9ee_46b660f0a6471cfd.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_2155a9ee_46b660f0a6471cfd.parquet",
+          "row_count": 474281,
+          "sha256": "46b660f0a6471cfd202ec355e7c4e294891f8f8c0da6a19c1f3d2bf4970888d2",
+          "size": 37510,
+          "start_date": "2015-01-05"
+        },
+        {
+          "end_date": "2016-12-30",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_e4fa10ef_48213af8ddb59fa6.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e4fa10ef_48213af8ddb59fa6.parquet",
+          "row_count": 496828,
+          "sha256": "48213af8ddb59fa6e99df28c7b336e42a3e1626b80740f054386f9cc26f813e2",
+          "size": 34436,
+          "start_date": "2016-01-04"
+        },
+        {
+          "end_date": "2017-12-29",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_66341a31_27ec5f667277d4bd.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_66341a31_27ec5f667277d4bd.parquet",
+          "row_count": 556591,
+          "sha256": "27ec5f667277d4bd2f7d0543d553392f7250535a379f3bd04c0b32e9790a910f",
+          "size": 36120,
+          "start_date": "2017-01-03"
+        },
+        {
+          "end_date": "2018-12-28",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_122ee9df_5e6f772d29d91fbc.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_122ee9df_5e6f772d29d91fbc.parquet",
+          "row_count": 595329,
+          "sha256": "5e6f772d29d91fbceb22bb7683fa1ba7b9cdfa15335bbb91a2f26fb288eaab2d",
+          "size": 33038,
+          "start_date": "2018-01-02"
+        },
+        {
+          "end_date": "2019-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_26db8232_18e0b55d01729c90.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_26db8232_18e0b55d01729c90.parquet",
+          "row_count": 615942,
+          "sha256": "18e0b55d01729c900999016a5b546b388610c7739a28ba7626dbc7cd0955f8b1",
+          "size": 29218,
+          "start_date": "2019-01-02"
+        },
+        {
+          "end_date": "2020-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_4d695d69_a6773d1e3a0b207b.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_4d695d69_a6773d1e3a0b207b.parquet",
+          "row_count": 636338,
+          "sha256": "a6773d1e3a0b207b6cc9018c45d794f0ffd50570bc66abfb3131d7ea354995c2",
+          "size": 30661,
+          "start_date": "2020-01-02"
+        },
+        {
+          "end_date": "2021-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_e3a49201_6987be170616bfd6.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e3a49201_6987be170616bfd6.parquet",
+          "row_count": 673614,
+          "sha256": "6987be170616bfd6943f0e5b0942fdd3a891b60b53f3f4be2736b228a395619a",
+          "size": 31103,
+          "start_date": "2021-01-04"
+        },
+        {
+          "end_date": "2022-12-30",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_a72878ec_84bb951931e2ac99.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_a72878ec_84bb951931e2ac99.parquet",
+          "row_count": 691833,
+          "sha256": "84bb951931e2ac99a6908aa030a35fc40adf231c01309a1eff2a362eb4da52e1",
+          "size": 29601,
+          "start_date": "2022-01-04"
+        },
+        {
+          "end_date": "2023-12-29",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_8be5fec5_8ffcda22651a1af0.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_8be5fec5_8ffcda22651a1af0.parquet",
+          "row_count": 708739,
+          "sha256": "8ffcda22651a1af02f30db74e12cb9d375284ba44279d95c763ecf58833d0bf2",
+          "size": 30788,
+          "start_date": "2023-01-03"
+        },
+        {
+          "end_date": "2024-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_c30bfb72_633ac59e6ea1c088.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_c30bfb72_633ac59e6ea1c088.parquet",
+          "row_count": 718178,
+          "sha256": "633ac59e6ea1c0887133f8fc0181eaf250efbcde406bc9a4d6c2b34529689812",
+          "size": 29690,
+          "start_date": "2024-01-02"
+        },
+        {
+          "end_date": "2025-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_7d354dc2_4638301e4f3bfd87.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_7d354dc2_4638301e4f3bfd87.parquet",
+          "row_count": 728022,
+          "sha256": "4638301e4f3bfd8749cf7383f3575f8647887d59e67e8abf4ea962bb2662c310",
+          "size": 31674,
+          "start_date": "2025-01-02"
+        },
+        {
+          "end_date": "2026-06-26",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_1bba4d0f_01d881196ae7c94e.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_1bba4d0f_01d881196ae7c94e.parquet",
+          "row_count": 344670,
+          "sha256": "01d881196ae7c94efd523edc6b85722096d72c0929c6bc7dcac1cfed66cf3684",
+          "size": 24730,
+          "start_date": "2026-01-05"
+        },
+        {
+          "end_date": "2010-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_49b08077_d2f38b271d89c7fb.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_49b08077_d2f38b271d89c7fb.parquet",
+          "row_count": 364811,
+          "sha256": "d2f38b271d89c7fbdb6467144899280453faf0286a4446c2b3582b985e81458f",
+          "size": 41643,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2011-12-30",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_ed296045_9f9683d931a45537.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_ed296045_9f9683d931a45537.parquet",
+          "row_count": 358856,
+          "sha256": "9f9683d931a4553761b3cf3e02a848bdebbe74612f39ff679fa2b37c820b0ebe",
+          "size": 40104,
+          "start_date": "2011-01-04"
+        },
+        {
+          "end_date": "2012-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_bff80fac_38e20e10f0f0816b.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_bff80fac_38e20e10f0f0816b.parquet",
+          "row_count": 1215,
+          "sha256": "38e20e10f0f0816b45d91155638134916f91e7fd6e79c3e718552e6486973d09",
+          "size": 2803,
+          "start_date": "2012-01-04"
+        },
+        {
+          "end_date": "2013-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_af5c1cd8_ef56b8a7d5045e58.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_af5c1cd8_ef56b8a7d5045e58.parquet",
+          "row_count": 1190,
+          "sha256": "ef56b8a7d5045e58c9f6d4bdc51ff71de9470878b8c6ec0066ac201517804761",
+          "size": 2733,
+          "start_date": "2013-01-04"
+        },
+        {
+          "end_date": "2014-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_06b80501_4b57645009a9fb48.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_06b80501_4b57645009a9fb48.parquet",
+          "row_count": 1225,
+          "sha256": "4b57645009a9fb4837065235a5319e5bb5a852c813aed8c004c439a74d3d893c",
+          "size": 2717,
+          "start_date": "2014-01-02"
+        },
+        {
+          "end_date": "2015-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_323886b4_50f2778e744ebda4.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_323886b4_50f2778e744ebda4.parquet",
+          "row_count": 1220,
+          "sha256": "50f2778e744ebda43d1880a50faa98cda188c7bb91abec31fe8f16454ab722f8",
+          "size": 2741,
+          "start_date": "2015-01-05"
+        },
+        {
+          "end_date": "2016-12-30",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_53acc6e2_7c5d6de6036eb816.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_53acc6e2_7c5d6de6036eb816.parquet",
+          "row_count": 1145,
+          "sha256": "7c5d6de6036eb816d3b146ff47750125a45de13bbb37a8f4b07034f02e95d1cf",
+          "size": 1890,
+          "start_date": "2016-01-04"
+        },
+        {
+          "end_date": "2017-12-29",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_45eb125c_c39b2c2a60d5a3f8.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_45eb125c_c39b2c2a60d5a3f8.parquet",
+          "row_count": 1614,
+          "sha256": "c39b2c2a60d5a3f8a97c129e782de19c83bf241e663256e7aa8a2dd537eef64e",
+          "size": 2848,
+          "start_date": "2017-01-03"
+        },
+        {
+          "end_date": "2018-12-28",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_de868a9f_d09d18d553ae3401.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_de868a9f_d09d18d553ae3401.parquet",
+          "row_count": 1701,
+          "sha256": "d09d18d553ae34011cb4aa7fecdb536f813d5ffebeb083064aeee9f5b4dc3f0d",
+          "size": 2710,
+          "start_date": "2018-01-02"
+        },
+        {
+          "end_date": "2019-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_da10efe9_e9b01f6f7186de6d.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_da10efe9_e9b01f6f7186de6d.parquet",
+          "row_count": 1708,
+          "sha256": "e9b01f6f7186de6dcafde52946ba768f27eb2090c62f60d6190b12949391c059",
+          "size": 2688,
+          "start_date": "2019-01-02"
+        },
+        {
+          "end_date": "2020-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_a82dbb7d_90fb9f8f1cabbf59.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_a82dbb7d_90fb9f8f1cabbf59.parquet",
+          "row_count": 1701,
+          "sha256": "90fb9f8f1cabbf590af065505a59fd16da6309b2b6bd53b2f057ce7c4b96bf8b",
+          "size": 2818,
+          "start_date": "2020-01-02"
+        },
+        {
+          "end_date": "2021-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_e762f747_10fa3020660e9310.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e762f747_10fa3020660e9310.parquet",
+          "row_count": 1701,
+          "sha256": "10fa3020660e931052b3899e907a2ab585b3108cbad4681225cb481746db6cb4",
+          "size": 2717,
+          "start_date": "2021-01-04"
+        },
+        {
+          "end_date": "2022-12-30",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_4e28ac3b_a80252fa3e8357a7.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_4e28ac3b_a80252fa3e8357a7.parquet",
+          "row_count": 1694,
+          "sha256": "a80252fa3e8357a74e3f005c9e57121d9176b304fb2e2823683983e7e810a2fe",
+          "size": 2709,
+          "start_date": "2022-01-04"
+        },
+        {
+          "end_date": "2023-12-29",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_3bd26dd3_d2c3abcad6e1c924.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_3bd26dd3_d2c3abcad6e1c924.parquet",
+          "row_count": 1694,
+          "sha256": "d2c3abcad6e1c924ce5e7e2d5413714c9717b1032141eecb6355ab2b2dc60b75",
+          "size": 2734,
+          "start_date": "2023-01-03"
+        },
+        {
+          "end_date": "2024-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_9e205649_ce7630d674f5cc88.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_9e205649_ce7630d674f5cc88.parquet",
+          "row_count": 1694,
+          "sha256": "ce7630d674f5cc888643dbd2b193aa8f365690a767135218e3caafeea484ccee",
+          "size": 2754,
+          "start_date": "2024-01-02"
+        },
+        {
+          "end_date": "2025-12-31",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_e0bdd8c0_afb71f7977d7acc7.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_e0bdd8c0_afb71f7977d7acc7.parquet",
+          "row_count": 1701,
+          "sha256": "afb71f7977d7acc7143551a5e9cd54385cec4fa7dbd0553cf50ed908d88b7694",
+          "size": 2836,
+          "start_date": "2025-01-02"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_668cef97_e99859a71ba08452.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_668cef97_e99859a71ba08452.parquet",
+          "row_count": 34224,
+          "sha256": "e99859a71ba08452a011a4d268b4d6cb52ae1299abb17b736404609e80c94680",
+          "size": 18016,
+          "start_date": "2026-01-05"
+        },
+        {
+          "end_date": "2026-07-16",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_0ce4b87a_16e5082ad7099dd8.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_0ce4b87a_16e5082ad7099dd8.parquet",
+          "row_count": 9117,
+          "sha256": "16e5082ad7099dd8e696f9fc3c1ceea4dcf47218c57375789cd48076ae5361ac",
+          "size": 5395,
+          "start_date": "2026-07-14"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_8d1030f9_097898efc6ead15b.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_8d1030f9_097898efc6ead15b.parquet",
+          "row_count": 9117,
+          "sha256": "097898efc6ead15b05e92e9ec91f06d404e247f85ba6a296f46723c573c4a89c",
+          "size": 5364,
+          "start_date": "2026-07-17"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_replace_98358a48_71252d564314ebdb.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_replace_98358a48_71252d564314ebdb.parquet",
+          "row_count": 1152188,
+          "sha256": "71252d564314ebdbddca26fc6f20bdbc97614c5f6423b5be0118ea34c6d4004c",
+          "size": 210026,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/security_status/security_status__dd7f01560245387dd417d53d/shards/repair_mutate_append_a3f883bf6dff412ee8d9d678.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\security_status\\security_status__dd7f01560245387dd417d53d\\shards\\repair_mutate_append_a3f883bf6dff412ee8d9d678.parquet",
+          "row_count": 8034,
+          "sha256": "a3f883bf6dff412ee8d9d67851579ef28e3de74c2257ef0b212695b1c4fd0d24",
+          "size": 7020,
+          "start_date": "2010-01-04"
+        }
+      ]
+    },
+    "symbol_history": {
+      "dataset_id": "symbol_history__59797a51bc8d3657511bd23e",
+      "manifest_copy": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\frozen\\manifests\\symbol_history__symbol_history__59797a51bc8d3657511bd23e.json",
+      "manifest_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\symbol_history\\symbol_history__59797a51bc8d3657511bd23e\\dataset.json",
+      "manifest_sha256": "063bbec3a04e13583714bb3d9063ab73efdfd55aa5608d2ed81d96bf7313b6f5",
+      "manifest_size": 4457,
+      "row_count": 4882,
+      "shards": [
+        {
+          "end_date": "",
+          "exists": true,
+          "manifest_path": "datasets/symbol_history/symbol_history__336ee8789b4ad33bd1732f5c/shards/repair_mutate_replace_c33281d9_1c4ba958f94c180c.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\symbol_history\\symbol_history__336ee8789b4ad33bd1732f5c\\shards\\repair_mutate_replace_c33281d9_1c4ba958f94c180c.parquet",
+          "row_count": 4442,
+          "sha256": "1c4ba958f94c180c8d82ff1f2729e7af1e5a8c5c74d76cdde0080465dfda93a0",
+          "size": 36045,
+          "start_date": ""
+        },
+        {
+          "end_date": "",
+          "exists": true,
+          "manifest_path": "datasets/symbol_history/symbol_history__336ee8789b4ad33bd1732f5c/shards/repair_mutate_replace_70307964_55d01a2f0a0e3a13.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\symbol_history\\symbol_history__336ee8789b4ad33bd1732f5c\\shards\\repair_mutate_replace_70307964_55d01a2f0a0e3a13.parquet",
+          "row_count": 287,
+          "sha256": "55d01a2f0a0e3a13abd38e67a4e3a787042382ee4ef623204f8a02342c6f4254",
+          "size": 6059,
+          "start_date": ""
+        },
+        {
+          "end_date": "",
+          "exists": true,
+          "manifest_path": "datasets/symbol_history/symbol_history__59797a51bc8d3657511bd23e/shards/repair_mutate_replace_3636787f_0ce4628decf277a8.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\symbol_history\\symbol_history__59797a51bc8d3657511bd23e\\shards\\repair_mutate_replace_3636787f_0ce4628decf277a8.parquet",
+          "row_count": 153,
+          "sha256": "0ce4628decf277a85b7b5dda0d5662c6d630abdf6549290e7b7b93d88e3a06f8",
+          "size": 8405,
+          "start_date": ""
+        }
+      ]
+    },
+    "trading_calendar": {
+      "dataset_id": "trading_calendar__8827e0264c6e3ec8b7330a88",
+      "manifest_copy": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\frozen\\manifests\\trading_calendar__trading_calendar__8827e0264c6e3ec8b7330a88.json",
+      "manifest_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\trading_calendar\\trading_calendar__8827e0264c6e3ec8b7330a88\\dataset.json",
+      "manifest_sha256": "b520b17c5ce95df579f0da567eed1f85bb31b9ed7b67c1603d75540e46016cba",
+      "manifest_size": 3879,
+      "row_count": 6046,
+      "shards": [
+        {
+          "end_date": "2026-06-08",
+          "exists": true,
+          "manifest_path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/part_000000_shard.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\trading_calendar\\trading_calendar__8827e0264c6e3ec8b7330a88\\shards\\part_000000_shard.parquet",
+          "row_count": 5313,
+          "sha256": "31be23570d257a770228428da6be19cd6a97ae461b1d683c76a26bca189a694e",
+          "size": 21798,
+          "start_date": "2011-11-22"
+        },
+        {
+          "end_date": "2026-06-26",
+          "exists": true,
+          "manifest_path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/part_000001_shard.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\trading_calendar\\trading_calendar__8827e0264c6e3ec8b7330a88\\shards\\part_000001_shard.parquet",
+          "row_count": 18,
+          "sha256": "375689c831b573b22ebe770f87af01f3a4cdaffb6a4e3791387f94d7329cfa50",
+          "size": 2729,
+          "start_date": "2026-06-09"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/repair_append_95c09c8fb51d6c1365913676.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\trading_calendar\\trading_calendar__8827e0264c6e3ec8b7330a88\\shards\\repair_append_95c09c8fb51d6c1365913676.parquet",
+          "row_count": 707,
+          "sha256": "95c09c8fb51d6c1365913676ddff7f9b76a97813c3933774383996d2c584c5de",
+          "size": 2720,
+          "start_date": "2010-01-01"
+        },
+        {
+          "end_date": "2026-07-16",
+          "exists": true,
+          "manifest_path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/repair_append_87956af7b216a09036674d3c.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\trading_calendar\\trading_calendar__8827e0264c6e3ec8b7330a88\\shards\\repair_append_87956af7b216a09036674d3c.parquet",
+          "row_count": 3,
+          "sha256": "3542db8f81ec7bfdafc96219543554d8aded4eb2ee94dbe6587e530d03ff3ec6",
+          "size": 2672,
+          "start_date": "2026-07-14"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/repair_append_e6256e8c6bbc8509861e903d.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\trading_calendar\\trading_calendar__8827e0264c6e3ec8b7330a88\\shards\\repair_append_e6256e8c6bbc8509861e903d.parquet",
+          "row_count": 5,
+          "sha256": "255ff3ca88544e1d0f786b182004f488891e87cf02a82b29c131a3fea9adeb30",
+          "size": 2681,
+          "start_date": "2026-07-17"
+        }
+      ]
+    },
+    "universe_snapshot": {
+      "dataset_id": "universe_snapshot__f79157008ed647500a73e8b4",
+      "manifest_copy": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\frozen\\manifests\\universe_snapshot__universe_snapshot__f79157008ed647500a73e8b4.json",
+      "manifest_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\dataset.json",
+      "manifest_sha256": "74ada441362b9f8c11c078be90dd5a74c8365967136c1fec8de5f1278ee71730",
+      "manifest_size": 26708,
+      "row_count": 10556784,
+      "shards": [
+        {
+          "end_date": "2010-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_72f3cb07_75dc3afe223412e6.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_replace_72f3cb07_75dc3afe223412e6.parquet",
+          "row_count": 364811,
+          "sha256": "75dc3afe223412e6d38bd28a3a9f8cb6c92869d1fe1490f0f775f7c88947c864",
+          "size": 46553,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_547227_0016.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_547227_0016.parquet",
+          "row_count": 8034,
+          "sha256": "740fbb2a79688773439f8e19af424104091eb58302dff0ab6bb45868fc948440",
+          "size": 7845,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_34f1b395_285fc89bebee7738.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_replace_34f1b395_285fc89bebee7738.parquet",
+          "row_count": 1152188,
+          "sha256": "285fc89bebee7738db87248629e88aa9a9a4e753acef414f45449007ce5c4bb1",
+          "size": 262547,
+          "start_date": "2010-01-04"
+        },
+        {
+          "end_date": "2011-12-30",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_2d6f170b_f797e93fb75f9334.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_replace_2d6f170b_f797e93fb75f9334.parquet",
+          "row_count": 358856,
+          "sha256": "f797e93fb75f93343f31e9cb2365e8e290d18bb76a934c4b4f0faee62ade3388",
+          "size": 46507,
+          "start_date": "2011-01-04"
+        },
+        {
+          "end_date": "2011-12-30",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_290802_0000.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_290802_0000.parquet",
+          "row_count": 49989,
+          "sha256": "31691cd7f1be28bc884caecabfbb07b221fe690f2bb25610046470436a5a447d",
+          "size": 89185,
+          "start_date": "2011-11-22"
+        },
+        {
+          "end_date": "2012-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_308419_0001.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_308419_0001.parquet",
+          "row_count": 431431,
+          "sha256": "cb3d8dc41102875ba31dd9de238f80f832c2e3d2f06d815bb4f3cc2dcbcaf0ec",
+          "size": 397005,
+          "start_date": "2012-01-04"
+        },
+        {
+          "end_date": "2012-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_ceed0954_cd61a69e906c7328.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_replace_ceed0954_cd61a69e906c7328.parquet",
+          "row_count": 1215,
+          "sha256": "cd61a69e906c7328cc4a7807bc023961af617bf56843d689452a17296b7ecdd0",
+          "size": 3553,
+          "start_date": "2012-01-04"
+        },
+        {
+          "end_date": "2013-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_92a57771_8f928eefbf21c9c8.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_92a57771_8f928eefbf21c9c8.parquet",
+          "row_count": 1190,
+          "sha256": "8f928eefbf21c9c8f0a3ce541d870d446fec1e23786b4b68162a93cc37fd7043",
+          "size": 3541,
+          "start_date": "2013-01-04"
+        },
+        {
+          "end_date": "2013-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_323122_0002.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_323122_0002.parquet",
+          "row_count": 428715,
+          "sha256": "950ee1d326c36111737f007f2f272bcc76ae4eed44cc6d5e1cd205cbc57082cb",
+          "size": 367343,
+          "start_date": "2013-01-04"
+        },
+        {
+          "end_date": "2014-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_edec290a_52eaa7a9272befad.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_edec290a_52eaa7a9272befad.parquet",
+          "row_count": 1225,
+          "sha256": "52eaa7a9272befada70c35529925c717fde9873f3dccf85e63e08ed9e6e6353b",
+          "size": 3569,
+          "start_date": "2014-01-02"
+        },
+        {
+          "end_date": "2014-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_337870_0003.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_337870_0003.parquet",
+          "row_count": 448734,
+          "sha256": "8e29b80fd37d3e7be250892853453b3752b1299ac9b8a77231b9fec142233a5d",
+          "size": 404602,
+          "start_date": "2014-01-02"
+        },
+        {
+          "end_date": "2015-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_3e6a381b_d008fd843fe64a4f.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_3e6a381b_d008fd843fe64a4f.parquet",
+          "row_count": 1220,
+          "sha256": "d008fd843fe64a4f90b68fda16f5d73b128ab1a4be330c82ece12035a8e9c599",
+          "size": 3544,
+          "start_date": "2015-01-05"
+        },
+        {
+          "end_date": "2015-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_352753_0004.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_352753_0004.parquet",
+          "row_count": 474281,
+          "sha256": "51760662bb578d735edf1ed709eba2c4e2069e5bdc17846898614b0271411192",
+          "size": 375034,
+          "start_date": "2015-01-05"
+        },
+        {
+          "end_date": "2016-12-30",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_c68f97cf_a59d36d40e49f816.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_c68f97cf_a59d36d40e49f816.parquet",
+          "row_count": 1145,
+          "sha256": "a59d36d40e49f8162ba908075d63c6a615e16749989a1e1a9a95ec23c8fc344b",
+          "size": 2794,
+          "start_date": "2016-01-04"
+        },
+        {
+          "end_date": "2016-12-30",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_368806_0005.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_368806_0005.parquet",
+          "row_count": 496828,
+          "sha256": "81fe0c7c5f85358f1a4810a6627cb2714296bd6ba1ed26d6b404bb5aa89015df",
+          "size": 411648,
+          "start_date": "2016-01-04"
+        },
+        {
+          "end_date": "2017-12-29",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_9f2daf35_4f8196acdaccab83.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_9f2daf35_4f8196acdaccab83.parquet",
+          "row_count": 1614,
+          "sha256": "4f8196acdaccab836cdfb24f984c3b8c757a5d2bd91a2fe7265d678bf91f844f",
+          "size": 3657,
+          "start_date": "2017-01-03"
+        },
+        {
+          "end_date": "2017-12-29",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_384904_0006.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_384904_0006.parquet",
+          "row_count": 556591,
+          "sha256": "0f5f96c78807057769960b2b8b34a2340ff1c833756649dee3ef1bea287187a5",
+          "size": 441682,
+          "start_date": "2017-01-03"
+        },
+        {
+          "end_date": "2018-12-28",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_3aca237e_b77006fd663a1544.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_3aca237e_b77006fd663a1544.parquet",
+          "row_count": 1701,
+          "sha256": "b77006fd663a1544f006223eefd343cbd842ed95d7b59cf965af5239a71bf175",
+          "size": 3631,
+          "start_date": "2018-01-02"
+        },
+        {
+          "end_date": "2018-12-28",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_399339_0007.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_399339_0007.parquet",
+          "row_count": 595329,
+          "sha256": "ef09b6cd1e70bf54bb41ae91401dc8090316c1e2c49261bd149fc70521dcda7f",
+          "size": 445723,
+          "start_date": "2018-01-02"
+        },
+        {
+          "end_date": "2019-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_33ed9cee_35629755bfab1c29.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_33ed9cee_35629755bfab1c29.parquet",
+          "row_count": 1708,
+          "sha256": "35629755bfab1c29bed58e1112bb9cdf875d5f761cd7042616d4c370c6306292",
+          "size": 3630,
+          "start_date": "2019-01-02"
+        },
+        {
+          "end_date": "2019-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_415367_0008.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_415367_0008.parquet",
+          "row_count": 615942,
+          "sha256": "a616d9119b722e569d377890f16be65870f764245d68782f641e4bf4d0853e8f",
+          "size": 481487,
+          "start_date": "2019-01-02"
+        },
+        {
+          "end_date": "2020-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_5db86fa8_e9132afac665cf1b.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_5db86fa8_e9132afac665cf1b.parquet",
+          "row_count": 1701,
+          "sha256": "e9132afac665cf1bd805b365000480effadad3826b42cce9b0e921bd929fb514",
+          "size": 3650,
+          "start_date": "2020-01-02"
+        },
+        {
+          "end_date": "2020-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_431399_0009.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_431399_0009.parquet",
+          "row_count": 636338,
+          "sha256": "28aec8ee893f9dcb4426a582187f57238f69413557a81bbf1c6080b279cc0766",
+          "size": 559621,
+          "start_date": "2020-01-02"
+        },
+        {
+          "end_date": "2021-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_5fa647dc_505ac48491e95454.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_5fa647dc_505ac48491e95454.parquet",
+          "row_count": 1701,
+          "sha256": "505ac48491e9545438b7f9b8f37f0f5edf1c1aa6b43db746bbebdd297b9a7d1a",
+          "size": 3628,
+          "start_date": "2021-01-04"
+        },
+        {
+          "end_date": "2021-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_450117_0010.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_450117_0010.parquet",
+          "row_count": 673614,
+          "sha256": "95d3338822a9fe3fccdfe80466260de05b3e6fd81155ba8ad64f1d1bc8624eaa",
+          "size": 605910,
+          "start_date": "2021-01-04"
+        },
+        {
+          "end_date": "2022-12-30",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_fd733691_de48f5af522ee2e5.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_fd733691_de48f5af522ee2e5.parquet",
+          "row_count": 1694,
+          "sha256": "de48f5af522ee2e541aef167a6e73e2e36f4357e2dd09819f4fdaa47b4298f28",
+          "size": 3649,
+          "start_date": "2022-01-04"
+        },
+        {
+          "end_date": "2022-12-30",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_467128_0011.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_467128_0011.parquet",
+          "row_count": 691833,
+          "sha256": "7e2019b44fbdb3cc9bb9618938a8e933983e4cdffd553ac8d141a108ceb1f6fe",
+          "size": 618450,
+          "start_date": "2022-01-04"
+        },
+        {
+          "end_date": "2023-12-29",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_e4d8ce87_586005708feaf406.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_e4d8ce87_586005708feaf406.parquet",
+          "row_count": 1694,
+          "sha256": "586005708feaf4061c230df3f972e61f08f23735130ca9c3adacbe4fdd110c0e",
+          "size": 3644,
+          "start_date": "2023-01-03"
+        },
+        {
+          "end_date": "2023-12-29",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_482847_0012.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_482847_0012.parquet",
+          "row_count": 708739,
+          "sha256": "38a500c82fa75c75ef45253eda1cac1b9ed838f0042b3aecccbb2f78e24b43c9",
+          "size": 630259,
+          "start_date": "2023-01-03"
+        },
+        {
+          "end_date": "2024-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_629ea78f_aa86ac8ba7a306c5.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_629ea78f_aa86ac8ba7a306c5.parquet",
+          "row_count": 1694,
+          "sha256": "aa86ac8ba7a306c5e1c1b1a96fd13f7af8511fd89a4eb70733af078b63aa5192",
+          "size": 3636,
+          "start_date": "2024-01-02"
+        },
+        {
+          "end_date": "2024-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_498020_0013.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_498020_0013.parquet",
+          "row_count": 718178,
+          "sha256": "768d614933dd13e5d1089a0a10023558e843d879dec597d83653797efb802004",
+          "size": 620949,
+          "start_date": "2024-01-02"
+        },
+        {
+          "end_date": "2025-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_e1fd815e_dde4945e8241922b.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__2b3f22d43561a519a61c9a26\\shards\\repair_mutate_replace_e1fd815e_dde4945e8241922b.parquet",
+          "row_count": 1701,
+          "sha256": "dde4945e8241922b81a62a6ac9ed1c23e773091a5987f57957f1297834cf13fb",
+          "size": 3649,
+          "start_date": "2025-01-02"
+        },
+        {
+          "end_date": "2025-12-31",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_515269_0014.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_515269_0014.parquet",
+          "row_count": 728022,
+          "sha256": "1cfc15ebacf2244ed674ebf5cface48fc7c8ed6107963e7157cfa6f93ff95c3e",
+          "size": 635952,
+          "start_date": "2025-01-02"
+        },
+        {
+          "end_date": "2026-06-26",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_531191_0015.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_20260730T182700_531191_0015.parquet",
+          "row_count": 344670,
+          "sha256": "9e05bff0b0d4075d9e6e4c2ec24a04131527c709c677d489de86aaae0ee0cff7",
+          "size": 316515,
+          "start_date": "2026-01-05"
+        },
+        {
+          "end_date": "2026-07-13",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_588e1c3a_a30353efee1758b9.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_replace_588e1c3a_a30353efee1758b9.parquet",
+          "row_count": 34224,
+          "sha256": "a30353efee1758b985d27d56ac9e7ebad2f3bec5fa62c381bc418ef35f3376fd",
+          "size": 64915,
+          "start_date": "2026-01-05"
+        },
+        {
+          "end_date": "2026-07-16",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_5e77a33e_6f7290635ec8fad7.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_replace_5e77a33e_6f7290635ec8fad7.parquet",
+          "row_count": 9117,
+          "sha256": "6f7290635ec8fad78f08d60372808aafe4abe7e773c451f9119f32eef479b8f9",
+          "size": 44682,
+          "start_date": "2026-07-14"
+        },
+        {
+          "end_date": "2026-07-21",
+          "exists": true,
+          "manifest_path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_0373052a_c0a66870626b921e.parquet",
+          "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_v2\\datasets\\universe_snapshot\\universe_snapshot__f79157008ed647500a73e8b4\\shards\\repair_mutate_replace_0373052a_c0a66870626b921e.parquet",
+          "row_count": 9117,
+          "sha256": "c0a66870626b921e14d938078dd93e844b89c89dff9624b7d84c9a8bc5c06ec4",
+          "size": 44683,
+          "start_date": "2026-07-17"
+        }
+      ]
+    }
+  },
+  "extra_sources": {
+    "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_quality_liquidity_training_ready\\model_inputs\\compact.f32": {
+      "exists": false
+    },
+    "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_quality_liquidity_training_ready\\model_inputs\\manifest.json": {
+      "sha256": "49216d6ec81686bc99821dd6281a310eaafc35740fee0aa8200883cb2042a1af",
+      "size": 212932
+    },
+    "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_quality_liquidity_training_ready\\model_inputs\\row_index.parquet": {
+      "sha256": "75523b6e156b58f5f19c98c9c72c9eb94325105ef6b7181ca2d34ab825bdf47b",
+      "size": 8165558
+    },
+    "H:\\quant_project\\quant_data_platform\\src\\quant_data_platform\\qdp_v2\\resources\\sse_st_transitions_2010_2011.csv": {
+      "sha256": "37949b2731e5804dc13fa6ed78a4c050f75ec8014a2b9b0e54c6962864b44e9b",
+      "size": 2877
+    }
+  },
+  "git_status": "## main...origin/main\n?? daily_research/research_records/seq100/mathematical_foundations_20260805/\n?? daily_research/research_records/seq100/status_repair_v1_20260805/",
+  "package_versions": {
+    "akshare": "1.18.63",
+    "baostock": "0.9.3",
+    "duckdb": "1.5.2",
+    "pandas": "2.3.2",
+    "pyarrow": "20.0.0",
+    "python": "3.11.15",
+    "requests": "2.32.5",
+    "tushare": "1.4.29"
+  },
+  "protected_archive": {
+    "archive_manifest": {
+      "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\manifest.json",
+      "sha256": "05d50f5ab856ed7a898ac6adac4cbe679d57e5a802bf4027566feb117b3efea7",
+      "size": 335
+    },
+    "recent_daily_bars": {
+      "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\daily_bars.parquet",
+      "sha256": "a9ddb567d72b0b47e257a1a2b560cb90c8b07eba6f40742e3ae330bd879ead2a",
+      "size": 151957562
+    },
+    "recent_daily_names": {
+      "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\raw_daily_stock_lists.parquet",
+      "sha256": "976e41d242321a7987346bbcf07b26d834cb40a7722886fc1b9b621e57b308ce",
+      "size": 10094821
+    },
+    "recent_daily_status": {
+      "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\daily_status.parquet",
+      "sha256": "43450c28d8c11a2647ffb9b1067cd3301871d7a1118873469544e42ab7f75998",
+      "size": 5706701
+    },
+    "recent_daily_universe": {
+      "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\daily_universe.parquet",
+      "sha256": "5cf7717e032c1ea3fe43290620f7ddece3deda471f0065db3f78e2057484c622",
+      "size": 19593742
+    },
+    "recovery_daily_bars": {
+      "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\daily_bars.parquet",
+      "sha256": "dbca4fe99b2a6d8538f1e3bdc2889f5535f707342e674d6adb1c35cb9c302ad0",
+      "size": 33602030
+    },
+    "recovery_daily_names": [
+      {
+        "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\cache\\daily_stock_lists\\year=2012.parquet",
+        "sha256": "91dfc09a5d1b75351af9c639087d53430c1dc308b25a90e98c2e2cb3cfde33f8",
+        "size": 524388
+      },
+      {
+        "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\cache\\daily_stock_lists\\year=2013.parquet",
+        "sha256": "7af6094c32355a1cb78d0684e0a3d5252da5e3010b6b83faaf039263d2e1e744",
+        "size": 516640
+      },
+      {
+        "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\cache\\daily_stock_lists\\year=2014.parquet",
+        "sha256": "f611af7bde170bac6d9eb84b377183bce25671db9149956e25aadf159428896c",
+        "size": 575940
+      },
+      {
+        "path": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\cache\\daily_stock_lists\\year=2015.parquet",
+        "sha256": "79d7a43414f089f3e5649fce67172b3078a4299a413c1e1e10fb3b7a3b33094e",
+        "size": 466260
+      }
+    ]
+  },
+  "provider_profile": {
+    "configured": true,
+    "path": "H:\\quant_project\\quant_data_platform\\data\\qdp_private\\provider_profiles.json",
+    "profile": {
+      "providers": {
+        "tushare_compatible": {
+          "api_url": "https://ts.gyzcloud.top/api",
+          "expires_at": "2026-08-06T17:48:00+08:00",
+          "http_headers": {
+            "Accept-Encoding": "gzip"
+          },
+          "mcp_url_template": "https://ts.gyzcloud.top/mcp/token={token}",
+          "plan": "week_7d",
+          "rate_limit_per_minute": 150,
+          "sdk": "tushare",
+          "sdk_http_url_override": "https://ts.gyzcloud.top/api",
+          "token": "<redacted>"
+        }
+      },
+      "schema": "qdp_private_provider_profiles/v1"
+    }
+  },
+  "schema": "seq100_status_repair_v1_frozen_inputs/v1",
+  "scope": {
+    "active_as_of_date": "2026-07-21",
+    "active_dataset_map": {
+      "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
+      "announcement": "announcement__5519420e9b586c89fa6e9b57",
+      "balance_sheet_quarterly": "balance_sheet_quarterly__c97d2e51362266b0b097f3bb",
+      "cash_flow_statement_quarterly": "cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6",
+      "corporate_actions": "corporate_actions__a415e50cd459b3d93cc76e5a",
+      "financial_quarterly": "financial_quarterly__72ba12c395f79a62bd75b70c",
+      "income_statement_quarterly": "income_statement_quarterly__5f863d3f3b37779414651bc8",
+      "index_constituents": "index_constituents__f22406610f67eac361f4c332",
+      "industry_concept": "industry_concept__e80436b5b466c965caf6c6a1",
+      "margin_detail": "margin_detail__2ed8aba21121548425f56b7c",
+      "margin_eligibility": "margin_eligibility__17297a42fd20f688b435b218",
+      "margin_market": "margin_market__56ef83c719973fea83362f87",
+      "market_daily_raw": "market_daily_raw__0559f722eb9142e5f476854a",
+      "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
+      "moneyflow_raw": "moneyflow_raw__75aeaebe4e2ceeb6c98bb5ba",
+      "name_change": "name_change__801d1567122e27f611ea67ec",
+      "performance_forecast": "performance_forecast__8eae00e6009084051062fa10",
+      "research_report": "research_report__450fc61384a81476d25f0bd0",
+      "research_report_forecast": "research_report_forecast__d1b0976bfcbdd7a2ef97083a",
+      "security_identity": "security_identity__8129272657578fb71c057292",
+      "security_status": "security_status__dd7f01560245387dd417d53d",
+      "share_capital": "share_capital__dd8dd0446ecc5d2343606d14",
+      "stk_factor_pro_raw": "stk_factor_pro_raw__db1c40c047054d43c94dd68d",
+      "symbol_history": "symbol_history__59797a51bc8d3657511bd23e",
+      "trading_calendar": "trading_calendar__8827e0264c6e3ec8b7330a88",
+      "universe_snapshot": "universe_snapshot__f79157008ed647500a73e8b4",
+      "valuation": "valuation__b94bd77f7ef9b261baf80c5c"
+    },
+    "burn_in_start": "2010-01-04",
+    "formal_end": "2025-12-31",
+    "formal_start": "2011-01-01"
+  },
+  "workspace": "H:\\quant_project"
+}

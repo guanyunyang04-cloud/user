@@ -1,0 +1,630 @@
+{
+  "contract_version": "qdp_v2_market_daily_raw_v1",
+  "created_at": "2026-07-22T20:22:13+00:00",
+  "dataset_id": "market_daily_raw__0559f722eb9142e5f476854a",
+  "domain": "market_daily_raw",
+  "end_date": "2026-07-21",
+  "frequency": "1d",
+  "layer": "raw",
+  "notes": [
+    "raw daily facts filtered from rectangular market panel; null OHLCV rows are excluded",
+    "filtered to mainboard_hs_a_ex_current_st_delisted_v1 as of 2026-06-26",
+    "2010 intraday-derived daily repairs are outside the active data scope",
+    "active data scope starts at 2011-11-22",
+    "600036.SH treated as active from 2016-07-25",
+    "filtered to mainboard_hs_a_ex_current_st_name_delisted_v2 as of 2026-06-26",
+    "bulk_append_active_shards_from_parquet:trusted Tushare direct repair 2eb2b86538d0fa34bef2f09d",
+    "bulk_append_active_shards_from_parquet:fill missing 2026-07-13 daily rows from healthy mootdx",
+    "append_active_shard:append BaoStock core facts 2026-07-14..2026-07-16",
+    "replace_active_shards_from_parquet:remove non-mainboard symbols accidentally appended during 2026-07-14..2026-07-16 BaoStock update",
+    "append_active_shard:append BaoStock core facts 2010-08-10..2010-08-10",
+    "append_active_shard:append BaoStock core facts 2015-11-23..2015-11-23",
+    "mutate_active_shards_from_parquet:restrict QDP to current listed main-board survivors and apply targeted 2026-07-17 quality corrections",
+    "append_active_shard:append BaoStock core facts 2026-07-12..2026-07-21",
+    "composite_restore:pit_historical_mainboard_v2",
+    "mutate_active_shards_from_parquet:canonicalize ticker rows to symbol_history effective intervals"
+  ],
+  "primary_key": [
+    "trade_date",
+    "symbol"
+  ],
+  "quality": {
+    "multi_symbol_identity_count": 2,
+    "ohlcv_non_null": true,
+    "path_refs_exist": true,
+    "pit_historical_scope_includes_delisted": true,
+    "pit_status_is_signal_date_asof": true,
+    "primary_key_unique": true,
+    "scope": "point_in_time_historical_mainboard",
+    "scope_as_of_date": "2026-07-21",
+    "scope_rewrite": "qdp_current_store_repair_20260717",
+    "scope_security_id_count": 0,
+    "scope_symbol_count": 3419,
+    "survivorship_bias_free_mainboard_daily": true,
+    "symbol_history_effective_intervals": true
+  },
+  "row_count": 10212710,
+  "schema": [
+    {
+      "name": "symbol",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "trade_date",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "open",
+      "type": "DOUBLE"
+    },
+    {
+      "name": "high",
+      "type": "DOUBLE"
+    },
+    {
+      "name": "low",
+      "type": "DOUBLE"
+    },
+    {
+      "name": "close",
+      "type": "DOUBLE"
+    },
+    {
+      "name": "volume",
+      "type": "DOUBLE"
+    },
+    {
+      "name": "amount",
+      "type": "DOUBLE"
+    },
+    {
+      "name": "source",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "adjusted_flag",
+      "type": "VARCHAR"
+    }
+  ],
+  "shards": [
+    {
+      "end_date": "2026-06-26",
+      "file_size": 135244514,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0000.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_60d73c59_e11289a188d0a296.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_c5568979_df74a81394467a40.parquet",
+      "row_count": 8375623,
+      "start_date": "2011-11-22",
+      "status": "stored"
+    },
+    {
+      "end_date": "2010-12-31",
+      "file_size": 5788143,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0001.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_5859f804_2f82c1d2fd93496a.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_f4569502_b3f84f75a0c3496d.parquet",
+      "row_count": 348535,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2011-12-30",
+      "file_size": 5622220,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0002.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_ffa1f3bb_b12e4ca900361fb4.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_eebaaa9b_e59df118e211efec.parquet",
+      "row_count": 342291,
+      "start_date": "2011-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2012-12-31",
+      "file_size": 24839,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_4fd492bc_68da036f039f8246.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_de0e8796_b21652396febd0f3.parquet",
+      "row_count": 1181,
+      "start_date": "2012-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2013-12-31",
+      "file_size": 24325,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_0e13a98c_830869126f37a433.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_6cab4315_6b28be5c24d0ec33.parquet",
+      "row_count": 1153,
+      "start_date": "2013-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2014-12-31",
+      "file_size": 23209,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_d9f1b451_9c94572998df52a7.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_48ec3f27_568a871914ced658.parquet",
+      "row_count": 1085,
+      "start_date": "2014-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2015-12-31",
+      "file_size": 24233,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_b861c40e_a47e4ba1c022e964.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_e2801098_335dcaff132cde8b.parquet",
+      "row_count": 1013,
+      "start_date": "2015-01-05",
+      "status": "stored"
+    },
+    {
+      "end_date": "2016-12-30",
+      "file_size": 24384,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_86e55cee_7be18f9b8a874045.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_a459afee_26823d8c0c3abb73.parquet",
+      "row_count": 1104,
+      "start_date": "2016-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2017-12-29",
+      "file_size": 30616,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_614d4d71_de986c72e143c520.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_f247f296_0b69f5c9815fbeb3.parquet",
+      "row_count": 1440,
+      "start_date": "2017-01-03",
+      "status": "stored"
+    },
+    {
+      "end_date": "2018-12-28",
+      "file_size": 32119,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_96b64cf7_f3a43289d0645ed5.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_32e8fa24_520a018ce7af6c98.parquet",
+      "row_count": 1581,
+      "start_date": "2018-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2019-12-31",
+      "file_size": 33948,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_2da4b5c1_a18498f5a53cf920.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_94de1fc6_cd6b08ce451e84aa.parquet",
+      "row_count": 1707,
+      "start_date": "2019-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2020-12-31",
+      "file_size": 32990,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_38f3a1a9_5dd5273e5242e602.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_0306598c_a4c67f5c34821a67.parquet",
+      "row_count": 1686,
+      "start_date": "2020-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2021-12-31",
+      "file_size": 32133,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_6655b770_8917862341a725e9.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_6f93ab5d_42304536bbe56353.parquet",
+      "row_count": 1698,
+      "start_date": "2021-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2022-12-30",
+      "file_size": 32742,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_b4e057d5_dc18188c0a44853c.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_62c45861_89ebac9ca168ba63.parquet",
+      "row_count": 1692,
+      "start_date": "2022-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2023-12-29",
+      "file_size": 31517,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_0e2f2dd5_3365a0d837c8a1d7.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_b19f78bb_48c87374a2eef974.parquet",
+      "row_count": 1681,
+      "start_date": "2023-01-03",
+      "status": "stored"
+    },
+    {
+      "end_date": "2024-12-31",
+      "file_size": 32972,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_dca8726d_b2874d4b1cf1b02d.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_a5e803c7_c04e2a5269d1c571.parquet",
+      "row_count": 1682,
+      "start_date": "2024-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2025-12-31",
+      "file_size": 32525,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_991aaa4f_7ee3d541f80dffeb.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_7db4b61b_05656294b8b32dd5.parquet",
+      "row_count": 1668,
+      "start_date": "2025-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 629688,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0017.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_d3ddcfd7_973694b7cff88c5d.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_6b684450_f629905a4953e7be.parquet",
+      "row_count": 31134,
+      "start_date": "2026-01-05",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6357,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_04525325_885f956a9cd2596a.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_cbe14ccb_2889798b67b4014b.parquet",
+      "row_count": 178,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6486,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_4c5f2cc7_3838ed5c08c3dc11.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_20062288_f7dc1bd3437bcbf1.parquet",
+      "row_count": 186,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6513,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_e3562b86_dc67aebb22811f75.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_97aa764d_3c62fab4c3a114ac.parquet",
+      "row_count": 186,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6553,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_0fc54075_65b2953b7aa8033a.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_3a5d795b_9c8769ec5ac7b184.parquet",
+      "row_count": 188,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6364,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_96a1bdeb_e4769d0c96eecfe0.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_66e16d9a_40da26f10f75c2a7.parquet",
+      "row_count": 181,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6537,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_5e876bfd_d667860cf7f5323b.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_1ff19a10_1e3a80516e088bcc.parquet",
+      "row_count": 188,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6705,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_87cede4e_310bbf2529345a29.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_49c9690f_3b67016c00a67775.parquet",
+      "row_count": 196,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6933,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_8520c888_18eb75aef69e15b5.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_45b1a9df_2ab11866335da7e1.parquet",
+      "row_count": 205,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6845,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0026.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_3bf7a69b_f7eef29cada7aec2.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_8a9ab990_b8951d0da1b41c25.parquet",
+      "row_count": 203,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 7095,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_dbbea3b2_9c72c9cb77bec5b8.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_7416c995_747a645510f73332.parquet",
+      "row_count": 214,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6177,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_d3ddfbb0_beb07d36b4b7a4be.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_d4604153_0709aaa6fbc02a9e.parquet",
+      "row_count": 173,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6642,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0029.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_f307c4e2_04792c6f682b6084.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_315b8755_f946a566f33fb0cc.parquet",
+      "row_count": 192,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6502,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_16f9881a_6f8d3fd98689f08d.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_27ed769a_d1adcf67b70cc6a3.parquet",
+      "row_count": 186,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6350,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_e6609983_9df510e5179769da.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_1d09d758_4338ee1252a3ce69.parquet",
+      "row_count": 178,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6590,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_ca86550d_a2e216e2a8077917.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_9bd7542a_7ddc57016972c142.parquet",
+      "row_count": 191,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 6540,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_267cc2a0_87bf92c7e129f8dd.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_66eb3c8c_7360ed2ad2c4609c.parquet",
+      "row_count": 187,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-16",
+      "file_size": 199961,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0034.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_bfba149c_c410d432521772a6.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_55362085_469e1275cdc56822.parquet",
+      "row_count": 9114,
+      "start_date": "2026-07-14",
+      "status": "stored"
+    },
+    {
+      "end_date": "2010-08-10",
+      "file_size": 3339,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0035.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_3af3741f_3b2bc6482183a9f6.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_3c6ddab8_cd341f95d2429091.parquet",
+      "row_count": 74,
+      "start_date": "2010-08-10",
+      "status": "stored"
+    },
+    {
+      "end_date": "2015-11-23",
+      "file_size": 5668,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0036.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_ef27774a_e1fbca93d3dbba36.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_cf6a46fd_f867e853694fd833.parquet",
+      "row_count": 218,
+      "start_date": "2015-11-23",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-21",
+      "file_size": 200714,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0037.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__d01f0ca92a2d55c0c0e9888d/shards/repair_mutate_replace_76ba34d1_d2e2569669255146.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_96261400_99613312285606b3.parquet",
+      "row_count": 9119,
+      "start_date": "2026-07-13",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-21",
+      "file_size": 17462571,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\retained_0038.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/pit_restore_5ab0b8e60b50c2b5.parquet"
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_replace_d00bcd6f_89880d73fe282ea4.parquet",
+      "row_count": 1065551,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-21",
+      "file_size": 150054,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\market_daily_raw\\canonicalized.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": ""
+      },
+      "path": "datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/shards/repair_mutate_append_e7e9a9dc26884beab2b524d8.parquet",
+      "row_count": 7648,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    }
+  ],
+  "source": {
+    "active_as_of_date": "2026-06-26",
+    "created_at": "2026-07-01T13:34:48+00:00",
+    "created_by": "scope_mainboard_active",
+    "last_metadata_update_at": "2026-07-23T03:19:20+00:00",
+    "last_metadata_update_reason": "record symbol_history effective-interval normalization",
+    "last_repair_action": "mutate_active_shards_from_parquet",
+    "last_repair_at": "2026-07-23T03:19:20+00:00",
+    "last_repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+    "pit_history_restored_at": "2026-07-22T20:22:13+00:00",
+    "provider": "qdp_v2",
+    "scope": "point_in_time_historical_mainboard",
+    "scope_metadata_reconciled_at": "2026-07-30T14:05:19+00:00",
+    "source_dataset_id": "market_daily_raw__10f9bea742d3f8c61c4f2d24",
+    "survivorship_policy": "include_when_listed_then_apply_same_day_status",
+    "symbol_lifecycle_normalized_at": "2026-07-23T03:19:20+00:00",
+    "symbol_lifecycle_semantics": "date_effective_symbol_history"
+  },
+  "start_date": "2010-01-04"
+}

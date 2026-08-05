@@ -18,6 +18,7 @@ from typing import Any
 import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 from quant_data_platform.qdp_v2.manifest import qdp_v2_root
 from scipy import stats
 from sklearn.metrics import average_precision_score
@@ -45,6 +46,7 @@ TARGETS = ("mfe_10", "mfe_20", "risk_10", "risk_20", "state_10")
 COMPACT_VARIANT = "compact_core"
 MODEL_INPUT_DIR_NAME = "model_inputs"
 FORMAL_TASK_SCOPE = "compact_core_only"
+MODEL_INPUT_BUILDER_VERSION = 2
 
 RETURN_HORIZONS = (1, 3, 5, 10, 20)
 RETURN_TARGETS = tuple(f"return_{horizon}" for horizon in RETURN_HORIZONS)
@@ -129,6 +131,12 @@ REFRESHED_BASE_FEATURES = (
     "float_share_ratio",
     "share_source_age_days",
     "valuation_missing",
+)
+REFRESHED_STATUS_FEATURES = (
+    "market_all__st_rate",
+    "market_csi500__st_rate",
+    "st_rate_20d",
+    "suspended_rate_20d",
 )
 
 DEFAULT_STUDY_PATH = (
@@ -409,9 +417,12 @@ def _feature_contract(
         raise ModelError(
             f"compact_core_count_or_uniqueness_mismatch:{len(compact_names)}:{len(set(compact_names))}"
         )
-    if set(REFRESHED_BASE_FEATURES) - set(compact_names):
+    refreshed_features = set(REFRESHED_BASE_FEATURES) | set(
+        REFRESHED_STATUS_FEATURES
+    )
+    if refreshed_features - set(compact_names):
         raise ModelError(
-            f"refreshed_base_feature_not_selected:{sorted(set(REFRESHED_BASE_FEATURES) - set(compact_names))}"
+            f"refreshed_base_feature_not_selected:{sorted(refreshed_features - set(compact_names))}"
         )
     return {
         "base_index": base_index,
@@ -429,7 +440,14 @@ def _row_index(ready_manifest: Mapping[str, Any]) -> pd.DataFrame:
         path = Path(ready_manifest["row_spine"][str(year)]["path"])
         frame = pd.read_parquet(
             path,
-            columns=["candidate_id", "date_idx", "trade_date", "symbol", "security_id"],
+            columns=[
+                "candidate_id",
+                "date_idx",
+                "symbol_idx",
+                "trade_date",
+                "symbol",
+                "security_id",
+            ],
         )
         if frame.empty or not frame["candidate_id"].is_unique:
             raise ModelError(f"row_index_year_empty_or_duplicate:{year}")
@@ -448,7 +466,18 @@ def _row_index(ready_manifest: Mapping[str, Any]) -> pd.DataFrame:
         raise ModelError("row_index_date_not_ordered")
     if bool(result["trade_date"].str.startswith("2026-").any()):
         raise ModelError("row_index_contains_2026")
-    return result[["candidate_id", "date_idx", "trade_date", "symbol", "security_id"]]
+    result["legacy_candidate_row"] = data_prep._legacy_candidate_rows(candidate_ids)
+    return result[
+        [
+            "candidate_id",
+            "date_idx",
+            "symbol_idx",
+            "trade_date",
+            "symbol",
+            "security_id",
+            "legacy_candidate_row",
+        ]
+    ]
 
 
 def _source_paths(ready_manifest: Mapping[str, Any], year: int) -> dict[str, Path]:
@@ -503,6 +532,162 @@ def _safe_divide_array(numerator: np.ndarray, denominator: np.ndarray) -> np.nda
 def _signed_log1p_array(values: np.ndarray) -> np.ndarray:
     array = np.asarray(values, dtype=np.float64)
     return (np.sign(array) * np.log1p(np.abs(array))).astype(np.float32)
+
+
+def _complete_status_rolling_mean(
+    values: np.ndarray, valid: np.ndarray, *, window: int
+) -> np.ndarray:
+    raw = np.asarray(values, dtype=bool)
+    known = np.asarray(valid, dtype=bool)
+    width = int(window)
+    if raw.shape != known.shape or raw.ndim != 2 or width <= 0:
+        raise ModelError("status_rolling_mean_shape_or_window_invalid")
+    cumulative_sums = np.cumsum(
+        (raw & known).astype(np.int32), axis=0, dtype=np.int32
+    )
+    cumulative_counts = np.cumsum(
+        known.astype(np.int32), axis=0, dtype=np.int32
+    )
+    sums = cumulative_sums.copy()
+    counts = cumulative_counts.copy()
+    if width < raw.shape[0]:
+        sums[width:] -= cumulative_sums[:-width]
+        counts[width:] -= cumulative_counts[:-width]
+    complete = counts == width
+    complete[: width - 1] = False
+    result = np.full(raw.shape, np.nan, dtype=np.float32)
+    result[complete] = sums[complete].astype(np.float32) / float(width)
+    return result
+
+
+def _strict_status_rate(
+    membership: np.ndarray, status_valid: np.ndarray, is_st: np.ndarray
+) -> np.ndarray:
+    members = np.asarray(membership, dtype=bool)
+    known = np.asarray(status_valid, dtype=bool)
+    st = np.asarray(is_st, dtype=bool)
+    if members.shape != known.shape or members.shape != st.shape or members.ndim != 2:
+        raise ModelError("status_rate_shape_mismatch")
+    member_count = members.sum(axis=1, dtype=np.int64)
+    known_members = members & known
+    known_count = known_members.sum(axis=1, dtype=np.int64)
+    complete = (member_count > 0) & (known_count == member_count)
+    result = np.full(members.shape[0], np.nan, dtype=np.float32)
+    numerator = (known_members & st).sum(axis=1, dtype=np.int64)
+    result[complete] = (
+        numerator[complete].astype(np.float64) / member_count[complete]
+    ).astype(np.float32)
+    return result
+
+
+def _current_csi500_membership(
+    ready_manifest: Mapping[str, Any], pack_manifest: Mapping[str, Any]
+) -> np.ndarray:
+    dates = [str(value) for value in pack_manifest["date_values"]]
+    symbols = [str(value) for value in pack_manifest["symbol_values"]]
+    date_map = {value: index for index, value in enumerate(dates)}
+    symbol_map = {value: index for index, value in enumerate(symbols)}
+    output = np.zeros((len(dates), len(symbols)), dtype=bool)
+    observed = 0
+    dataset_ids = dict(ready_manifest["qdp_dataset_ids"])
+    for path in ready._active_paths(
+        WORKSPACE_ROOT, "index_constituents", dataset_ids
+    ):
+        parquet = pq.ParquetFile(path)
+        for batch in parquet.iter_batches(
+            batch_size=250_000,
+            columns=[
+                "trade_date",
+                "symbol",
+                "index_symbol",
+                "source_snapshot_date",
+            ],
+        ):
+            frame = batch.to_pandas()
+            target = frame["index_symbol"].astype(str).eq("000905.SH")
+            if not bool(target.any()):
+                continue
+            selected = frame.loc[target]
+            trade = selected["trade_date"].astype(str)
+            source = selected["source_snapshot_date"].fillna("").astype(str)
+            if bool(((source == "") | (source > trade)).any()):
+                raise ModelError("csi500_membership_source_date_invalid")
+            date_idx = trade.map(date_map)
+            symbol_idx = selected["symbol"].astype(str).map(symbol_map)
+            usable = date_idx.notna() & symbol_idx.notna()
+            if not bool(usable.any()):
+                continue
+            output[
+                date_idx.loc[usable].to_numpy(dtype=np.int64),
+                symbol_idx.loc[usable].to_numpy(dtype=np.int64),
+            ] = True
+            observed += int(usable.sum())
+    if observed == 0:
+        raise ModelError("csi500_membership_has_no_pack_overlap")
+    return output
+
+
+def _current_status_feature_arrays(
+    *, ready_manifest: Mapping[str, Any], row_index: pd.DataFrame
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+    pack_path = data_prep.CANDIDATE_INDEX.parent / "manifest.json"
+    pack_manifest = _read_json(pack_path)
+    masks = dict(pack_manifest["masks"])
+    shape = tuple(int(value) for value in masks["status_valid"]["shape"])
+
+    def open_mask(name: str) -> np.memmap:
+        record = dict(masks[name])
+        if tuple(int(value) for value in record["shape"]) != shape:
+            raise ModelError(f"status_mask_shape_mismatch:{name}")
+        return np.memmap(Path(record["path"]), dtype=bool, mode="r", shape=shape)
+
+    status_valid = open_mask("status_valid")
+    is_st = open_mask("is_st")
+    is_suspended = open_mask("is_suspended")
+    universe = open_mask("pit_universe_has_bar")
+    csi500 = _current_csi500_membership(ready_manifest, pack_manifest)
+    market_all = _strict_status_rate(universe, status_valid, is_st)
+    market_csi500 = _strict_status_rate(
+        np.asarray(universe, dtype=bool) & csi500, status_valid, is_st
+    )
+    date_idx = row_index["date_idx"].to_numpy(dtype=np.int64)
+    symbol_idx = row_index["symbol_idx"].to_numpy(dtype=np.int64)
+    if bool(
+        (date_idx < 0).any()
+        or (date_idx >= shape[0]).any()
+        or (symbol_idx < 0).any()
+        or (symbol_idx >= shape[1]).any()
+    ):
+        raise ModelError("model_row_status_coordinate_out_of_range")
+    features = {
+        "market_all__st_rate": market_all[date_idx],
+        "market_csi500__st_rate": market_csi500[date_idx],
+    }
+    rolling_st = _complete_status_rolling_mean(is_st, status_valid, window=20)
+    features["st_rate_20d"] = rolling_st[date_idx, symbol_idx]
+    del rolling_st
+    rolling_suspended = _complete_status_rolling_mean(
+        is_suspended, status_valid, window=20
+    )
+    features["suspended_rate_20d"] = rolling_suspended[date_idx, symbol_idx]
+    del rolling_suspended, csi500
+    profile = {
+        "source_pack_manifest": _file_record(pack_path),
+        "unknown_status_universe_cell_count": int(
+            np.count_nonzero(np.asarray(universe, dtype=bool) & ~status_valid)
+        ),
+        "market_all_missing_date_count": int(np.count_nonzero(~np.isfinite(market_all))),
+        "market_csi500_missing_date_count": int(
+            np.count_nonzero(~np.isfinite(market_csi500))
+        ),
+        "row_missing_counts": {
+            name: int(np.count_nonzero(~np.isfinite(values)))
+            for name, values in features.items()
+        },
+        "unknown_policy": "cross_section_rate_missing_unless_every_member_status_is_known",
+        "rolling_policy": "20_consecutive_open_dates_all_three_status_fields_known",
+    }
+    return features, profile
 
 
 def _current_size_source_frame(
@@ -578,7 +763,12 @@ def _refreshed_industry_frame(
     return_columns = np.asarray(
         [int(base_index[name]) for name in return_names], dtype=np.int32
     )
-    returns = np.asarray(base[np.ix_(candidate_ids, return_columns)], dtype=np.float32)
+    legacy_rows = data_prep._legacy_candidate_rows(candidate_ids)
+    returns = np.full((len(candidate_ids), len(return_columns)), np.nan, dtype=np.float32)
+    matched = legacy_rows >= 0
+    returns[matched] = np.asarray(
+        base[np.ix_(legacy_rows[matched], return_columns)], dtype=np.float32
+    )
     diagnostics["ret1"] = returns[:, 0]
     diagnostics["ret5"] = returns[:, 1]
     diagnostics["ret20"] = returns[:, 2]
@@ -756,7 +946,7 @@ def _write_feature_storage(
         shape=tuple(int(value) for value in base_manifest["continuous_shape"]),
     )
     base_index = dict(contract["base_index"])
-    refreshed_names = set(REFRESHED_BASE_FEATURES)
+    refreshed_names = set(REFRESHED_BASE_FEATURES) | set(REFRESHED_STATUS_FEATURES)
     base_rows = catalog[catalog["block"].eq("existing_seq100_base")]
     direct_base_names = [
         name
@@ -778,6 +968,11 @@ def _write_feature_storage(
         "traditional_moneyflow_features",
         "financial_statement_extensions",
     ]
+    legacy_rows = row_index["legacy_candidate_row"].to_numpy(dtype=np.int64)
+    status_features, status_profile = _current_status_feature_arrays(
+        ready_manifest=ready_manifest,
+        row_index=row_index,
+    )
     yearly_profiles: dict[str, Any] = {}
     for year in YEARS:
         year_rows = row_index["trade_date"].str.startswith(f"{year}-").to_numpy()
@@ -789,9 +984,14 @@ def _write_feature_storage(
         expected_ids = row_index.loc[positions, "candidate_id"].to_numpy(dtype=np.int64)
         for start in range(0, len(positions), 65_536):
             stop = min(start + 65_536, len(positions))
-            source_ids = expected_ids[start:stop]
-            values = np.asarray(
-                base[np.ix_(source_ids, direct_source_columns)], dtype=np.float32
+            source_rows = legacy_rows[positions[start:stop]]
+            values = np.full(
+                (stop - start, len(direct_source_columns)), np.nan, dtype=np.float32
+            )
+            matched = source_rows >= 0
+            values[matched] = np.asarray(
+                base[np.ix_(source_rows[matched], direct_source_columns)],
+                dtype=np.float32,
             )
             target_rows = positions[start:stop]
             compact_mm[np.ix_(target_rows, direct_target_columns)] = values
@@ -806,6 +1006,8 @@ def _write_feature_storage(
             compact_mm[positions, compact_index[name]] = pd.to_numeric(
                 refreshed[name], errors="coerce"
             ).to_numpy(dtype=np.float32, na_value=np.nan)
+        for name in REFRESHED_STATUS_FEATURES:
+            compact_mm[positions, compact_index[name]] = status_features[name][positions]
         paths = _source_paths(ready_manifest, year)
         for block in block_order:
             block_features = catalog[catalog["block"].eq(block)]
@@ -830,6 +1032,13 @@ def _write_feature_storage(
                 name: int(pd.to_numeric(refreshed[name], errors="coerce").isna().sum())
                 for name in REFRESHED_BASE_FEATURES
             },
+            "refreshed_status_missing": {
+                name: int(np.count_nonzero(~np.isfinite(status_features[name][positions])))
+                for name in REFRESHED_STATUS_FEATURES
+            },
+            "legacy_candidate_unmatched_count": int(
+                np.count_nonzero(legacy_rows[positions] < 0)
+            ),
             "industry_missing_nonzero_count": int(
                 (
                     pd.to_numeric(refreshed["industry_missing"], errors="coerce")
@@ -855,6 +1064,7 @@ def _write_feature_storage(
             "sample_hash": sample_hash,
         },
         "yearly_profiles": yearly_profiles,
+        "status_refresh": status_profile,
     }
 
 
@@ -888,9 +1098,13 @@ def _model_input_fingerprint(
     return _stable_hash(
         {
             "study_id": STUDY_ID,
+            "model_input_builder_version": MODEL_INPUT_BUILDER_VERSION,
             "config_sha256": _sha256(config_path),
             "ready_manifest_sha256": _sha256(ready_root / "manifest.json"),
             "ready_readiness_sha256": _sha256(ready_root / "readiness.json"),
+            "current_pack_manifest_sha256": _sha256(
+                data_prep.CANDIDATE_INDEX.parent / "manifest.json"
+            ),
             "base_feature_manifest_sha256": _sha256(data_prep.BASE_FEATURE_MANIFEST),
             "label_manifest_sha256": _sha256(data_prep.LABEL_MANIFEST),
             "numeric_feature_names": pd.DataFrame(contract["catalog"])["feature_name"]
@@ -916,9 +1130,11 @@ def _verify_model_input_files(
     expected_columns = [
         "candidate_id",
         "date_idx",
+        "symbol_idx",
         "trade_date",
         "symbol",
         "security_id",
+        "legacy_candidate_row",
     ]
     if list(row_index.columns) != expected_columns:
         raise ModelError("model_input_row_index_schema_mismatch")
@@ -1012,12 +1228,19 @@ def prepare(
         "path": str(data_prep.LABEL_MANIFEST.resolve()),
         "sha256": _sha256(data_prep.LABEL_MANIFEST),
         "candidate_count": int(label_manifest["candidate_count"]),
+        "coordinate_aligned_row_count": int(
+            row_index["legacy_candidate_row"].ge(0).sum()
+        ),
+        "coordinate_unmatched_row_count": int(
+            row_index["legacy_candidate_row"].lt(0).sum()
+        ),
     }
     features = _feature_records(contract)
     manifest = {
-        "schema": "seq100_quality_liquidity_model_inputs/1",
+        "schema": "seq100_quality_liquidity_model_inputs/2",
         "status": "completed",
         "study_id": STUDY_ID,
+        "builder_version": MODEL_INPUT_BUILDER_VERSION,
         "created_at": _now(),
         "input_fingerprint": fingerprint,
         "row_count": len(row_index),
@@ -1040,8 +1263,14 @@ def prepare(
             "legacy_base_feature_manifest": {
                 "path": str(data_prep.BASE_FEATURE_MANIFEST.resolve()),
                 "sha256": _sha256(data_prep.BASE_FEATURE_MANIFEST),
-                "use": "copy_unaffected_columns_and_recompute_repaired_columns",
+                "use": "coordinate_map_unaffected_columns_and_recompute_repaired_columns",
             }
+        },
+        "legacy_candidate_alignment": {
+            "key": ["date_idx", "symbol_idx"],
+            "matched_row_count": int(row_index["legacy_candidate_row"].ge(0).sum()),
+            "unmatched_row_count": int(row_index["legacy_candidate_row"].lt(0).sum()),
+            "unmatched_policy": "legacy_features_missing_and_legacy_labels_invalid",
         },
         "source": {
             "training_ready_manifest": _file_record(ready_root / "manifest.json"),
@@ -1114,6 +1343,9 @@ class ModelInputs:
         self.row_count = int(manifest["row_count"])
         self.row_index = pd.read_parquet(Path(manifest["row_index"]["path"]))
         self.candidate_ids = self.row_index["candidate_id"].to_numpy(dtype=np.int64)
+        self.legacy_candidate_rows = self.row_index["legacy_candidate_row"].to_numpy(
+            dtype=np.int64
+        )
         self.date_idx = self.row_index["date_idx"].to_numpy(dtype=np.int32)
         self.trade_date = np.asarray(
             self.row_index["trade_date"].astype(str).to_numpy(), dtype=str
@@ -1152,8 +1384,9 @@ class ModelInputs:
             mode="r",
             shape=tuple(int(value) for value in label_files["state_labels"]["shape"]),
         )
-        if candidate_count <= int(self.candidate_ids.max()):
-            raise ModelError("model_input_candidate_id_exceeds_label_memmap")
+        matched_label_rows = self.legacy_candidate_rows[self.legacy_candidate_rows >= 0]
+        if matched_label_rows.size and candidate_count <= int(matched_label_rows.max()):
+            raise ModelError("model_input_legacy_row_exceeds_label_memmap")
         pack_manifest = _read_json(Path(label_manifest["source"]["pack_manifest"]))
         self.date_values = np.asarray(pack_manifest["date_values"], dtype=str)
         self.feature_records = [dict(item) for item in manifest["features"]]
@@ -1171,6 +1404,25 @@ class ModelInputs:
         self._return_cache: dict[int, np.ndarray] = {}
         self._return_valid_cache: dict[int, np.ndarray] = {}
 
+    def _label_rows(self) -> np.ndarray:
+        return np.asarray(
+            getattr(self, "legacy_candidate_rows", self.candidate_ids), dtype=np.int64
+        )
+
+    def _aligned_label_column(
+        self,
+        values: np.ndarray,
+        column: int,
+        *,
+        dtype: np.dtype[Any] | type,
+        missing: float | int,
+    ) -> np.ndarray:
+        rows = self._label_rows()
+        result = np.full(len(rows), missing, dtype=dtype)
+        matched = rows >= 0
+        result[matched] = np.asarray(values[rows[matched], int(column)], dtype=dtype)
+        return result
+
     def rows_for_year(self, year: int) -> np.ndarray:
         rows = np.flatnonzero(self.years == int(year)).astype(np.int64, copy=False)
         if not rows.size:
@@ -1187,16 +1439,18 @@ class ModelInputs:
         if target.startswith("return_"):
             values = self.return_values(int(target.rsplit("_", 1)[1]))
         elif target.startswith("state"):
-            values = np.asarray(
-                self.states[self.candidate_ids, LABEL_HORIZON_INDEX[STATE_HORIZON]],
+            values = self._aligned_label_column(
+                self.states,
+                LABEL_HORIZON_INDEX[STATE_HORIZON],
                 dtype=np.int8,
+                missing=-1,
             )
         else:
             horizon = int(target.rsplit("_", 1)[1])
             label = "mfe" if target.startswith("mfe") else "pre_peak_mae"
             column = self.label_manifest["label_columns"].index(f"{label}_{horizon}")
-            values = np.asarray(
-                self.labels[self.candidate_ids, column], dtype=np.float32
+            values = self._aligned_label_column(
+                self.labels, column, dtype=np.float32, missing=np.nan
             )
         cache[target] = values
         return values
@@ -1213,8 +1467,8 @@ class ModelInputs:
             cache[target] = valid
             return valid
         horizon_index = LABEL_HORIZON_INDEX[int(target.rsplit("_", 1)[1])]
-        flags = np.asarray(
-            self.flags[self.candidate_ids, horizon_index], dtype=np.uint16
+        flags = self._aligned_label_column(
+            self.flags, horizon_index, dtype=np.uint16, missing=0
         )
         if target.startswith("state"):
             state = self.task_values(target)
@@ -1229,9 +1483,15 @@ class ModelInputs:
         if hasattr(self, "short_labels") and hasattr(self, "short_flags"):
             return
         manifest = _read_json(DEFAULT_SHORT_LABEL_MANIFEST)
+        label_rows = self._label_rows()
+        matched_label_rows = label_rows[label_rows >= 0]
         if (
             manifest.get("status") != "completed"
-            or int(manifest.get("candidate_count", -1)) <= int(self.candidate_ids.max())
+            or (
+                matched_label_rows.size
+                and int(manifest.get("candidate_count", -1))
+                <= int(matched_label_rows.max())
+            )
             or int(manifest.get("forbidden_outcome_year", -1)) != FORBIDDEN_YEAR
             or str(manifest.get("maximum_outcome_date_read")) != MAXIMUM_OUTCOME_DATE
         ):
@@ -1264,13 +1524,13 @@ class ModelInputs:
         if horizon in {1, 3}:
             self._ensure_short_return_labels()
             column = self.short_label_manifest["label_columns"].index(f"g_{horizon}")
-            values = np.asarray(
-                self.short_labels[self.candidate_ids, column], dtype=np.float32
+            values = self._aligned_label_column(
+                self.short_labels, column, dtype=np.float32, missing=np.nan
             )
         elif horizon in {5, 10, 20}:
             column = self.label_manifest["label_columns"].index(f"g_{horizon}")
-            values = np.asarray(
-                self.labels[self.candidate_ids, column], dtype=np.float32
+            values = self._aligned_label_column(
+                self.labels, column, dtype=np.float32, missing=np.nan
             )
         else:
             raise ModelError(f"unsupported_return_horizon:{horizon}")
@@ -1294,14 +1554,16 @@ class ModelInputs:
         values = self.raw_return_values(horizon)
         if horizon in {1, 3}:
             flag_column = 0 if horizon == 1 else 1
-            flags = np.asarray(
-                self.short_flags[self.candidate_ids, flag_column], dtype=np.uint16
+            flags = self._aligned_label_column(
+                self.short_flags, flag_column, dtype=np.uint16, missing=0
             )
             valid = ((flags & SHORT_FLAG_G_VALID) != 0) & np.isfinite(values)
         else:
-            flags = np.asarray(
-                self.flags[self.candidate_ids, LABEL_HORIZON_INDEX[horizon]],
+            flags = self._aligned_label_column(
+                self.flags,
+                LABEL_HORIZON_INDEX[horizon],
                 dtype=np.uint16,
+                missing=0,
             )
             valid = ((flags & FLAG_G_VALID) != 0) & np.isfinite(values)
         cache[horizon] = valid
@@ -2350,6 +2612,72 @@ def _partition_results(
     return formal, diagnostic
 
 
+def _bound_model_input_manifest(
+    root_manifest: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        record = dict(root_manifest["model_inputs"])
+        path = Path(record["path"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ModelError("model_input_manifest_binding_missing") from exc
+    if not path.is_file():
+        raise ModelError(f"model_input_manifest_missing:{path}")
+    expected_hash = str(record.get("sha256", ""))
+    if not expected_hash or _sha256(path) != expected_hash:
+        raise ModelError("model_input_manifest_hash_mismatch")
+    input_manifest = _read_json(path)
+    expected_fingerprint = str(record.get("input_fingerprint", ""))
+    actual_fingerprint = str(input_manifest.get("input_fingerprint", ""))
+    if (
+        not expected_fingerprint
+        or not actual_fingerprint
+        or expected_fingerprint != actual_fingerprint
+    ):
+        raise ModelError("model_input_fingerprint_binding_mismatch")
+    _verify_model_input_files(input_manifest, full_hash=False)
+    return input_manifest
+
+
+def _require_current_task_results(
+    *,
+    output_root: Path,
+    tasks: Sequence[Mapping[str, Any]],
+    inputs: ModelInputs,
+    study_path: Path,
+    experiment_fingerprint: str | None = None,
+    allow_diagnostic_tasks: bool = False,
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    results, diagnostic = _partition_results(_completed_results(output_root), tasks)
+    expected_ids = {str(task["task_id"]) for task in tasks}
+    if set(results) != expected_ids:
+        raise ModelError(
+            f"current_task_result_count_mismatch:{len(results)}:{len(expected_ids)}"
+        )
+    if diagnostic and not allow_diagnostic_tasks:
+        raise ModelError(f"unexpected_diagnostic_tasks:{sorted(diagnostic)}")
+    config_sha256 = _sha256(study_path)
+    model_input_fingerprint = str(inputs.manifest.get("input_fingerprint", ""))
+    if not model_input_fingerprint:
+        raise ModelError("model_input_fingerprint_missing")
+    for task in tasks:
+        task_id = str(task["task_id"])
+        feature_names, _ = _effective_features(
+            inputs=inputs, task=task, output_root=output_root
+        )
+        fingerprint = _task_fingerprint(
+            task=task,
+            feature_names=feature_names,
+            model_input_fingerprint=model_input_fingerprint,
+            config_sha256=config_sha256,
+            experiment_fingerprint=experiment_fingerprint,
+        )
+        if not _task_complete(
+            _task_result_path(output_root, task_id), fingerprint=fingerprint
+        ):
+            raise ModelError(f"task_result_not_current:{task_id}")
+    return results, diagnostic
+
+
 def _selected_head_contract(output_root: Path, inputs: ModelInputs) -> dict[str, Any]:
     del output_root
     targets = {
@@ -2589,11 +2917,16 @@ def evaluate(
     manifest = _read_json(output_root / "manifest.json")
     if manifest.get("status") not in {"training_completed", "evaluated", "audited"}:
         raise ModelError("training_not_completed")
+    input_manifest = _bound_model_input_manifest(manifest)
+    inputs = ModelInputs(input_manifest)
     tasks = _task_plan(config)
-    all_results = _completed_results(output_root)
-    results, diagnostic_results = _partition_results(all_results, tasks)
-    if len(results) != len(tasks):
-        raise ModelError(f"evaluation_task_count_mismatch:{len(results)}:{len(tasks)}")
+    results, diagnostic_results = _require_current_task_results(
+        output_root=output_root,
+        tasks=tasks,
+        inputs=inputs,
+        study_path=study_path,
+        allow_diagnostic_tasks=True,
+    )
     annual = _annual_metrics(results)
     paired = _paired_variant_deltas(results=results)
     importance_parts = []
@@ -2608,7 +2941,6 @@ def evaluate(
     _write_parquet(annual, annual_path)
     _write_parquet(paired, paired_path)
     _write_parquet(importance, importance_path)
-    inputs = ModelInputs(_read_json(Path(manifest["model_inputs"]["path"])))
     contract = _selected_head_contract(output_root, inputs)
     contract_path = output_root / "selected_head_contract.json"
     _write_json(contract_path, contract)
@@ -3179,12 +3511,30 @@ def evaluate_returns(
     manifest = _read_json(manifest_path)
     if manifest.get("status") not in {"training_completed", "evaluated", "audited"}:
         raise ModelError("direct_return_training_not_completed")
+    input_manifest = _bound_model_input_manifest(manifest)
+    main_manifest_path = Path(input_manifest["label_manifest"]["path"])
+    main_manifest = _read_json(main_manifest_path)
+    short_manifest = _read_json(DEFAULT_SHORT_LABEL_MANIFEST)
+    _verify_return_label_sources(
+        main_manifest=main_manifest, short_manifest=short_manifest
+    )
+    experiment_fingerprint = _direct_return_fingerprint(
+        input_manifest=input_manifest,
+        study_path=study_path,
+        main_manifest_path=main_manifest_path,
+        short_manifest_path=DEFAULT_SHORT_LABEL_MANIFEST,
+    )
+    if str(manifest.get("experiment_fingerprint", "")) != experiment_fingerprint:
+        raise ModelError("direct_return_experiment_fingerprint_mismatch")
+    inputs = ModelInputs(input_manifest)
     tasks = _direct_return_task_plan()
-    results, diagnostic = _partition_results(_completed_results(direct_root), tasks)
-    if len(results) != len(tasks) or diagnostic:
-        raise ModelError(
-            f"direct_return_evaluation_task_count_mismatch:{len(results)}:{len(diagnostic)}"
-        )
+    results, _ = _require_current_task_results(
+        output_root=direct_root,
+        tasks=tasks,
+        inputs=inputs,
+        study_path=study_path,
+        experiment_fingerprint=experiment_fingerprint,
+    )
     annual = _annual_metrics(results)
     monthly = _return_monthly_metrics(results)
     horizon = _return_horizon_summary(annual)
@@ -4195,6 +4545,28 @@ def _baseline_d1_results(
         "audited",
     }:
         raise ModelError("close_d1_baseline_direct_returns_not_completed")
+    direct_input_manifest = _bound_model_input_manifest(direct_manifest)
+    if str(direct_input_manifest["input_fingerprint"]) != str(
+        inputs.manifest["input_fingerprint"]
+    ):
+        raise ModelError("close_d1_baseline_model_input_mismatch")
+    main_manifest_path = Path(direct_input_manifest["label_manifest"]["path"])
+    main_manifest = _read_json(main_manifest_path)
+    short_manifest = _read_json(DEFAULT_SHORT_LABEL_MANIFEST)
+    _verify_return_label_sources(
+        main_manifest=main_manifest, short_manifest=short_manifest
+    )
+    experiment_fingerprint = _direct_return_fingerprint(
+        input_manifest=direct_input_manifest,
+        study_path=study_path,
+        main_manifest_path=main_manifest_path,
+        short_manifest_path=DEFAULT_SHORT_LABEL_MANIFEST,
+    )
+    if (
+        str(direct_manifest.get("experiment_fingerprint", ""))
+        != experiment_fingerprint
+    ):
+        raise ModelError("close_d1_baseline_experiment_fingerprint_mismatch")
     direct_tasks = _direct_return_task_plan()
     results, diagnostic = _partition_results(
         _completed_results(direct_root), direct_tasks
@@ -4214,7 +4586,7 @@ def _baseline_d1_results(
             feature_names=feature_names,
             model_input_fingerprint=str(inputs.manifest["input_fingerprint"]),
             config_sha256=_sha256(study_path),
-            experiment_fingerprint=str(direct_manifest["experiment_fingerprint"]),
+            experiment_fingerprint=experiment_fingerprint,
         )
         if not _task_complete(
             _task_result_path(direct_root, str(task["task_id"])),
@@ -4354,16 +4726,29 @@ def evaluate_close_d1(
     manifest = _read_json(manifest_path)
     if manifest.get("status") not in {"training_completed", "evaluated", "audited"}:
         raise ModelError("close_d1_training_not_completed")
-    input_manifest = _read_json(Path(manifest["model_inputs"]["path"]))
-    label_contract = _read_json(Path(manifest["label_contract"]["path"]))
+    input_manifest = _bound_model_input_manifest(manifest)
+    sources = _close_d1_source_context(input_manifest=input_manifest)
+    experiment_fingerprint = _close_d1_experiment_fingerprint(
+        input_manifest=input_manifest, study_path=study_path, sources=sources
+    )
+    if str(manifest.get("experiment_fingerprint", "")) != experiment_fingerprint:
+        raise ModelError("close_d1_experiment_fingerprint_mismatch")
+    label_record = dict(manifest["label_contract"])
+    if not _record_file_valid(label_record):
+        raise ModelError("close_d1_label_contract_binding_mismatch")
+    label_contract = _read_json(Path(label_record["path"]))
+    if str(label_contract.get("experiment_fingerprint", "")) != experiment_fingerprint:
+        raise ModelError("close_d1_label_fingerprint_mismatch")
     base_inputs = ModelInputs(input_manifest)
     close_inputs = CloseD1ModelInputs(input_manifest, label_contract)
     tasks = _close_d1_task_plan()
-    close_results, diagnostic = _partition_results(
-        _completed_results(close_root), tasks
+    close_results, _ = _require_current_task_results(
+        output_root=close_root,
+        tasks=tasks,
+        inputs=close_inputs,
+        study_path=study_path,
+        experiment_fingerprint=experiment_fingerprint,
     )
-    if len(close_results) != CLOSE_D1_TASK_COUNT or diagnostic:
-        raise ModelError("close_d1_evaluation_task_count_mismatch")
     close_by_year = {
         int(result["evaluation_year"]): result for result in close_results.values()
     }

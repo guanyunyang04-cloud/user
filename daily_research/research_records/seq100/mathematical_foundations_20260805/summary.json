@@ -1,0 +1,283 @@
+{
+  "schema": "seq100_mathematical_foundations_audit/v1",
+  "status": "completed",
+  "scope": {
+    "research_start": "2011-01-04",
+    "research_end": "2025-12-31",
+    "logical_maximum_outcome_date": "2025-12-31",
+    "forbidden_2026_read_count": 0,
+    "path_horizon": 20
+  },
+  "row_index": {
+    "row_count": 4476851,
+    "signal_date_count": 3644,
+    "security_count": 3005,
+    "pack_symbol_count": 3419,
+    "candidate_id_missing_count": 0,
+    "candidate_id_duplicate_count": 0,
+    "date_symbol_duplicate_count": 0
+  },
+  "st_state": {
+    "feature_max_absolute_error_vs_pack_rate": 3.713636620439331e-09,
+    "largest_one_day_change": {
+      "previous_date": "2011-11-21",
+      "previous_rate": 0.0720675944333996,
+      "date": "2011-11-22",
+      "rate": 0.01787487586891758,
+      "change": -0.05419271856448203
+    },
+    "marked_five_percent_flat_stock_days": 6982,
+    "unmarked_five_percent_flat_stock_days": 4398,
+    "diagnostic_is_not_official_truth": true,
+    "diagnostic_price_basis": "pinned_qdp_raw_unadjusted_ohlc"
+  },
+  "barrier": {
+    "valid_path_count": 4385062,
+    "volatility_median": 0.023543878458440304,
+    "standardized_8pct_distance_quantiles": {
+      "q01": 0.2688409770783125,
+      "median": 0.7309336051123209,
+      "q99": 2.299652276411857
+    },
+    "fixed_8pct_annual_rate_range": [
+      0.32575962822211973,
+      0.7099118758869054
+    ],
+    "fixed_8pct_annual_rate_std": 0.09057894370656383,
+    "scaled_k1_annual_rate_range": [
+      0.2224590241574405,
+      0.41678464457349784
+    ],
+    "scaled_k1_annual_rate_std": 0.05269386038661772,
+    "zero_drift_brownian_k1_probability": 0.31731050786291415,
+    "fixed_hit_endpoint_negative_rate": 0.19968875598074012,
+    "fixed_hit_endpoint_below_minus_10_rate": 0.04680354720981482,
+    "fixed_hit_mean_peak_retrace": 0.10348691171973222,
+    "fixed_miss_endpoint_mean": -0.057425908344498865,
+    "fixed_miss_endpoint_es05": -0.2504186026727817,
+    "endpoint_mean_log_return": 0.00011105901741297081,
+    "continuity_break_within_d20_count": 0,
+    "logical_maximum_outcome_date": "2025-12-31",
+    "forbidden_2026_read_count": 0
+  },
+  "endpoint_distribution_all": {
+    "count": 4385062,
+    "mean": 0.0077538453565309225,
+    "std": 0.12845375383078053,
+    "skew": 1.6189586589940355,
+    "excess_kurtosis": 12.473895591244203,
+    "q01": -0.2625004428625107,
+    "q05": -0.16634794995188712,
+    "median": -0.004368278197944164,
+    "q95": 0.22004362866282462,
+    "q99": 0.4162416437268218,
+    "es01": -0.33230569769954416,
+    "es05": -0.22763247062025949,
+    "mean_log_return": 0.00011105901741297081
+  },
+  "dependence": {
+    "row_count": 4385062,
+    "signal_date_count": 3624,
+    "rough_nonoverlapping_d20_block_count": 181.2,
+    "date_fixed_effect_variance_share": 0.29805109491313714,
+    "naive_row_standard_error_of_mean": 6.134214817122258e-05,
+    "date_equal_mean_return": 0.007695577357641893,
+    "date_equal_standard_error_of_mean": 0.0012738252707216334,
+    "date_equal_hac20_standard_error_of_mean": 0.004632285377961896,
+    "date_equal_hac20_t_of_mean": 1.6612917231424498,
+    "date_equal_hac60_standard_error_of_mean": 0.004929605634531654,
+    "date_equal_hac60_t_of_mean": 1.561093914639893,
+    "date_equal_hac20_effective_signal_date_count": 274.0421058135757,
+    "date_equal_hac60_effective_signal_date_count": 241.98227475307763,
+    "date_equal_block20_mean_ci": [
+      -0.0013166871007152525,
+      0.01648037397373425
+    ],
+    "date_equal_block60_mean_ci": [
+      -0.0020247241489608253,
+      0.017342438814665934
+    ],
+    "date_equal_mean_log_return": -0.00031743909921318507,
+    "date_equal_log_standard_error_of_mean": 0.0013045990182248876,
+    "date_equal_log_hac20_standard_error_of_mean": 0.00471900370507814,
+    "date_equal_log_hac20_t_of_mean": -0.06726824538653943,
+    "date_equal_log_hac60_standard_error_of_mean": 0.004945883730977717,
+    "date_equal_log_hac60_t_of_mean": -0.06418248314754314,
+    "date_equal_log_hac20_effective_signal_date_count": 276.97568624763437,
+    "date_equal_log_hac60_effective_signal_date_count": 252.14739077309167,
+    "date_equal_log_block20_mean_ci": [
+      -0.00972521801107051,
+      0.00838848276024484
+    ],
+    "date_equal_log_block60_mean_ci": [
+      -0.010415000998582233,
+      0.009500900042981016
+    ],
+    "daily_mean_autocorrelation_lag1": 0.9508614342922951,
+    "daily_mean_autocorrelation_lag5": 0.7478153493684578,
+    "daily_mean_autocorrelation_lag20": -0.10095498340364636
+  },
+  "policy_labels": {
+    "extremes": [
+      {
+        "horizon": 10,
+        "kind": "maximum_fill_day",
+        "row": 1177229,
+        "trade_date": "2016-08-31",
+        "symbol": "000029.SZ",
+        "trigger_day": 10,
+        "fill_day": 1016,
+        "delay_days": 1006,
+        "policy_return": -0.057835664600133896
+      },
+      {
+        "horizon": 10,
+        "kind": "maximum_policy_return",
+        "row": 640959,
+        "trade_date": "2013-12-25",
+        "symbol": "000520.SZ",
+        "trigger_day": 10,
+        "fill_day": 484,
+        "delay_days": 474,
+        "policy_return": 5.870229244232178
+      },
+      {
+        "horizon": 20,
+        "kind": "maximum_fill_day",
+        "row": 1168165,
+        "trade_date": "2016-08-17",
+        "symbol": "000029.SZ",
+        "trigger_day": 20,
+        "fill_day": 1026,
+        "delay_days": 1006,
+        "policy_return": -0.09376571327447891
+      },
+      {
+        "horizon": 20,
+        "kind": "maximum_policy_return",
+        "row": 640959,
+        "trade_date": "2013-12-25",
+        "symbol": "000520.SZ",
+        "trigger_day": 20,
+        "fill_day": 484,
+        "delay_days": 464,
+        "policy_return": 5.870229244232178
+      }
+    ],
+    "d60_fully_observed_through_cutoff_count": 4374685,
+    "d60_price_label_invalid_count": 57969,
+    "policy_label_contract_uses_price_label_valid": false,
+    "logical_maximum_source_date": "2025-12-31",
+    "forbidden_2026_read_count": 0,
+    "valid_matrix_shape": [
+      4476851,
+      6
+    ]
+  },
+  "model_importance": [
+    {
+      "model_group": "direct_return_15",
+      "model_count": 15,
+      "positive_gain_count": 15,
+      "median_gain_share": 0.03093952296217174,
+      "minimum_gain_share": 0.006598959933067941,
+      "maximum_gain_share": 0.06704349280586892,
+      "median_gain_rank": 1.0,
+      "best_gain_rank": 1,
+      "worst_gain_rank": 39
+    },
+    {
+      "model_group": "original_path_24",
+      "model_count": 24,
+      "positive_gain_count": 24,
+      "median_gain_share": 0.033641106978515356,
+      "minimum_gain_share": 0.0051644195079005905,
+      "maximum_gain_share": 0.11333250521175756,
+      "median_gain_rank": 9.5,
+      "best_gain_rank": 1,
+      "worst_gain_rank": 42
+    },
+    {
+      "model_group": "policy_target_18",
+      "model_count": 18,
+      "positive_gain_count": 18,
+      "median_gain_share": 0.08597627067444148,
+      "minimum_gain_share": 0.046709518472223654,
+      "maximum_gain_share": 0.14650138143555322,
+      "median_gain_rank": 1.0,
+      "best_gain_rank": 1,
+      "worst_gain_rank": 4
+    },
+    {
+      "model_group": "t1_direct_6",
+      "model_count": 6,
+      "positive_gain_count": 6,
+      "median_gain_share": 0.009425165880386182,
+      "minimum_gain_share": 0.006278641877019646,
+      "maximum_gain_share": 0.015597527160185533,
+      "median_gain_rank": 21.0,
+      "best_gain_rank": 4,
+      "worst_gain_rank": 47
+    }
+  ],
+  "trade_outcomes": [
+    {
+      "label": "old_mfe_plus_risk",
+      "task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+      "closed_trades": 821,
+      "take_profit_hit_rate": 0.6650426309378806,
+      "hit_mean_gross_return": 0.08683031087573354,
+      "miss_mean_gross_return": -0.13120952768224362,
+      "mean_gross_return": 0.013796260201624258,
+      "loss_below_minus_10_rate": 0.1961023142509135,
+      "es05_gross_return": -0.29795294842941855,
+      "breakeven_hit_rate": 0.6017685967390533
+    },
+    {
+      "label": "new_hit_plus_timeout",
+      "task": "dual_mfe_hit_timeout_maximin__tp08_d20__k12__base",
+      "closed_trades": 564,
+      "take_profit_hit_rate": 0.43617021276595747,
+      "hit_mean_gross_return": 0.08455795363131835,
+      "miss_mean_gross_return": -0.03628601777293761,
+      "mean_gross_return": 0.016422522945939995,
+      "loss_below_minus_10_rate": 0.06205673758865248,
+      "es05_gross_return": -0.15501708523274768,
+      "breakeven_hit_rate": 0.30027164244338683
+    }
+  ],
+  "source_files": {
+    "model_input_manifest": {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_quality_liquidity_training_ready\\model_inputs\\manifest.json",
+      "sha256": "49216d6ec81686bc99821dd6281a310eaafc35740fee0aa8200883cb2042a1af"
+    },
+    "row_index": {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_quality_liquidity_training_ready\\model_inputs\\row_index.parquet",
+      "sha256": "75523b6e156b58f5f19c98c9c72c9eb94325105ef6b7181ca2d34ab825bdf47b"
+    },
+    "pack_manifest": {
+      "path": "H:\\quant_project\\daily_research\\data\\research_store\\seq100_pit_l35v2_v1\\pack\\manifest.json",
+      "sha256": "257bfde778c202cb3c52dfb6d42ffbce821268c1df282884e342736702fd320d"
+    },
+    "policy_label_manifest": {
+      "path": "H:\\quant_project\\daily_research\\output\\path_policy\\studies\\seq100_quality_liquidity_policy_targets\\labels\\manifest.json",
+      "sha256": "a4126b9e6f033155abe1a70e5164ada000d6a31992003c9cba80d2e54b5cbb7e"
+    }
+  },
+  "outputs": [
+    "barrier_by_volatility_decile.csv",
+    "barrier_by_year.csv",
+    "data_quality_findings.csv",
+    "endpoint_by_date.csv",
+    "endpoint_distribution_by_year.csv",
+    "paired_model_accounts.csv",
+    "policy_label_delays.csv",
+    "st_feature_importance.csv",
+    "st_feature_importance_summary.csv",
+    "st_limit_geometry_annual.csv",
+    "st_rate_annual.csv",
+    "st_rate_daily.csv",
+    "threshold_robustness.csv",
+    "trade_outcomes.csv"
+  ]
+}

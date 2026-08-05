@@ -4,8 +4,8 @@
   "purpose": "Define the current formal 2011-2025 daily and complete quality-liquidity research scopes while retaining 2010 only as causal burn-in.",
   "source_data_prep": {
     "study_id": "seq100_quality_liquidity_data_prep",
-    "expected_complete_support_rows": 4476851,
-    "expected_daily_support_rows": 4477003,
+    "expected_complete_support_rows": 4361485,
+    "expected_daily_support_rows": 4361635,
     "expected_existing_feature_count": 518,
     "reuse_existing_partitions": true,
     "copy_physical_rows": false
@@ -35,9 +35,9 @@
     "daily_fallback": false
   },
   "expected_rolling_training_rows": {
-    "2023": 3242301,
-    "2024": 3652008,
-    "2025": 4064304
+    "2023": 3147686,
+    "2024": 3550401,
+    "2025": 3956386
   },
   "source_coverage": {
     "report_rc_daily_task_ledger_complete": true,

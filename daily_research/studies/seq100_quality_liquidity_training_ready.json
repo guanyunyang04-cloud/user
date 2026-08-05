@@ -4,15 +4,15 @@
   "purpose": "Prepare the current corrected quality-liquidity feature package without training or selecting features.",
   "source_scope": {
     "study_id": "seq100_quality_liquidity_research_scope",
-    "expected_common_support_rows": 4476851,
+    "expected_common_support_rows": 4361485,
     "expected_existing_feature_count": 518,
     "reuse_existing_partitions": true
   },
-  "expected_daily_support_rows": 4477003,
+  "expected_daily_support_rows": 4361635,
   "expected_rolling_training_rows": {
-    "2023": 3242301,
-    "2024": 3652008,
-    "2025": 4064304
+    "2023": 3147686,
+    "2024": 3550401,
+    "2025": 3956386
   },
   "expected_existing_formal_candidate_count": 106,
   "expected_existing_diagnostic_only_count": 83,

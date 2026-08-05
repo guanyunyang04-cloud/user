@@ -1,0 +1,147 @@
+{
+  "contract_version": "qdp_v2_name_change_strict_pit_v2",
+  "created_at": "2026-07-22T20:22:17+00:00",
+  "dataset_id": "name_change__801d1567122e27f611ea67ec",
+  "domain": "name_change",
+  "end_date": "2026-07-20",
+  "frequency": "event",
+  "layer": "raw",
+  "notes": [
+    "filtered to mainboard_hs_a_ex_current_st_name_delisted_v2 as of 2026-06-26",
+    "mutate_active_shards_from_parquet:restrict QDP to current listed main-board survivors and apply targeted 2026-07-17 quality corrections",
+    "replace_active_table_from_parquet:strict PIT auxiliary repair 2010 through current market date",
+    "append_active_shard:append free-source auxiliary tail through 2026-07-21",
+    "composite_restore:pit_historical_mainboard_v2",
+    "mutate_active_shards_from_parquet:canonicalize ticker rows to symbol_history effective intervals"
+  ],
+  "primary_key": [
+    "symbol",
+    "trade_date",
+    "change_type"
+  ],
+  "quality": {
+    "duplicate_key_rows": 0,
+    "future_source_dates": 0,
+    "multi_symbol_identity_count": 2,
+    "path_refs_exist": true,
+    "pit_historical_scope_includes_delisted": true,
+    "pit_status_is_signal_date_asof": true,
+    "primary_key_unique": true,
+    "restored_name_history_scope": "dated Shenzhen exchange short-name history; Shanghai exact-date ST state is restored separately from official SSE factbooks",
+    "scope": "point_in_time_historical_mainboard",
+    "scope_as_of_date": "2026-07-21",
+    "scope_rewrite": "qdp_current_store_repair_20260717",
+    "scope_security_id_count": 0,
+    "scope_symbol_count": 3419,
+    "strict_point_in_time": true,
+    "survivorship_bias_free_mainboard_daily": true,
+    "symbol_history_effective_intervals": true
+  },
+  "row_count": 2900,
+  "schema": [
+    {
+      "name": "symbol",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "trade_date",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "old_name",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "new_name",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "change_type",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "source",
+      "type": "VARCHAR"
+    }
+  ],
+  "shards": [
+    {
+      "end_date": "2026-07-14",
+      "file_size": 36310,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\name_change\\retained_0000.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/name_change/name_change__a6025da827a90be854b6d98e/shards/auxiliary_replace_137e8702cdd36c38fb11191d.parquet"
+      },
+      "path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_replace_37422d38_d5788f9d1ab822f9.parquet",
+      "row_count": 2218,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-06-29",
+      "file_size": 1478,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\name_change\\retained_0001.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/name_change/name_change__a6025da827a90be854b6d98e/shards/repair_append_0a7c6e619ab7d87baf09135a.parquet"
+      },
+      "path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_replace_b85d1a27_cb603b817085c4fa.parquet",
+      "row_count": 6,
+      "start_date": "2011-11-22",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-20",
+      "file_size": 10574,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\name_change\\retained_0002.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/pit_restore_d008cf1b716e32ba.parquet"
+      },
+      "path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_replace_28baeb3b_0eb2a18b12227756.parquet",
+      "row_count": 655,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-14",
+      "file_size": 1867,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\name_change\\canonicalized.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": ""
+      },
+      "path": "datasets/name_change/name_change__801d1567122e27f611ea67ec/shards/repair_mutate_append_4dc0bc5f416d02001e7f39a3.parquet",
+      "row_count": 21,
+      "start_date": "2010-08-10",
+      "status": "stored"
+    }
+  ],
+  "source": {
+    "active_as_of_date": "2026-06-26",
+    "checked_through": "2026-07-21",
+    "created_at": "2026-07-01T13:51:28+00:00",
+    "created_by": "scope_mainboard_active",
+    "last_metadata_update_at": "2026-07-23T03:20:01+00:00",
+    "last_metadata_update_reason": "record symbol_history effective-interval normalization",
+    "last_repair_action": "mutate_active_shards_from_parquet",
+    "last_repair_at": "2026-07-23T03:20:01+00:00",
+    "last_repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+    "missing_daily_keys": null,
+    "pit_history_restored_at": "2026-07-22T20:22:17+00:00",
+    "provider": "qdp_v2",
+    "scope": "point_in_time_historical_mainboard",
+    "scope_metadata_reconciled_at": "2026-07-30T14:05:19+00:00",
+    "secondary_compared_count": 3041,
+    "secondary_material_mismatch_count": 0,
+    "secondary_validation_at": "2026-07-17T18:58:58+00:00",
+    "secondary_validation_status": "ok",
+    "source_contract": "Tushare name intervals; QDP daily-universe observed transitions arbitrate symbols whose latest provider name conflicts",
+    "source_dataset_id": "name_change__410e040978feb32f90861734",
+    "survivorship_policy": "include_when_listed_then_apply_same_day_status",
+    "symbol_lifecycle_normalized_at": "2026-07-23T03:20:01+00:00",
+    "symbol_lifecycle_semantics": "date_effective_symbol_history"
+  },
+  "start_date": "2010-01-04"
+}

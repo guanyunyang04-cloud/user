@@ -1,0 +1,5 @@
+﻿conflict_category,row_count,symbol_count,first_date,last_date,changed_rows
+all_agree,9939535,3402,2010-01-04,2025-12-31,0.0
+date_offset,2266,377,2012-01-19,2025-12-30,2266.0
+hard_conflict,195467,421,2010-01-04,2025-12-31,195466.0
+source_missing,1011,3,2010-01-04,2011-12-30,0.0

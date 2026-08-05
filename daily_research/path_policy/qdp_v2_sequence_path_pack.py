@@ -701,9 +701,22 @@ def _write_status_panels(
         return
     date_idx = indexed["_date_idx"].to_numpy(dtype=np.int64)
     symbol_idx = indexed["_symbol_idx"].to_numpy(dtype=np.int64)
-    status_valid[date_idx, symbol_idx] = True
+    status_columns = ("is_st", "is_suspended", "is_delisted")
+    known = pd.DataFrame(
+        {
+            column: indexed[column] if column in indexed.columns else pd.NA
+            for column in status_columns
+        }
+    ).notna().all(axis=1).to_numpy(dtype=bool)
+    status_valid[date_idx, symbol_idx] = known
     for column, panel in (("is_st", is_st), ("is_suspended", is_suspended), ("is_delisted", is_delisted)):
-        values = indexed[column].fillna(False).astype(bool).to_numpy(copy=True) if column in indexed.columns else np.zeros(len(indexed), dtype=bool)
+        values = (
+            indexed[column]
+            .astype("boolean")
+            .to_numpy(dtype=bool, na_value=False, copy=True)
+            if column in indexed.columns
+            else np.zeros(len(indexed), dtype=bool)
+        )
         panel[date_idx, symbol_idx] = values
     for panel in (status_valid, is_st, is_suspended, is_delisted):
         if hasattr(panel, "flush"):
@@ -729,7 +742,9 @@ def _write_pit_universe_panels(
         return
     date_idx = indexed["_date_idx"].to_numpy(dtype=np.int64)
     symbol_idx = indexed["_symbol_idx"].to_numpy(dtype=np.int64)
-    status_valid[date_idx, symbol_idx] = True
+    status_columns = ("is_st", "is_suspended", "is_delisted")
+    known = indexed.loc[:, status_columns].notna().all(axis=1).to_numpy(dtype=bool)
+    status_valid[date_idx, symbol_idx] = known
     mappings = (
         ("is_st", is_st),
         ("is_suspended", is_suspended),
@@ -740,7 +755,11 @@ def _write_pit_universe_panels(
     for column, panel in mappings:
         if column not in indexed.columns:
             raise ValueError(f"PIT signal universe is missing required column: {column}")
-        panel[date_idx, symbol_idx] = indexed[column].fillna(False).astype(bool).to_numpy(copy=True)
+        panel[date_idx, symbol_idx] = (
+            indexed[column]
+            .astype("boolean")
+            .to_numpy(dtype=bool, na_value=False, copy=True)
+        )
     for panel in (status_valid, is_st, is_suspended, is_delisted, universe_has_bar, signal_eligible):
         if hasattr(panel, "flush"):
             panel.flush()

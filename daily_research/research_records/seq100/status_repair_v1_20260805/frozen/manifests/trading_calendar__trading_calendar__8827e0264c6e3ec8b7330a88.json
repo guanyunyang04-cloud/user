@@ -1,0 +1,115 @@
+{
+  "contract_version": "qdp_v2_trading_calendar_v1",
+  "created_at": "2026-06-30T22:12:14+08:00",
+  "dataset_id": "trading_calendar__8827e0264c6e3ec8b7330a88",
+  "domain": "trading_calendar",
+  "end_date": "2026-07-21",
+  "frequency": "",
+  "layer": "raw",
+  "notes": [
+    "active data scope starts at 2011-11-22",
+    "bulk_append_active_shards_from_parquet:trusted Tushare direct repair 2eb2b86538d0fa34bef2f09d",
+    "append_active_shard:append BaoStock core facts 2026-07-14..2026-07-16",
+    "append_active_shard:append BaoStock core facts 2026-07-12..2026-07-21"
+  ],
+  "primary_key": [
+    "trade_date"
+  ],
+  "quality": {
+    "date_coverage_ok": true,
+    "footer_verified": true,
+    "path_refs_exist": true,
+    "primary_key_unique": true
+  },
+  "row_count": 6046,
+  "schema": [
+    {
+      "name": "trade_date",
+      "type": "string"
+    },
+    {
+      "name": "is_open",
+      "type": "bool"
+    },
+    {
+      "name": "exchange",
+      "type": "string"
+    },
+    {
+      "name": "source",
+      "type": "string"
+    }
+  ],
+  "shards": [
+    {
+      "end_date": "2026-06-08",
+      "file_size": 21798,
+      "metadata": {
+        "data_scope_rewritten": true
+      },
+      "path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/part_000000_shard.parquet",
+      "row_count": 5313,
+      "start_date": "2011-11-22",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-06-26",
+      "file_size": 2729,
+      "metadata": {
+        "data_scope_reused": true,
+        "source_dataset_id": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b"
+      },
+      "path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/part_000001_shard.parquet",
+      "row_count": 18,
+      "start_date": "2026-06-09",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 2720,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\direct_repair\\direct_repair__2eb2b86538d0fa34bef2f09d\\prepared.feb48b56fc914d969a9bcd265f78af3f\\trading_calendar\\part_trading_calendar_missing.parquet",
+        "repair_reason": "trusted Tushare direct repair 2eb2b86538d0fa34bef2f09d",
+        "replaces": ""
+      },
+      "path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/repair_append_95c09c8fb51d6c1365913676.parquet",
+      "row_count": 707,
+      "start_date": "2010-01-01",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-16",
+      "file_size": 2672,
+      "metadata": {
+        "repair_reason": "append BaoStock core facts 2026-07-14..2026-07-16",
+        "replaces": ""
+      },
+      "path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/repair_append_87956af7b216a09036674d3c.parquet",
+      "row_count": 3,
+      "start_date": "2026-07-14",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-21",
+      "file_size": 2681,
+      "metadata": {
+        "repair_reason": "append BaoStock core facts 2026-07-12..2026-07-21",
+        "replaces": ""
+      },
+      "path": "datasets/trading_calendar/trading_calendar__8827e0264c6e3ec8b7330a88/shards/repair_append_e6256e8c6bbc8509861e903d.parquet",
+      "row_count": 5,
+      "start_date": "2026-07-17",
+      "status": "stored"
+    }
+  ],
+  "source": {
+    "created_at": "2026-06-30T22:12:14+08:00",
+    "created_by": "apply_data_scope",
+    "last_repair_action": "append_active_shard",
+    "last_repair_at": "2026-07-21T18:07:41+00:00",
+    "last_repair_reason": "append BaoStock core facts 2026-07-12..2026-07-21",
+    "provider": "qdp_v2",
+    "source_dataset_id": "data_platform_trading_calendar__03298281bc6712b72d0b5a6b"
+  },
+  "start_date": "2010-01-01"
+}

@@ -1,0 +1,3 @@
+horizon,resolved_count,delayed_open_count,delay_over_20_count,delay_over_60_count,maximum_delay_days,maximum_fill_day,maximum_policy_return
+10,4443174,31931,5744,2960,1006,1016,5.870229244232178
+20,4426360,29039,9030,4352,1006,1026,5.870229244232178

@@ -1,0 +1,277 @@
+{
+  "active_dataset_ids": {
+    "name_change": "name_change__801d1567122e27f611ea67ec",
+    "security_status": "security_status__dd7f01560245387dd417d53d"
+  },
+  "active_manifest_sha256": "5c1c6e48d022ac6b097d06d665b8b3b385b67eb34a0d9de21cf80dbc19fa20eb",
+  "active_write_performed": false,
+  "checks": {
+    "000972_is_st_on_2012_05_02": true,
+    "000972_wrong_st_before_2012_05_02": 0,
+    "active_pointer_unchanged_during_dry_run": true,
+    "archive_mismatches_2012_2025": 0,
+    "boundary_st_jump": 0,
+    "boundary_st_rows": [
+      {
+        "st_rows": 145.0,
+        "trade_date": "2011-11-21"
+      },
+      {
+        "st_rows": 145.0,
+        "trade_date": "2011-11-22"
+      }
+    ],
+    "changed_non_st_status_fields": 0,
+    "extra_prepared_status_keys": 0,
+    "historical_unknown_status_rows": 115446,
+    "independent_conflict_rows": 1,
+    "missing_prepared_status_keys": 0,
+    "name_change_rows_removed": 24,
+    "post_archive_unknown_status_rows": 3745,
+    "prepared_name_primary_key_duplicates": 0,
+    "prepared_name_synthetic_rows": 0,
+    "status_primary_key_duplicates": 0,
+    "status_row_count_equal": true,
+    "unknown_status_rows": 119191
+  },
+  "created_at": "2026-08-05T12:28:22.342090+00:00",
+  "impact_by_year": [
+    {
+      "changed_rows": 59191.0,
+      "changed_symbols": 253,
+      "newly_st": 193.0,
+      "no_longer_st": 0.0,
+      "row_count": 427642,
+      "unknown_rows": 58998.0,
+      "year": 2010
+    },
+    {
+      "changed_rows": 59646.0,
+      "changed_symbols": 348,
+      "newly_st": 3169.0,
+      "no_longer_st": 29.0,
+      "row_count": 478486,
+      "unknown_rows": 56448.0,
+      "year": 2011
+    },
+    {
+      "changed_rows": 23394.0,
+      "changed_symbols": 125,
+      "newly_st": 23319.0,
+      "no_longer_st": 75.0,
+      "row_count": 507126,
+      "unknown_rows": 0.0,
+      "year": 2012
+    },
+    {
+      "changed_rows": 12708.0,
+      "changed_symbols": 90,
+      "newly_st": 12668.0,
+      "no_longer_st": 40.0,
+      "row_count": 503084,
+      "unknown_rows": 0.0,
+      "year": 2013
+    },
+    {
+      "changed_rows": 9362.0,
+      "changed_symbols": 73,
+      "newly_st": 9117.0,
+      "no_longer_st": 245.0,
+      "row_count": 525827,
+      "unknown_rows": 0.0,
+      "year": 2014
+    },
+    {
+      "changed_rows": 9017.0,
+      "changed_symbols": 64,
+      "newly_st": 8773.0,
+      "no_longer_st": 244.0,
+      "row_count": 552825,
+      "unknown_rows": 0.0,
+      "year": 2015
+    },
+    {
+      "changed_rows": 11484.0,
+      "changed_symbols": 80,
+      "newly_st": 11240.0,
+      "no_longer_st": 244.0,
+      "row_count": 577198,
+      "unknown_rows": 0.0,
+      "year": 2016
+    },
+    {
+      "changed_rows": 10891.0,
+      "changed_symbols": 83,
+      "newly_st": 10823.0,
+      "no_longer_st": 68.0,
+      "row_count": 640123,
+      "unknown_rows": 0.0,
+      "year": 2017
+    },
+    {
+      "changed_rows": 10853.0,
+      "changed_symbols": 74,
+      "newly_st": 10853.0,
+      "no_longer_st": 0.0,
+      "row_count": 680143,
+      "unknown_rows": 0.0,
+      "year": 2018
+    },
+    {
+      "changed_rows": 14524.0,
+      "changed_symbols": 87,
+      "newly_st": 14524.0,
+      "no_longer_st": 0.0,
+      "row_count": 699566,
+      "unknown_rows": 0.0,
+      "year": 2019
+    },
+    {
+      "changed_rows": 23254.0,
+      "changed_symbols": 123,
+      "newly_st": 23254.0,
+      "no_longer_st": 0.0,
+      "row_count": 717104,
+      "unknown_rows": 0.0,
+      "year": 2020
+    },
+    {
+      "changed_rows": 20079.0,
+      "changed_symbols": 136,
+      "newly_st": 20079.0,
+      "no_longer_st": 0.0,
+      "row_count": 750932,
+      "unknown_rows": 0.0,
+      "year": 2021
+    },
+    {
+      "changed_rows": 14601.0,
+      "changed_symbols": 88,
+      "newly_st": 14601.0,
+      "no_longer_st": 0.0,
+      "row_count": 762466,
+      "unknown_rows": 0.0,
+      "year": 2022
+    },
+    {
+      "changed_rows": 11365.0,
+      "changed_symbols": 70,
+      "newly_st": 11225.0,
+      "no_longer_st": 140.0,
+      "row_count": 771488,
+      "unknown_rows": 0.0,
+      "year": 2023
+    },
+    {
+      "changed_rows": 10845.0,
+      "changed_symbols": 70,
+      "newly_st": 10845.0,
+      "no_longer_st": 0.0,
+      "row_count": 771470,
+      "unknown_rows": 0.0,
+      "year": 2024
+    },
+    {
+      "changed_rows": 11344.0,
+      "changed_symbols": 76,
+      "newly_st": 11344.0,
+      "no_longer_st": 0.0,
+      "row_count": 772799,
+      "unknown_rows": 0.0,
+      "year": 2025
+    },
+    {
+      "changed_rows": 7337.0,
+      "changed_symbols": 149,
+      "newly_st": 3592.0,
+      "no_longer_st": 0.0,
+      "row_count": 418505,
+      "unknown_rows": 3745.0,
+      "year": 2026
+    }
+  ],
+  "independent_conflicts": [
+    {
+      "archive_is_st": false,
+      "official_is_st": null,
+      "status_source": "baostock_archive.daily_isST",
+      "symbol": "600530.SH",
+      "trade_date": "2020-04-29",
+      "tushare_end_date": "2020-05-05 00:00:00",
+      "tushare_is_st": true,
+      "tushare_start_date": "2020-04-29 00:00:00"
+    }
+  ],
+  "model_retrained": false,
+  "outputs": {
+    "candidates": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\audit\\status_repair_candidates.parquet",
+    "evidence": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\audit\\status_reconciliation.parquet",
+    "prepared_name_change": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\name_change\\name_change.parquet",
+    "prepared_security_status": [
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2010.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2011.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2012.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2013.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2014.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2015.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2016.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2017.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2018.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2019.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2020.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2021.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2022.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2023.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2024.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2025.parquet",
+      "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\prepared\\security_status\\security_status_2026.parquet"
+    ]
+  },
+  "schema": "seq100_status_repair_dry_run/v2",
+  "scope": {
+    "end_date": "2026-07-21",
+    "start_date": "2010-01-04"
+  },
+  "source_priority": [
+    "baostock_archive.daily_isST",
+    "sse_official.st_transition",
+    "tushare.namechange_interval",
+    "status_unknown"
+  ],
+  "source_summary": [
+    {
+      "changed_rows": 197118.0,
+      "confidence": "high",
+      "row_count": 9538781,
+      "status_source": "baostock_archive.daily_isST",
+      "symbol_count": 3409,
+      "unknown_rows": 0.0
+    },
+    {
+      "changed_rows": 3064.0,
+      "confidence": "medium",
+      "row_count": 874998,
+      "status_source": "tushare.namechange_interval",
+      "symbol_count": 3249,
+      "unknown_rows": 0.0
+    },
+    {
+      "changed_rows": 119191.0,
+      "confidence": "unknown",
+      "row_count": 119191,
+      "status_source": "status_unknown",
+      "symbol_count": 251,
+      "unknown_rows": 119191.0
+    },
+    {
+      "changed_rows": 522.0,
+      "confidence": "high",
+      "row_count": 23814,
+      "status_source": "sse_official.st_transition",
+      "symbol_count": 49,
+      "unknown_rows": 0.0
+    }
+  ],
+  "status": "ready_to_apply",
+  "tushare_interval_rule": "min(supplied_end_date, next_start_date - 1 day)"
+}

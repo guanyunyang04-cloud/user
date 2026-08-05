@@ -1,0 +1,26 @@
+{
+  "columns": [
+    "变更日期",
+    "证券代码",
+    "证券简称",
+    "变更前全称",
+    "变更后全称"
+  ],
+  "created_at": "2026-08-05T11:32:37.828728+00:00",
+  "function": "ak.stock_info_sz_change_name",
+  "package_versions": {
+    "akshare": "1.18.63",
+    "baostock": "0.9.3",
+    "duckdb": "1.5.2",
+    "pandas": "2.3.2",
+    "pyarrow": "20.0.0",
+    "python": "3.11.15",
+    "requests": "2.32.5",
+    "tushare": "1.4.29"
+  },
+  "raw_parquet": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\akshare_sz_name_change\\raw.parquet",
+  "raw_parquet_sha256": "59df0e0c22f6fcfbb021be2b02b1ea7dc80fea65386ebe3008f29ad660c30017",
+  "raw_records": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\akshare_sz_name_change\\raw_records.json",
+  "row_count": 1756,
+  "schema": "seq100_status_repair_akshare_sz_name_change_cache/v1"
+}

@@ -10,6 +10,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from quant_data_platform.core.security_status import st_status_from_name
 from quant_data_platform.domains.contracts import (
     DataDomain,
     DatePartitionFetchRequest,
@@ -106,6 +107,7 @@ def run_baostock_core_update(
             )
             universe, status = _universe_and_status_frames(
                 all_stock,
+                daily_status=getattr(result, "raw_data", pd.DataFrame()),
                 stock_basic=stock_basic,
                 trade_date=trade_date,
             )
@@ -190,7 +192,10 @@ def _calendar_frame(frame: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["trade_date", "is_open", "exchange", "source"])
     data = frame.copy()
     data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce").dt.strftime("%Y-%m-%d")
-    data["is_open"] = data["is_open"].map(_to_bool)
+    is_open = data["is_open"].map(_to_nullable_bool).astype("boolean")
+    if bool(is_open.isna().any()):
+        raise BaostockCoreUpdateError("baostock_calendar_is_open_invalid")
+    data["is_open"] = is_open.astype(bool)
     data["exchange"] = data.get("exchange", "SSE").fillna("SSE").astype(str).replace("", "SSE")
     data["source"] = "baostock"
     data = data.dropna(subset=["trade_date"])
@@ -328,6 +333,7 @@ def _valuation_frame(frame: pd.DataFrame, *, trade_date: str) -> pd.DataFrame:
 def _universe_and_status_frames(
     all_stock: pd.DataFrame,
     *,
+    daily_status: pd.DataFrame | None = None,
     stock_basic: pd.DataFrame,
     trade_date: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -363,16 +369,54 @@ def _universe_and_status_frames(
             "source",
         ]
     ].drop_duplicates(["trade_date", "symbol"], keep="last")
-    suspended_source = data["is_suspended"] if "is_suspended" in data else data.get("trade_status", "").astype(str).eq("0")
+    if "is_suspended" in data:
+        is_suspended = data["is_suspended"].map(_to_nullable_bool).astype("boolean")
+    elif "trade_status" in data:
+        trade_status = data["trade_status"].fillna("").astype(str).str.strip()
+        is_suspended = trade_status.map({"0": True, "1": False}).astype("boolean")
+    else:
+        is_suspended = pd.Series(pd.NA, index=data.index, dtype="boolean")
+    name_is_st = data["name"].map(st_status_from_name).astype("boolean")
+    daily_is_st = data["symbol"].map(
+        _daily_is_st_lookup(daily_status)
+    ).astype("boolean")
+    is_st = daily_is_st.fillna(name_is_st).astype("boolean")
+    known_st = is_st.fillna(False).astype(bool)
+    known_suspended = is_suspended.fillna(False).astype(bool)
+    unknown_status = is_st.isna() | is_suspended.isna()
+    status_reason = np.select(
+        (
+            unknown_status & known_st,
+            unknown_status & known_suspended,
+            unknown_status,
+            known_st & known_suspended,
+            known_st,
+            known_suspended,
+        ),
+        (
+            "st;status_unknown",
+            "suspended;status_unknown",
+            "status_unknown",
+            "st;suspended",
+            "st",
+            "suspended",
+        ),
+        default="tradeable",
+    )
+    status_source = np.where(
+        daily_is_st.notna(),
+        "baostock.daily_isST",
+        np.where(name_is_st.notna(), "baostock.all_stock_name", "status_unknown"),
+    )
     status = pd.DataFrame(
         {
             "symbol": data["symbol"],
             "trade_date": str(trade_date),
-            "is_st": data["name"].map(_name_is_st),
-            "is_suspended": suspended_source.map(_to_bool),
+            "is_st": is_st,
+            "is_suspended": is_suspended,
             "is_delisted": False,
-            "status_reason": np.where(suspended_source.map(_to_bool), "suspended", ""),
-            "source": "baostock",
+            "status_reason": status_reason,
+            "source": status_source,
         }
     ).drop_duplicates(["trade_date", "symbol"], keep="last")
     return universe.reset_index(drop=True), status.reset_index(drop=True)
@@ -486,14 +530,54 @@ def _is_supported_mainboard_symbol(symbol: str) -> bool:
     return suffix in MAINBOARD_PREFIXES and code.startswith(MAINBOARD_PREFIXES[suffix])
 
 
-def _name_is_st(value: Any) -> bool:
-    return str(value or "").strip().upper().startswith(("ST", "*ST"))
+def _daily_is_st_lookup(frame: pd.DataFrame | None) -> pd.Series:
+    if frame is None or frame.empty or "isST" not in frame.columns:
+        return pd.Series(dtype="boolean")
+    raw = frame.copy()
+    if "symbol" in raw.columns:
+        symbol = raw["symbol"].fillna("").astype(str).str.upper().str.strip()
+    elif "provider_symbol" in raw.columns:
+        symbol = (
+            raw["provider_symbol"].fillna("").astype(str).str.upper().str.strip()
+        )
+    elif "code" in raw.columns:
+        code = raw["code"].fillna("").astype(str).str.lower().str.strip()
+        symbol = pd.Series(
+            np.where(
+                code.str.startswith("sh."),
+                code.str.slice(3) + ".SH",
+                np.where(
+                    code.str.startswith("sz."),
+                    code.str.slice(3) + ".SZ",
+                    "",
+                ),
+            ),
+            index=raw.index,
+        )
+    else:
+        return pd.Series(dtype="boolean")
+    values = raw["isST"].fillna("").astype(str).str.strip().str.lower()
+    parsed = values.map(
+        {"1": True, "true": True, "0": False, "false": False}
+    ).astype("boolean")
+    result = pd.DataFrame({"symbol": symbol, "is_st": parsed})
+    result = result.loc[result["symbol"].ne("")].drop_duplicates(
+        "symbol", keep="last"
+    )
+    return result.set_index("symbol")["is_st"]
 
 
-def _to_bool(value: Any) -> bool:
+def _to_nullable_bool(value: Any) -> bool | None:
+    if value is None or pd.isna(value):
+        return None
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
-    return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y", "open"}
+    text = str(value).strip().lower()
+    if text in {"1", "true", "t", "yes", "y"}:
+        return True
+    if text in {"0", "false", "f", "no", "n"}:
+        return False
+    return None
 
 
 def _date_text(value: str) -> str:

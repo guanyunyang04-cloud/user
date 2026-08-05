@@ -1,0 +1,26 @@
+{
+  "created_at": "2026-08-05T11:33:33.858003+00:00",
+  "schema": "seq100_status_repair_official_evidence/v1",
+  "sources": {
+    "sse_factbook_2011": {
+      "path": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\official\\sse_factbook_2011.pdf",
+      "sha256": "77e4d1f8024f47456a608c119f2e634e3936f5ae1c245f4aefa45ba59f0d0bbe",
+      "size": 6158650,
+      "status": "cached",
+      "url": "https://www.sse.com.cn/aboutus/publication/factbook/documents/c/10170571/files/f43f33c247f242d48780c3097548281b.pdf"
+    },
+    "sse_factbook_2012": {
+      "path": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\official\\sse_factbook_2012.pdf",
+      "sha256": "d1283b557d51b298300b3cb46c1125aabeac0ae86e94cea7ecb15de9befff0bb",
+      "size": 8624901,
+      "status": "cached",
+      "url": "https://www.sse.com.cn/aboutus/publication/factbook/documents/c/10170570/files/9a7b8e0d00e84d358d02fbba056f7bda.pdf"
+    },
+    "sse_transition_resource": {
+      "path": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\official\\sse_st_transitions_2010_2011.csv",
+      "sha256": "37949b2731e5804dc13fa6ed78a4c050f75ec8014a2b9b0e54c6962864b44e9b",
+      "size": 2877,
+      "source_path": "H:\\quant_project\\quant_data_platform\\src\\quant_data_platform\\qdp_v2\\resources\\sse_st_transitions_2010_2011.csv"
+    }
+  }
+}

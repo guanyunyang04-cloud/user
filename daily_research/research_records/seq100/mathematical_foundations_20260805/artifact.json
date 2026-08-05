@@ -1,0 +1,3062 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "A股量化研究的数学地基：2011-2025 数据与模型审计",
+    "description": "技术报告：从随机过程、条件分布、风险度量和稳健验证重新定义强模型；包含固定8%批注、标签延迟和ST状态数据审计。",
+    "generatedAt": "2026-08-05T23:00:00+08:00",
+    "sources": [
+      {
+        "id": "audit_source",
+        "label": "2011-2025 mathematical foundations audit",
+        "path": "daily_research/research_records/seq100/mathematical_foundations_20260805/audit.py",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_json_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/summary.json');\nSELECT * FROM read_csv_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/*.csv', union_by_name=true, filename=true);",
+          "description": "Read-only reconstruction of finite D20 price paths, date-level dependence, threshold comparisons, and retained model/account diagnostics.",
+          "executed_at": "2026-08-05T23:00:00+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/mathematical_foundations_20260805/summary.json",
+            "daily_research/research_records/seq100/mathematical_foundations_20260805/*.csv"
+          ],
+          "filters": [
+            "formal research dates 2011-01-04 through 2025-12-31",
+            "2010 burn-in only",
+            "logical maximum outcome date 2025-12-31",
+            "no 2026 reads"
+          ],
+          "metric_definitions": [
+            "D20 endpoint return = close at signal index + 20 divided by next-open entry minus one.",
+            "Date-equal means first average candidates within each signal date, then average dates.",
+            "HAC bandwidths and moving blocks are measured in signal trading dates.",
+            "ES5 is the mean of the worst 5 percent of finite returns."
+          ]
+        }
+      },
+      {
+        "id": "raw_qdp_source",
+        "label": "Pinned QDP raw OHLC and security status evidence",
+        "path": "quant_data_platform/data/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT symbol, trade_date, open, high, low, close FROM read_parquet('quant_data_platform/data/qdp_v2/datasets/market_daily_raw/**/*.parquet') WHERE trade_date BETWEEN '2011-01-01' AND '2025-12-31'",
+          "description": "Unadjusted OHLC is used only for the flat-price diagnostic; the result is explicitly not official ST truth.",
+          "executed_at": "2026-08-05T23:00:00+08:00",
+          "tables_used": [
+            "market_daily_raw__0559f722eb9142e5f476854a",
+            "security_status__dd7f01560245387dd417d53d"
+          ],
+          "filters": [
+            "2011-01-01 through 2025-12-31",
+            "pinned pack PIT universe"
+          ],
+          "metric_definitions": [
+            "Flat diagnostic requires open=high=low=close and rounded close at previous close +/- 5%."
+          ]
+        }
+      },
+      {
+        "id": "policy_source",
+        "label": "Quality-liquidity policy target labels",
+        "path": "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets/labels/manifest.json",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/policy_label_delays.csv')",
+          "description": "Audits fill-day delays and distinguishes direct finite endpoint returns from policy returns that retry blocked exits.",
+          "executed_at": "2026-08-05T23:00:00+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/mathematical_foundations_20260805/policy_label_delays.csv",
+            "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets/labels/fill_day.npy",
+            "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets/labels/policy_return.npy"
+          ],
+          "filters": [
+            "horizons D10 and D20",
+            "cutoff 2025-12-31"
+          ],
+          "metric_definitions": [
+            "Delayed open means a blocked event or timeout is filled after its trigger date.",
+            "A finite-horizon policy label must censor unresolved delayed exits rather than retry indefinitely."
+          ]
+        }
+      },
+      {
+        "id": "model_source",
+        "label": "Frozen 557-feature model and account evidence",
+        "path": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/st_feature_importance_summary.csv')",
+          "description": "Retained model gain summaries, direct T+1 target comparisons, and paired account diagnostics; no new model was trained in this audit.",
+          "executed_at": "2026-08-05T23:00:00+08:00",
+          "tables_used": [
+            "daily_research/research_records/seq100/mathematical_foundations_20260805/st_feature_importance_summary.csv",
+            "seq100_quality_liquidity_model/tasks/*/model.txt",
+            "seq100_quality_liquidity_t1_return_models/audit.json",
+            "seq100_quality_liquidity_execution/decision.json"
+          ],
+          "filters": [
+            "2011-2025 audit scope",
+            "2023-2025 retrospective rolling OOS for model/account evidence"
+          ],
+          "metric_definitions": [
+            "LightGBM gain share is conditional split gain, not causal feature contribution.",
+            "2023-2025 is retrospective rolling OOS because it has been repeatedly inspected."
+          ]
+        }
+      },
+      {
+        "id": "t1_model_source",
+        "label": "Strict T+1 direct-return model audit",
+        "path": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/annual_metrics.parquet",
+        "query": {
+          "engine": "duckdb",
+          "language": "sql",
+          "sql": "SELECT * FROM read_parquet('daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/annual_metrics.parquet') WHERE target = 'open_to_open_1' ORDER BY year, model_source",
+          "description": "Compares direct open-to-open T+1 targets with the frozen return head on identical retrospective rolling-OOS support.",
+          "executed_at": "2026-08-05T23:00:00+08:00",
+          "tables_used": [
+            "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/annual_metrics.parquet",
+            "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/paired_comparison.parquet",
+            "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/audit.json"
+          ],
+          "filters": [
+            "target open_to_open_1",
+            "rolling years 2023-2025",
+            "identical candidate support"
+          ],
+          "metric_definitions": [
+            "Rank IC is the within-date Spearman correlation averaged over the evaluation year.",
+            "Top-5 capture is the share of realized cross-sectional extreme return captured by the five highest model scores."
+          ]
+        }
+      },
+      {
+        "id": "literature_source",
+        "label": "Mathematical foundations literature and DOI evidence",
+        "path": "daily_research/research_records/seq100/mathematical_foundations_20260805/literature_evidence.md",
+        "query": {
+          "engine": "DOI/Crossref metadata plus Consensus/SciSpace abstracts",
+          "language": "text",
+          "description": "Primary literature identifiers and applicability notes; Scite was unavailable because its monthly quota was exhausted.",
+          "executed_at": "2026-08-05T23:00:00+08:00",
+          "tables_used": [
+            "literature_evidence.md"
+          ],
+          "filters": [
+            "peer-reviewed methodology and risk literature"
+          ],
+          "metric_definitions": [
+            "DOIs are canonical identifiers; citations do not prove trading profitability."
+          ]
+        }
+      }
+    ],
+    "cards": [
+      {
+        "id": "path_count_card",
+        "dataset": "headline",
+        "sourceId": "audit_source",
+        "description": "完整的D20纯价格路径；不把未来买卖状态当作价格标签门槛。",
+        "metrics": [
+          {
+            "label": "完整 D20 路径",
+            "field": "valid_d20_paths",
+            "format": "number"
+          }
+        ]
+      },
+      {
+        "id": "log_mean_card",
+        "dataset": "headline",
+        "sourceId": "audit_source",
+        "description": "每天等权的D20对数财富变化；日期级而不是股票行级估计。",
+        "metrics": [
+          {
+            "label": "日期等权对数均值",
+            "field": "date_equal_log_mean",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "label": "HAC20 t",
+            "field": "date_equal_log_hac20_t",
+            "format": "number",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "tail_card",
+        "dataset": "headline",
+        "sourceId": "audit_source",
+        "description": "全体D20终点收益最差5%的平均值。",
+        "metrics": [
+          {
+            "label": "终点 ES5",
+            "field": "endpoint_es05",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "barrier_card",
+        "dataset": "headline",
+        "sourceId": "audit_source",
+        "description": "固定8%事件的行加权观察率；仅作为描述性切片。",
+        "metrics": [
+          {
+            "label": "固定 8% 观察命中率",
+            "field": "fixed_8pct_hit_rate",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "charts": [
+      {
+        "id": "barrier_volatility_chart",
+        "title": "D20 障碍命中率与波动率十分位",
+        "subtitle": "固定8%命中率随波动率上升，而k=1标准化障碍反向下降；每组约43.9万条路径。",
+        "type": "bar",
+        "dataset": "barrier_long",
+        "sourceId": "audit_source",
+        "encodings": {
+          "x": {
+            "field": "volatility_decile",
+            "type": "ordinal",
+            "label": "历史波动率十分位"
+          },
+          "y": {
+            "field": "hit_rate",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "命中率"
+          },
+          "color": {
+            "field": "barrier_type",
+            "type": "nominal",
+            "label": "障碍定义"
+          },
+          "tooltip": [
+            {
+              "field": "volatility_median",
+              "format": "percent",
+              "label": "波动率中位数"
+            },
+            {
+              "field": "standardized_distance_median",
+              "label": "8%标准化距离"
+            },
+            {
+              "field": "endpoint_mean_log_return",
+              "format": "percent",
+              "label": "终点对数均值"
+            },
+            {
+              "field": "endpoint_es05",
+              "format": "percent",
+              "label": "终点ES5"
+            }
+          ]
+        },
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "annual_barrier_chart",
+        "title": "年度障碍命中率",
+        "subtitle": "年度状态差异远大于一个固定百分比标签可以解释的稳定信号。",
+        "type": "line",
+        "dataset": "annual_long",
+        "sourceId": "audit_source",
+        "encodings": {
+          "x": {
+            "field": "year_label",
+            "type": "ordinal",
+            "label": "年份"
+          },
+          "y": {
+            "field": "hit_rate",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "命中率"
+          },
+          "color": {
+            "field": "barrier_type",
+            "type": "nominal",
+            "label": "障碍定义"
+          },
+          "tooltip": [
+            {
+              "field": "candidate_count",
+              "format": "number",
+              "label": "路径数"
+            },
+            {
+              "field": "endpoint_mean_log_return",
+              "format": "percent",
+              "label": "终点对数均值"
+            },
+            {
+              "field": "endpoint_es05",
+              "format": "percent",
+              "label": "终点ES5"
+            }
+          ]
+        },
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "endpoint_year_chart",
+        "title": "年度 D20 终点收益：算术与对数口径",
+        "subtitle": "算术均值的正尾不能替代可复利的对数增长；两种口径刻画不同问题。",
+        "type": "bar",
+        "dataset": "endpoint_long",
+        "sourceId": "audit_source",
+        "encodings": {
+          "x": {
+            "field": "year_label",
+            "type": "ordinal",
+            "label": "年份"
+          },
+          "y": {
+            "field": "value",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "终点均值"
+          },
+          "color": {
+            "field": "return_measure",
+            "type": "nominal",
+            "label": "收益口径"
+          },
+          "tooltip": [
+            {
+              "field": "candidate_count",
+              "format": "number",
+              "label": "路径数"
+            },
+            {
+              "field": "endpoint_es05",
+              "format": "percent",
+              "label": "ES5"
+            }
+          ]
+        },
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "settings": {
+          "groupMode": "grouped"
+        },
+        "layout": "full"
+      },
+      {
+        "id": "st_boundary_chart",
+        "title": "ST 状态拼接边界诊断",
+        "subtitle": "2011-11-21 到 2011-11-22 出现约5.42个百分点的一日跳变；该图是诊断而非官方ST真值。",
+        "type": "line",
+        "dataset": "st_boundary_long",
+        "sourceId": "raw_qdp_source",
+        "encodings": {
+          "x": {
+            "field": "date_label",
+            "type": "ordinal",
+            "label": "交易日"
+          },
+          "y": {
+            "field": "st_rate",
+            "type": "quantitative",
+            "format": "percent",
+            "label": "ST比例"
+          },
+          "color": {
+            "field": "rate_type",
+            "type": "nominal",
+            "label": "计算口径"
+          },
+          "tooltip": [
+            {
+              "field": "universe_count",
+              "format": "number",
+              "label": "池内行数"
+            },
+            {
+              "field": "is_st_count",
+              "format": "number",
+              "label": "is_st行数"
+            }
+          ]
+        },
+        "legend": {
+          "position": "bottom",
+          "sort": "spec"
+        },
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "annual_barrier_table",
+        "title": "年度障碍与终点分布",
+        "subtitle": "2011-2025；路径数、信号日数和ES5均按年度完整支持计算。",
+        "dataset": "annual_barrier",
+        "sourceId": "audit_source",
+        "defaultSort": {
+          "field": "year",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "year",
+            "label": "年份",
+            "type": "number"
+          },
+          {
+            "field": "count",
+            "label": "路径数",
+            "type": "number"
+          },
+          {
+            "field": "date_count",
+            "label": "信号日数",
+            "type": "number"
+          },
+          {
+            "field": "fixed_8pct_hit_rate",
+            "label": "固定8%命中",
+            "format": "percent"
+          },
+          {
+            "field": "volatility_scaled_k1_hit_rate",
+            "label": "k=1命中",
+            "format": "percent"
+          },
+          {
+            "field": "endpoint_mean",
+            "label": "终点算术均值",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "field": "endpoint_mean_log_return",
+            "label": "终点对数均值",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "field": "endpoint_es05",
+            "label": "终点ES5",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "volatility_table",
+        "title": "波动率十分位的障碍与风险",
+        "subtitle": "每组约等量路径；保留波动率、标准化距离、终点和左尾字段以便审计。",
+        "dataset": "barrier_deciles",
+        "sourceId": "audit_source",
+        "defaultSort": {
+          "field": "volatility_decile",
+          "direction": "asc"
+        },
+        "density": "dense",
+        "columns": [
+          {
+            "field": "volatility_decile",
+            "label": "十分位",
+            "type": "number"
+          },
+          {
+            "field": "count",
+            "label": "路径数",
+            "type": "number"
+          },
+          {
+            "field": "volatility_median",
+            "label": "波动率中位数",
+            "format": "percent"
+          },
+          {
+            "field": "standardized_8pct_distance_median",
+            "label": "8%标准化距离",
+            "format": "number"
+          },
+          {
+            "field": "fixed_8pct_hit_rate",
+            "label": "固定8%命中",
+            "format": "percent"
+          },
+          {
+            "field": "volatility_scaled_k1_hit_rate",
+            "label": "k=1命中",
+            "format": "percent"
+          },
+          {
+            "field": "endpoint_mean_log_return",
+            "label": "终点对数均值",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "field": "endpoint_es05",
+            "label": "终点ES5",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "quality_table",
+        "title": "数据质量严重度清单",
+        "subtitle": "高严重度问题会改变标签、特征或推断口径；可选限制没有伪装成缺数。",
+        "dataset": "data_quality_findings",
+        "sourceId": "audit_source",
+        "defaultSort": {
+          "field": "severity",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "severity",
+            "label": "严重度",
+            "type": "text"
+          },
+          {
+            "field": "confidence",
+            "label": "置信度",
+            "type": "text"
+          },
+          {
+            "field": "finding",
+            "label": "问题",
+            "type": "text"
+          },
+          {
+            "field": "evidence",
+            "label": "证据",
+            "type": "text"
+          },
+          {
+            "field": "impact",
+            "label": "影响",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "id": "policy_delay_table",
+        "title": "D10/D20 政策标签延迟",
+        "subtitle": "受阻卖出只受2025截止约束；延迟超过目标期限的数量按股票行统计。",
+        "dataset": "policy_delays",
+        "sourceId": "policy_source",
+        "defaultSort": {
+          "field": "horizon",
+          "direction": "asc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "horizon",
+            "label": "目标期限",
+            "type": "number"
+          },
+          {
+            "field": "resolved_count",
+            "label": "已解析行",
+            "type": "number"
+          },
+          {
+            "field": "delayed_open_count",
+            "label": "延迟开盘",
+            "type": "number"
+          },
+          {
+            "field": "delay_over_20_count",
+            "label": "延迟>20日",
+            "type": "number"
+          },
+          {
+            "field": "delay_over_60_count",
+            "label": "延迟>60日",
+            "type": "number"
+          },
+          {
+            "field": "maximum_delay_days",
+            "label": "最大延迟日数",
+            "type": "number"
+          },
+          {
+            "field": "maximum_policy_return",
+            "label": "最大政策收益",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "threshold_table",
+        "title": "8% 与邻近障碍的配对稳健性",
+        "subtitle": "2023-2025账户配对；HAC和移动块区间未校正本次及历史反复选择。",
+        "dataset": "threshold_robustness",
+        "sourceId": "audit_source",
+        "defaultSort": {
+          "field": "hac_t",
+          "direction": "desc"
+        },
+        "density": "dense",
+        "columns": [
+          {
+            "field": "slot_count",
+            "label": "槽位K",
+            "type": "number"
+          },
+          {
+            "field": "cost",
+            "label": "成本",
+            "type": "text"
+          },
+          {
+            "field": "reference_threshold",
+            "label": "对照",
+            "type": "text"
+          },
+          {
+            "field": "lag_or_block_days",
+            "label": "带宽/块长",
+            "type": "number"
+          },
+          {
+            "field": "annualized_mean_log_return_difference",
+            "label": "年化对数差",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "field": "hac_t",
+            "label": "HAC t",
+            "format": "number",
+            "signed": true
+          },
+          {
+            "field": "annualized_block_bootstrap_ci_low",
+            "label": "区间下界",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "field": "annualized_block_bootstrap_ci_high",
+            "label": "区间上界",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      },
+      {
+        "id": "model_importance_table",
+        "title": "ST市场特征的条件增益摘要",
+        "subtitle": "63个已训练头；gain是树分裂统计，不是因果贡献。",
+        "dataset": "model_importance",
+        "sourceId": "model_source",
+        "defaultSort": {
+          "field": "median_gain_share",
+          "direction": "desc"
+        },
+        "density": "spacious",
+        "columns": [
+          {
+            "field": "model_group",
+            "label": "模型组",
+            "type": "text"
+          },
+          {
+            "field": "model_count",
+            "label": "模型数",
+            "type": "number"
+          },
+          {
+            "field": "positive_gain_count",
+            "label": "正增益数",
+            "type": "number"
+          },
+          {
+            "field": "median_gain_share",
+            "label": "中位增益占比",
+            "format": "percent"
+          },
+          {
+            "field": "minimum_gain_share",
+            "label": "最小增益占比",
+            "format": "percent"
+          },
+          {
+            "field": "maximum_gain_share",
+            "label": "最大增益占比",
+            "format": "percent"
+          },
+          {
+            "field": "median_gain_rank",
+            "label": "中位增益排名",
+            "type": "number"
+          }
+        ]
+      },
+      {
+        "id": "paired_table",
+        "title": "新旧失败分布标签的账户配对",
+        "subtitle": "同一2023-2025信号日历；结果是方向诊断，不是确认性检验。",
+        "dataset": "paired_accounts",
+        "sourceId": "audit_source",
+        "defaultSort": {
+          "field": "hac_t",
+          "direction": "desc"
+        },
+        "density": "dense",
+        "columns": [
+          {
+            "field": "slot_count",
+            "label": "槽位K",
+            "type": "number"
+          },
+          {
+            "field": "cost",
+            "label": "成本",
+            "type": "text"
+          },
+          {
+            "field": "lag_or_block_days",
+            "label": "带宽/块长",
+            "type": "number"
+          },
+          {
+            "field": "annualized_mean_log_return_difference",
+            "label": "年化对数差",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "field": "hac_t",
+            "label": "HAC t",
+            "format": "number",
+            "signed": true
+          },
+          {
+            "field": "annualized_block_bootstrap_ci_low",
+            "label": "区间下界",
+            "format": "percent",
+            "signed": true
+          },
+          {
+            "field": "annualized_block_bootstrap_ci_high",
+            "label": "区间上界",
+            "format": "percent",
+            "signed": true
+          }
+        ]
+      }
+    ],
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "layout": "full",
+        "body": "# A股量化研究的数学地基：2011-2025 数据与模型审计"
+      },
+      {
+        "id": "technical_summary",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## 技术摘要\n\n**结论先行：当前没有一个经过数据修复、时间依赖校正和选择偏差校正后仍被证明有用的强模型。** 固定8%不是数学常数；D20路径的正算术均值在日期等权对数口径下消失。下一步应预测执行相关结果的条件分布，并把低持仓作为后置组合约束。\n\n审计覆盖2011-2025正式期，2010仅作burn-in，2026读取为零。报告把描述性事实、统计推断、理论假设和尚未验证的建议分开。"
+      },
+      {
+        "id": "headline_metrics",
+        "type": "metric-strip",
+        "cardIds": [
+          "path_count_card",
+          "log_mean_card",
+          "tail_card",
+          "barrier_card"
+        ],
+        "layout": "full"
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## 范围、粒度与收益定义\n\n正式输入有 **4,476,851** 行、**3,644** 信号日、**3,005** 个实际模型证券；完整D20价格路径有 **4,385,062** 行、**3,624** 个有效信号日。路径从次日开盘进入，以D20收盘为终点，MFE/TP从D2开始以遵守T+1。`endpoint_return` 是纯价格终点收益，不等于受阻卖出后的政策收益。`log1p(return)` 才是重复资本的可加财富尺度。"
+      },
+      {
+        "id": "fixed8",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## 固定8%没有特殊数学地位\n\n令 `X_s = mu*s + sigma*W_s`，上穿 `a=log(1.08)` 的概率为 `Phi((mu*H-a)/(sigma*sqrt(H))) + exp(2*mu*a/sigma^2) Phi((-mu*H-a)/(sigma*sqrt(H)))`。无量纲输入是障碍 `k=a/(sigma*sqrt(H))` 与漂移 `delta=mu*sqrt(H)/sigma`；只有零漂移时才只依赖 `k`。当前8%的标准化距离中位数为 **0.731**，1%-99%为 **0.269-2.300**。行加权年度固定命中率 **32.58%-70.99%**，说明标签主要在选择波动率和市场状态。波动率标准化为 `k=1` 后年度仍为 **22.25%-41.68%**，所以波动率也不是充分状态变量。"
+      },
+      {
+        "id": "barrier_vol_chart_block",
+        "type": "chart",
+        "chartId": "barrier_volatility_chart",
+        "layout": "full"
+      },
+      {
+        "id": "barrier_table_block",
+        "type": "table",
+        "tableId": "volatility_table",
+        "layout": "full"
+      },
+      {
+        "id": "endpoint",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## 算术均值不能替代对数财富\n\n全体D20终点的算术均值是 **+0.775%**，中位数 **-0.437%**，ES5 **-22.76%**，ES1 **-33.23%**；偏度 **1.62**、超额峰度 **12.47**。行加权对数均值只有 **+0.011%**，日期等权对数均值为 **-0.0317%**。这正是右尾和波动拖累同时存在的情形。命中8%的路径中，**19.97%** 到D20反而为负，**4.68%** 低于-10%，平均峰后回吐 **10.35%**；未命中路径的终点均值 **-5.74%**、ES5 **-25.04%**。"
+      },
+      {
+        "id": "endpoint_year_chart_block",
+        "type": "chart",
+        "chartId": "endpoint_year_chart",
+        "layout": "full"
+      },
+      {
+        "id": "annual_table_block",
+        "type": "table",
+        "tableId": "annual_barrier_table",
+        "layout": "full"
+      },
+      {
+        "id": "dependence",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## 股票行数不是独立实验数\n\n日期固定效应解释约 **29.81%** 的横截面总方差；日均终点收益的lag-1自相关为 **0.951**。把股票行当独立样本的标准误约 **0.0061个百分点**，日期等权后为 **0.1274个百分点**，HAC20/60后为 **0.463%/0.493%**，相应有效日期数只有约 **274/242**。日期等权对数均值的HAC t为 **-0.067/-0.064**，20/60日块区间均跨零。所有模型比较应先按日期聚合损失，再做HAC、块自助或SPA；不能用行级p值证明稳定alpha。"
+      },
+      {
+        "id": "st",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## ST状态存在可定位的数据拼接问题\n\n原始未复权OHLC与状态表的诊断显示，ST比例从 **2011-11-21的7.2068%** 一日跳到 **2011-11-22的1.7875%**；底层状态行数从 **145** 变为 **36**，而总覆盖没有相应断裂。该日期与历史档案范围边界重合，最可能是名称/状态来源拼接，而不是正常市场变化。固定8%平价诊断找到 **6,982** 个已标记、**4,398** 个未标记股票日；它不是官方真值，需用交易所历史简称区间重建。`market_all__st_rate` 与`is_st/pit_universe`内部误差仅 **3.71e-9**，但内部一致不等于外部正确。"
+      },
+      {
+        "id": "st_chart_block",
+        "type": "chart",
+        "chartId": "st_boundary_chart",
+        "layout": "full"
+      },
+      {
+        "id": "quality_table_block",
+        "type": "table",
+        "tableId": "quality_table",
+        "layout": "full"
+      },
+      {
+        "id": "labels",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "policy_source",
+        "body": "## 受阻卖出把D10/D20政策标签变成了不定期限标签\n\nD10有 **31,931** 次延迟开盘，其中 **5,744** 超过20日、**2,960** 超过60日；D20对应 **29,039**、**9,030**、**4,352**。最大延迟 **1,006** 个交易日，极端记录 `000520.SZ/2013-12-25` 的政策收益为 **+587.02%**，填充约两年后发生。`endpoint_return`不受这种重试机制直接污染，但`timeout_return`及其模型明显被污染。正确做法是有限期限加`complete/right_censored/unresolved/invalid`状态，而不是把多年后的可卖价格塞回原标签。"
+      },
+      {
+        "id": "policy_table_block",
+        "type": "table",
+        "tableId": "policy_delay_table",
+        "layout": "full"
+      },
+      {
+        "id": "model_direct",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "t1_model_source",
+        "body": "## 严格T+1目标提高了排序，但削弱了极端尾部捕获\n\n严格T+1直接收益模型把open-to-open Rank IC从冻结旧头的 **0.0033/0.0335/0.0306** 提到 **0.0420/0.0742/0.0774**（2023/2024/2025），说明目标契约会实质改变可学习信号。然而直接模型的Top-5极端尾部捕获率三年都下降，且所有低持仓账户执行面尚未找到稳定正收益区间；这是局部预测能力，不是强模型结论。"
+      },
+      {
+        "id": "model_st",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "model_source",
+        "body": "## 可疑ST状态进入了全部审计模型\n\nST特征在 **63/63** 个审计头有正增益；按组中位增益占比为直接收益 **3.09%**、原路径 **3.36%**、政策目标 **8.60%**、T+1直接收益 **0.94%**。这些是树的条件分裂增益，不能解释为因果贡献，尤其在状态源可疑时；必须修复后做删除/重建消融。"
+      },
+      {
+        "id": "model_table_block",
+        "type": "table",
+        "tableId": "model_importance_table",
+        "layout": "full"
+      },
+      {
+        "id": "model_spec",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "literature_source",
+        "body": "## 正确的预测对象：条件分布而不是8%二分类\n\n令`F_t`为收盘时可用信息，模型应估计 `P(Z_{i,t}|F_t)`，其中`Z`至少包含多期限open/open与open/close收益、MFE、MAE、峰值时间、峰后回吐、标准化障碍的首次穿越时间，以及买卖阻塞和右删失状态。\n\n分位数回归使用 pinball loss，并检查/修复分位数交叉；全分布使用CRPS或log score；VaR与ES用联合严格一致的Fissler-Ziegel分数；首次穿越用带生存项的离散hazard likelihood。右删失行贡献生存概率，不能被强行标成失败。对路径联合分布还需额外的边际/路径分数，因为单一多元分数可能看不出依赖结构错误。相关理论依据见文献证据文件。"
+      },
+      {
+        "id": "decision",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "literature_source",
+        "body": "## 低持仓应是后置决策约束\n\n预测层只负责校准 `P(Z|F_t)`；决策层再解 `max_w E[log(1+w'R_net)] - lambda*CVaR_alpha(-w'R_net)`，约束`w_i>=0`、`sum(w)<=1`、`||w||_0<=K`、容量和换手，并允许现金。没有稳健的正效用时，空仓是可行解。Top-1会放大顺序统计误差和winner's curse，所以“尽可能少仓位”不应反过来污染监督目标。预测后优化损失可以作为后续挑战者，但必须在执行模型冻结后才有可识别含义。"
+      },
+      {
+        "id": "validation",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## 能支撑强模型结论的验证协议\n\n先修复ST和有限期限标签，再冻结数据哈希、目标、候选模型数、损失、超参数预算，以及 `d_t=mean_i[L_baseline-L_model]` 的最小相关改善和预设状态容忍度。用nested purged rolling做外层确认与内层选择，purge至少覆盖最大有限标签依赖期；按日期聚合损失，使用HAC与20/60日块自助；对全候选族使用White Reality Check或Hansen SPA，并用同时区间检查最坏预设状态，对选中的Sharpe只补充DSR。PBO只有在近似独立块足够时才有解释力；本数据D20大约只有181个不重叠块。2023-2025已经反复用于研究选择，只能叫retrospective rolling OOS，不能叫untouched holdout。"
+      },
+      {
+        "id": "annotation_conclusions",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "audit_source",
+        "body": "## 两个批注的最终回答\n\n**Annotation 1：不一定是8%，而且8%没有特殊理论支撑。** 8%只是一个尺度依赖的事件切片；如果继续报告它，必须同时报告标准化障碍、完整分布和邻近阈值的预注册比较。\n\n**Annotation 2：失败分布建模方向成立，但当前改善未被证明。** 新的hit-plus-timeout标签降低了深亏率和ES5，说明控制失败分布有经济含义；然而与旧标签的配对账户改善在HAC/块区间下不显著，不能把它写成已胜出的模型。"
+      },
+      {
+        "id": "next_steps",
+        "type": "markdown",
+        "layout": "full",
+        "body": "## 推荐下一步\n\n1. 用交易所历史简称有效区间重建ST，并做删除/重建消融。\n2. 将受阻卖出改成有限期限、期限专属validity和右删失状态。\n3. 冻结一个小型分布式目标协议：日期先验、L2基线、分位数LightGBM、标准化障碍hazard。\n4. 先通过日期级proper score、尾部校准和SPA/Reality Check，再进入独立执行实验。\n5. 通过后才把场景映射到带现金的log-growth/CVaR低K组合优化，并保留新的未来确认期。"
+      },
+      {
+        "id": "further_questions",
+        "type": "markdown",
+        "layout": "full",
+        "sourceId": "literature_source",
+        "body": "## 仍待回答的问题\n\n- 去除日期共同因子后，哪些特征仍能预测股票相对残差？\n- calibrated first-passage/hazard能否改善峰值实现，而不把未来卖得出去作为标签门槛？\n- 在审计过的佣金、印花税、价差和参与率成本下，最小可接受效果是多少？\n- 在校正目标、期限、特征、阈值和执行的全部试验后，尾部捕获还能剩多少？\n\n外部文献的DOI和适用边界保存在 `literature_evidence.md`；Scite本轮因月度额度耗尽未能提供Smart Citation。"
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-08-05T23:00:00+08:00",
+    "datasets": {
+      "headline": [
+        {
+          "valid_d20_paths": 4385062,
+          "signal_dates": 3624,
+          "row_count": 4476851,
+          "arithmetic_endpoint_mean": 0.0077538453565309225,
+          "date_equal_log_mean": -0.00031743909921318507,
+          "date_equal_log_hac20_t": -0.06726824538653943,
+          "date_equal_log_hac60_t": -0.06418248314754314,
+          "endpoint_es05": -0.22763247062025949,
+          "fixed_8pct_hit_rate": 0.4504609056838877,
+          "scaled_k1_hit_rate": 0.32475435923140883,
+          "st_splice_change": -0.05419271856448203,
+          "maximum_policy_delay_days": 1006,
+          "models_with_st_gain": 63,
+          "audited_model_count": 63
+        }
+      ],
+      "barrier_long": [
+        {
+          "volatility_decile": 1,
+          "volatility_median": 0.0106844818219542,
+          "standardized_distance_median": 1.610654802612265,
+          "endpoint_mean": 0.0058414083309349,
+          "endpoint_mean_log_return": 0.0027894097945326,
+          "endpoint_es05": -0.1471624295507144,
+          "candidate_count": 438507,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.2635305707776614
+        },
+        {
+          "volatility_decile": 1,
+          "volatility_median": 0.0106844818219542,
+          "standardized_distance_median": 1.610654802612265,
+          "endpoint_mean": 0.0058414083309349,
+          "endpoint_mean_log_return": 0.0027894097945326,
+          "endpoint_es05": -0.1471624295507144,
+          "candidate_count": 438507,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.4645877944935884
+        },
+        {
+          "volatility_decile": 2,
+          "volatility_median": 0.0144754387438297,
+          "standardized_distance_median": 1.1888421666866256,
+          "endpoint_mean": 0.0064954385894191,
+          "endpoint_mean_log_return": 0.0020375456080711,
+          "endpoint_es05": -0.1705674669931896,
+          "candidate_count": 438505,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.3388285196291946
+        },
+        {
+          "volatility_decile": 2,
+          "volatility_median": 0.0144754387438297,
+          "standardized_distance_median": 1.1888421666866256,
+          "endpoint_mean": 0.0064954385894191,
+          "endpoint_mean_log_return": 0.0020375456080711,
+          "endpoint_es05": -0.1705674669931896,
+          "candidate_count": 438505,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.4075962645807915
+        },
+        {
+          "volatility_decile": 3,
+          "volatility_median": 0.0171874873340129,
+          "standardized_distance_median": 1.0012523427958242,
+          "endpoint_mean": 0.0064018608923701,
+          "endpoint_mean_log_return": 0.0011370671065897,
+          "endpoint_es05": -0.1826644198219565,
+          "candidate_count": 438507,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.3800828721092251
+        },
+        {
+          "volatility_decile": 3,
+          "volatility_median": 0.0171874873340129,
+          "standardized_distance_median": 1.0012523427958242,
+          "endpoint_mean": 0.0064018608923701,
+          "endpoint_mean_log_return": 0.0011370671065897,
+          "endpoint_es05": -0.1826644198219565,
+          "candidate_count": 438507,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.380985936370457
+        },
+        {
+          "volatility_decile": 4,
+          "volatility_median": 0.0196596812456846,
+          "standardized_distance_median": 0.875345421164021,
+          "endpoint_mean": 0.0058199490278369,
+          "endpoint_mean_log_return": 3.775804983888783e-05,
+          "endpoint_es05": -0.1922033436798238,
+          "candidate_count": 438504,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4085755204057432
+        },
+        {
+          "volatility_decile": 4,
+          "volatility_median": 0.0196596812456846,
+          "standardized_distance_median": 0.875345421164021,
+          "endpoint_mean": 0.0058199490278369,
+          "endpoint_mean_log_return": 3.775804983888783e-05,
+          "endpoint_es05": -0.1922033436798238,
+          "candidate_count": 438504,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3556273146881214
+        },
+        {
+          "volatility_decile": 5,
+          "volatility_median": 0.0221797712147235,
+          "standardized_distance_median": 0.7758877128782252,
+          "endpoint_mean": 0.0073257949583092,
+          "endpoint_mean_log_return": 0.0008149844123194,
+          "endpoint_es05": -0.1994336059626725,
+          "candidate_count": 438508,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.43900453355469
+        },
+        {
+          "volatility_decile": 5,
+          "volatility_median": 0.0221797712147235,
+          "standardized_distance_median": 0.7758877128782252,
+          "endpoint_mean": 0.0073257949583092,
+          "endpoint_mean_log_return": 0.0008149844123194,
+          "endpoint_es05": -0.1994336059626725,
+          "candidate_count": 438508,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3366597644740803
+        },
+        {
+          "volatility_decile": 6,
+          "volatility_median": 0.0250031314790248,
+          "standardized_distance_median": 0.6882742657411046,
+          "endpoint_mean": 0.0086879605434244,
+          "endpoint_mean_log_return": 0.0016948678856093,
+          "endpoint_es05": -0.2063484042774181,
+          "candidate_count": 438506,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4655420906441417
+        },
+        {
+          "volatility_decile": 6,
+          "volatility_median": 0.0250031314790248,
+          "standardized_distance_median": 0.6882742657411046,
+          "endpoint_mean": 0.0086879605434244,
+          "endpoint_mean_log_return": 0.0016948678856093,
+          "endpoint_es05": -0.2063484042774181,
+          "candidate_count": 438506,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3140846419433257
+        },
+        {
+          "volatility_decile": 7,
+          "volatility_median": 0.0282531436532735,
+          "standardized_distance_median": 0.6091007843638814,
+          "endpoint_mean": 0.0102963838967018,
+          "endpoint_mean_log_return": 0.0025532421728871,
+          "endpoint_es05": -0.2148393946989907,
+          "candidate_count": 438506,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4927663475528271
+        },
+        {
+          "volatility_decile": 7,
+          "volatility_median": 0.0282531436532735,
+          "standardized_distance_median": 0.6091007843638814,
+          "endpoint_mean": 0.0102963838967018,
+          "endpoint_mean_log_return": 0.0025532421728871,
+          "endpoint_es05": -0.2148393946989907,
+          "candidate_count": 438506,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2869812499714941
+        },
+        {
+          "volatility_decile": 8,
+          "volatility_median": 0.0321329329162836,
+          "standardized_distance_median": 0.5355568383623575,
+          "endpoint_mean": 0.0116371097185539,
+          "endpoint_mean_log_return": 0.0026379209345361,
+          "endpoint_es05": -0.229607966905972,
+          "candidate_count": 438506,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.523347457047338
+        },
+        {
+          "volatility_decile": 8,
+          "volatility_median": 0.0321329329162836,
+          "standardized_distance_median": 0.5355568383623575,
+          "endpoint_mean": 0.0116371097185539,
+          "endpoint_mean_log_return": 0.0026379209345361,
+          "endpoint_es05": -0.229607966905972,
+          "candidate_count": 438506,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2673965692601697
+        },
+        {
+          "volatility_decile": 9,
+          "volatility_median": 0.0375908855348825,
+          "standardized_distance_median": 0.4577974611421959,
+          "endpoint_mean": 0.011895260493873,
+          "endpoint_mean_log_return": 0.0009826645793671,
+          "endpoint_es05": -0.2573364989446874,
+          "candidate_count": 438506,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.5652556635485033
+        },
+        {
+          "volatility_decile": 9,
+          "volatility_median": 0.0375908855348825,
+          "standardized_distance_median": 0.4577974611421959,
+          "endpoint_mean": 0.011895260493873,
+          "endpoint_mean_log_return": 0.0009826645793671,
+          "endpoint_es05": -0.2573364989446874,
+          "candidate_count": 438506,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2403889570496185
+        },
+        {
+          "volatility_decile": 10,
+          "volatility_median": 0.0484152510762214,
+          "standardized_distance_median": 0.3554460955466581,
+          "endpoint_mean": 0.0031372953483745,
+          "endpoint_mean_log_return": -0.0135748467585863,
+          "endpoint_es05": -0.3431728379516328,
+          "candidate_count": 438507,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.6276752708622667
+        },
+        {
+          "volatility_decile": 10,
+          "volatility_median": 0.0484152510762214,
+          "standardized_distance_median": 0.3554460955466581,
+          "endpoint_mean": 0.0031372953483745,
+          "endpoint_mean_log_return": -0.0135748467585863,
+          "endpoint_es05": -0.3431728379516328,
+          "candidate_count": 438507,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.1932352277158631
+        }
+      ],
+      "annual_long": [
+        {
+          "year": 2011,
+          "year_label": "2011",
+          "candidate_count": 195063,
+          "date_count": 244,
+          "endpoint_mean": -0.0242012184639798,
+          "endpoint_mean_log_return": -0.0309291687752711,
+          "endpoint_es05": -0.2367872615280468,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.3640721202893424
+        },
+        {
+          "year": 2011,
+          "year_label": "2011",
+          "candidate_count": 195063,
+          "date_count": 244,
+          "endpoint_mean": -0.0242012184639798,
+          "endpoint_mean_log_return": -0.0309291687752711,
+          "endpoint_es05": -0.2367872615280468,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2448132141923378
+        },
+        {
+          "year": 2012,
+          "year_label": "2012",
+          "candidate_count": 216440,
+          "date_count": 243,
+          "endpoint_mean": 0.0075595474521925,
+          "endpoint_mean_log_return": 0.0021519156809073,
+          "endpoint_es05": -0.1859586985461307,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4440768804287562
+        },
+        {
+          "year": 2012,
+          "year_label": "2012",
+          "candidate_count": 216440,
+          "date_count": 243,
+          "endpoint_mean": 0.0075595474521925,
+          "endpoint_mean_log_return": 0.0021519156809073,
+          "endpoint_es05": -0.1859586985461307,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3119848456847163
+        },
+        {
+          "year": 2013,
+          "year_label": "2013",
+          "candidate_count": 223930,
+          "date_count": 238,
+          "endpoint_mean": 0.0074340431437211,
+          "endpoint_mean_log_return": 0.0010708919488911,
+          "endpoint_es05": -0.2074840233039992,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4800294734961818
+        },
+        {
+          "year": 2013,
+          "year_label": "2013",
+          "candidate_count": 223930,
+          "date_count": 238,
+          "endpoint_mean": 0.0074340431437211,
+          "endpoint_mean_log_return": 0.0010708919488911,
+          "endpoint_es05": -0.2074840233039992,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3188809002813379
+        },
+        {
+          "year": 2014,
+          "year_label": "2014",
+          "candidate_count": 207666,
+          "date_count": 245,
+          "endpoint_mean": 0.0352926849650069,
+          "endpoint_mean_log_return": 0.0290427039212528,
+          "endpoint_es05": -0.1568211843381608,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.5144559051553937
+        },
+        {
+          "year": 2014,
+          "year_label": "2014",
+          "candidate_count": 207666,
+          "date_count": 245,
+          "endpoint_mean": 0.0352926849650069,
+          "endpoint_mean_log_return": 0.0290427039212528,
+          "endpoint_es05": -0.1568211843381608,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.4167846445734978
+        },
+        {
+          "year": 2015,
+          "year_label": "2015",
+          "candidate_count": 167718,
+          "date_count": 244,
+          "endpoint_mean": 0.0289050690140755,
+          "endpoint_mean_log_return": 0.0032416783398566,
+          "endpoint_es05": -0.4376308168108014,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.7099118758869054
+        },
+        {
+          "year": 2015,
+          "year_label": "2015",
+          "candidate_count": 167718,
+          "date_count": 244,
+          "endpoint_mean": 0.0289050690140755,
+          "endpoint_mean_log_return": 0.0032416783398566,
+          "endpoint_es05": -0.4376308168108014,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3814259650126999
+        },
+        {
+          "year": 2016,
+          "year_label": "2016",
+          "candidate_count": 190987,
+          "date_count": 244,
+          "endpoint_mean": 0.007695454912151,
+          "endpoint_mean_log_return": 0.0030240011949264,
+          "endpoint_es05": -0.1815757783888522,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.420662139307911
+        },
+        {
+          "year": 2016,
+          "year_label": "2016",
+          "candidate_count": 190987,
+          "date_count": 244,
+          "endpoint_mean": 0.007695454912151,
+          "endpoint_mean_log_return": 0.0030240011949264,
+          "endpoint_es05": -0.1815757783888522,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2803436883138643
+        },
+        {
+          "year": 2017,
+          "year_label": "2017",
+          "candidate_count": 235508,
+          "date_count": 244,
+          "endpoint_mean": 0.0008858287604777,
+          "endpoint_mean_log_return": -0.0035601780212366,
+          "endpoint_es05": -0.1875711101114891,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.3513935832328413
+        },
+        {
+          "year": 2017,
+          "year_label": "2017",
+          "candidate_count": 235508,
+          "date_count": 244,
+          "endpoint_mean": 0.0008858287604777,
+          "endpoint_mean_log_return": -0.0035601780212366,
+          "endpoint_es05": -0.1875711101114891,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3295344531820575
+        },
+        {
+          "year": 2018,
+          "year_label": "2018",
+          "candidate_count": 274491,
+          "date_count": 243,
+          "endpoint_mean": -0.0237254904162182,
+          "endpoint_mean_log_return": -0.0298338715569337,
+          "endpoint_es05": -0.2332350694709788,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.3508421041127031
+        },
+        {
+          "year": 2018,
+          "year_label": "2018",
+          "candidate_count": 274491,
+          "date_count": 243,
+          "endpoint_mean": -0.0237254904162182,
+          "endpoint_mean_log_return": -0.0298338715569337,
+          "endpoint_es05": -0.2332350694709788,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2224590241574405
+        },
+        {
+          "year": 2019,
+          "year_label": "2019",
+          "candidate_count": 335675,
+          "date_count": 244,
+          "endpoint_mean": 0.0215484567856337,
+          "endpoint_mean_log_return": 0.0139197388148251,
+          "endpoint_es05": -0.2034908756649244,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4857674834289119
+        },
+        {
+          "year": 2019,
+          "year_label": "2019",
+          "candidate_count": 335675,
+          "date_count": 244,
+          "endpoint_mean": 0.0215484567856337,
+          "endpoint_mean_log_return": 0.0139197388148251,
+          "endpoint_es05": -0.2034908756649244,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3923020779027333
+        },
+        {
+          "year": 2020,
+          "year_label": "2020",
+          "candidate_count": 356981,
+          "date_count": 243,
+          "endpoint_mean": 0.0161280276626322,
+          "endpoint_mean_log_return": 0.00743911586315,
+          "endpoint_es05": -0.2102634259799615,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.5032760847215958
+        },
+        {
+          "year": 2020,
+          "year_label": "2020",
+          "candidate_count": 356981,
+          "date_count": 243,
+          "endpoint_mean": 0.0161280276626322,
+          "endpoint_mean_log_return": 0.00743911586315,
+          "endpoint_es05": -0.2102634259799615,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3459819990419658
+        },
+        {
+          "year": 2021,
+          "year_label": "2021",
+          "candidate_count": 387240,
+          "date_count": 243,
+          "endpoint_mean": 0.0151574256386454,
+          "endpoint_mean_log_return": 0.0063948952986403,
+          "endpoint_es05": -0.2215378108814277,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.5071635161656853
+        },
+        {
+          "year": 2021,
+          "year_label": "2021",
+          "candidate_count": 387240,
+          "date_count": 243,
+          "endpoint_mean": 0.0151574256386454,
+          "endpoint_mean_log_return": 0.0063948952986403,
+          "endpoint_es05": -0.2215378108814277,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3565876459043487
+        },
+        {
+          "year": 2022,
+          "year_label": "2022",
+          "candidate_count": 392842,
+          "date_count": 242,
+          "endpoint_mean": -0.002518271738851,
+          "endpoint_mean_log_return": -0.0104724464196774,
+          "endpoint_es05": -0.2345671697791819,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4533883851523004
+        },
+        {
+          "year": 2022,
+          "year_label": "2022",
+          "candidate_count": 392842,
+          "date_count": 242,
+          "endpoint_mean": -0.002518271738851,
+          "endpoint_mean_log_return": -0.0104724464196774,
+          "endpoint_es05": -0.2345671697791819,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2825588913609033
+        },
+        {
+          "year": 2023,
+          "year_label": "2023",
+          "candidate_count": 409707,
+          "date_count": 242,
+          "endpoint_mean": -0.0090351488418342,
+          "endpoint_mean_log_return": -0.0135491326500663,
+          "endpoint_es05": -0.1816755098498136,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.3257596282221197
+        },
+        {
+          "year": 2023,
+          "year_label": "2023",
+          "candidate_count": 409707,
+          "date_count": 242,
+          "endpoint_mean": -0.0090351488418342,
+          "endpoint_mean_log_return": -0.0135491326500663,
+          "endpoint_es05": -0.1816755098498136,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.2926188715350238
+        },
+        {
+          "year": 2024,
+          "year_label": "2024",
+          "candidate_count": 412237,
+          "date_count": 242,
+          "endpoint_mean": 0.0113191513438676,
+          "endpoint_mean_log_return": 0.0021210419502358,
+          "endpoint_es05": -0.2341565616065938,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4603880777319842
+        },
+        {
+          "year": 2024,
+          "year_label": "2024",
+          "candidate_count": 412237,
+          "date_count": 242,
+          "endpoint_mean": 0.0113191513438676,
+          "endpoint_mean_log_return": 0.0021210419502358,
+          "endpoint_es05": -0.2341565616065938,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3166067092473504
+        },
+        {
+          "year": 2025,
+          "year_label": "2025",
+          "candidate_count": 378577,
+          "date_count": 223,
+          "endpoint_mean": 0.0244142843750373,
+          "endpoint_mean_log_return": 0.0176346295277563,
+          "endpoint_es05": -0.1803440644914371,
+          "barrier_type": "fixed 8%",
+          "hit_rate": 0.4619773520314229
+        },
+        {
+          "year": 2025,
+          "year_label": "2025",
+          "candidate_count": 378577,
+          "date_count": 223,
+          "endpoint_mean": 0.0244142843750373,
+          "endpoint_mean_log_return": 0.0176346295277563,
+          "endpoint_es05": -0.1803440644914371,
+          "barrier_type": "volatility-scaled k=1",
+          "hit_rate": 0.3696949365650845
+        }
+      ],
+      "endpoint_long": [
+        {
+          "year": 2011,
+          "year_label": "2011",
+          "candidate_count": 195063,
+          "endpoint_es05": -0.2367872615280468,
+          "return_measure": "arithmetic endpoint",
+          "value": -0.0242012184639798
+        },
+        {
+          "year": 2011,
+          "year_label": "2011",
+          "candidate_count": 195063,
+          "endpoint_es05": -0.2367872615280468,
+          "return_measure": "log endpoint",
+          "value": -0.0309291687752711
+        },
+        {
+          "year": 2012,
+          "year_label": "2012",
+          "candidate_count": 216440,
+          "endpoint_es05": -0.1859586985461307,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0075595474521925
+        },
+        {
+          "year": 2012,
+          "year_label": "2012",
+          "candidate_count": 216440,
+          "endpoint_es05": -0.1859586985461307,
+          "return_measure": "log endpoint",
+          "value": 0.0021519156809073
+        },
+        {
+          "year": 2013,
+          "year_label": "2013",
+          "candidate_count": 223930,
+          "endpoint_es05": -0.2074840233039992,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0074340431437211
+        },
+        {
+          "year": 2013,
+          "year_label": "2013",
+          "candidate_count": 223930,
+          "endpoint_es05": -0.2074840233039992,
+          "return_measure": "log endpoint",
+          "value": 0.0010708919488911
+        },
+        {
+          "year": 2014,
+          "year_label": "2014",
+          "candidate_count": 207666,
+          "endpoint_es05": -0.1568211843381608,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0352926849650069
+        },
+        {
+          "year": 2014,
+          "year_label": "2014",
+          "candidate_count": 207666,
+          "endpoint_es05": -0.1568211843381608,
+          "return_measure": "log endpoint",
+          "value": 0.0290427039212528
+        },
+        {
+          "year": 2015,
+          "year_label": "2015",
+          "candidate_count": 167718,
+          "endpoint_es05": -0.4376308168108014,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0289050690140755
+        },
+        {
+          "year": 2015,
+          "year_label": "2015",
+          "candidate_count": 167718,
+          "endpoint_es05": -0.4376308168108014,
+          "return_measure": "log endpoint",
+          "value": 0.0032416783398566
+        },
+        {
+          "year": 2016,
+          "year_label": "2016",
+          "candidate_count": 190987,
+          "endpoint_es05": -0.1815757783888522,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.007695454912151
+        },
+        {
+          "year": 2016,
+          "year_label": "2016",
+          "candidate_count": 190987,
+          "endpoint_es05": -0.1815757783888522,
+          "return_measure": "log endpoint",
+          "value": 0.0030240011949264
+        },
+        {
+          "year": 2017,
+          "year_label": "2017",
+          "candidate_count": 235508,
+          "endpoint_es05": -0.1875711101114891,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0008858287604777
+        },
+        {
+          "year": 2017,
+          "year_label": "2017",
+          "candidate_count": 235508,
+          "endpoint_es05": -0.1875711101114891,
+          "return_measure": "log endpoint",
+          "value": -0.0035601780212366
+        },
+        {
+          "year": 2018,
+          "year_label": "2018",
+          "candidate_count": 274491,
+          "endpoint_es05": -0.2332350694709788,
+          "return_measure": "arithmetic endpoint",
+          "value": -0.0237254904162182
+        },
+        {
+          "year": 2018,
+          "year_label": "2018",
+          "candidate_count": 274491,
+          "endpoint_es05": -0.2332350694709788,
+          "return_measure": "log endpoint",
+          "value": -0.0298338715569337
+        },
+        {
+          "year": 2019,
+          "year_label": "2019",
+          "candidate_count": 335675,
+          "endpoint_es05": -0.2034908756649244,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0215484567856337
+        },
+        {
+          "year": 2019,
+          "year_label": "2019",
+          "candidate_count": 335675,
+          "endpoint_es05": -0.2034908756649244,
+          "return_measure": "log endpoint",
+          "value": 0.0139197388148251
+        },
+        {
+          "year": 2020,
+          "year_label": "2020",
+          "candidate_count": 356981,
+          "endpoint_es05": -0.2102634259799615,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0161280276626322
+        },
+        {
+          "year": 2020,
+          "year_label": "2020",
+          "candidate_count": 356981,
+          "endpoint_es05": -0.2102634259799615,
+          "return_measure": "log endpoint",
+          "value": 0.00743911586315
+        },
+        {
+          "year": 2021,
+          "year_label": "2021",
+          "candidate_count": 387240,
+          "endpoint_es05": -0.2215378108814277,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0151574256386454
+        },
+        {
+          "year": 2021,
+          "year_label": "2021",
+          "candidate_count": 387240,
+          "endpoint_es05": -0.2215378108814277,
+          "return_measure": "log endpoint",
+          "value": 0.0063948952986403
+        },
+        {
+          "year": 2022,
+          "year_label": "2022",
+          "candidate_count": 392842,
+          "endpoint_es05": -0.2345671697791819,
+          "return_measure": "arithmetic endpoint",
+          "value": -0.002518271738851
+        },
+        {
+          "year": 2022,
+          "year_label": "2022",
+          "candidate_count": 392842,
+          "endpoint_es05": -0.2345671697791819,
+          "return_measure": "log endpoint",
+          "value": -0.0104724464196774
+        },
+        {
+          "year": 2023,
+          "year_label": "2023",
+          "candidate_count": 409707,
+          "endpoint_es05": -0.1816755098498136,
+          "return_measure": "arithmetic endpoint",
+          "value": -0.0090351488418342
+        },
+        {
+          "year": 2023,
+          "year_label": "2023",
+          "candidate_count": 409707,
+          "endpoint_es05": -0.1816755098498136,
+          "return_measure": "log endpoint",
+          "value": -0.0135491326500663
+        },
+        {
+          "year": 2024,
+          "year_label": "2024",
+          "candidate_count": 412237,
+          "endpoint_es05": -0.2341565616065938,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0113191513438676
+        },
+        {
+          "year": 2024,
+          "year_label": "2024",
+          "candidate_count": 412237,
+          "endpoint_es05": -0.2341565616065938,
+          "return_measure": "log endpoint",
+          "value": 0.0021210419502358
+        },
+        {
+          "year": 2025,
+          "year_label": "2025",
+          "candidate_count": 378577,
+          "endpoint_es05": -0.1803440644914371,
+          "return_measure": "arithmetic endpoint",
+          "value": 0.0244142843750373
+        },
+        {
+          "year": 2025,
+          "year_label": "2025",
+          "candidate_count": 378577,
+          "endpoint_es05": -0.1803440644914371,
+          "return_measure": "log endpoint",
+          "value": 0.0176346295277563
+        }
+      ],
+      "st_boundary_long": [
+        {
+          "trade_date": "2011-11-15",
+          "date_label": "2011-11-15",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0720675944333996
+        },
+        {
+          "trade_date": "2011-11-15",
+          "date_label": "2011-11-15",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "feature value",
+          "st_rate": 0.0720675960183143
+        },
+        {
+          "trade_date": "2011-11-16",
+          "date_label": "2011-11-16",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0720675944333996
+        },
+        {
+          "trade_date": "2011-11-16",
+          "date_label": "2011-11-16",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "feature value",
+          "st_rate": 0.0720675960183143
+        },
+        {
+          "trade_date": "2011-11-17",
+          "date_label": "2011-11-17",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0720675944333996
+        },
+        {
+          "trade_date": "2011-11-17",
+          "date_label": "2011-11-17",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "feature value",
+          "st_rate": 0.0720675960183143
+        },
+        {
+          "trade_date": "2011-11-18",
+          "date_label": "2011-11-18",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0720675944333996
+        },
+        {
+          "trade_date": "2011-11-18",
+          "date_label": "2011-11-18",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "feature value",
+          "st_rate": 0.0720675960183143
+        },
+        {
+          "trade_date": "2011-11-21",
+          "date_label": "2011-11-21",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0720675944333996
+        },
+        {
+          "trade_date": "2011-11-21",
+          "date_label": "2011-11-21",
+          "universe_count": 2012,
+          "is_st_count": 145,
+          "rate_type": "feature value",
+          "st_rate": 0.0720675960183143
+        },
+        {
+          "trade_date": "2011-11-22",
+          "date_label": "2011-11-22",
+          "universe_count": 2014,
+          "is_st_count": 36,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0178748758689175
+        },
+        {
+          "trade_date": "2011-11-22",
+          "date_label": "2011-11-22",
+          "universe_count": 2014,
+          "is_st_count": 36,
+          "rate_type": "feature value",
+          "st_rate": 0.01787487603724
+        },
+        {
+          "trade_date": "2011-11-23",
+          "date_label": "2011-11-23",
+          "universe_count": 2014,
+          "is_st_count": 36,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0178748758689175
+        },
+        {
+          "trade_date": "2011-11-23",
+          "date_label": "2011-11-23",
+          "universe_count": 2014,
+          "is_st_count": 36,
+          "rate_type": "feature value",
+          "st_rate": 0.01787487603724
+        },
+        {
+          "trade_date": "2011-11-24",
+          "date_label": "2011-11-24",
+          "universe_count": 2014,
+          "is_st_count": 36,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0178748758689175
+        },
+        {
+          "trade_date": "2011-11-24",
+          "date_label": "2011-11-24",
+          "universe_count": 2014,
+          "is_st_count": 36,
+          "rate_type": "feature value",
+          "st_rate": 0.01787487603724
+        },
+        {
+          "trade_date": "2011-11-25",
+          "date_label": "2011-11-25",
+          "universe_count": 2018,
+          "is_st_count": 36,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0178394449950445
+        },
+        {
+          "trade_date": "2011-11-25",
+          "date_label": "2011-11-25",
+          "universe_count": 2018,
+          "is_st_count": 36,
+          "rate_type": "feature value",
+          "st_rate": 0.0178394448012113
+        },
+        {
+          "trade_date": "2011-11-28",
+          "date_label": "2011-11-28",
+          "universe_count": 2018,
+          "is_st_count": 36,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0178394449950445
+        },
+        {
+          "trade_date": "2011-11-28",
+          "date_label": "2011-11-28",
+          "universe_count": 2018,
+          "is_st_count": 36,
+          "rate_type": "feature value",
+          "st_rate": 0.0178394448012113
+        },
+        {
+          "trade_date": "2011-11-29",
+          "date_label": "2011-11-29",
+          "universe_count": 2018,
+          "is_st_count": 36,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0178394449950445
+        },
+        {
+          "trade_date": "2011-11-29",
+          "date_label": "2011-11-29",
+          "universe_count": 2018,
+          "is_st_count": 36,
+          "rate_type": "feature value",
+          "st_rate": 0.0178394448012113
+        },
+        {
+          "trade_date": "2011-11-30",
+          "date_label": "2011-11-30",
+          "universe_count": 2019,
+          "is_st_count": 36,
+          "rate_type": "calculated from is_st",
+          "st_rate": 0.0178306092124814
+        },
+        {
+          "trade_date": "2011-11-30",
+          "date_label": "2011-11-30",
+          "universe_count": 2019,
+          "is_st_count": 36,
+          "rate_type": "feature value",
+          "st_rate": 0.0178306084126234
+        }
+      ],
+      "barrier_deciles": [
+        {
+          "volatility_decile": 1,
+          "count": 438507,
+          "volatility_median": 0.0106844818219542,
+          "standardized_8pct_distance_median": 1.610654802612265,
+          "fixed_8pct_hit_rate": 0.2635305707776614,
+          "volatility_scaled_k1_hit_rate": 0.4645877944935884,
+          "zero_drift_brownian_hit_probability_mean": 0.1007521866697274,
+          "endpoint_mean": 0.0058414083309349,
+          "endpoint_mean_log_return": 0.0027894097945326,
+          "endpoint_median": 0.0,
+          "endpoint_es05": -0.1471624295507144,
+          "mfe_median": 0.0416108258068561,
+          "mae_median": -0.0376012995839118
+        },
+        {
+          "volatility_decile": 2,
+          "count": 438505,
+          "volatility_median": 0.0144754387438297,
+          "standardized_8pct_distance_median": 1.1888421666866256,
+          "fixed_8pct_hit_rate": 0.3388285196291946,
+          "volatility_scaled_k1_hit_rate": 0.4075962645807915,
+          "zero_drift_brownian_hit_probability_mean": 0.2327480276224925,
+          "endpoint_mean": 0.0064954385894191,
+          "endpoint_mean_log_return": 0.0020375456080711,
+          "endpoint_median": -0.0025381138548254,
+          "endpoint_es05": -0.1705674669931896,
+          "mfe_median": 0.0516461916267871,
+          "mae_median": -0.0494808815419673
+        },
+        {
+          "volatility_decile": 3,
+          "count": 438507,
+          "volatility_median": 0.0171874873340129,
+          "standardized_8pct_distance_median": 1.0012523427958242,
+          "fixed_8pct_hit_rate": 0.3800828721092251,
+          "volatility_scaled_k1_hit_rate": 0.380985936370457,
+          "zero_drift_brownian_hit_probability_mean": 0.3160365809219795,
+          "endpoint_mean": 0.0064018608923701,
+          "endpoint_mean_log_return": 0.0011370671065897,
+          "endpoint_median": -0.0044247903861105,
+          "endpoint_es05": -0.1826644198219565,
+          "mfe_median": 0.057734228670597,
+          "mae_median": -0.0566037558019161
+        },
+        {
+          "volatility_decile": 4,
+          "count": 438504,
+          "volatility_median": 0.0196596812456846,
+          "standardized_8pct_distance_median": 0.875345421164021,
+          "fixed_8pct_hit_rate": 0.4085755204057432,
+          "volatility_scaled_k1_hit_rate": 0.3556273146881214,
+          "zero_drift_brownian_hit_probability_mean": 0.3810565812342871,
+          "endpoint_mean": 0.0058199490278369,
+          "endpoint_mean_log_return": 3.775804983888783e-05,
+          "endpoint_median": -0.0054054034408181,
+          "endpoint_es05": -0.1922033436798238,
+          "mfe_median": 0.0621849223971366,
+          "mae_median": -0.0619658157229423
+        },
+        {
+          "volatility_decile": 5,
+          "count": 438508,
+          "volatility_median": 0.0221797712147235,
+          "standardized_8pct_distance_median": 0.7758877128782252,
+          "fixed_8pct_hit_rate": 0.43900453355469,
+          "volatility_scaled_k1_hit_rate": 0.3366597644740803,
+          "zero_drift_brownian_hit_probability_mean": 0.4377431103702272,
+          "endpoint_mean": 0.0073257949583092,
+          "endpoint_mean_log_return": 0.0008149844123194,
+          "endpoint_median": -0.005165277281776,
+          "endpoint_es05": -0.1994336059626725,
+          "mfe_median": 0.0677847117185592,
+          "mae_median": -0.0661970824003219
+        },
+        {
+          "volatility_decile": 6,
+          "count": 438506,
+          "volatility_median": 0.0250031314790248,
+          "standardized_8pct_distance_median": 0.6882742657411046,
+          "fixed_8pct_hit_rate": 0.4655420906441417,
+          "volatility_scaled_k1_hit_rate": 0.3140846419433257,
+          "zero_drift_brownian_hit_probability_mean": 0.491178672451571,
+          "endpoint_mean": 0.0086879605434244,
+          "endpoint_mean_log_return": 0.0016948678856093,
+          "endpoint_median": -0.0040760904084891,
+          "endpoint_es05": -0.2063484042774181,
+          "mfe_median": 0.0728793889284133,
+          "mae_median": -0.0689265392720699
+        },
+        {
+          "volatility_decile": 7,
+          "count": 438506,
+          "volatility_median": 0.0282531436532735,
+          "standardized_8pct_distance_median": 0.6091007843638814,
+          "fixed_8pct_hit_rate": 0.4927663475528271,
+          "volatility_scaled_k1_hit_rate": 0.2869812499714941,
+          "zero_drift_brownian_hit_probability_mean": 0.5423400937610123,
+          "endpoint_mean": 0.0102963838967018,
+          "endpoint_mean_log_return": 0.0025532421728871,
+          "endpoint_median": -0.0038610172923654,
+          "endpoint_es05": -0.2148393946989907,
+          "mfe_median": 0.0784916281700134,
+          "mae_median": -0.0714285671710968
+        },
+        {
+          "volatility_decile": 8,
+          "count": 438506,
+          "volatility_median": 0.0321329329162836,
+          "standardized_8pct_distance_median": 0.5355568383623575,
+          "fixed_8pct_hit_rate": 0.523347457047338,
+          "volatility_scaled_k1_hit_rate": 0.2673965692601697,
+          "zero_drift_brownian_hit_probability_mean": 0.5924467261822342,
+          "endpoint_mean": 0.0116371097185539,
+          "endpoint_mean_log_return": 0.0026379209345361,
+          "endpoint_median": -0.0043103294447064,
+          "endpoint_es05": -0.229607966905972,
+          "mfe_median": 0.0853293426334858,
+          "mae_median": -0.0764015354216098
+        },
+        {
+          "volatility_decile": 9,
+          "count": 438506,
+          "volatility_median": 0.0375908855348825,
+          "standardized_8pct_distance_median": 0.4577974611421959,
+          "fixed_8pct_hit_rate": 0.5652556635485033,
+          "volatility_scaled_k1_hit_rate": 0.2403889570496185,
+          "zero_drift_brownian_hit_probability_mean": 0.6476664852005858,
+          "endpoint_mean": 0.011895260493873,
+          "endpoint_mean_log_return": 0.0009826645793671,
+          "endpoint_median": -0.0052460646256804,
+          "endpoint_es05": -0.2573364989446874,
+          "mfe_median": 0.0958447232842445,
+          "mae_median": -0.0829723514616489
+        },
+        {
+          "volatility_decile": 10,
+          "count": 438507,
+          "volatility_median": 0.0484152510762214,
+          "standardized_8pct_distance_median": 0.3554460955466581,
+          "fixed_8pct_hit_rate": 0.6276752708622667,
+          "volatility_scaled_k1_hit_rate": 0.1932352277158631,
+          "zero_drift_brownian_hit_probability_mean": 0.7304553435942647,
+          "endpoint_mean": 0.0031372953483745,
+          "endpoint_mean_log_return": -0.0135748467585863,
+          "endpoint_median": -0.0156863629817962,
+          "endpoint_es05": -0.3431728379516328,
+          "mfe_median": 0.1169942393898963,
+          "mae_median": -0.1051259711384773
+        }
+      ],
+      "annual_barrier": [
+        {
+          "year": 2011,
+          "count": 195063,
+          "date_count": 244,
+          "fixed_8pct_hit_rate": 0.3640721202893424,
+          "fixed_8pct_daily_equal_hit_rate": 0.3665054756866382,
+          "volatility_scaled_k1_hit_rate": 0.2448132141923378,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.246841223150655,
+          "endpoint_mean": -0.0242012184639798,
+          "endpoint_mean_log_return": -0.0309291687752711,
+          "endpoint_es05": -0.2367872615280468
+        },
+        {
+          "year": 2012,
+          "count": 216440,
+          "date_count": 243,
+          "fixed_8pct_hit_rate": 0.4440768804287562,
+          "fixed_8pct_daily_equal_hit_rate": 0.4441524266872136,
+          "volatility_scaled_k1_hit_rate": 0.3119848456847163,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.311614780367683,
+          "endpoint_mean": 0.0075595474521925,
+          "endpoint_mean_log_return": 0.0021519156809073,
+          "endpoint_es05": -0.1859586985461307
+        },
+        {
+          "year": 2013,
+          "count": 223930,
+          "date_count": 238,
+          "fixed_8pct_hit_rate": 0.4800294734961818,
+          "fixed_8pct_daily_equal_hit_rate": 0.4800242092720391,
+          "volatility_scaled_k1_hit_rate": 0.3188809002813379,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3192122282942779,
+          "endpoint_mean": 0.0074340431437211,
+          "endpoint_mean_log_return": 0.0010708919488911,
+          "endpoint_es05": -0.2074840233039992
+        },
+        {
+          "year": 2014,
+          "count": 207666,
+          "date_count": 245,
+          "fixed_8pct_hit_rate": 0.5144559051553937,
+          "fixed_8pct_daily_equal_hit_rate": 0.5175707472817282,
+          "volatility_scaled_k1_hit_rate": 0.4167846445734978,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.4200686839867503,
+          "endpoint_mean": 0.0352926849650069,
+          "endpoint_mean_log_return": 0.0290427039212528,
+          "endpoint_es05": -0.1568211843381608
+        },
+        {
+          "year": 2015,
+          "count": 167718,
+          "date_count": 244,
+          "fixed_8pct_hit_rate": 0.7099118758869054,
+          "fixed_8pct_daily_equal_hit_rate": 0.7080068048569146,
+          "volatility_scaled_k1_hit_rate": 0.3814259650126999,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3723786001448047,
+          "endpoint_mean": 0.0289050690140755,
+          "endpoint_mean_log_return": 0.0032416783398566,
+          "endpoint_es05": -0.4376308168108014
+        },
+        {
+          "year": 2016,
+          "count": 190987,
+          "date_count": 244,
+          "fixed_8pct_hit_rate": 0.420662139307911,
+          "fixed_8pct_daily_equal_hit_rate": 0.4272713438907051,
+          "volatility_scaled_k1_hit_rate": 0.2803436883138643,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.2761169797005782,
+          "endpoint_mean": 0.007695454912151,
+          "endpoint_mean_log_return": 0.0030240011949264,
+          "endpoint_es05": -0.1815757783888522
+        },
+        {
+          "year": 2017,
+          "count": 235508,
+          "date_count": 244,
+          "fixed_8pct_hit_rate": 0.3513935832328413,
+          "fixed_8pct_daily_equal_hit_rate": 0.3510863285278202,
+          "volatility_scaled_k1_hit_rate": 0.3295344531820575,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3307379030276942,
+          "endpoint_mean": 0.0008858287604777,
+          "endpoint_mean_log_return": -0.0035601780212366,
+          "endpoint_es05": -0.1875711101114891
+        },
+        {
+          "year": 2018,
+          "count": 274491,
+          "date_count": 243,
+          "fixed_8pct_hit_rate": 0.3508421041127031,
+          "fixed_8pct_daily_equal_hit_rate": 0.3496931440467136,
+          "volatility_scaled_k1_hit_rate": 0.2224590241574405,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.2222408473710377,
+          "endpoint_mean": -0.0237254904162182,
+          "endpoint_mean_log_return": -0.0298338715569337,
+          "endpoint_es05": -0.2332350694709788
+        },
+        {
+          "year": 2019,
+          "count": 335675,
+          "date_count": 244,
+          "fixed_8pct_hit_rate": 0.4857674834289119,
+          "fixed_8pct_daily_equal_hit_rate": 0.491227755675528,
+          "volatility_scaled_k1_hit_rate": 0.3923020779027333,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3966467101175278,
+          "endpoint_mean": 0.0215484567856337,
+          "endpoint_mean_log_return": 0.0139197388148251,
+          "endpoint_es05": -0.2034908756649244
+        },
+        {
+          "year": 2020,
+          "count": 356981,
+          "date_count": 243,
+          "fixed_8pct_hit_rate": 0.5032760847215958,
+          "fixed_8pct_daily_equal_hit_rate": 0.5042993360222661,
+          "volatility_scaled_k1_hit_rate": 0.3459819990419658,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3474723945417184,
+          "endpoint_mean": 0.0161280276626322,
+          "endpoint_mean_log_return": 0.00743911586315,
+          "endpoint_es05": -0.2102634259799615
+        },
+        {
+          "year": 2021,
+          "count": 387240,
+          "date_count": 243,
+          "fixed_8pct_hit_rate": 0.5071635161656853,
+          "fixed_8pct_daily_equal_hit_rate": 0.5067273769673415,
+          "volatility_scaled_k1_hit_rate": 0.3565876459043487,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3562665848949558,
+          "endpoint_mean": 0.0151574256386454,
+          "endpoint_mean_log_return": 0.0063948952986403,
+          "endpoint_es05": -0.2215378108814277
+        },
+        {
+          "year": 2022,
+          "count": 392842,
+          "date_count": 242,
+          "fixed_8pct_hit_rate": 0.4533883851523004,
+          "fixed_8pct_daily_equal_hit_rate": 0.453371331416716,
+          "volatility_scaled_k1_hit_rate": 0.2825588913609033,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.2824955536506592,
+          "endpoint_mean": -0.002518271738851,
+          "endpoint_mean_log_return": -0.0104724464196774,
+          "endpoint_es05": -0.2345671697791819
+        },
+        {
+          "year": 2023,
+          "count": 409707,
+          "date_count": 242,
+          "fixed_8pct_hit_rate": 0.3257596282221197,
+          "fixed_8pct_daily_equal_hit_rate": 0.3263239841949207,
+          "volatility_scaled_k1_hit_rate": 0.2926188715350238,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.2934730921142816,
+          "endpoint_mean": -0.0090351488418342,
+          "endpoint_mean_log_return": -0.0135491326500663,
+          "endpoint_es05": -0.1816755098498136
+        },
+        {
+          "year": 2024,
+          "count": 412237,
+          "date_count": 242,
+          "fixed_8pct_hit_rate": 0.4603880777319842,
+          "fixed_8pct_daily_equal_hit_rate": 0.4609503085140139,
+          "volatility_scaled_k1_hit_rate": 0.3166067092473504,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3172444512838574,
+          "endpoint_mean": 0.0113191513438676,
+          "endpoint_mean_log_return": 0.0021210419502358,
+          "endpoint_es05": -0.2341565616065938
+        },
+        {
+          "year": 2025,
+          "count": 378577,
+          "date_count": 223,
+          "fixed_8pct_hit_rate": 0.4619773520314229,
+          "fixed_8pct_daily_equal_hit_rate": 0.4621354879044321,
+          "volatility_scaled_k1_hit_rate": 0.3696949365650845,
+          "volatility_scaled_k1_daily_equal_hit_rate": 0.3703388080387435,
+          "endpoint_mean": 0.0244142843750373,
+          "endpoint_mean_log_return": 0.0176346295277563,
+          "endpoint_es05": -0.1803440644914371
+        }
+      ],
+      "data_quality_findings": [
+        {
+          "severity": "high",
+          "confidence": "high",
+          "finding": "Policy labels can defer a D10/D20 exit until any later sellable open",
+          "evidence": "Maximum observed delay is 1006 trading days; the implementation has only a 2025 cutoff.",
+          "impact": "Target horizon, purge length, timeout-return tails, and calibration no longer describe D10/D20.",
+          "severity_rank": 1
+        },
+        {
+          "severity": "high",
+          "confidence": "high",
+          "finding": "The historical ST-state series has an implausible one-day splice discontinuity",
+          "evidence": "ST rate moves from 7.2068% on 2011-11-21 to 1.7875% on 2011-11-22.",
+          "impact": "Universe rules, reconstructed price limits, market-state interactions, and blocked-exit labels may all change.",
+          "severity_rank": 1
+        },
+        {
+          "severity": "high",
+          "confidence": "medium",
+          "finding": "Many raw-price flat days at an exact +/-5% tick are not marked ST",
+          "evidence": "Diagnostic count is 4398 stock-days versus 6982 marked stock-days.",
+          "impact": "The test is not an official-name truth set and may include corporate-action edge cases, but the scale requires an exchange-name-interval reconstruction.",
+          "severity_rank": 1
+        },
+        {
+          "severity": "high",
+          "confidence": "high",
+          "finding": "Candidate rows are not independent observations",
+          "evidence": "There are 4,385,062 D20 paths but only 3,624 signal dates and about 181.2 non-overlapping 20-day blocks.",
+          "impact": "Row-level p-values and random-row validation materially understate uncertainty.",
+          "severity_rank": 1
+        },
+        {
+          "severity": "medium",
+          "confidence": "high",
+          "finding": "The ST-rate feature is correctly named as a date-level market rate, but it is built from suspect ST states",
+          "evidence": "Its maximum difference from is_st/pit_universe is 3.71e-09; it receives positive gain in 63/63 audited models.",
+          "impact": "The feature is not wrong merely because it is constant within date; repair the source and run a drop/rebuild ablation.",
+          "severity_rank": 2
+        },
+        {
+          "severity": "high",
+          "confidence": "high",
+          "finding": "2023-2025 is retrospective rolling OOS, not an untouched holdout",
+          "evidence": "The same period has already been used repeatedly for target, threshold, model, and execution comparisons.",
+          "impact": "Current confidence intervals do not include adaptive research selection; final confirmation requires future frozen data.",
+          "severity_rank": 1
+        }
+      ],
+      "policy_delays": [
+        {
+          "horizon": 10,
+          "resolved_count": 4443174,
+          "delayed_open_count": 31931,
+          "delay_over_20_count": 5744,
+          "delay_over_60_count": 2960,
+          "maximum_delay_days": 1006,
+          "maximum_fill_day": 1016,
+          "maximum_policy_return": 5.870229244232178
+        },
+        {
+          "horizon": 20,
+          "resolved_count": 4426360,
+          "delayed_open_count": 29039,
+          "delay_over_20_count": 9030,
+          "delay_over_60_count": 4352,
+          "maximum_delay_days": 1006,
+          "maximum_fill_day": 1026,
+          "maximum_policy_return": 5.870229244232178
+        }
+      ],
+      "model_importance": [
+        {
+          "model_group": "direct_return_15",
+          "model_count": 15,
+          "positive_gain_count": 15,
+          "median_gain_share": 0.0309395229621717,
+          "minimum_gain_share": 0.0065989599330679,
+          "maximum_gain_share": 0.0670434928058689,
+          "median_gain_rank": 1.0,
+          "best_gain_rank": 1,
+          "worst_gain_rank": 39
+        },
+        {
+          "model_group": "original_path_24",
+          "model_count": 24,
+          "positive_gain_count": 24,
+          "median_gain_share": 0.0336411069785153,
+          "minimum_gain_share": 0.0051644195079005,
+          "maximum_gain_share": 0.1133325052117575,
+          "median_gain_rank": 9.5,
+          "best_gain_rank": 1,
+          "worst_gain_rank": 42
+        },
+        {
+          "model_group": "policy_target_18",
+          "model_count": 18,
+          "positive_gain_count": 18,
+          "median_gain_share": 0.0859762706744414,
+          "minimum_gain_share": 0.0467095184722236,
+          "maximum_gain_share": 0.1465013814355532,
+          "median_gain_rank": 1.0,
+          "best_gain_rank": 1,
+          "worst_gain_rank": 4
+        },
+        {
+          "model_group": "t1_direct_6",
+          "model_count": 6,
+          "positive_gain_count": 6,
+          "median_gain_share": 0.0094251658803861,
+          "minimum_gain_share": 0.0062786418770196,
+          "maximum_gain_share": 0.0155975271601855,
+          "median_gain_rank": 21.0,
+          "best_gain_rank": 4,
+          "worst_gain_rank": 47
+        }
+      ],
+      "threshold_robustness": [
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0815069652977001,
+          "annualized_hac_standard_error": 0.0952246405615554,
+          "hac_t": 0.8559440583554854,
+          "annualized_block_bootstrap_ci_low": -0.1054677035757004,
+          "annualized_block_bootstrap_ci_high": 0.2643818327481836,
+          "slot_count": 6,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0815069652977001,
+          "annualized_hac_standard_error": 0.1025133752632446,
+          "hac_t": 0.7950861542544863,
+          "annualized_block_bootstrap_ci_low": -0.107673479181972,
+          "annualized_block_bootstrap_ci_high": 0.3047303129918942,
+          "slot_count": 6,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0858175142124852,
+          "annualized_hac_standard_error": 0.1055401706865483,
+          "hac_t": 0.8131265437059142,
+          "annualized_block_bootstrap_ci_low": -0.1311851899125352,
+          "annualized_block_bootstrap_ci_high": 0.2915043783689671,
+          "slot_count": 6,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0858175142124852,
+          "annualized_hac_standard_error": 0.0907244788643139,
+          "hac_t": 0.9459135537260296,
+          "annualized_block_bootstrap_ci_low": -0.098886790986408,
+          "annualized_block_bootstrap_ci_high": 0.2623625143437167,
+          "slot_count": 6,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0600839080809995,
+          "annualized_hac_standard_error": 0.1593227021082731,
+          "hac_t": 0.3771208201086592,
+          "annualized_block_bootstrap_ci_low": -0.2584037385361993,
+          "annualized_block_bootstrap_ci_high": 0.362083123960756,
+          "slot_count": 6,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0600839080809995,
+          "annualized_hac_standard_error": 0.1781098856564065,
+          "hac_t": 0.3373417924533846,
+          "annualized_block_bootstrap_ci_low": -0.2692915262666344,
+          "annualized_block_bootstrap_ci_high": 0.4430732093548477,
+          "slot_count": 6,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0876587374339725,
+          "annualized_hac_standard_error": 0.0942874049389588,
+          "hac_t": 0.9296972113160004,
+          "annualized_block_bootstrap_ci_low": -0.1072241002673863,
+          "annualized_block_bootstrap_ci_high": 0.2755005875657312,
+          "slot_count": 6,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0876587374339725,
+          "annualized_hac_standard_error": 0.1012052463266671,
+          "hac_t": 0.8661481555119228,
+          "annualized_block_bootstrap_ci_low": -0.0955503425482044,
+          "annualized_block_bootstrap_ci_high": 0.3139233607253734,
+          "slot_count": 6,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0804774299990722,
+          "annualized_hac_standard_error": 0.1048234626257312,
+          "hac_t": 0.7677425261786506,
+          "annualized_block_bootstrap_ci_low": -0.1342435949530418,
+          "annualized_block_bootstrap_ci_high": 0.277129087469301,
+          "slot_count": 6,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0804774299990722,
+          "annualized_hac_standard_error": 0.0902906312446844,
+          "hac_t": 0.8913153988366888,
+          "annualized_block_bootstrap_ci_low": -0.1115696116638083,
+          "annualized_block_bootstrap_ci_high": 0.2576356905873082,
+          "slot_count": 6,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0428586124037744,
+          "annualized_hac_standard_error": 0.1589028671651483,
+          "hac_t": 0.2697157903339236,
+          "annualized_block_bootstrap_ci_low": -0.2717742113307317,
+          "annualized_block_bootstrap_ci_high": 0.3486922832863382,
+          "slot_count": 6,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0428586124037744,
+          "annualized_hac_standard_error": 0.1775602355421507,
+          "hac_t": 0.2413750594152615,
+          "annualized_block_bootstrap_ci_low": -0.2710173314627884,
+          "annualized_block_bootstrap_ci_high": 0.4284233356761034,
+          "slot_count": 6,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.1852350252408429,
+          "annualized_hac_standard_error": 0.0581171691410919,
+          "hac_t": 3.187268546944278,
+          "annualized_block_bootstrap_ci_low": 0.0759017173888974,
+          "annualized_block_bootstrap_ci_high": 0.3063780005679313,
+          "slot_count": 12,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.1852350252408429,
+          "annualized_hac_standard_error": 0.0524768308990908,
+          "hac_t": 3.5298439724196844,
+          "annualized_block_bootstrap_ci_low": 0.0837484754376952,
+          "annualized_block_bootstrap_ci_high": 0.2942072793999832,
+          "slot_count": 12,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0747541642053906,
+          "annualized_hac_standard_error": 0.0690367192195031,
+          "hac_t": 1.082817449185394,
+          "annualized_block_bootstrap_ci_low": -0.0718266388302557,
+          "annualized_block_bootstrap_ci_high": 0.212440509377587,
+          "slot_count": 12,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0747541642053906,
+          "annualized_hac_standard_error": 0.0720371259080301,
+          "hac_t": 1.037717194614751,
+          "annualized_block_bootstrap_ci_low": -0.0643273923989273,
+          "annualized_block_bootstrap_ci_high": 0.2226071826470787,
+          "slot_count": 12,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.21886871075869,
+          "annualized_hac_standard_error": 0.0922968133030136,
+          "hac_t": 2.371357178282381,
+          "annualized_block_bootstrap_ci_low": 0.0341422382550849,
+          "annualized_block_bootstrap_ci_high": 0.3976969017209982,
+          "slot_count": 12,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.21886871075869,
+          "annualized_hac_standard_error": 0.0627800771163008,
+          "hac_t": 3.4862765516078147,
+          "annualized_block_bootstrap_ci_low": 0.1004350380187013,
+          "annualized_block_bootstrap_ci_high": 0.3509174070819623,
+          "slot_count": 12,
+          "cost": "base",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.1943479566036255,
+          "annualized_hac_standard_error": 0.0579695110890063,
+          "hac_t": 3.3525891965040717,
+          "annualized_block_bootstrap_ci_low": 0.0823849979410787,
+          "annualized_block_bootstrap_ci_high": 0.3095109657822533,
+          "slot_count": 12,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__tp05_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.1943479566036255,
+          "annualized_hac_standard_error": 0.0521400214814677,
+          "hac_t": 3.727423792349281,
+          "annualized_block_bootstrap_ci_low": 0.0929839274728987,
+          "annualized_block_bootstrap_ci_high": 0.3068289373236318,
+          "slot_count": 12,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp05"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0728175262457398,
+          "annualized_hac_standard_error": 0.0682358561296189,
+          "hac_t": 1.067144612466174,
+          "annualized_block_bootstrap_ci_low": -0.0603359553119948,
+          "annualized_block_bootstrap_ci_high": 0.2039725338904558,
+          "slot_count": 12,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__tp10_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0728175262457398,
+          "annualized_hac_standard_error": 0.0707438685975928,
+          "hac_t": 1.0293121890172894,
+          "annualized_block_bootstrap_ci_low": -0.0615395224047943,
+          "annualized_block_bootstrap_ci_high": 0.2275765802041884,
+          "slot_count": 12,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "tp10"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.209554846882525,
+          "annualized_hac_standard_error": 0.0933766147366396,
+          "hac_t": 2.244189805697666,
+          "annualized_block_bootstrap_ci_low": 0.0196055345073485,
+          "annualized_block_bootstrap_ci_high": 0.4020130855557254,
+          "slot_count": 12,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        },
+        {
+          "preferred_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__timeout_only_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.209554846882525,
+          "annualized_hac_standard_error": 0.0638273402631252,
+          "hac_t": 3.283151796998668,
+          "annualized_block_bootstrap_ci_low": 0.0867842050404183,
+          "annualized_block_bootstrap_ci_high": 0.3390979014766914,
+          "slot_count": 12,
+          "cost": "stress",
+          "preferred_threshold": "8pct",
+          "reference_threshold": "timeout_only"
+        }
+      ],
+      "paired_accounts": [
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0456909063921485,
+          "annualized_hac_standard_error": 0.1560294960998222,
+          "hac_t": 0.2928350570517583,
+          "annualized_block_bootstrap_ci_low": -0.2575236082490941,
+          "annualized_block_bootstrap_ci_high": 0.3666597782165344,
+          "slot_count": 6,
+          "cost": "base"
+        },
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k06__base",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k06__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0456909063921485,
+          "annualized_hac_standard_error": 0.1349544114755907,
+          "hac_t": 0.3385654895795138,
+          "annualized_block_bootstrap_ci_low": -0.2271363080118185,
+          "annualized_block_bootstrap_ci_high": 0.2697730277697458,
+          "slot_count": 6,
+          "cost": "base"
+        },
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.054608703069673,
+          "annualized_hac_standard_error": 0.1546227439107436,
+          "hac_t": 0.3531738067020465,
+          "annualized_block_bootstrap_ci_low": -0.2389660641277844,
+          "annualized_block_bootstrap_ci_high": 0.3618296922049336,
+          "slot_count": 6,
+          "cost": "stress"
+        },
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k06__stress",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k06__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.054608703069673,
+          "annualized_hac_standard_error": 0.1333391703027107,
+          "hac_t": 0.409547344157749,
+          "annualized_block_bootstrap_ci_low": -0.2094005708456319,
+          "annualized_block_bootstrap_ci_high": 0.2743515366489717,
+          "slot_count": 6,
+          "cost": "stress"
+        },
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": -0.0060666974142235,
+          "annualized_hac_standard_error": 0.1365341893680386,
+          "hac_t": -0.0444335403630682,
+          "annualized_block_bootstrap_ci_low": -0.273522070667403,
+          "annualized_block_bootstrap_ci_high": 0.2605940285544641,
+          "slot_count": 12,
+          "cost": "base"
+        },
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k12__base",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": -0.0060666974142235,
+          "annualized_hac_standard_error": 0.1012210265975858,
+          "hac_t": -0.0599351500191981,
+          "annualized_block_bootstrap_ci_low": -0.206000458153946,
+          "annualized_block_bootstrap_ci_high": 0.1636757073772519,
+          "slot_count": 12,
+          "cost": "base"
+        },
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 20,
+          "annualized_mean_log_return_difference": 0.0028052534562548,
+          "annualized_hac_standard_error": 0.1355267823320237,
+          "hac_t": 0.0206988862864194,
+          "annualized_block_bootstrap_ci_low": -0.2602767228248199,
+          "annualized_block_bootstrap_ci_high": 0.2693623808005211,
+          "slot_count": 12,
+          "cost": "stress"
+        },
+        {
+          "preferred_task": "dual_mfe_hit_timeout_maximin__tp08_d20__k12__stress",
+          "reference_task": "dual_mfe_risk_veto__tp08_d20__k12__stress",
+          "date_count": 727,
+          "lag_or_block_days": 60,
+          "annualized_mean_log_return_difference": 0.0028052534562548,
+          "annualized_hac_standard_error": 0.1002767183134044,
+          "hac_t": 0.0279751222760137,
+          "annualized_block_bootstrap_ci_low": -0.1999081671680889,
+          "annualized_block_bootstrap_ci_high": 0.1714384137391226,
+          "slot_count": 12,
+          "cost": "stress"
+        }
+      ],
+      "trade_outcomes": [
+        {
+          "label": "old_mfe_plus_risk",
+          "task": "dual_mfe_risk_veto__tp08_d20__k12__base",
+          "closed_trades": 821,
+          "take_profit_hit_rate": 0.6650426309378806,
+          "hit_mean_gross_return": 0.0868303108757335,
+          "miss_mean_gross_return": -0.1312095276822436,
+          "mean_gross_return": 0.0137962602016242,
+          "loss_below_minus_10_rate": 0.1961023142509135,
+          "es05_gross_return": -0.2979529484294185,
+          "breakeven_hit_rate": 0.6017685967390533
+        },
+        {
+          "label": "new_hit_plus_timeout",
+          "task": "dual_mfe_hit_timeout_maximin__tp08_d20__k12__base",
+          "closed_trades": 564,
+          "take_profit_hit_rate": 0.4361702127659574,
+          "hit_mean_gross_return": 0.0845579536313183,
+          "miss_mean_gross_return": -0.0362860177729376,
+          "mean_gross_return": 0.0164225229459399,
+          "loss_below_minus_10_rate": 0.0620567375886524,
+          "es05_gross_return": -0.1550170852327476,
+          "breakeven_hit_rate": 0.3002716424433868
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "audit_source",
+      "label": "2011-2025 mathematical foundations audit",
+      "path": "daily_research/research_records/seq100/mathematical_foundations_20260805/audit.py",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_json_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/summary.json');\nSELECT * FROM read_csv_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/*.csv', union_by_name=true, filename=true);",
+        "description": "Read-only reconstruction of finite D20 price paths, date-level dependence, threshold comparisons, and retained model/account diagnostics.",
+        "executed_at": "2026-08-05T23:00:00+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/mathematical_foundations_20260805/summary.json",
+          "daily_research/research_records/seq100/mathematical_foundations_20260805/*.csv"
+        ],
+        "filters": [
+          "formal research dates 2011-01-04 through 2025-12-31",
+          "2010 burn-in only",
+          "logical maximum outcome date 2025-12-31",
+          "no 2026 reads"
+        ],
+        "metric_definitions": [
+          "D20 endpoint return = close at signal index + 20 divided by next-open entry minus one.",
+          "Date-equal means first average candidates within each signal date, then average dates.",
+          "HAC bandwidths and moving blocks are measured in signal trading dates.",
+          "ES5 is the mean of the worst 5 percent of finite returns."
+        ]
+      }
+    },
+    {
+      "id": "raw_qdp_source",
+      "label": "Pinned QDP raw OHLC and security status evidence",
+      "path": "quant_data_platform/data/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT symbol, trade_date, open, high, low, close FROM read_parquet('quant_data_platform/data/qdp_v2/datasets/market_daily_raw/**/*.parquet') WHERE trade_date BETWEEN '2011-01-01' AND '2025-12-31'",
+        "description": "Unadjusted OHLC is used only for the flat-price diagnostic; the result is explicitly not official ST truth.",
+        "executed_at": "2026-08-05T23:00:00+08:00",
+        "tables_used": [
+          "market_daily_raw__0559f722eb9142e5f476854a",
+          "security_status__dd7f01560245387dd417d53d"
+        ],
+        "filters": [
+          "2011-01-01 through 2025-12-31",
+          "pinned pack PIT universe"
+        ],
+        "metric_definitions": [
+          "Flat diagnostic requires open=high=low=close and rounded close at previous close +/- 5%."
+        ]
+      }
+    },
+    {
+      "id": "policy_source",
+      "label": "Quality-liquidity policy target labels",
+      "path": "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets/labels/manifest.json",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/policy_label_delays.csv')",
+        "description": "Audits fill-day delays and distinguishes direct finite endpoint returns from policy returns that retry blocked exits.",
+        "executed_at": "2026-08-05T23:00:00+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/mathematical_foundations_20260805/policy_label_delays.csv",
+          "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets/labels/fill_day.npy",
+          "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets/labels/policy_return.npy"
+        ],
+        "filters": [
+          "horizons D10 and D20",
+          "cutoff 2025-12-31"
+        ],
+        "metric_definitions": [
+          "Delayed open means a blocked event or timeout is filled after its trigger date.",
+          "A finite-horizon policy label must censor unresolved delayed exits rather than retry indefinitely."
+        ]
+      }
+    },
+    {
+      "id": "model_source",
+      "label": "Frozen 557-feature model and account evidence",
+      "path": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_csv_auto('daily_research/research_records/seq100/mathematical_foundations_20260805/st_feature_importance_summary.csv')",
+        "description": "Retained model gain summaries, direct T+1 target comparisons, and paired account diagnostics; no new model was trained in this audit.",
+        "executed_at": "2026-08-05T23:00:00+08:00",
+        "tables_used": [
+          "daily_research/research_records/seq100/mathematical_foundations_20260805/st_feature_importance_summary.csv",
+          "seq100_quality_liquidity_model/tasks/*/model.txt",
+          "seq100_quality_liquidity_t1_return_models/audit.json",
+          "seq100_quality_liquidity_execution/decision.json"
+        ],
+        "filters": [
+          "2011-2025 audit scope",
+          "2023-2025 retrospective rolling OOS for model/account evidence"
+        ],
+        "metric_definitions": [
+          "LightGBM gain share is conditional split gain, not causal feature contribution.",
+          "2023-2025 is retrospective rolling OOS because it has been repeatedly inspected."
+        ]
+      }
+    },
+    {
+      "id": "t1_model_source",
+      "label": "Strict T+1 direct-return model audit",
+      "path": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/annual_metrics.parquet",
+      "query": {
+        "engine": "duckdb",
+        "language": "sql",
+        "sql": "SELECT * FROM read_parquet('daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/annual_metrics.parquet') WHERE target = 'open_to_open_1' ORDER BY year, model_source",
+        "description": "Compares direct open-to-open T+1 targets with the frozen return head on identical retrospective rolling-OOS support.",
+        "executed_at": "2026-08-05T23:00:00+08:00",
+        "tables_used": [
+          "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/annual_metrics.parquet",
+          "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/paired_comparison.parquet",
+          "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/audit.json"
+        ],
+        "filters": [
+          "target open_to_open_1",
+          "rolling years 2023-2025",
+          "identical candidate support"
+        ],
+        "metric_definitions": [
+          "Rank IC is the within-date Spearman correlation averaged over the evaluation year.",
+          "Top-5 capture is the share of realized cross-sectional extreme return captured by the five highest model scores."
+        ]
+      }
+    },
+    {
+      "id": "literature_source",
+      "label": "Mathematical foundations literature and DOI evidence",
+      "path": "daily_research/research_records/seq100/mathematical_foundations_20260805/literature_evidence.md",
+      "query": {
+        "engine": "DOI/Crossref metadata plus Consensus/SciSpace abstracts",
+        "language": "text",
+        "description": "Primary literature identifiers and applicability notes; Scite was unavailable because its monthly quota was exhausted.",
+        "executed_at": "2026-08-05T23:00:00+08:00",
+        "tables_used": [
+          "literature_evidence.md"
+        ],
+        "filters": [
+          "peer-reviewed methodology and risk literature"
+        ],
+        "metric_definitions": [
+          "DOIs are canonical identifiers; citations do not prove trading profitability."
+        ]
+      }
+    }
+  ]
+}

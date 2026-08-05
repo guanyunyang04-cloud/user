@@ -1,0 +1,74 @@
+{
+  "active_as_of_date": "2026-07-21",
+  "datasets": {
+    "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
+    "announcement": "announcement__5519420e9b586c89fa6e9b57",
+    "balance_sheet_quarterly": "balance_sheet_quarterly__c97d2e51362266b0b097f3bb",
+    "cash_flow_statement_quarterly": "cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6",
+    "corporate_actions": "corporate_actions__a415e50cd459b3d93cc76e5a",
+    "financial_quarterly": "financial_quarterly__72ba12c395f79a62bd75b70c",
+    "income_statement_quarterly": "income_statement_quarterly__5f863d3f3b37779414651bc8",
+    "index_constituents": "index_constituents__f22406610f67eac361f4c332",
+    "industry_concept": "industry_concept__e80436b5b466c965caf6c6a1",
+    "margin_detail": "margin_detail__2ed8aba21121548425f56b7c",
+    "margin_eligibility": "margin_eligibility__17297a42fd20f688b435b218",
+    "margin_market": "margin_market__56ef83c719973fea83362f87",
+    "market_daily_raw": "market_daily_raw__0559f722eb9142e5f476854a",
+    "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
+    "moneyflow_raw": "moneyflow_raw__75aeaebe4e2ceeb6c98bb5ba",
+    "name_change": "name_change__801d1567122e27f611ea67ec",
+    "performance_forecast": "performance_forecast__8eae00e6009084051062fa10",
+    "research_report": "research_report__450fc61384a81476d25f0bd0",
+    "research_report_forecast": "research_report_forecast__d1b0976bfcbdd7a2ef97083a",
+    "security_identity": "security_identity__8129272657578fb71c057292",
+    "security_status": "security_status__dd7f01560245387dd417d53d",
+    "share_capital": "share_capital__dd8dd0446ecc5d2343606d14",
+    "stk_factor_pro_raw": "stk_factor_pro_raw__db1c40c047054d43c94dd68d",
+    "symbol_history": "symbol_history__59797a51bc8d3657511bd23e",
+    "trading_calendar": "trading_calendar__8827e0264c6e3ec8b7330a88",
+    "universe_snapshot": "universe_snapshot__f79157008ed647500a73e8b4",
+    "valuation": "valuation__b94bd77f7ef9b261baf80c5c"
+  },
+  "scope": {
+    "end_date": "2026-07-21",
+    "intraday_5m_restored_for_historical_symbols": false,
+    "name": "point_in_time_historical_mainboard",
+    "restored_delisted_symbol_count": 228,
+    "restored_symbol_count": 378,
+    "start_date": "2010-01-04",
+    "survivorship_policy": "point_in_time_no_future_exclusion",
+    "symbol_count": 3419,
+    "universe": "Shanghai/Shenzhen main-board securities are included on dates when listed; same-day ST, suspension, and delisting state controls eligibility."
+  },
+  "source": {
+    "created_at": "2026-07-01T08:43:12+00:00",
+    "created_by": "qdp direct mutable repair",
+    "pit_history_restore": "protected_baostock_archive+akshare_eastmoney+sina_factor+cninfo+szse+sse_factbook",
+    "pit_history_restored_at": "2026-07-22T20:22:17+00:00",
+    "pit_history_source_evidence": {
+      "archive_paths": {
+        "recent_bars": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\daily_bars.parquet",
+        "recent_master": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\security_master.parquet",
+        "recent_metrics": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\daily_metrics.parquet",
+        "recent_names": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\raw_daily_stock_lists.parquet",
+        "recent_universe": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit\\baostock_v2_pit_20160101_20260601_industry_metrics_month_start_20260603\\daily_universe.parquet",
+        "recovery_bars": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\daily_bars.parquet",
+        "recovery_master": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\cache\\security_master.parquet",
+        "recovery_names": "H:\\quant_project\\daily_research\\data\\research_store\\traditional_quant_baostock_archive_v1\\raw\\baostock_daily_mainboard_v2_pit_recovery_2012_2015\\cache\\daily_stock_lists"
+      },
+      "boundary_market_provider": "eastmoney_via_akshare_unadjusted_daily",
+      "factor_provider": "sina_via_akshare_hfq_factor_event",
+      "sse_factbooks": {
+        "2011": {
+          "url": "https://www.sse.com.cn/aboutus/publication/factbook/documents/c/10170571/files/f43f33c247f242d48780c3097548281b.pdf"
+        },
+        "2012": {
+          "url": "https://www.sse.com.cn/aboutus/publication/factbook/documents/c/10170570/files/9a7b8e0d00e84d358d02fbba056f7bda.pdf"
+        }
+      },
+      "sse_transition_resource": "H:\\quant_project\\quant_data_platform\\src\\quant_data_platform\\qdp_v2\\resources\\sse_st_transitions_2010_2011.csv"
+    }
+  },
+  "updated_at": "2026-08-02T09:29:58+00:00",
+  "version": 2
+}

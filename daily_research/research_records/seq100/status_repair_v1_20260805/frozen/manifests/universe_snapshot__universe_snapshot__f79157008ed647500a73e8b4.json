@@ -1,0 +1,572 @@
+{
+  "contract_version": "qdp_v2_universe_snapshot_v1",
+  "created_at": "2026-07-22T20:22:13+00:00",
+  "dataset_id": "universe_snapshot__f79157008ed647500a73e8b4",
+  "domain": "universe_snapshot",
+  "end_date": "2026-07-21",
+  "frequency": "",
+  "layer": "raw",
+  "notes": [
+    "filtered to mainboard_hs_a_ex_current_st_delisted_v1 as of 2026-06-26",
+    "active data scope starts at 2011-11-22",
+    "600036.SH treated as active from 2016-07-25",
+    "filtered to mainboard_hs_a_ex_current_st_name_delisted_v2 as of 2026-06-26",
+    "bulk_append_active_shards_from_parquet:trusted Tushare direct repair 2eb2b86538d0fa34bef2f09d",
+    "append_active_shard:append BaoStock core facts 2026-07-14..2026-07-16",
+    "replace_active_shards_from_parquet:remove non-mainboard symbols accidentally appended during 2026-07-14..2026-07-16 BaoStock update",
+    "append_active_shard:append BaoStock core facts 2010-08-10..2010-08-10",
+    "append_active_shard:append BaoStock core facts 2015-11-23..2015-11-23",
+    "mutate_active_shards_from_parquet:restrict QDP to current listed main-board survivors and apply targeted 2026-07-17 quality corrections",
+    "append_active_shard:append BaoStock core facts 2026-07-12..2026-07-21",
+    "composite_restore:pit_historical_mainboard_v2",
+    "mutate_active_shards_from_parquet:canonicalize ticker rows to symbol_history effective intervals"
+  ],
+  "primary_key": [
+    "trade_date",
+    "symbol"
+  ],
+  "quality": {
+    "date_coverage_ok": true,
+    "footer_verified": true,
+    "list_date_blank_rows": 0,
+    "list_date_repair_filled_rows": 8602631,
+    "multi_symbol_identity_count": 2,
+    "path_refs_exist": true,
+    "pit_historical_scope_includes_delisted": true,
+    "pit_status_is_signal_date_asof": true,
+    "primary_key_unique": true,
+    "scope": "point_in_time_historical_mainboard",
+    "scope_as_of_date": "2026-07-21",
+    "scope_rewrite": "qdp_current_store_repair_20260717",
+    "scope_security_id_count": 0,
+    "scope_symbol_count": 3419,
+    "survivorship_bias_free_mainboard_daily": true,
+    "symbol_history_effective_intervals": true
+  },
+  "row_count": 10556784,
+  "schema": [
+    {
+      "name": "symbol",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "trade_date",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "name",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "exchange",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "board",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "list_status",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "list_date",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "delist_date",
+      "type": "VARCHAR"
+    },
+    {
+      "name": "source",
+      "type": "VARCHAR"
+    }
+  ],
+  "shards": [
+    {
+      "end_date": "2010-12-31",
+      "file_size": 46553,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\universe_snapshot\\retained_0016.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_bcb47727_4f79b5af229ddbd8.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_72f3cb07_75dc3afe223412e6.parquet",
+      "row_count": 364811,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-21",
+      "file_size": 7845,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_547227_0016.parquet",
+      "row_count": 8034,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-21",
+      "file_size": 262547,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\universe_snapshot\\retained_0037.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/pit_restore_50b331848bcd67e7.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_34f1b395_285fc89bebee7738.parquet",
+      "row_count": 1152188,
+      "start_date": "2010-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2011-12-30",
+      "file_size": 46507,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\universe_snapshot\\retained_0017.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_5d3fb72d_7775e5dcd3fb3d80.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_2d6f170b_f797e93fb75f9334.parquet",
+      "row_count": 358856,
+      "start_date": "2011-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2011-12-30",
+      "file_size": 89185,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_290802_0000.parquet",
+      "row_count": 49989,
+      "start_date": "2011-11-22",
+      "status": "stored"
+    },
+    {
+      "end_date": "2012-12-31",
+      "file_size": 397005,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_308419_0001.parquet",
+      "row_count": 431431,
+      "start_date": "2012-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2012-12-31",
+      "file_size": 3553,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\universe_snapshot\\retained_0018.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_e1394a16_5b8d0e87e6f70332.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_ceed0954_cd61a69e906c7328.parquet",
+      "row_count": 1215,
+      "start_date": "2012-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2013-12-31",
+      "file_size": 3541,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_cb67d99e_260d4d4760002768.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_92a57771_8f928eefbf21c9c8.parquet",
+      "row_count": 1190,
+      "start_date": "2013-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2013-12-31",
+      "file_size": 367343,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_323122_0002.parquet",
+      "row_count": 428715,
+      "start_date": "2013-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2014-12-31",
+      "file_size": 3569,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_f4261061_00ea9145eb161e3f.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_edec290a_52eaa7a9272befad.parquet",
+      "row_count": 1225,
+      "start_date": "2014-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2014-12-31",
+      "file_size": 404602,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_337870_0003.parquet",
+      "row_count": 448734,
+      "start_date": "2014-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2015-12-31",
+      "file_size": 3544,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_9994547f_086a8a4dc5694b6a.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_3e6a381b_d008fd843fe64a4f.parquet",
+      "row_count": 1220,
+      "start_date": "2015-01-05",
+      "status": "stored"
+    },
+    {
+      "end_date": "2015-12-31",
+      "file_size": 375034,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_352753_0004.parquet",
+      "row_count": 474281,
+      "start_date": "2015-01-05",
+      "status": "stored"
+    },
+    {
+      "end_date": "2016-12-30",
+      "file_size": 2794,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_c868c027_7156a3ed14365cd7.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_c68f97cf_a59d36d40e49f816.parquet",
+      "row_count": 1145,
+      "start_date": "2016-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2016-12-30",
+      "file_size": 411648,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_368806_0005.parquet",
+      "row_count": 496828,
+      "start_date": "2016-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2017-12-29",
+      "file_size": 3657,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_eda01de8_057bdf6722a6d9e8.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_9f2daf35_4f8196acdaccab83.parquet",
+      "row_count": 1614,
+      "start_date": "2017-01-03",
+      "status": "stored"
+    },
+    {
+      "end_date": "2017-12-29",
+      "file_size": 441682,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_384904_0006.parquet",
+      "row_count": 556591,
+      "start_date": "2017-01-03",
+      "status": "stored"
+    },
+    {
+      "end_date": "2018-12-28",
+      "file_size": 3631,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_3fdea5fd_cdca689db3108d62.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_3aca237e_b77006fd663a1544.parquet",
+      "row_count": 1701,
+      "start_date": "2018-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2018-12-28",
+      "file_size": 445723,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_399339_0007.parquet",
+      "row_count": 595329,
+      "start_date": "2018-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2019-12-31",
+      "file_size": 3630,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_64cc7413_2de651eec38a752d.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_33ed9cee_35629755bfab1c29.parquet",
+      "row_count": 1708,
+      "start_date": "2019-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2019-12-31",
+      "file_size": 481487,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_415367_0008.parquet",
+      "row_count": 615942,
+      "start_date": "2019-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2020-12-31",
+      "file_size": 3650,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_0b7d032a_dd824fc6d16ad7a9.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_5db86fa8_e9132afac665cf1b.parquet",
+      "row_count": 1701,
+      "start_date": "2020-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2020-12-31",
+      "file_size": 559621,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_431399_0009.parquet",
+      "row_count": 636338,
+      "start_date": "2020-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2021-12-31",
+      "file_size": 3628,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_548faeb9_4fd9c1291e52b8c5.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_5fa647dc_505ac48491e95454.parquet",
+      "row_count": 1701,
+      "start_date": "2021-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2021-12-31",
+      "file_size": 605910,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_450117_0010.parquet",
+      "row_count": 673614,
+      "start_date": "2021-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2022-12-30",
+      "file_size": 3649,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_3f05a044_19fda8b5dbd0cba1.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_fd733691_de48f5af522ee2e5.parquet",
+      "row_count": 1694,
+      "start_date": "2022-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2022-12-30",
+      "file_size": 618450,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_467128_0011.parquet",
+      "row_count": 691833,
+      "start_date": "2022-01-04",
+      "status": "stored"
+    },
+    {
+      "end_date": "2023-12-29",
+      "file_size": 3644,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_182e3c44_f4a4508ff45f6cf4.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_e4d8ce87_586005708feaf406.parquet",
+      "row_count": 1694,
+      "start_date": "2023-01-03",
+      "status": "stored"
+    },
+    {
+      "end_date": "2023-12-29",
+      "file_size": 630259,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_482847_0012.parquet",
+      "row_count": 708739,
+      "start_date": "2023-01-03",
+      "status": "stored"
+    },
+    {
+      "end_date": "2024-12-31",
+      "file_size": 3636,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_840bedf6_59d4002798b258a0.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_629ea78f_aa86ac8ba7a306c5.parquet",
+      "row_count": 1694,
+      "start_date": "2024-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2024-12-31",
+      "file_size": 620949,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_498020_0013.parquet",
+      "row_count": 718178,
+      "start_date": "2024-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2025-12-31",
+      "file_size": 3649,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\permanent_exclusions\\prepared.parquet",
+        "repair_reason": "apply permanent_st_delisting_exclusion_v1",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_4d21f4e8_36914ccf00c02f76.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_e1fd815e_dde4945e8241922b.parquet",
+      "row_count": 1701,
+      "start_date": "2025-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2025-12-31",
+      "file_size": 635952,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_515269_0014.parquet",
+      "row_count": 728022,
+      "start_date": "2025-01-02",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-06-26",
+      "file_size": 316515,
+      "metadata": {
+        "created_at": "2026-07-30T18:27:00+00:00",
+        "reason": "fill blank PIT universe listing dates from security identity"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_20260730T182700_531191_0015.parquet",
+      "row_count": 344670,
+      "start_date": "2026-01-05",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-13",
+      "file_size": 64915,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\universe_snapshot\\retained_0032.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_be3f74f5_48e866f3879faa15.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_588e1c3a_a30353efee1758b9.parquet",
+      "row_count": 34224,
+      "start_date": "2026-01-05",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-16",
+      "file_size": 44682,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\universe_snapshot\\retained_0033.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_a33d59b4_6d5fd88199f43410.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_5e77a33e_6f7290635ec8fad7.parquet",
+      "row_count": 9117,
+      "start_date": "2026-07-14",
+      "status": "stored"
+    },
+    {
+      "end_date": "2026-07-21",
+      "file_size": 44683,
+      "metadata": {
+        "prepared_source_path": "H:\\quant_project\\quant_data_platform\\data\\qdp_runtime\\pit_history_restore\\lifecycle_effectivity\\prepared\\universe_snapshot\\retained_0036.parquet",
+        "repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+        "replaces": "datasets/universe_snapshot/universe_snapshot__2b3f22d43561a519a61c9a26/shards/repair_mutate_replace_7a36dc9d_ef32af9a11530be8.parquet"
+      },
+      "path": "datasets/universe_snapshot/universe_snapshot__f79157008ed647500a73e8b4/shards/repair_mutate_replace_0373052a_c0a66870626b921e.parquet",
+      "row_count": 9117,
+      "start_date": "2026-07-17",
+      "status": "stored"
+    }
+  ],
+  "source": {
+    "active_as_of_date": "2026-06-26",
+    "created_at": "2026-07-01T13:51:35+00:00",
+    "created_by": "scope_mainboard_active",
+    "last_metadata_update_at": "2026-07-23T03:19:26+00:00",
+    "last_metadata_update_reason": "record symbol_history effective-interval normalization",
+    "last_repair_action": "mutate_active_shards_from_parquet",
+    "last_repair_at": "2026-07-23T03:19:26+00:00",
+    "last_repair_reason": "canonicalize ticker rows to symbol_history effective intervals",
+    "list_date_repair_id": "pit_metadata_repair_v1",
+    "list_date_repaired_at": "2026-07-30T18:27:01+00:00",
+    "pit_history_restored_at": "2026-07-22T20:22:13+00:00",
+    "provider": "qdp_v2",
+    "scope": "point_in_time_historical_mainboard",
+    "scope_metadata_reconciled_at": "2026-07-30T14:05:19+00:00",
+    "source_dataset_id": "universe_snapshot__a468bc540bf34f07fa93a1d0",
+    "survivorship_policy": "include_when_listed_then_apply_same_day_status",
+    "symbol_lifecycle_normalized_at": "2026-07-23T03:19:26+00:00",
+    "symbol_lifecycle_semantics": "date_effective_symbol_history"
+  },
+  "start_date": "2010-01-04"
+}

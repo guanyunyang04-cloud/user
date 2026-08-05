@@ -13,6 +13,7 @@ import pandas as pd
 
 from quant_data_platform.core.json_io import json_safe
 from quant_data_platform.core.paths import qdp_paths
+from quant_data_platform.core.security_status import st_status_from_name
 from quant_data_platform.providers import BaostockProvider
 from quant_data_platform.qdp_v2.auxiliary_update import (
     CNINFO_SHARE_NORMALIZED_COLUMNS,
@@ -41,7 +42,7 @@ from quant_data_platform.qdp_v2.repair import (
 
 
 DEFAULT_START_DATE = "2010-01-04"
-PART_SEMANTIC_VERSION = "pit_historical_mainboard_daily_v5"
+PART_SEMANTIC_VERSION = "pit_historical_mainboard_daily_nullable_security_status"
 MAINBOARD_PREFIXES = ("600", "601", "603", "605", "000", "001", "002", "003")
 ARCHIVE_ROOT = Path(
     "daily_research/data/research_store/traditional_quant_baostock_archive_v1/raw"
@@ -302,7 +303,7 @@ def _local_stock_basic(ctx: PitHistoryContext) -> pd.DataFrame:
     result["list_status"] = result["status"]
     result["trade_date"] = ctx.end_date
     result["board"] = "1"
-    result["is_st"] = result["name"].str.upper().str.contains("ST", regex=False)
+    result["is_st"] = result["name"].map(st_status_from_name).astype("boolean")
     result["is_suspended"] = False
     result["is_delisted"] = result["delist_date"].ne("")
     result["status_reason"] = ""
@@ -1097,7 +1098,7 @@ def _load_sse_st_transitions() -> pd.DataFrame:
 
 
 def _name_implies_st(names: pd.Series) -> pd.Series:
-    return names.fillna("").astype(str).str.upper().str.contains("ST", regex=False)
+    return names.map(st_status_from_name).astype("boolean")
 
 
 def _historical_st_status(
@@ -1127,7 +1128,7 @@ def _historical_st_status(
     # Shenzhen's dated exchange name intervals carry the exact ST prefix. The
     # name fallback also covers archive-edge current rows after 2026-06-01.
     result = result.fillna(_name_implies_st(names).astype("boolean"))
-    return result.fillna(False).astype(bool)
+    return result.astype("boolean")
 
 
 def _factor_rows(history: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
@@ -1242,7 +1243,9 @@ def _prepare_symbol_parts(
     )
     for column in numeric_columns:
         history[column] = pd.to_numeric(history[column], errors="coerce")
-    suspended_input = history["tradestatus"].fillna("").astype(str).ne("1")
+    trade_status = history["tradestatus"].fillna("").astype(str).str.strip()
+    is_suspended = trade_status.map({"0": True, "1": False}).astype("boolean")
+    suspended_input = is_suspended.fillna(False).astype(bool)
     for column in ("volume", "amount", "turn"):
         history.loc[suspended_input & history[column].isna(), column] = 0.0
     history["trade_date"] = pd.to_datetime(
@@ -1275,9 +1278,8 @@ def _prepare_symbol_parts(
         if delist_date
         else pd.Series(False, index=history.index)
     )
-    is_suspended = suspended_input
     is_st = _historical_st_status(history, symbol=symbol, names=names)
-    observed_bar = ~is_suspended
+    observed_bar = is_suspended.eq(False).fillna(valid_bar).astype(bool) & valid_bar
 
     daily = pd.DataFrame(
         {
@@ -1307,17 +1309,36 @@ def _prepare_symbol_parts(
             "source": "protected_archive+exchange_name_history+akshare_pit_restore",
         }
     )
-    reasons = np.where(
-        is_delisted,
-        "delisted",
-        np.where(is_st, "st", np.where(is_suspended, "suspended", "")),
+    known_st = is_st.fillna(False).astype(bool)
+    known_suspended = is_suspended.fillna(False).astype(bool)
+    unknown_status = is_st.isna() | is_suspended.isna()
+    reasons = np.select(
+        (
+            is_delisted,
+            unknown_status & known_st,
+            unknown_status & known_suspended,
+            unknown_status,
+            known_st & known_suspended,
+            known_st,
+            known_suspended,
+        ),
+        (
+            "delisted",
+            "st;status_unknown",
+            "suspended;status_unknown",
+            "status_unknown",
+            "st;suspended",
+            "st",
+            "suspended",
+        ),
+        default="",
     )
     status = pd.DataFrame(
         {
             "symbol": symbol,
             "trade_date": history["trade_date"],
-            "is_st": is_st.astype(bool),
-            "is_suspended": is_suspended.astype(bool),
+            "is_st": is_st.astype("boolean"),
+            "is_suspended": is_suspended.astype("boolean"),
             "is_delisted": is_delisted.astype(bool),
             "status_reason": reasons,
             "source": "protected_archive+exchange_status_evidence+akshare_pit_restore",
@@ -1359,7 +1380,7 @@ def _prepare_symbol_parts(
         event_source = pd.Series(source_values, index=history.index, dtype="object")
 
     turnover = history["turn"].copy()
-    turnover.loc[is_suspended & turnover.isna()] = 0.0
+    turnover.loc[suspended_input & turnover.isna()] = 0.0
     known_float_from_turnover = history["volume"].astype("float64").mul(100.0).div(
         turnover.astype("float64").where(turnover.gt(0.0))
     )

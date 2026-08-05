@@ -13,10 +13,15 @@ from daily_research.path_policy.seq100_quality_liquidity_data_prep import (
     YEARS,
     _calendar_position_frames,
     _combined_feature_sample,
+    _coordinate_row_mapping,
     _feature_block_current,
     _load_config,
+    _membership_input_fingerprint,
+    _minute_input_fingerprint,
     _pct_rank_sql,
     _sha256,
+    _status_eligible_sql,
+    _validate_feature_block,
     _year_bounds,
 )
 
@@ -41,6 +46,95 @@ def test_quality_rank_direction_rewards_low_debt() -> None:
 
     assert "ORDER BY roe ASC" in ordinary
     assert "ORDER BY debt DESC" in debt
+
+
+def test_status_eligibility_requires_every_status_field_to_be_known() -> None:
+    connection = duckdb.connect()
+    try:
+        rows = connection.execute(
+            "SELECT "
+            + _status_eligible_sql("s")
+            + " FROM (VALUES "
+            "(false,false,false),(true,false,false),(NULL,false,false),"
+            "(false,NULL,false),(false,false,NULL)) "
+            "AS s(is_st,is_suspended,is_delisted)"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert rows == [(True,), (False,), (False,), (False,), (False,)]
+
+
+def test_membership_input_fingerprint_changes_with_qdp_partition(tmp_path) -> None:
+    paths = {}
+    for domain in (
+        "market_daily_raw",
+        "universe_snapshot",
+        "security_status",
+        "valuation",
+        "industry_concept",
+        "financial_quarterly",
+        "trading_calendar",
+        "security_identity",
+    ):
+        path = tmp_path / f"{domain}.parquet"
+        path.write_bytes(domain.encode())
+        paths[domain] = [path]
+    minute_path = tmp_path / "minute.parquet"
+    calendar_path = tmp_path / "calendar.parquet"
+    listing_path = tmp_path / "listing.parquet"
+    for path in (minute_path, calendar_path, listing_path):
+        path.write_bytes(path.name.encode())
+    original_candidate_index = prep.CANDIDATE_INDEX
+    candidate_index = tmp_path / "candidate_index.parquet"
+    candidate_index.write_bytes(b"candidate")
+    prep.CANDIDATE_INDEX = candidate_index
+    try:
+        before = _membership_input_fingerprint(
+            qdp_paths=paths,
+            minute_path=minute_path,
+            calendar_path=calendar_path,
+            listing_path=listing_path,
+        )
+        paths["security_status"][0].write_bytes(b"security-status-repaired")
+        after = _membership_input_fingerprint(
+            qdp_paths=paths,
+            minute_path=minute_path,
+            calendar_path=calendar_path,
+            listing_path=listing_path,
+        )
+    finally:
+        prep.CANDIDATE_INDEX = original_candidate_index
+
+    assert before != after
+
+
+def test_minute_input_fingerprint_includes_candidate_index(
+    monkeypatch, tmp_path
+) -> None:
+    intraday = tmp_path / "intraday.parquet"
+    candidate = tmp_path / "candidate_index.parquet"
+    intraday.write_bytes(b"intraday")
+    candidate.write_bytes(b"candidate-old")
+    monkeypatch.setattr(prep, "CANDIDATE_INDEX", candidate)
+
+    before = _minute_input_fingerprint([intraday])
+    candidate.write_bytes(b"candidate-rebuilt")
+    after = _minute_input_fingerprint([intraday])
+
+    assert before != after
+
+
+def test_coordinate_row_mapping_uses_stable_panel_coordinates() -> None:
+    actual = _coordinate_row_mapping(
+        current_date_idx=np.asarray([2, 1, 3]),
+        current_symbol_idx=np.asarray([1, 2, 0]),
+        legacy_date_idx=np.asarray([1, 2, 2]),
+        legacy_symbol_idx=np.asarray([2, 0, 1]),
+        symbol_count=10,
+    )
+
+    assert actual.tolist() == [2, 0, -1]
 
 
 def test_safe_ratio_parenthesizes_composite_expressions() -> None:
@@ -164,10 +258,46 @@ def test_feature_cache_rejects_changed_candidate_support(tmp_path) -> None:
             support_path=support_path,
             feature_path=feature_path,
             input_fingerprint="current-input",
-            allow_legacy_cache=True,
         )
     finally:
         connection.close()
+
+
+def test_feature_alignment_rejects_changed_symbol_coordinates(tmp_path) -> None:
+    support_path = tmp_path / "support.parquet"
+    feature_path = tmp_path / "features.parquet"
+    common = {
+        "candidate_id": [1],
+        "year": [2020],
+        "trade_date": ["2020-01-02"],
+        "date_idx": [10],
+    }
+    pd.DataFrame(
+        {**common, "symbol_idx": [1], "symbol": ["000001.SZ"]}
+    ).to_parquet(support_path, index=False)
+    pd.DataFrame(
+        {
+            **common,
+            "symbol_idx": [2],
+            "symbol": ["000002.SZ"],
+            "value": [0.1],
+        }
+    ).to_parquet(feature_path, index=False)
+
+    connection = duckdb.connect()
+    try:
+        alignment = _validate_feature_block(
+            connection,
+            support_path=support_path,
+            feature_path=feature_path,
+            raise_on_error=False,
+        )
+    finally:
+        connection.close()
+
+    assert alignment["support_rows"] == alignment["feature_rows"] == 1
+    assert alignment["support_missing_rows"] == 1
+    assert alignment["feature_extra_rows"] == 1
 
 
 def test_reused_atlas_restores_completed_top_level_state(monkeypatch, tmp_path) -> None:

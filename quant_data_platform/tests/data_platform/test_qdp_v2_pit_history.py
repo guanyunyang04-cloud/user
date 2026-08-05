@@ -23,6 +23,7 @@ from quant_data_platform.qdp_v2.pit_history import (
     _factor_rows,
     _historical_names,
     _historical_st_status,
+    _name_implies_st,
     _normalize_eastmoney_history,
     _normalize_sina_factors,
     _prepare_symbol_parts,
@@ -158,6 +159,41 @@ def test_sse_st_status_uses_dated_transitions_before_archive() -> None:
     assert result.tolist() == [False, True, True, False, False]
 
 
+def test_historical_st_name_parser_uses_exchange_prefixes_only() -> None:
+    names = pd.Series(
+        [
+            "ST one",
+            "*ST two",
+            "SST three",
+            "S*ST four",
+            "S ST five",
+            "GST six",
+            "G*ST seven",
+            "BEST technology",
+            pd.NA,
+        ]
+    )
+
+    result = _name_implies_st(names)
+
+    assert result.iloc[:7].tolist() == [True] * 7
+    assert not bool(result.iloc[7])
+    assert pd.isna(result.iloc[8])
+
+
+def test_historical_st_status_does_not_coerce_unknown_to_false() -> None:
+    history = pd.DataFrame({"trade_date": ["2011-01-04"], "isST": [""]})
+
+    result = _historical_st_status(
+        history,
+        symbol="000001.SZ",
+        names=pd.Series([pd.NA]),
+    )
+
+    assert str(result.dtype) == "boolean"
+    assert pd.isna(result.iloc[0])
+
+
 def test_eastmoney_history_converts_lots_to_shares() -> None:
     raw = pd.DataFrame(
         {
@@ -205,25 +241,30 @@ def test_prepare_symbol_parts_keeps_suspension_and_infers_float_shares(
     symbol_file = "000033_SZ.parquet"
     history = pd.DataFrame(
         {
-            "trade_date": ["2020-01-02", "2020-01-03", "2020-01-06"],
-            "symbol": ["000033.SZ"] * 3,
-            "provider_code": ["sz.000033"] * 3,
-            "open": [10.0, 10.0, 9.0],
-            "high": [10.5, 10.0, 9.5],
-            "low": [9.5, 10.0, 8.5],
-            "close": [10.0, 10.0, 9.0],
-            "preclose": [9.8, 10.0, 10.0],
-            "volume": [1_000_000.0, np.nan, 900_000.0],
-            "amount": [10_000_000.0, np.nan, 8_100_000.0],
-            "adjustflag": ["3"] * 3,
-            "turn": [1.0, np.nan, 1.0],
-            "tradestatus": ["1", "0", "1"],
-            "pctChg": [2.0, 0.0, -10.0],
-            "peTTM": [10.0, 10.0, 9.0],
-            "pbMRQ": [1.0, 1.0, 0.9],
-            "psTTM": [1.0, 1.0, 0.9],
-            "pcfNcfTTM": [5.0, 5.0, 4.5],
-            "isST": ["0", "1", "1"],
+            "trade_date": [
+                "2020-01-02",
+                "2020-01-03",
+                "2020-01-06",
+                "2020-01-07",
+            ],
+            "symbol": ["000033.SZ"] * 4,
+            "provider_code": ["sz.000033"] * 4,
+            "open": [10.0, 10.0, 9.0, 8.0],
+            "high": [10.5, 10.0, 9.5, 8.5],
+            "low": [9.5, 10.0, 8.5, 7.5],
+            "close": [10.0, 10.0, 9.0, 8.0],
+            "preclose": [9.8, 10.0, 10.0, 9.0],
+            "volume": [1_000_000.0, np.nan, 900_000.0, 800_000.0],
+            "amount": [10_000_000.0, np.nan, 8_100_000.0, 6_400_000.0],
+            "adjustflag": ["3"] * 4,
+            "turn": [1.0, np.nan, 1.0, 1.0],
+            "tradestatus": ["1", "0", "1", ""],
+            "pctChg": [2.0, 0.0, -10.0, -11.11],
+            "peTTM": [10.0, 10.0, 9.0, 8.0],
+            "pbMRQ": [1.0, 1.0, 0.9, 0.8],
+            "psTTM": [1.0, 1.0, 0.9, 0.8],
+            "pcfNcfTTM": [5.0, 5.0, 4.5, 4.0],
+            "isST": ["0", "1", "1", "0"],
         }
     )
     factors = pd.DataFrame(
@@ -285,16 +326,24 @@ def test_prepare_symbol_parts_keeps_suspension_and_infers_float_shares(
     shares = pd.read_parquet(
         runtime / "domain_parts" / "share_capital" / symbol_file
     )
-    assert daily["trade_date"].tolist() == ["2020-01-02", "2020-01-06"]
+    assert daily["trade_date"].tolist() == [
+        "2020-01-02",
+        "2020-01-06",
+        "2020-01-07",
+    ]
     assert bool(status.loc[1, "is_suspended"])
     assert bool(status.loc[1, "is_st"])
+    assert pd.isna(status.loc[3, "is_suspended"])
+    assert status.loc[3, "status_reason"] == "status_unknown"
     assert shares["float_share"].tolist() == [
         100_000_000.0,
         90_000_000.0,
+        80_000_000.0,
     ]
     assert shares["float_share_source_date"].tolist() == [
         "2020-01-02",
         "2020-01-06",
+        "2020-01-07",
     ]
 
     (runtime / "domain_parts" / "done" / "000033_SZ.json").unlink()

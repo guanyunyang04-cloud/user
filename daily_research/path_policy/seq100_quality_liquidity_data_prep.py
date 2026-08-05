@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +30,7 @@ from quant_data_platform.qdp_v2.status import active_dataset_map
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_quality_liquidity_data_prep"
 CALENDAR_INPUT_BUILDER_VERSION = 2
-MEMBERSHIP_BUILDER_VERSION = 2
+MEMBERSHIP_BUILDER_VERSION = 3
 ATLAS_BUILDER_VERSION = 3
 FEATURE_TRANSFORM_VERSIONS = {
     "minute": 1,
@@ -458,6 +459,10 @@ def _minute_sql(*, year: int, intraday_scan: str) -> str:
     """
 
 
+def _minute_input_fingerprint(intraday_paths: Sequence[Path]) -> str:
+    return _path_set_fingerprint([*intraday_paths, CANDIDATE_INDEX])
+
+
 def prepare_minute_features(
     *,
     output_root: Path,
@@ -468,10 +473,7 @@ def prepare_minute_features(
     if not intraday:
         raise DataPreparationError("active_intraday_5m_missing")
     records = dict(state.get("minute_years", {}) or {})
-    source_fingerprint = _path_set_fingerprint(intraday)
-    allow_legacy_cache = "market_intraday_5m" not in set(
-        state.get("qdp_changed_domains", []) or []
-    )
+    source_fingerprint = _minute_input_fingerprint(intraday)
     connection = _connect(output_root)
     try:
         scan = _scan(intraday)
@@ -482,10 +484,7 @@ def prepare_minute_features(
                 path.is_file()
                 and existing.get("status") == "completed"
                 and existing.get("sha256") == _sha256(path)
-                and (
-                    existing.get("source_fingerprint") == source_fingerprint
-                    or ("source_fingerprint" not in existing and allow_legacy_cache)
-                )
+                and existing.get("source_fingerprint") == source_fingerprint
             )
             if valid_existing:
                 existing["source_fingerprint"] = source_fingerprint
@@ -537,6 +536,7 @@ def _membership_sql(
         for metric in QUALITY_METRICS
     )
     quality_values = ",".join(f"{metric}_rank" for metric in QUALITY_METRICS)
+    status_eligible = _status_eligible_sql()
     return f"""
     WITH candidate AS (
       SELECT candidate_id,year,trade_date,date_idx,symbol_idx,symbol,
@@ -570,9 +570,9 @@ def _membership_sql(
         ON c.symbol=f.symbol AND c.trade_date>f.publish_date
     ), joined AS (
       SELECT c.*,u.list_status,u.list_date,
-             coalesce(s.is_st,false) AS is_st,
-             coalesce(s.is_suspended,false) AS is_suspended,
-             coalesce(s.is_delisted,false) AS is_delisted,
+             s.is_st,
+             s.is_suspended,
+             s.is_delisted,
              try_cast(v.circ_mv AS DOUBLE) AS circ_mv,
              try_cast(v.pe AS DOUBLE) AS pe,try_cast(v.pb AS DOUBLE) AS pb,
              coalesce(i.industry_name,i.industry,'Unknown') AS industry,
@@ -627,7 +627,7 @@ def _membership_sql(
     ), decided AS (
       SELECT *,(
         upper(coalesce(list_status,''))='L'
-        AND NOT is_st AND NOT is_suspended AND NOT is_delisted
+        AND {status_eligible}
         AND listed_open_days>=250 AND valid_amount_20>=15
         AND amount_median_rank>=0.30 AND circ_mv_rank>=0.20
         AND report_age_days BETWEEN 0 AND 550
@@ -638,6 +638,14 @@ def _membership_sql(
     SELECT *,quality_liquidity_keep AND minute_complete AS quality_liquidity_complete_keep
     FROM decided ORDER BY candidate_id
     """
+
+
+def _status_eligible_sql(alias: str = "") -> str:
+    prefix = f"{alias}." if alias else ""
+    fields = tuple(f"{prefix}{field}" for field in ("is_st", "is_suspended", "is_delisted"))
+    known = " AND ".join(f"{field} IS NOT NULL" for field in fields)
+    excluded = " AND ".join(f"NOT {field}" for field in fields)
+    return f"({known} AND {excluded})"
 
 
 def _path_set_hash(paths: Sequence[Path]) -> str:
@@ -653,6 +661,104 @@ def _path_set_fingerprint(paths: Sequence[Path]) -> str:
         stat = path.stat()
         digest.update(f"{path}|{stat.st_size}|{stat.st_mtime_ns}\n".encode())
     return digest.hexdigest()
+
+
+def _coordinate_row_mapping(
+    *,
+    current_date_idx: np.ndarray,
+    current_symbol_idx: np.ndarray,
+    legacy_date_idx: np.ndarray,
+    legacy_symbol_idx: np.ndarray,
+    symbol_count: int,
+) -> np.ndarray:
+    current_keys = np.asarray(current_date_idx, dtype=np.int64) * int(
+        symbol_count
+    ) + np.asarray(current_symbol_idx, dtype=np.int64)
+    legacy_keys = np.asarray(legacy_date_idx, dtype=np.int64) * int(
+        symbol_count
+    ) + np.asarray(legacy_symbol_idx, dtype=np.int64)
+    if legacy_keys.size and not bool(np.all(legacy_keys[1:] > legacy_keys[:-1])):
+        raise DataPreparationError("legacy_candidate_coordinates_not_strictly_ordered")
+    positions = np.searchsorted(legacy_keys, current_keys)
+    matched = positions < len(legacy_keys)
+    matched[matched] &= legacy_keys[positions[matched]] == current_keys[matched]
+    result = np.full(len(current_keys), -1, dtype=np.int64)
+    result[matched] = positions[matched]
+    return result
+
+
+@lru_cache(maxsize=1)
+def _current_candidate_coordinates() -> tuple[np.ndarray, np.ndarray]:
+    frame = pd.read_parquet(
+        CANDIDATE_INDEX, columns=["candidate_id", "date_idx", "symbol_idx"]
+    )
+    candidate_ids = frame["candidate_id"].to_numpy(dtype=np.int64)
+    if not np.array_equal(candidate_ids, np.arange(len(frame), dtype=np.int64)):
+        raise DataPreparationError("current_candidate_id_is_not_row_position")
+    return (
+        frame["date_idx"].to_numpy(dtype=np.int32),
+        frame["symbol_idx"].to_numpy(dtype=np.int32),
+    )
+
+
+@lru_cache(maxsize=1)
+def _legacy_candidate_coordinates() -> tuple[np.ndarray, np.ndarray]:
+    manifest = json.loads(BASE_FEATURE_MANIFEST.read_text(encoding="utf-8"))
+    count = int(manifest["candidate_alignment"]["candidate_count"])
+    date_record = manifest["files"]["candidate_date_idx"]
+    symbol_record = manifest["files"]["candidate_symbol_idx"]
+    date_idx = np.memmap(
+        Path(date_record["path"]), dtype=np.int32, mode="r", shape=(count,)
+    )
+    symbol_idx = np.memmap(
+        Path(symbol_record["path"]), dtype=np.int32, mode="r", shape=(count,)
+    )
+    return np.asarray(date_idx).copy(), np.asarray(symbol_idx).copy()
+
+
+def _legacy_candidate_rows(candidate_ids: np.ndarray) -> np.ndarray:
+    requested = np.asarray(candidate_ids, dtype=np.int64)
+    current_date_idx, current_symbol_idx = _current_candidate_coordinates()
+    if bool(((requested < 0) | (requested >= len(current_date_idx))).any()):
+        raise DataPreparationError("current_candidate_id_out_of_range")
+    legacy_date_idx, legacy_symbol_idx = _legacy_candidate_coordinates()
+    pack_manifest = json.loads(
+        (CANDIDATE_INDEX.parent / "manifest.json").read_text(encoding="utf-8")
+    )
+    return _coordinate_row_mapping(
+        current_date_idx=current_date_idx[requested],
+        current_symbol_idx=current_symbol_idx[requested],
+        legacy_date_idx=legacy_date_idx,
+        legacy_symbol_idx=legacy_symbol_idx,
+        symbol_count=int(pack_manifest["symbol_count"]),
+    )
+
+
+def _membership_input_fingerprint(
+    *,
+    qdp_paths: Mapping[str, Sequence[Path]],
+    minute_path: Path,
+    calendar_path: Path,
+    listing_path: Path,
+) -> str:
+    domains = (
+        "market_daily_raw",
+        "universe_snapshot",
+        "security_status",
+        "valuation",
+        "industry_concept",
+        "financial_quarterly",
+        "trading_calendar",
+        "security_identity",
+    )
+    source_paths = [
+        CANDIDATE_INDEX,
+        minute_path,
+        calendar_path,
+        listing_path,
+        *(path for domain in domains for path in qdp_paths[domain]),
+    ]
+    return _path_set_fingerprint(source_paths)
 
 
 def _calendar_position_frames(
@@ -825,6 +931,12 @@ def prepare_membership(
             )
             if not minute_path.is_file():
                 raise DataPreparationError(f"minute_year_missing:{year}")
+            input_fingerprint = _membership_input_fingerprint(
+                qdp_paths=qdp_paths,
+                minute_path=minute_path,
+                calendar_path=calendar_path,
+                listing_path=listing_path,
+            )
             diagnostics_path = (
                 output_root / "membership" / f"year={year}" / "diagnostics.parquet"
             )
@@ -844,6 +956,7 @@ def prepare_membership(
                 and existing.get("status") == "completed"
                 and existing.get("builder_version") == MEMBERSHIP_BUILDER_VERSION
                 and existing.get("calendar_inputs_hash") == calendar_inputs_hash
+                and existing.get("input_fingerprint") == input_fingerprint
                 and existing.get("support_sha256") == _sha256(support_path)
                 and (
                     not materialize_daily_quality_pool
@@ -892,6 +1005,7 @@ def prepare_membership(
                 "status": "completed",
                 "builder_version": MEMBERSHIP_BUILDER_VERSION,
                 "calendar_inputs_hash": calendar_inputs_hash,
+                "input_fingerprint": input_fingerprint,
                 "candidate_row_count": int(stats[0]),
                 "quality_liquidity_row_count": int(stats[1] or 0),
                 "minute_complete_candidate_row_count": int(stats[2] or 0),
@@ -1457,13 +1571,14 @@ def _validate_feature_block(
 ) -> dict[str, int]:
     support = str(support_path).replace("'", "''")
     feature = str(feature_path).replace("'", "''")
+    row_keys = ",".join(KEY_COLUMNS)
     row = connection.execute(
         "SELECT "
         f"(SELECT count(*) FROM read_parquet('{support}')) AS support_rows,"
         f"(SELECT count(*) FROM read_parquet('{feature}')) AS feature_rows,"
         f"(SELECT count(*) FROM (SELECT candidate_id,count(*) n FROM read_parquet('{feature}') GROUP BY candidate_id HAVING n>1)) AS duplicates,"
-        f"(SELECT count(*) FROM read_parquet('{support}') s ANTI JOIN read_parquet('{feature}') f USING(candidate_id)) AS support_missing,"
-        f"(SELECT count(*) FROM read_parquet('{feature}') f ANTI JOIN read_parquet('{support}') s USING(candidate_id)) AS feature_extra,"
+        f"(SELECT count(*) FROM read_parquet('{support}') s ANTI JOIN read_parquet('{feature}') f USING({row_keys})) AS support_missing,"
+        f"(SELECT count(*) FROM read_parquet('{feature}') f ANTI JOIN read_parquet('{support}') s USING({row_keys})) AS feature_extra,"
         f"(SELECT count(*) FROM read_parquet('{feature}') WHERE trade_date>'{END_DATE}') AS forbidden_rows"
     ).fetchone()
     result = {
@@ -1512,7 +1627,6 @@ def _feature_block_current(
     support_path: Path,
     feature_path: Path,
     input_fingerprint: str,
-    allow_legacy_cache: bool,
 ) -> bool:
     if not (
         feature_path.is_file()
@@ -1520,28 +1634,10 @@ def _feature_block_current(
         and existing.get("sha256") == _sha256(feature_path)
     ):
         return False
-    support_sha256 = _sha256(support_path)
-    if (
-        existing.get("support_sha256") == support_sha256
+    return (
+        existing.get("support_sha256") == _sha256(support_path)
         and existing.get("input_fingerprint") == input_fingerprint
-    ):
-        return True
-    if "input_fingerprint" in existing or not allow_legacy_cache:
-        return False
-    alignment = _validate_feature_block(
-        connection,
-        support_path=support_path,
-        feature_path=feature_path,
-        raise_on_error=False,
     )
-    valid = alignment["support_rows"] == alignment["feature_rows"] and not any(
-        alignment[key] for key in tuple(alignment)[2:]
-    )
-    if valid:
-        existing["support_sha256"] = support_sha256
-        existing["input_fingerprint"] = input_fingerprint
-        existing["alignment"] = alignment
-    return valid
 
 
 def _feature_input_fingerprint(
@@ -1611,18 +1707,6 @@ def prepare_feature_blocks(
     records = dict(state.get("feature_blocks", {}) or {})
     coverage = _report_coverage_status(report_coverage_path)
     calendar_path = output_root / "inputs" / "calendar_positions.parquet"
-    changed_domains = set(state.get("qdp_changed_domains", []) or [])
-    relevant_domains = {
-        "minute": {"market_intraday_5m"},
-        "fundamental": {
-            "financial_quarterly",
-            "performance_forecast",
-            "income_statement_quarterly",
-            "balance_sheet_quarterly",
-            "cash_flow_statement_quarterly",
-        },
-        "event": {"announcement", "research_report", "research_report_forecast"},
-    }
     connection = _connect(output_root)
     try:
         for year in YEARS:
@@ -1657,9 +1741,6 @@ def prepare_feature_blocks(
                 support_path=support_path,
                 feature_path=minute_path,
                 input_fingerprint=minute_input,
-                allow_legacy_cache=not bool(
-                    relevant_domains["minute"] & changed_domains
-                ),
             ):
                 year_records["minute"] = existing
             else:
@@ -1705,9 +1786,6 @@ def prepare_feature_blocks(
                 support_path=support_path,
                 feature_path=fundamental_path,
                 input_fingerprint=fundamental_input,
-                allow_legacy_cache=not bool(
-                    relevant_domains["fundamental"] & changed_domains
-                ),
             ):
                 year_records["fundamental"] = existing
             else:
@@ -1756,9 +1834,6 @@ def prepare_feature_blocks(
                 support_path=support_path,
                 feature_path=event_path,
                 input_fingerprint=event_input,
-                allow_legacy_cache=not bool(
-                    relevant_domains["event"] & changed_domains
-                ),
             ):
                 year_records["event"] = existing
             else:
@@ -2004,7 +2079,10 @@ def _base_sample(
     path = Path(manifest["files"]["continuous"]["path"])
     values = np.memmap(path, dtype=np.float32, mode="r", shape=shape)
     names = [str(item["name"]) for item in manifest["continuous_catalog"]]
-    sample = np.asarray(values[candidate_ids], dtype=np.float32)
+    legacy_rows = _legacy_candidate_rows(candidate_ids)
+    sample = np.full((len(candidate_ids), shape[1]), np.nan, dtype=np.float32)
+    matched = legacy_rows >= 0
+    sample[matched] = np.asarray(values[legacy_rows[matched]], dtype=np.float32)
     return pd.DataFrame(sample, columns=names), list(manifest["continuous_catalog"])
 
 
@@ -2013,7 +2091,12 @@ def _label_sample(candidate_ids: np.ndarray) -> pd.DataFrame:
     record = manifest["files"]["candidate_labels"]
     shape = tuple(int(value) for value in record["shape"])
     values = np.memmap(Path(record["path"]), dtype=np.float32, mode="r", shape=shape)
-    sample = np.asarray(values[candidate_ids][:, [4, 7]], dtype=np.float32)
+    legacy_rows = _legacy_candidate_rows(candidate_ids)
+    sample = np.full((len(candidate_ids), 2), np.nan, dtype=np.float32)
+    matched = legacy_rows >= 0
+    sample[matched] = np.asarray(
+        values[legacy_rows[matched]][:, [4, 7]], dtype=np.float32
+    )
     return pd.DataFrame(sample, columns=["mfe_10", "mfe_20"])
 
 

@@ -103,6 +103,11 @@ def test_refreshed_industry_features_use_current_industry_groups(
         "_diagnostics_path",
         lambda source_manifest, year: diagnostics,
     )
+    monkeypatch.setattr(
+        model.data_prep,
+        "_legacy_candidate_rows",
+        lambda candidate_ids: np.asarray(candidate_ids, dtype=np.int64),
+    )
     base = np.asarray(
         [
             [0.10, 0.15, 0.30],
@@ -128,6 +133,26 @@ def test_refreshed_industry_features_use_current_industry_groups(
     assert frame.loc[1, "industry_relative_ret20"] == pytest.approx(-0.1)
     assert frame.loc[2, "industry_missing"] == 1
     assert np.isnan(frame.loc[2, "industry_ret1_mean"])
+
+
+def test_status_features_preserve_unknown_in_time_and_cross_section() -> None:
+    values = np.asarray([[False], [True], [True], [False]], dtype=bool)
+    valid = np.asarray([[True], [True], [False], [True]], dtype=bool)
+
+    rolling = model._complete_status_rolling_mean(values, valid, window=2)
+
+    assert np.isnan(rolling[0, 0])
+    assert rolling[1, 0] == pytest.approx(0.5)
+    assert np.isnan(rolling[2, 0])
+    assert np.isnan(rolling[3, 0])
+
+    membership = np.asarray([[True, True], [True, True]], dtype=bool)
+    status_valid = np.asarray([[True, True], [True, False]], dtype=bool)
+    is_st = np.asarray([[True, False], [True, False]], dtype=bool)
+    rates = model._strict_status_rate(membership, status_valid, is_st)
+
+    assert rates[0] == pytest.approx(0.5)
+    assert np.isnan(rates[1])
 
 
 def test_task_plan_is_exactly_24_compact_core_tasks() -> None:
@@ -180,6 +205,18 @@ def test_target_and_valid_arrays_are_cached() -> None:
     assert inputs.valid_mask("mfe_10") is first_valid
 
 
+def test_unmatched_legacy_candidate_has_no_reused_label() -> None:
+    inputs = _fake_inputs()
+    inputs.legacy_candidate_rows = np.asarray(
+        [0, 1, -1, 3, 4, 5, 6, 7, 8, 9], dtype=np.int64
+    )
+
+    assert np.isnan(inputs.task_values("mfe_10")[2])
+    assert not inputs.valid_mask("mfe_10")[2]
+    assert inputs.task_values("state_10")[2] == -1
+    assert not inputs.valid_mask("state_10")[2]
+
+
 def test_sequence_supports_arbitrary_rows_and_variant_layout() -> None:
     inputs = object.__new__(model.ModelInputs)
     inputs.candidate_ids = np.arange(4, dtype=np.int64)
@@ -226,6 +263,66 @@ def test_task_completion_is_resumable_and_hash_bound(tmp_path) -> None:
     assert model._task_complete(result_path, fingerprint="fingerprint")
     artifact.write_bytes(b"changed")
     assert not model._task_complete(result_path, fingerprint="fingerprint")
+
+
+def test_evaluate_rejects_model_input_manifest_replaced_in_place(tmp_path) -> None:
+    input_manifest_path = tmp_path / "model_inputs.json"
+    input_manifest_path.write_text(
+        json.dumps({"input_fingerprint": "current-input"}), encoding="utf-8"
+    )
+    root_manifest = {
+        "status": "training_completed",
+        "model_inputs": model._file_record(
+            input_manifest_path, input_fingerprint="current-input"
+        ),
+    }
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(root_manifest), encoding="utf-8"
+    )
+    input_manifest_path.write_text(
+        json.dumps({"input_fingerprint": "current-input"}, indent=2),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(model.ModelError, match="model_input_manifest_hash_mismatch"):
+        model.evaluate(output_root=tmp_path)
+
+
+def test_current_task_results_reject_stale_fingerprint(tmp_path) -> None:
+    inputs = object.__new__(model.ModelInputs)
+    inputs.manifest = {"input_fingerprint": "current-input"}
+    inputs.feature_groups = {model.COMPACT_VARIANT: ["feature_0"]}
+    task = {
+        "task_id": f"mfe_core__mfe_10__{model.COMPACT_VARIANT}__2023",
+        "stage": "mfe_core",
+        "target": "mfe_10",
+        "kind": "mfe",
+        "horizon": 10,
+        "year": 2023,
+        "variant": model.COMPACT_VARIANT,
+        "gated_family": None,
+    }
+    result_path = model._task_result_path(tmp_path, str(task["task_id"]))
+    result_path.parent.mkdir(parents=True)
+    result_path.write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "task_id": task["task_id"],
+                "task_fingerprint": "stale-input",
+                "files": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(model.ModelError, match="task_result_not_current"):
+        model._require_current_task_results(
+            output_root=tmp_path,
+            tasks=[task],
+            inputs=inputs,
+            study_path=model.DEFAULT_STUDY_PATH,
+        )
 
 
 def test_small_lightgbm_fixture_is_deterministic() -> None:

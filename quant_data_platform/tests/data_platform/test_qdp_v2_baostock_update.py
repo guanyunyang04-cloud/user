@@ -5,6 +5,12 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from quant_data_platform.domains.contracts import DataDomain
+from quant_data_platform.providers import (
+    _baostock_all_stock_frame,
+    _baostock_bulk_daily_domain_frame,
+    _baostock_status_frame_from_all_stock,
+)
 from quant_data_platform.qdp_v2 import baostock_update, factor_update, update
 
 
@@ -52,6 +58,23 @@ class _FakeBaostock:
             }
         )
         return SimpleNamespace(data=daily, error_report=[]), all_stock
+
+
+class _FakeAllStockQuery:
+    fields = ["code", "code_name", "tradeStatus"]
+    error_code = "0"
+    error_msg = ""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.position = -1
+
+    def next(self):
+        self.position += 1
+        return self.position < len(self.rows)
+
+    def get_row_data(self):
+        return self.rows[self.position]
 
 
 def test_baostock_core_update_builds_only_current_table_rows(
@@ -115,6 +138,90 @@ def test_daily_normalization_keeps_all_ohlcva_columns_float64() -> None:
         str(normalized[column].dtype) == "float64"
         for column in ("open", "high", "low", "close", "volume", "amount")
     )
+
+
+def test_status_prefers_raw_daily_isst_and_preserves_unknown() -> None:
+    all_stock = pd.DataFrame(
+        {
+            "symbol": ["000001.SZ", "000002.SZ", "000003.SZ", "000004.SZ"],
+            "name": ["normal", "S ST fallback", "G*ST fallback", ""],
+            "is_suspended": [False, pd.NA, False, False],
+        }
+    )
+    stock_basic = pd.DataFrame(
+        {
+            "symbol": all_stock["symbol"],
+            "name": ["normal", "S ST fallback", "G*ST fallback", ""],
+            "list_date": ["2000-01-01"] * 4,
+            "delist_date": [""] * 4,
+        }
+    )
+    raw_daily = pd.DataFrame(
+        {
+            "code": ["sz.000001", "sz.000002", "sz.000003", "sz.000004"],
+            "isST": ["1", "0", "", ""],
+        }
+    )
+
+    _, status = baostock_update._universe_and_status_frames(
+        all_stock,
+        daily_status=raw_daily,
+        stock_basic=stock_basic,
+        trade_date="2026-01-05",
+    )
+    status = status.set_index("symbol")
+
+    assert bool(status.loc["000001.SZ", "is_st"])
+    assert not bool(status.loc["000002.SZ", "is_st"])
+    assert pd.isna(status.loc["000002.SZ", "is_suspended"])
+    assert status.loc["000002.SZ", "status_reason"] == "status_unknown"
+    assert bool(status.loc["000003.SZ", "is_st"])
+    assert pd.isna(status.loc["000004.SZ", "is_st"])
+    assert status.loc["000001.SZ", "source"] == "baostock.daily_isST"
+    assert status.loc["000003.SZ", "source"] == "baostock.all_stock_name"
+    assert status.loc["000004.SZ", "status_reason"] == "status_unknown"
+
+
+def test_baostock_status_parsers_preserve_missing_and_invalid_trade_status() -> None:
+    raw = pd.DataFrame(
+        {
+            "date": ["2026-01-05"] * 4,
+            "code": ["sz.000001", "sz.000002", "sz.000003", "sz.000004"],
+            "tradestatus": ["", "invalid", "0", "1"],
+            "isST": ["0"] * 4,
+        }
+    )
+    bulk = _baostock_bulk_daily_domain_frame(
+        raw, domain=DataDomain.SECURITY_STATUS, query_date="2026-01-05"
+    )
+
+    assert str(bulk["is_suspended"].dtype) == "boolean"
+    assert bulk["is_suspended"].isna().tolist() == [True, True, False, False]
+    assert bool(bulk.loc[2, "is_suspended"])
+    assert not bool(bulk.loc[3, "is_suspended"])
+
+    rows = [
+        ["sz.000001", "normal one", ""],
+        ["sz.000002", "normal two", "invalid"],
+        ["sz.000003", "normal three", "0"],
+        ["sz.000004", "normal four", "1"],
+    ]
+    universe = _baostock_all_stock_frame(
+        _FakeAllStockQuery(rows), trade_date="2026-01-05"
+    )
+    status = _baostock_status_frame_from_all_stock(
+        _FakeAllStockQuery(rows), trade_date="2026-01-05"
+    )
+
+    assert universe["is_suspended"].isna().tolist() == [True, True, False, False]
+    assert status["is_suspended"].isna().tolist() == [True, True, False, False]
+
+
+def test_nullable_bool_parser_does_not_guess_market_state_words() -> None:
+    assert baostock_update._to_nullable_bool("yes") is True
+    assert baostock_update._to_nullable_bool("no") is False
+    assert baostock_update._to_nullable_bool("open") is None
+    assert baostock_update._to_nullable_bool("closed") is None
 
 
 def test_factor_tail_initializes_first_qdp_observation_to_one() -> None:

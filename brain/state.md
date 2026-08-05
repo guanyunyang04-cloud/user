@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-05
+Updated: 2026-08-06
 
 ## Objective
 
@@ -12,6 +12,49 @@ ceiling and candidate-aligned prediction-to-oracle loss audits are complete.
 The strict T+1 direct-return heads and their bounded low-position execution
 audit are also complete. No production deployment policy, stop, deep model, or
 reinforcement-learning policy has been selected.
+
+The current active work is the mathematically grounded replacement model on
+the corrected data. The underlying status defect and downstream preparation
+chain are now repaired, but no model has been trained on the corrected input.
+
+## In-place security-status repair (2026-08-06)
+
+Historical ST state is now derived from dated name-change intervals rather
+than the old invalid current-status backfill. Unknown `is_st`, `is_suspended`,
+and `is_delisted` values remain unknown and are not converted to `False`.
+Candidate, minute, and membership caches include their real input
+fingerprints, and legacy features and labels are aligned by
+`(date_idx, symbol_idx)` rather than treating old `candidate_id` values as
+stable identities. Historical PIT part caches also carry the nullable-status
+semantics, so old completed parts cannot bypass the corrected parser. The
+repair was applied to the existing QDP data and Seq100 pack without creating a
+new logical dataset or changing `active.json`.
+
+The rebuilt pack has 8,461,165 candidates and 8,323,878 sequence samples.
+There are 10,437,593 known-status universe cells and 119,191 unknown cells;
+unknown status can never enter the eligible candidate mask. The full-history
+complete support has 4,401,464 rows. The current formal 2011-2025 daily and
+complete supports have 4,361,635 and 4,361,485 rows. Expanding pre-purge
+training counts for 2023/2024/2025 are 3,147,686, 3,550,401, and 3,956,386.
+
+The corrected self-contained feature input is 4,361,485 rows by 557 fields.
+It has no infinite values, no all-missing row, and no all-missing feature.
+Thirty-one repaired 2014 rows for `000972.SZ` did not exist in the legacy
+feature/label base; their legacy fields are missing and every existing target
+is explicitly invalid, so they cannot contaminate training. The name-change
+evidence confirms that the stock's prior `*ST` interval ended in 2013. Strict
+market ST-rate features remain missing where any market member's status is
+unknown; in particular this affects the 2011 cross-section rather than
+fabricating a zero or non-ST value.
+
+Research-scope and training-ready evaluations pass on the corrected support,
+and `training_performed=false` throughout the rebuilt chain. All model and
+execution results recorded below predate this repair and remain historical
+baselines only. Their old task outputs must not be reused as if they were
+trained on the corrected input fingerprint. Core, direct-return, and close-D1
+evaluation now require the root input-manifest hash, input fingerprint, and
+every task fingerprint to match the current data and experiment; all three
+entry points reject the retained pre-repair outputs.
 
 ## Current QDP and pre-training state (2026-08-02)
 
@@ -78,12 +121,13 @@ certification.
 The canonical freeze chain is now the source of truth for new research:
 
 - `seq100_quality_liquidity_data_prep` materializes both pools without
-  changing the pool thresholds. The formal 2011-2025 daily pool has 4,477,003
-  rows; the complete daily/minute support has 4,476,851 rows. 2010 is burn-in
+  changing the pool thresholds. After the status repair, the formal 2011-2025
+  daily pool has 4,361,635 rows; the complete daily/minute support has
+  4,361,485 rows. 2010 is burn-in
   only and 2026 reads/writes are zero.
 - `seq100_quality_liquidity_research_scope` pins repaired dataset IDs and
   both row spines. Expanding training counts for the 2023/2024/2025 folds are
-  3,242,301, 3,652,008, and 4,064,304.
+  3,147,686, 3,550,401, and 3,956,386.
 - `seq100_quality_liquidity_training_ready` is
   `ready_with_documented_optional_gaps`: 518 existing features, 106 new formal
   candidates, 83 diagnostic-only fields, and four availability-gated numeric
@@ -97,9 +141,11 @@ The canonical freeze chain is now the source of truth for new research:
   reports using knowledge from all 2011-2025 descriptive research are called
   retrospective rolling OOS rather than untouched confirmatory OOS.
 
-`seq100_quality_liquidity_descriptive_feature_audit` completed on every one
-of the 4,476,851 formal rows and 628 numeric candidates, with overall, annual,
-and three-period views. It used daily cross-sectional Top-1%/Top-5% true MFE
+The retained pre-status-repair
+`seq100_quality_liquidity_descriptive_feature_audit` completed on every one of
+the then-current 4,476,851 formal rows and 628 numeric candidates, with
+overall, annual, and three-period views. It used daily cross-sectional
+Top-1%/Top-5% true MFE
 labels, separate risk/state coordinates, explicit source-state semantics, and
 market-wide time-series deciles where daily cross-sectional deciles would be
 degenerate. Redundancy was the only sampled calculation (4,975 deterministic
@@ -127,11 +173,13 @@ The descriptive audit is retained as machine-readable Parquet and JSON evidence.
 Its findings are explained directly in the working conversation; no HTML report
 is part of the canonical workflow.
 
-## Quality-liquidity core model (2026-08-04)
+## Historical quality-liquidity core model (2026-08-04)
 
 `seq100_quality_liquidity_model` completed the 2023-2025 retrospective rolling
-study on the 4,476,851-row complete support. The canonical input is one
-self-contained row-major `compact_core` cache with 557 fields. It starts from
+study on the then-current 4,476,851-row complete support. Its trained outputs
+predate the status repair and were not retrained. The current corrected input
+described above is a self-contained row-major `compact_core` cache with 557
+fields and `training_performed=false`. The 557-field contract starts from
 the 587-field core, removes 14 frozen-support constants and 11 conservative
 semantic duplicates, removes five coverage-unstable financial fields, and
 replaces three component financial fields with their more complete statement

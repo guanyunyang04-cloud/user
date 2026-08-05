@@ -1,0 +1,81 @@
+{
+  "created_at": "2026-08-05T11:32:34.429651+00:00",
+  "deduplicated_row_count": 13778,
+  "endpoint": "namechange",
+  "formal_filter": {
+    "end": "2025-12-31",
+    "start": "2011-01-01"
+  },
+  "normalized_path": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\tushare_namechange\\normalized.parquet",
+  "normalized_sha256": "15a9a09b34956e807f16760f49238cf3097a8bd96f727daf58b7ffb85cd60002",
+  "package_versions": {
+    "akshare": "1.18.63",
+    "baostock": "0.9.3",
+    "duckdb": "1.5.2",
+    "pandas": "2.3.2",
+    "pyarrow": "20.0.0",
+    "python": "3.11.15",
+    "requests": "2.32.5",
+    "tushare": "1.4.29"
+  },
+  "pages": [
+    {
+      "elapsed_seconds": 4.847,
+      "fields": [
+        "ts_code",
+        "name",
+        "start_date",
+        "end_date",
+        "ann_date",
+        "change_reason"
+      ],
+      "page": 0,
+      "raw_path": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\tushare_namechange\\raw\\page_000.json",
+      "raw_sha256": "29713189ac1f9bcf995a72a46b733717dbf9e76b1066f1647d686f40a7f7dfea",
+      "raw_size": 673458,
+      "request": {
+        "end_date": "20251231",
+        "limit": 10000,
+        "offset": 0,
+        "start_date": "20100101"
+      },
+      "response_status": 200,
+      "row_count": 10000
+    },
+    {
+      "elapsed_seconds": 1.265,
+      "fields": [
+        "ts_code",
+        "name",
+        "start_date",
+        "end_date",
+        "ann_date",
+        "change_reason"
+      ],
+      "page": 1,
+      "raw_path": "H:\\quant_project\\daily_research\\research_records\\seq100\\status_repair_v1_20260805\\evidence\\tushare_namechange\\raw\\page_001.json",
+      "raw_sha256": "dea0071a027e0904062535130cd2f0fe1732ccd0fd84bd1e376629280ccfdc58",
+      "raw_size": 287315,
+      "request": {
+        "end_date": "20251231",
+        "limit": 10000,
+        "offset": 10000,
+        "start_date": "20100101"
+      },
+      "response_status": 200,
+      "row_count": 4162
+    }
+  ],
+  "raw_row_count": 14162,
+  "request_fields": [
+    "ts_code",
+    "name",
+    "start_date",
+    "end_date",
+    "ann_date",
+    "change_reason"
+  ],
+  "schema": "seq100_status_repair_tushare_namechange_cache/v1",
+  "token_saved": false,
+  "url": "https://ts.gyzcloud.top/api"
+}
