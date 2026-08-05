@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-04
+Updated: 2026-08-05
 
 ## Objective
 
@@ -750,3 +750,85 @@ Retained result:
 
 - `daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/d1_execution/manifest.json`
 - `daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/d1_execution/audit.json`
+
+## Strict T+1 open-to-open target contract
+
+`seq100_quality_liquidity_t1_targets` now defines the next bounded model target
+without changing or overwriting `g_1`. The signal is still formed at the signal
+day close, entry is the next trading-day open, and the target exit is the
+following trading-day open. The primary back-adjusted return is accompanied by
+separate entry-open-to-close and close-to-exit-open components. Their stored
+identity reconciles to within `2.36e-08`.
+
+The contract covers all 4,476,851 formal complete-support rows. It has 4,456,500
+valid price labels; the maximum signal date read is 2025-12-29, the maximum
+outcome date is 2025-12-31, and 2026 reads are zero. Price observation defines
+label validity. Future entry buyability and exit-open sellability are separate
+state coordinates: 8,270 valid-label rows are not entry-buyable and 4,844 are
+not exit-open-sellable, proving that future fill state is not a supervision or
+candidate-universe gate. Missing execution-state evidence remains distinct from
+a known blocked state. The full target audit is `ok`.
+
+The frozen original `g_1` predictions were then evaluated against the new target
+without retraining. Open-to-open Rank IC is `0.0033/0.0335/0.0306` in
+2023/2024/2025. Daily Top-5 excess is slightly negative in 2023 and positive in
+2024-2025. This passes the bounded preregistered gate for a direct-target
+baseline, but it is not evidence of an executable strategy.
+
+## Strict T+1 direct-return model experiment
+
+`seq100_quality_liquidity_t1_return_models` completed the bounded follow-up.
+It trained exactly six retrospective rolling LightGBM heads: the audited
+open-to-open target and an open-to-D2-close target for 2023, 2024, and 2025.
+Both targets have the same 4,456,500 valid rows and the same normalized support.
+The D2-close values were reconstructed exactly from the source panels; the
+maximum stored-value error is `0`, the open/open plus exit-day intraday identity
+reconciles within `2.83e-08`, and 2026 reads are zero.
+
+All models use the fixed 557-field `compact_core`, L2 regression, 512 rounds,
+daily 1%/99% winsorization and z-scoring, date-equal weights, and expanding
+history. Both labels depend on two future trading days, so every fold limits
+its maximum training signal index to OOS start minus three. The six maximum
+training signal dates are 2022-12-28, 2023-12-27, and 2024-12-27 for the two
+targets. Candidate alignment, task hashes, fixed rounds, purge, outputs, and
+the absence of future-fill label gates all pass the final audit.
+
+On identical target support, direct open-to-open Rank IC versus frozen `g_1`
+is `0.0420/0.0742/0.0774` versus `0.0033/0.0335/0.0306` in 2023/2024/2025.
+Daily Top-5 excess is `0.0497%/0.3196%/0.2178%` versus
+`-0.0014%/0.1643%/0.1041%`. The direct target therefore improves broad rank
+and Top-5 excess in all three years.
+
+Direct open-to-D2-close Rank IC is `0.0254/0.0435/0.0563` versus frozen `g_1`
+at `0.0007/0.0236/0.0209`. Daily Top-5 excess is
+`0.1510%/0.3994%/0.2543%` versus `0.1586%/0.3711%/0.2216%`, improving in two
+of three years. All six direct annual heads have positive Rank IC and positive
+Top-5 excess.
+
+The improvement is not uniformly a strong-tail improvement. Direct Top-5
+capture is only `8.20%/8.84%/7.85%` for open-to-open and
+`9.74%/10.02%/8.29%` for open-to-D2-close, below frozen `g_1` in every year.
+Top-1 capture also declines in every comparison. The L2 heads produce better
+broad ordering and realized selected-basket means while overlapping less with
+the ex-post extreme-return set. This is a material tail-selection tradeoff,
+not an audit failure.
+
+Formal conclusion:
+
+`direct_t1_targets_improve_rank_and_selected_returns_but_not_tail_overlap`
+
+Open-to-open is the stronger direct-target candidate because it improves both
+Rank IC and Top-5 excess in all three years. It is eligible for a bounded,
+pre-registered T+1 execution comparison, but no account replay, feature-set
+selection, production policy selection, or execution-rule search was performed
+here. The D2-close head remains a secondary comparison target. Do not treat
+either predictive result as deployable return evidence.
+
+There is no active training process.
+
+Retained result:
+
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_targets/manifest.json`
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_targets/audit.json`
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/manifest.json`
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/audit.json`

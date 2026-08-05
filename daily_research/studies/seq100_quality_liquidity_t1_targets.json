@@ -1,0 +1,84 @@
+{
+  "study_id": "seq100_quality_liquidity_t1_targets",
+  "purpose": "Prepare and audit a strict A-share T+1 open-to-open target without using future fill state to define label support.",
+  "source": {
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "source_study_id": "seq100_quality_liquidity_model",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026,
+    "candidate_universe": "quality_liquidity_complete_pit",
+    "candidate_selection_uses_future_fill": false
+  },
+  "period": {
+    "burn_in_year": 2010,
+    "research_years": [
+      2011,
+      2012,
+      2013,
+      2014,
+      2015,
+      2016,
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024,
+      2025
+    ],
+    "rolling_prediction_years": [2023, 2024, 2025]
+  },
+  "target": {
+    "primary": "open_to_open_1",
+    "components": [
+      "open_to_close_1",
+      "close_to_open_1"
+    ],
+    "signal_decision": "signal_day_close",
+    "entry": "next_trading_day_open",
+    "exit": "second_next_trading_day_open",
+    "holding_period": "one_trading_day_after_entry",
+    "price_semantics": "back_adjusted_total_return",
+    "formula": "(1 + open_to_close_1) * (1 + close_to_open_1) - 1",
+    "validity": "both future opens observed and finite positive; future buyability and sellability are separate state coordinates"
+  },
+  "label_contract": {
+    "schema_version": "seq100_quality_liquidity_t1_labels/1",
+    "label_columns": [
+      "open_to_open_1",
+      "open_to_close_1",
+      "close_to_open_1"
+    ],
+    "execution_state_columns": [
+      "entry_price_observed",
+      "exit_price_observed",
+      "entry_execution_state_known",
+      "exit_execution_state_known",
+      "entry_buyable",
+      "exit_open_sellable"
+    ],
+    "normalization": {
+      "group": "signal_trade_date_cross_section",
+      "winsor_quantiles": [0.01, 0.99],
+      "quantile_method": "nearest",
+      "zscore_ddof": 0,
+      "minimum_cross_section": 20
+    }
+  },
+  "frozen_baseline": {
+    "source_label": "g_1",
+    "source_stage": "direct_returns",
+    "minimum_positive_rank_ic_years": 2,
+    "minimum_positive_top5_excess_years": 2,
+    "minimum_rank_ic": 0.0,
+    "minimum_top5_excess": 0.0
+  },
+  "execution": {
+    "training_performed": false,
+    "feature_set_selected": false,
+    "html_report": false,
+    "research_semantics": "retrospective_target_contract_and_frozen_baseline"
+  }
+}

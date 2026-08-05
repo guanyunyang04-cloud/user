@@ -1277,6 +1277,12 @@ class ModelInputs:
         cache[horizon] = values
         return values
 
+    def raw_task_values(self, target: str) -> np.ndarray:
+        """Return the untransformed values used to evaluate a model target."""
+        if target.startswith("return_"):
+            return self.raw_return_values(int(target.rsplit("_", 1)[1]))
+        return self.task_values(target)
+
     def raw_return_valid_mask(self, horizon: int) -> np.ndarray:
         horizon = int(horizon)
         cache = getattr(self, "_raw_return_valid_cache", None)
@@ -2057,10 +2063,9 @@ def _evaluate_prediction(
     kind = str(task["kind"])
     actual = inputs.task_values(target)[rows]
     if kind == "return":
-        horizon = int(task["horizon"])
         return _return_daily_metrics(
             date_idx=inputs.date_idx[rows],
-            actual_raw=inputs.raw_return_values(horizon)[rows],
+            actual_raw=inputs.raw_task_values(target)[rows],
             actual_zscore=actual,
             prediction=prediction,
         )
@@ -2264,7 +2269,7 @@ def _run_training_task(
         "schema": "seq100_quality_liquidity_model_task/1",
         "status": "completed",
         "completed_at": _now(),
-        "study_id": STUDY_ID,
+        "study_id": str(task.get("study_id", STUDY_ID)),
         "task_id": str(task["task_id"]),
         "task_fingerprint": fingerprint,
         "stage": str(task["stage"]),
