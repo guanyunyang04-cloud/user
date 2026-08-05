@@ -1,0 +1,106 @@
+{
+  "study_id": "seq100_quality_liquidity_t1_execution",
+  "purpose": "Bounded continuous-account execution research for the two strict T+1 direct-return models with a preference for one to three positions.",
+  "sources": {
+    "model_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models",
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "row_index": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "close_d1_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/close_to_close_d1/manifest.json"
+  },
+  "period": {
+    "signal_years": [2023, 2024, 2025],
+    "first_signal_date": "2023-01-03",
+    "last_entry_signal_date": "2025-12-29",
+    "last_mark_date": "2025-12-31",
+    "continuous_account": true,
+    "annual_reset": false,
+    "forbidden_year": 2026,
+    "research_semantics": "retrospective_rolling_execution_research"
+  },
+  "model_contract": {
+    "variant": "compact_core",
+    "feature_count": 557,
+    "targets": ["open_to_open_1", "open_to_close_2"],
+    "prediction_years": [2023, 2024, 2025],
+    "candidate_selection_uses_future_fill": false
+  },
+  "signals": {
+    "score_families": [
+      "open_to_open",
+      "open_to_close_2",
+      "blend_open_weight_25",
+      "blend_open_weight_50",
+      "blend_open_weight_75",
+      "agreement_min"
+    ],
+    "rank_before_blend": true,
+    "blend_open_weights": [0.25, 0.5, 0.75],
+    "confidence_modes": ["always", "causal_top_score_q50", "causal_top_score_q80"],
+    "confidence_lookback_days": 126,
+    "confidence_min_history_days": 20,
+    "low_confidence_rolling_action": "sell_to_cash_next_open",
+    "low_confidence_fixed_action": "do_not_open_new_cohort"
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "slot_counts": [1, 2, 3],
+    "equal_target_slots": true,
+    "allow_pyramiding": false,
+    "allow_leverage": false,
+    "cash_interest_rate": 0.0,
+    "board_lot": 100,
+    "terminal_liquidation": true
+  },
+  "policies": {
+    "entry_modes": ["open", "first_5m_vwap"],
+    "exit_modes": ["rolling_open", "fixed_open_2", "fixed_close_2", "renewed_close_2"],
+    "fixed_close_cadences": ["full_cohort", "staggered"],
+    "rolling_buffer_multipliers": [0.0, 1.0, 2.0, 5.0, 10.0],
+    "renewed_close_buffer_multipliers": [0.0, 1.0, 2.0, 5.0, 10.0],
+    "same_symbol_reselected_rolling": "retain_position",
+    "same_symbol_reselected_fixed": "sell_then_rebuy_at_the_contract_exit",
+    "blocked_sell_rule": "retry_same_exit_time_and_do_not_replace_slot",
+    "minimum_first_5m_vwap_coverage": 0.999
+  },
+  "execution": {
+    "decision_time": "signal_date_close",
+    "open_entry_time": "next_trading_date_open",
+    "vwap_entry_time": "next_trading_date_first_5m_vwap",
+    "rolling_exit_time": "next_trading_date_open_after_rank_replacement",
+    "fixed_open_exit_time": "second_next_trading_date_open",
+    "fixed_close_exit_time": "second_next_trading_date_close",
+    "renewed_close_exit_time": "second_next_trading_date_close_then_daily_signal_confirmed_close_renewal",
+    "sell_before_buy": true,
+    "t_plus_one": true,
+    "cost_scenarios": {"base": 1.0, "stress": 2.0},
+    "expected_pack_costs": {
+      "lot_size": 100,
+      "commission_bps": 3.0,
+      "minimum_commission_cny": 5.0,
+      "transfer_fee_bps": 0.1,
+      "slippage_bps": 7.0,
+      "stress_slippage_multiplier": 2.0,
+      "stamp_tax_schedule": [
+        {"effective_date": "1900-01-01", "stamp_tax_bps": 10.0},
+        {"effective_date": "2023-08-28", "stamp_tax_bps": 5.0}
+      ]
+    },
+    "amount_participation_thresholds": [0.001, 0.005, 0.01]
+  },
+  "selection": {
+    "minimum_positive_years": 3,
+    "minimum_stress_sharpe": 0.5,
+    "minimum_stress_positive_month_fraction": 0.55,
+    "maximum_stress_drawdown": 0.35,
+    "require_positive_base_and_stress_return": true,
+    "require_positive_stress_relative_excess": true,
+    "minimum_passing_neighbor_count": 1,
+    "position_priority": "smallest_slot_count_before_return_tiebreak"
+  },
+  "outputs": {
+    "output_dir": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/execution",
+    "expected_task_count": 3456,
+    "html_report": false
+  }
+}

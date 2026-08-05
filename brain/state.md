@@ -9,7 +9,8 @@ quality, and pre-peak adversity separate. Entry output structure is frozen,
 the supervised post-entry update challenge is finished, and the first
 continuous executable-account monetization audit plus a true-label economic
 ceiling and candidate-aligned prediction-to-oracle loss audits are complete.
-No score fusion, deployment policy, holding period, stop, deep model, or
+The strict T+1 direct-return heads and their bounded low-position execution
+audit are also complete. No production deployment policy, stop, deep model, or
 reinforcement-learning policy has been selected.
 
 ## Current QDP and pre-training state (2026-08-02)
@@ -817,14 +818,10 @@ Formal conclusion:
 
 `direct_t1_targets_improve_rank_and_selected_returns_but_not_tail_overlap`
 
-Open-to-open is the stronger direct-target candidate because it improves both
-Rank IC and Top-5 excess in all three years. It is eligible for a bounded,
-pre-registered T+1 execution comparison, but no account replay, feature-set
-selection, production policy selection, or execution-rule search was performed
-here. The D2-close head remains a secondary comparison target. Do not treat
-either predictive result as deployable return evidence.
-
-There is no active training process.
+Open-to-open was the stronger predictive candidate because it improved both
+Rank IC and Top-5 excess in all three years. The bounded T+1 account comparison
+recorded below has now completed without changing the six trained heads. It
+does not turn either predictive result into deployable return evidence.
 
 Retained result:
 
@@ -832,3 +829,64 @@ Retained result:
 - `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_targets/audit.json`
 - `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/manifest.json`
 - `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/audit.json`
+
+## Strict T+1 direct-return execution research (2026-08-05)
+
+`seq100_quality_liquidity_t1_execution` reused the six frozen direct-return
+heads without retraining. It aligned 1,234,550 candidate predictions over
+2023-2025 and ran 3,456 continuous-account tasks, or 1,728 base/stress pairs.
+The surface covered both direct scores, three rank blends, a rank-agreement
+score, open and first-5-minute-VWAP entry, target-aligned and rolling/renewable
+exits, causal confidence gates, rank-retention bands, staggered D2 cohorts, and
+K=`1/2/3`. Accounts start with CNY 1 million, use 100-share lots, sell before
+buying, obey T+1, retry blocked exits, do not use future fill state for
+selection, and stop at 2025-12-31 without reading 2026.
+
+Formal conclusion:
+
+`no_stable_profitable_execution_region_found`
+
+No configuration has positive cumulative return under either base or stress
+costs, no stress configuration is positive in all three years, and neither the
+strict nor relaxed stability gate has a passing cell. Only seven base-cost
+same-sequence gross returns are positive; all use the D2 score, and none is
+gross-positive in all three years. Fusion and score agreement do not create a
+profitable region. No production policy is selected.
+
+The least-loss stress cell uses the D2 score, next-open entry, renewable D2
+close exit, K=2 staggered cohorts, the prior-only Q80 confidence gate, and a
+10K retention band. Its base/stress terminal returns are `-18.35%/-22.83%`,
+stress annual returns are `+32.52%/-20.51%/-26.67%`, maximum drawdown is
+`-44.89%`, and average position count is `0.143`. This is mostly a cash policy,
+not a profitable signal: average cash is about 92.95%, its same-sequence gross
+return is negative, and concentrated active-day orders have material liquidity
+participation.
+
+For the unextended target contracts, the best open-to-open cell is open entry,
+fixed next-open exit, Q80, and K=2; it loses `-46.97%/-53.56%` under base/stress
+costs and is negative in every stress year. The best D2 cell is open entry,
+fixed D2-close exit, staggered K=2, and Q50. It earns `+11.27%` gross but loses
+`-13.36%/-24.59%` net under base/stress costs; its base annual gross returns are
+`+2.69%/+34.70%/-19.55%`, so cost is not the only instability.
+
+Strictly paired diagnostics favor open over first-5-minute VWAP entry in 97.2%
+of stress-return pairs. Q50 and Q80 confidence gates reduce turnover and median
+loss, with Q80 improving median stress return by about 16.7 percentage points
+versus always trading. Staggering D2 cohorts materially improves return and
+drawdown versus full-cohort rotation. Renewal and wider retention bands save
+some trades but add only small, inconsistent return improvements. K=1 has the
+worst concentration outcome; K=2 is the smallest defensible research size,
+while K=3 adds turnover without producing a stable region.
+
+The final audit is `ok`: all task and base/stress pairs are complete, T+1 and
+position limits hold, cash/position conservation error stays below `6e-9`,
+close sellability is independent evidence, and 2026 rows are zero. There is no
+active training or execution process. Do not continue tuning this same
+2023-2025 surface into a production rule; further work requires a new model or
+objective and an independent confirmation design.
+
+Retained result:
+
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/execution/manifest.json`
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/execution/audit.json`
+- `daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/execution/decision.json`
