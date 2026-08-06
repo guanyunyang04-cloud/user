@@ -78,6 +78,36 @@ five event-rate shifts and 114 conditional-distribution shifts; these are
 monitoring findings, not automatic model exclusions. No corrected-data model
 has been trained.
 
+## Mathematical market-model research (2026-08-06)
+
+The effective market-level sample in the corrected formal support is 3,400
+trading days, not 4.19 million independent observations. Daily equal-weight
+market returns have heavy tails (sample excess kurtosis about 6.6), negative
+skew, and volatility clustering (lag-1 autocorrelation of absolute returns
+about 0.30). A constant Student-t distribution beats a constant Gaussian
+baseline on held-out log score in each 2023-2025 year; an expanding EWMA
+Student-t baseline improves further in the volatile years. This makes a
+distributional, time-varying volatility model a testable requirement rather
+than a stylistic preference.
+
+The 54 existing market-state fields are highly collinear: the first robust PCA
+component explains about 90% of their daily variation. Gaussian-mixture BIC
+does not identify a stable small number of discrete regimes, so the canonical
+candidate is a continuous low-rank Student-t state-space/factor model. A
+regime-mixture version is only a challenger and must earn its complexity by
+out-of-sample proper scores. Stock returns are to be decomposed into common
+market/industry factors and an idiosyncratic conditional distribution; raw
+stock-day rows must not be treated as independent market samples.
+
+The target is the distribution of the next executable return under the actual
+information filtration. D2/D5/D10/D20 are derived by iterating one transition
+kernel, not separately invented labels. Feature inclusion is justified only
+when it improves blocked out-of-sample log score/CRPS after conditioning on
+the state and factor structure. Portfolio weights are a downstream constrained
+expected-log-utility/CVaR problem with costs, T+1, long-only and sparse-capacity
+constraints; an 8% event is not a fundamental target. No model training or
+execution search has started under this specification.
+
 ## Current QDP and pre-training state (2026-08-02)
 
 The pre-training data repair, storage compaction, canonical freeze chain,
