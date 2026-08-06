@@ -1,0 +1,147 @@
+{
+  "study_id": "seq100_stock_distribution_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Estimate a daily A-share stock-level executable conditional distribution on the corrected Seq100 input before any portfolio or profitability decision.",
+  "epistemic_contract": {
+    "prior_project_results_are": "historical observations and falsifiable hypotheses only",
+    "deep_model_is_not_a_default_challenger": true,
+    "fixed_take_profit_is_not_a_primary_target": true,
+    "single_step_markov_kernel_is_privileged": false,
+    "forecast_and_decision_are_separate": true,
+    "cash_is_an_admissible_future_action": true
+  },
+  "source": {
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "membership_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+    "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "expected_row_count": 4191476,
+    "expected_symbol_count": 3419,
+    "formal_start_year": 2012,
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "target": {
+    "horizons": [5, 10, 20],
+    "primary_horizons": [10, 20],
+    "diagnostic_horizons": [5],
+    "signal": "signal-day close",
+    "entry": "next trading-day adjusted open",
+    "planned_exit": "adjusted close at H trading days after signal",
+    "t_plus_one": "no liquidation is modeled before D2 after next-open entry",
+    "retry_days": 20,
+    "continuous_vector": [
+      "shadow_log_return_H",
+      "executable_log_return_H",
+      "market_industry_residual_executable_log_return_H",
+      "MFE_log_H",
+      "MAE_log_H"
+    ],
+    "state_vector": [
+      "A_buy",
+      "A_sell_H",
+      "tau_sell_H"
+    ],
+    "factor_construction": {
+      "market_component": "leave-one-out equal-weight mean shadow log return within signal date",
+      "industry_component": "leave-one-out PIT industry mean minus leave-one-out market mean within signal date",
+      "residual": "executable log return minus the two components",
+      "small_or_unknown_industry": "fall back to leave-one-out market component"
+    },
+    "mixture_likelihood": "P(A_buy|F_t) P(A_sell_H,tau_sell_H|A_buy,F_t) P(continuous path outcomes|A_buy=A_sell_H=1,F_t)",
+    "candidate_selection_uses_future_states": false,
+    "right_censoring": "A_sell_H=0 and tau_sell_H=retry_days+1 when no legal sellable close exists in the bounded retry window"
+  },
+  "feature_blocks": {
+    "core": {
+      "families": [
+        "market_state",
+        "industry_context",
+        "daily_price_volume_technical",
+        "daily_cross_sectional_technical",
+        "size_liquidity_and_status"
+      ],
+      "role": "scale-stable market, industry, price-path, cross-sectional, size, liquidity, and status coordinates"
+    },
+    "core_minute": {
+      "adds_families": ["same_day_5m"],
+      "role": "same-day realized volatility, semivariance, tail-bar, closing-path, and amount-concentration proxies"
+    },
+    "core_minute_pit": {
+      "adds_families": [
+        "structured_financial_summary",
+        "financial_statements",
+        "financial_statement_extensions",
+        "announcements"
+      ],
+      "role": "point-in-time financial and event information"
+    },
+    "excluded_from_initial_contract": [
+      "traditional_technical_indicators",
+      "traditional_moneyflow"
+    ]
+  },
+  "candidate_models": {
+    "implemented_initial_baselines": [
+      "zero_mean_student_t",
+      "zero_mean_feature_scale_student_t",
+      "direct_ridge_student_t",
+      "direct_ridge_heteroskedastic_student_t",
+      "constant_entry_sell_hurdle",
+      "recent_252d_entry_sell_hurdle",
+      "ridge_logistic_entry_sell_hurdle"
+    ],
+    "frozen_future_challengers": [
+      "direct_lightgbm_quantile_distribution",
+      "joint_D10_D20_path_distribution",
+      "iterated_single_step_kernel",
+      "HAR_or_rough_volatility_scale_model",
+      "skew_or_jump_tail_distribution"
+    ],
+    "initial_learning_rules": {
+      "location": "date-equal weighted ridge regression",
+      "scale": "date-equal weighted ridge regression on log squared location residual",
+      "tail": "Student-t likelihood calibrated on training residuals only",
+      "state": "date-equal weighted ridge logistic likelihood",
+      "sample_cap": "deterministic maximum 64 training stocks per signal date for the first bounded baseline"
+    }
+  },
+  "evaluation": {
+    "development_years": [2017, 2018, 2019, 2020, 2021, 2022],
+    "retrospective_oos_years": [2023, 2024, 2025],
+    "semantics": "2023-2025 are burned retrospective folds, not untouched confirmation data",
+    "training_window": "expanding",
+    "purge": "H + 20 trading days, because the executable label includes the bounded retry window",
+    "date_weighting": "each signal date has total weight one",
+    "continuous_scores": [
+      "log_score",
+      "CRPS",
+      "pinball_05",
+      "pinball_50",
+      "pinball_95",
+      "50_percent_coverage",
+      "90_percent_coverage",
+      "PIT"
+    ],
+    "state_scores": [
+      "Bernoulli_log_score",
+      "Brier",
+      "calibration"
+    ],
+    "dependence_inference": [
+      "date_level_HAC_lag_20",
+      "moving_block_bootstrap_length_20",
+      "White_Reality_Check_over_declared_challenger_family"
+    ],
+    "training_performed": false,
+    "hyperparameter_selection_performed": false,
+    "portfolio_selection_performed": false
+  },
+  "decision_boundary": {
+    "forecast_gate_before_portfolio": true,
+    "future_utility": "expected log wealth minus CVaR under state-dependent costs, turnover, capacity, and cash constraints",
+    "minimum_final_gate": "selection-adjusted 95 percent lower confidence bound of net utility improvement is positive on an unused confirmation period",
+    "profit_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1"
+  }
+}

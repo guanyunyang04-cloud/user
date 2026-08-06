@@ -14,19 +14,19 @@ audit are also complete. No production deployment policy, stop, deep model, or
 reinforcement-learning policy has been selected.
 
 The current active work is the mathematically grounded replacement model on
-the corrected data. The market-layer candidate comparison is now complete as an
-exploratory diagnostic; no stock-level production model has been trained or
-selected on the corrected input. The underlying status defect and downstream
-preparation chain are repaired.
+the corrected data. The market-layer candidate comparison and the first
+stock-level executable conditional-distribution development baseline are now
+complete. No stock-level production model or portfolio has been selected. The
+underlying status defect and downstream preparation chain are repaired.
 
 The formal research contract is now fixed at 2012-01-01 through 2025-12-31;
 2010 and 2011 are burn-in only. The latest data certification is `certified`
-with all blocking checks passing. The 557-field input is ready for the next
-stock-level executable conditional-distribution contract. The market study
-found time-varying and long-memory volatility but did not select a kernel,
-direct model, feature set, or portfolio policy. The next step is finite-horizon
-T+1-compatible target and factor/idiosyncratic distribution design, not another
-outer-period execution search.
+with all blocking checks passing. The 557-field input now has finite-horizon
+T+1-compatible labels, factor/idiosyncratic targets, and a transparent rolling
+baseline. Corrected-data evidence supports conditional risk scale much more
+strongly than residual return direction. The next step is a nested comparison
+of complete direct, joint, and iterated stock-path laws, including sell-delay
+hazards, not another outer-period execution search.
 
 ## In-place security-status repair (2026-08-06)
 
@@ -59,13 +59,14 @@ unknown; the affected 2010-2011 cross-sections remain burn-in only rather than
 fabricating a zero or non-ST value.
 
 Research-scope and training-ready evaluations pass on the corrected support,
-and `training_performed=false` throughout the rebuilt chain. All model and
-execution results recorded below predate this repair and remain historical
-baselines only. Their old task outputs must not be reused as if they were
-trained on the corrected input fingerprint. Core, direct-return, and close-D1
-evaluation now require the root input-manifest hash, input fingerprint, and
-every task fingerprint to match the current data and experiment; all three
-entry points reject the retained pre-repair outputs.
+and `training_performed=false` throughout the rebuilt preparation chain. The
+previously retained model and execution outputs predate this repair and remain
+historical baselines only; the corrected-data market and stock studies are new,
+fingerprint-bound research. Old task outputs must not be reused as if they were
+trained on the corrected input. Core, direct-return, and close-D1 evaluation
+require the root input-manifest hash, input fingerprint, and every task
+fingerprint to match the current data and experiment; all three entry points
+reject the retained pre-repair outputs.
 
 ## Corrected-input data certification (2026-08-06)
 
@@ -79,8 +80,9 @@ source-era coverage is not stable. All 12 blocking checks pass, including
 PIT timing, next-open leakage, raw-price/tradeability, same-day minute
 recomputation, and full input hashes. Annual distribution diagnostics report
 five event-rate shifts and 114 conditional-distribution shifts; these are
-monitoring findings, not automatic model exclusions. No corrected-data model
-has been trained.
+monitoring findings, not automatic model exclusions. The corrected-data market
+diagnostic and first stock distribution baseline described below have since
+been trained; neither is a selected production model.
 
 ## Mathematical market-model research (2026-08-06)
 
@@ -134,12 +136,50 @@ comparison until state sufficiency, time homogeneity, and error accumulation
 are empirically supported. The durable record is
 `daily_research/research_records/seq100/mathematical_market_model_20260806/`.
 
-The next research object is an executable stock-level conditional distribution
-under the actual close-to-next-open filtration, with finite T+1-compatible
-labels, costs, fill/censoring states, common-factor/idiosyncratic decomposition,
-and a later cash-permitted expected-log-utility/CVaR decision layer. An 8% event
-is a descriptive slice only. No production model or execution search has been
-selected under this specification.
+The market study identified the next research object as an executable
+stock-level conditional distribution under the actual close-to-next-open
+filtration, with finite T+1-compatible labels, fill/censoring states, and a
+common-factor/idiosyncratic decomposition. The first baseline for that object is
+now recorded below. Costs and the cash-permitted expected-log-utility/CVaR
+decision layer remain later stages. An 8% event is a descriptive slice only.
+
+## Corrected stock-level distribution baseline (2026-08-06)
+
+`seq100_stock_distribution_v1` now prepares 4,191,476 corrected-input rows of
+D5/D10/D20 shadow and executable log returns, leave-one-out market/industry
+residuals, MFE/MAE, next-open buyability, bounded close sellability, and sell
+delay/right-censoring labels. Future execution state is never a candidate
+filter. The label contract reads through 2025-12-31 only and contains no
+infinite continuous values.
+
+The first frozen development matrix uses 1,459 dates in 2017-2022, D10/D20,
+three feature blocks, expanding `H+20` purges, date-equal weights, and four
+transparent Student-t location/scale baselines. All 36 folds completed. The
+best descriptive law is zero mean with feature-driven scale on the 314-field
+core-plus-minute block: its pooled log-score gains over a static Student-t are
+about `0.0610/0.0516` at D10/D20. The gain is positive in all six years and is
+also visible in CRPS. This is conditional-risk evidence, not alpha.
+
+The same block's ridge mean has only about `0.26%/0.56%` pooled OOS R-squared;
+two-sided HAC and block intervals cross zero. After feature scale is controlled,
+adding the fitted mean lowers log score by about `0.0055/0.0051`. Same-day
+five-minute summaries add a small distributional increment. Naively appending
+all PIT financial/event fields under the fixed ridge estimator is worse and is
+not retained; this does not prove that PIT information is useless.
+
+Entry buyability has some conditional signal, but bounded sell failure is rare
+and changes sharply across years. There are 38,843/41,163 delayed filled D10/D20
+exits and 8,620/15,557 right-censored exits over the formal history, so a
+sell-delay hazard remains part of the required law. The current baseline does
+not model `tau_sell`, joint horizons, common-factor forecasts, costs, or utility.
+No portfolio or profit claim is authorized.
+
+The durable record is
+`daily_research/research_records/seq100/seq100_stock_distribution_v1_20260806/`.
+The next frozen stage should compare direct quantile, joint multi-horizon,
+iterated-kernel, and long-memory/skew-tail challengers inside nested
+chronological folds. Only a passed forecast gate may enter the cash-permitted
+expected-log-utility/CVaR layer; final confirmation requires unused future data.
 
 ## External empirical-literature review (2026-08-06)
 

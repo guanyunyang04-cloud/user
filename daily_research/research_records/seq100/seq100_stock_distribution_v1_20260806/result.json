@@ -1,0 +1,110 @@
+{
+  "schema": "seq100_stock_distribution_research_record/1",
+  "status": "development_completed_no_model_or_policy_selected",
+  "study_id": "seq100_stock_distribution_v1",
+  "record_date": "2026-08-06",
+  "input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+  "label_fingerprint": "c93cf15be7f58642b34e086c0c25e00b56a4f46de514d01a35b3132f2e0bc65d",
+  "formal_label_rows": 4191476,
+  "development": {
+    "years": [2017, 2018, 2019, 2020, 2021, 2022],
+    "date_count": 1459,
+    "candidate_rows": 1946848,
+    "d10_executable_rows": 1940085,
+    "d20_executable_rows": 1938254,
+    "feature_counts": {
+      "core": 289,
+      "core_minute": 314,
+      "core_minute_pit": 465
+    },
+    "fold_count": 36,
+    "maximum_train_rows_per_date": 64,
+    "ridge_penalty": 0.001,
+    "purge_days": {
+      "d10": 30,
+      "d20": 40
+    }
+  },
+  "best_development_distribution_baseline": {
+    "model": "zero_mean_feature_scale_student_t",
+    "feature_block": "core_minute",
+    "h10": {
+      "log_score": 1.392069,
+      "log_score_gain_vs_static": 0.061039,
+      "crps": 0.035538,
+      "rmse": 0.069748,
+      "coverage_90": 0.8869
+    },
+    "h20": {
+      "log_score": 1.041269,
+      "log_score_gain_vs_static": 0.051604,
+      "crps": 0.049938,
+      "rmse": 0.096797,
+      "coverage_90": 0.8840
+    },
+    "pooled_family_reality_check_p": {
+      "h10": 0.0001999600079984003,
+      "h20": 0.0001999600079984003,
+      "repetitions": 5000,
+      "block_length": 20
+    },
+    "interpretation": "conditional risk scale evidence, not directional alpha"
+  },
+  "conditional_mean_audit": {
+    "core_minute_ridge_oos_r2": {
+      "h10": 0.002589,
+      "h20": 0.005605
+    },
+    "mean_mse_family_reality_check_p": {
+      "h10": 0.1239752049590082,
+      "h20": 0.04919016196760648
+    },
+    "location_gain_after_feature_scale": {
+      "h10": -0.005531,
+      "h10_hac_95": [-0.008335, -0.002726],
+      "h20": -0.005149,
+      "h20_hac_95": [-0.009212, -0.001085]
+    },
+    "conclusion": "no stable linear directional-alpha claim; retain D20 as a weak challenger hypothesis"
+  },
+  "feature_increment_audit": {
+    "core_to_core_minute": {
+      "zero_mean_scale_log_score_gain_h10": 0.000523,
+      "zero_mean_scale_hac_95_h10": [0.000272, 0.000774],
+      "zero_mean_scale_log_score_gain_h20": 0.000474,
+      "zero_mean_scale_hac_95_h20": [0.000187, 0.000760]
+    },
+    "core_minute_to_core_minute_pit": {
+      "best_log_score_gain_h10": -0.001436,
+      "best_hac_95_h10": [-0.003313, 0.000440],
+      "best_log_score_gain_h20": -0.000973,
+      "best_hac_95_h20": [-0.002922, 0.000976]
+    },
+    "conclusion": "minute summaries are a small retained increment; naive PIT concatenation is not retained"
+  },
+  "execution_state_audit": {
+    "development_entry_blocked_rows": 4880,
+    "entry_logistic_gain_vs_recent_core_minute": {
+      "h10": 0.0009211,
+      "h20": 0.0009100
+    },
+    "formal_delayed_filled": {
+      "h10": 38843,
+      "h20": 41163
+    },
+    "formal_right_censored": {
+      "h10": 8620,
+      "h20": 15557
+    },
+    "conclusion": "entry state is conditionally predictable; sell state is rare and nonstationary; tau hazard remains unmodeled"
+  },
+  "boundaries": {
+    "retrospective_oos_years_used": [],
+    "model_selection_performed": false,
+    "portfolio_selection_performed": false,
+    "execution_search_performed": false,
+    "profit_claim_allowed": false,
+    "training_or_reads_from_2026": false
+  },
+  "next_required_stage": "joint executable D10/D20 law with tau hazard, nested direct/joint/iterated challengers, then a gated expected-log-utility/CVaR decision layer"
+}
