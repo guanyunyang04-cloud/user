@@ -141,6 +141,34 @@ and a later cash-permitted expected-log-utility/CVaR decision layer. An 8% event
 is a descriptive slice only. No production model or execution search has been
 selected under this specification.
 
+## External empirical-literature review (2026-08-06)
+
+Sider Scholar/OpenAlex and SciSpace were used to audit five-minute return,
+realized-volatility, machine-learning alpha, Chinese intraday, T+1,
+transaction-cost, and backtest-overfitting research. The durable matrix is
+`daily_research/research_records/seq100/mathematical_market_model_20260806/empirical_literature_review_20260806.md`.
+
+The literature supports conditional information in five-minute data, especially
+volatility scale, signed jumps, intraday seasonality, liquidity state and some
+cross-sectional lag structure. It does not establish a universally profitable
+five-minute rule. The strongest intraday alpha papers use US liquid ETFs or
+event/level-2 order-flow data; the latter signals are not reconstructible from
+five-minute OHLCV. The search found no high-confidence peer-reviewed study that
+simultaneously matches five-minute OHLCV-only Chinese A-shares, strict T+1,
+point-in-time selection, realistic state-dependent costs, and stable net OOS
+profitability. Daily/monthly China ML evidence and intraday order-imbalance
+evidence remain useful but non-equivalent priors.
+
+The literature also strengthens the horizon and inference requirements:
+one-month ML alpha can be nearly eliminated by post-2004 costs while longer,
+lower-turnover horizons recover net returns; published anomalies decay; and
+research-design choices create nonstandard uncertainty much larger than an
+ordinary standard error. The next target therefore remains an executable
+stock-level net conditional distribution with cash permitted, not a fixed
+return event or another broad execution sweep. Direct, iterated and joint path
+models must be compared in nested chronological folds, with the full
+feature/model/policy family included in selection-adjusted inference.
+
 ## Current QDP and pre-training state (2026-08-02)
 
 The pre-training data repair, storage compaction, canonical freeze chain,
