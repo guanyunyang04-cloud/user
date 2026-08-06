@@ -1,0 +1,132 @@
+{
+  "study_id": "seq100_stock_bad_tail_v1",
+  "status": "frozen_preflight_contract",
+  "purpose": "Test whether the corrected Seq100 filtration supports a calibrated executable-return left-tail veto and a separate positive-return ranking signal before any account optimization.",
+  "epistemic_contract": {
+    "past_project_results_are": "falsifiable priors rather than model-selection evidence",
+    "absolute_executable_return_is_primary": true,
+    "residual_return_is_diagnostic_only": true,
+    "bad_tail_veto_and_winner_ranking_are_separate": true,
+    "gross_return_law_and_cost_threshold_are_separate": true,
+    "future_execution_state_is_never_a_candidate_filter": true,
+    "preflight_cannot_pass_the_account_gate": true,
+    "forbidden_2026_data_remain_untouched": true
+  },
+  "source": {
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "stock_distribution_label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "expected_label_fingerprint": "c93cf15be7f58642b34e086c0c25e00b56a4f46de514d01a35b3132f2e0bc65d",
+    "expected_row_count": 4191476,
+    "formal_start_year": 2012,
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "targets": {
+    "primary_horizon": 20,
+    "diagnostic_horizon": 10,
+    "conditional_continuous_targets": [
+      "executable_log_return_H",
+      "residual_log_return_H"
+    ],
+    "economic_target": "executable_log_return_H",
+    "stock_selection_diagnostic": "residual_log_return_H",
+    "bad_tail_event": "executable_log_return_H <= 0",
+    "quantile_probabilities": [0.05, 0.10, 0.25, 0.50, 0.75, 0.90],
+    "conditional_mean": true,
+    "execution_states": ["entry_action", "sell_action_H"],
+    "sell_delay": {
+      "target": "tau_sell_H",
+      "support": [0, 20],
+      "right_censoring_code": 21,
+      "likelihood": "sum of at-risk Bernoulli log likelihoods; a filled observation contributes log S(d-1)+log h(d), while a right-censored observation contributes log S(20)"
+    },
+    "cost_policy": "Forecast the gross conditional law. Apply candidate-specific costs only after forecasting; never encode one arbitrary cost in the supervised label."
+  },
+  "features": {
+    "rank_gam": {
+      "transform": "within-signal-date mid-percentile rank on the full candidate cross-section",
+      "structural_features": [
+        "log_turnover_pct_1d",
+        "ma_distance_60d",
+        "return_20d",
+        "atr_60d",
+        "volatility_60d"
+      ],
+      "role": "low-capacity test of the previously observed crowded, extended, high-volatility negative tail"
+    },
+    "lightgbm": {
+      "feature_block": "core_minute",
+      "role": "nonlinear challenger using market, industry, daily, cross-sectional, liquidity/status, and same-day five-minute information"
+    },
+    "pit_policy": "Full PIT concatenation is excluded from this study. PIT may enter only as a separately declared late-fusion or ablation family in a later study."
+  },
+  "models": {
+    "student_t_baseline": {
+      "name": "zero_mean_feature_scale_student_t",
+      "feature_block": "core_minute",
+      "ridge_penalty": 0.001,
+      "role": "existing corrected-data conditional-scale baseline"
+    },
+    "rank_gam": {
+      "spline_knots": 5,
+      "spline_degree": 3,
+      "spline_knot_locations": "equally spaced on [0,1]",
+      "ridge_penalty": 0.001,
+      "logistic_c": 1.0,
+      "interactions": false,
+      "distribution": "Student-t residual law with a separate additive spline location and log-scale",
+      "hazard": "pooled discrete logistic hazard with additive spline covariates and delay indicators"
+    },
+    "lightgbm": {
+      "runtime_version": "4.6.0",
+      "objectives": ["regression_l2", "binary", "quantile"],
+      "num_boost_round": 128,
+      "learning_rate": 0.05,
+      "num_leaves": 15,
+      "max_depth": 4,
+      "min_data_in_leaf": 512,
+      "lambda_l2": 1.0,
+      "max_bin": 127,
+      "feature_fraction": 1.0,
+      "bagging_fraction": 1.0,
+      "num_threads": 8,
+      "seed": 20260806,
+      "early_stopping": false,
+      "quantile_monotonicity": "independent quantiles followed by pointwise monotone rearrangement; raw crossing rate is retained"
+    }
+  },
+  "evaluation": {
+    "preflight_years": [2022],
+    "development_years": [2017, 2018, 2019, 2020, 2021, 2022],
+    "retrospective_oos_years_reserved": [2023, 2024, 2025],
+    "training_window": "expanding",
+    "purge": "H + 20 trading days",
+    "maximum_train_rows_per_date": 64,
+    "date_weighting": "each signal date has total weight one",
+    "top_k_diagnostic": 48,
+    "gross_cost_proxies": [0.003, 0.006],
+    "dependence_inference": [
+      "date-level HAC lag 20",
+      "moving-block bootstrap length 20",
+      "White Reality Check over each declared challenger family"
+    ],
+    "required_scores": [
+      "binary log score, Brier, reliability, ROC-AUC, and average precision",
+      "quantile pinball loss, marginal coverage, interval coverage, and quantile-CRPS approximation",
+      "conditional-mean squared error",
+      "rank IC and positive-IC rate",
+      "Top-48 gross simple return, observation rate, and cost-proxy return",
+      "discrete sell-delay survival log likelihood and censoring-aware calibration",
+      "annual and train-thresholded market trend/volatility regime stability"
+    ],
+    "preflight_expansion_gate": "Only implementation, leakage, support, finiteness, quantile-order, and output-completeness checks. Predictive performance is not a preflight tuning criterion.",
+    "account_gate": "Disabled until the complete frozen forecast family passes selection-adjusted development and retrospective-OOS forecast gates."
+  },
+  "decision_boundary": {
+    "portfolio_selection_performed": false,
+    "account_optimization_performed": false,
+    "profit_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1"
+  }
+}

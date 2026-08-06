@@ -1,0 +1,76 @@
+{
+  "schema": "seq100_stock_bad_tail_v1_result/1",
+  "study_id": "seq100_stock_bad_tail_v1",
+  "record_date": "2026-08-06",
+  "status": "forecast_gate_failed_absolute_law_but_risk_veto_and_residual_relative_signal_supported",
+  "source_run": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022",
+  "risk_decile_audit": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/risk_decile_audit.json",
+  "development": {
+    "years": [2017, 2018, 2019, 2020, 2021, 2022],
+    "dates": 1459,
+    "folds": 12,
+    "horizons": [20, 10],
+    "input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "forbidden_2026_read_count": 0
+  },
+  "primary_d20": {
+    "absolute_quantile_mean_pinball": {
+      "lightgbm_minus_student_t": -0.001653,
+      "lightgbm_hac_lcb_95": -0.002774,
+      "lightgbm_block_lcb_95": -0.002871,
+      "rank_gam_minus_student_t": 0.000058,
+      "rank_gam_hac_lcb_95": -0.000187,
+      "rank_gam_block_lcb_95": -0.000181
+    },
+    "residual_quantile_mean_pinball": {
+      "lightgbm_minus_student_t": 0.000131,
+      "lightgbm_hac_lcb_95": 0.000057,
+      "lightgbm_block_lcb_95": 0.000059,
+      "reality_check_p_value": 0.003996
+    },
+    "bad_tail_probability": {
+      "lightgbm_log_score_improvement": -0.040761,
+      "lightgbm_hac_lcb_95": -0.070388,
+      "lightgbm_block_lcb_95": -0.071211,
+      "rank_gam_logistic_improvement": 0.003649,
+      "rank_gam_logistic_hac_lcb_95": -0.011558
+    },
+    "risk_decile_ranking": {
+      "high_minus_low_loss_rate": 0.089499,
+      "hac_lcb_95": 0.057113,
+      "block_lcb_95": 0.055248,
+      "high_minus_middle_simple_return": -0.016491,
+      "high_minus_middle_hac_lcb_95": -0.023143,
+      "high_minus_middle_block_lcb_95": -0.022554
+    },
+    "winner_ranking": {
+      "lightgbm_residual_top48_excess": 0.008374,
+      "lightgbm_residual_top48_excess_hac_lcb_95": 0.003834,
+      "lightgbm_residual_top48_excess_block_lcb_95": 0.004322,
+      "lightgbm_residual_top48_excess_reality_check_p_value": 0.001998,
+      "lightgbm_residual_top48_60bp_cost_proxy": 0.006791,
+      "lightgbm_residual_top48_60bp_hac_lcb_95": -0.005163,
+      "lightgbm_residual_top48_60bp_block_lcb_95": -0.004574,
+      "lightgbm_residual_top48_60bp_reality_check_p_value": 0.203796
+    },
+    "sell_delay": {
+      "rank_gam_hazard_d20_log_likelihood_improvement": -0.054373,
+      "hac_lcb_95": -0.062053,
+      "block_lcb_95": -0.061956
+    }
+  },
+  "policy": {
+    "model_selected": false,
+    "veto_selected": false,
+    "account_optimization_performed": false,
+    "retrospective_2023_2025_read": false,
+    "2026_read": false,
+    "profit_claim_allowed": false
+  },
+  "next_research": [
+    "hierarchical common-factor plus residual conditional law",
+    "causal prior-shift calibration for bad-tail probability",
+    "empirical sell-delay hazard retained as baseline",
+    "cash-permitted absolute-left-tail gate only after a new forecast gate"
+  ]
+}

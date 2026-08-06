@@ -190,10 +190,43 @@ No strategy is selected. The durable follow-up is
 
 The durable record is
 `daily_research/research_records/seq100/seq100_stock_distribution_v1_20260806/`.
-The next frozen stage should compare direct quantile, joint multi-horizon,
-iterated-kernel, and long-memory/skew-tail challengers inside nested
-chronological folds. Only a passed forecast gate may enter the cash-permitted
-expected-log-utility/CVaR layer; final confirmation requires unused future data.
+
+## Executable bad-tail study (2026-08-06)
+
+`seq100_stock_bad_tail_v1` completed the frozen 2017-2022 development matrix:
+1,459 dates, D20 primary/D10 diagnostic, 12 folds, full candidate-level
+forecasts, and zero 2026 reads. The mechanical audit passes: full-date ranks,
+H+20 purges, monotone quantiles, input/label fingerprints, and candidate
+coverage all pass. The formal forecast gate fails for the absolute executable
+law, so 2023-2025 and all account research remain untouched.
+
+The primary D20 absolute LightGBM quantile law is worse than the feature-scale
+Student-t baseline (mean-pinball difference `-0.001653`, HAC LCB
+`-0.002774`). The rank GAM is statistically indistinguishable. In contrast,
+the residual LightGBM law improves mean pinball (`+0.000131`, HAC LCB
+`+0.000057`, family Reality Check `p=0.0040`), confirming cross-sectional
+information without establishing long-only absolute alpha.
+
+Bad-tail probability calibration fails: D20 LightGBM loss log score is worse
+than a recent-252-day prevalence baseline. But bad-tail ordering is stable. In
+the separate full-candidate risk-decile audit, high-risk minus low-risk loss
+rate is `+0.0895` with HAC/block LCBs `+0.0571/+0.0552` in pooled development,
+positive in all six years; high-risk return is about `-1.65%` versus the middle
+80%. This is a veto coordinate, not a calibrated probability or selected
+policy.
+
+The best D20 Top-48 selector is the residual LightGBM mean: relative excess
+`+0.837%`, HAC LCB `+0.383%`, Reality Check `p=0.0020`. Its 60bp absolute
+cost-proxy return has HAC LCB `-0.516%` and Reality Check `p=0.204`, so the
+absolute-profit gate still fails. The learned sell-delay hazard is worse than
+the empirical hazard; keep the empirical hazard as baseline.
+
+Durable record:
+`daily_research/research_records/seq100/seq100_stock_bad_tail_v1_20260806/`.
+The next model should be a hierarchical common-factor plus residual law with
+causal prior-shift calibration for the loss probability. Only after that new
+forecast gate may the cash-permitted expected-log-utility/CVaR layer be opened;
+the final confirmation period remains unused.
 
 ## External empirical-literature review (2026-08-06)
 
