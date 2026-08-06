@@ -1,6 +1,7 @@
 # Mathematical Market-Model Research Record
 
-Status: retrospective research, no model selected, 2026-08-06
+Status: retrospective research, no model selected, 2026-08-06; post-run
+mean/scale audit added after the final forecast files were generated
 
 Audience: maintainers of Daily Research and the future stock-level model
 implementation. This record is an internal developer/research guide, not a
@@ -242,16 +243,56 @@ HAC, bootstrap, PIT, coverage, and per-date records are in
 
 Feature observations are similarly conditional, not causal attribution:
 
-- HAR direct models beat market-only direct models by roughly `0.02-0.10`
-  log-score points depending on horizon and penalty, but EWMA often scores
-  higher on the pooled log score.
-- Concatenating all 54 market fields with the five current minute fields is
-  worse than the market-only direct model at H=1-10 for every declared penalty
-  (about `-0.004` to `-0.027` log-score points), and is nearly neutral at H=20.
-  This is consistent with collinearity and estimation variance, not proof that
-  minute data have no stock-level value.
+- At the fixed `1e-2` ridge penalty, HAR direct models beat market-only direct
+  models by `0.0276/0.0388/0.0498/0.0708/0.1167` log-score points at
+  H=1/2/5/10/20. The range across all declared penalties reaches `0.1754` at
+  H=20, but EWMA still often scores higher against the static baseline.
+- Concatenating all 54 market fields with the five current minute fields has a
+  small, unstable pooled difference from market-only at the fixed `1e-2`
+  penalty: `+0.0137/+0.0108/+0.0024/+0.0035/-0.0102` at H=1/2/5/10/20.
+  H=1-2 remain positive across all three penalties, H=5-10 change sign, and
+  H=20 is non-positive. Annual signs also change. The earlier sentence saying
+  that concatenation was worse at H=1-10 for every penalty was based on a
+  pre-final summary and is retired; the final per-date forecast file controls.
+- Minute-only models also score above the 54-field market-only direct model in
+  the pooled comparison. This can reflect lower estimation variance as well as
+  information in the minute coordinates, so it is not an incremental-factor
+  or causal claim.
 - The three ridge penalties produce close but non-identical results. No
   penalty is selected.
+
+### Conditional mean versus conditional scale
+
+A post-run audit of the final `marginal_forecasts.parquet` separates return
+location accuracy from distributional accuracy. The comparison uses the same
+707 outer dates, the expanding static Student-t location as the squared-error
+baseline, and the full declared forecast family.
+
+The best descriptive location forecast has pooled OOS R-squared of
+`0.0201/0.0303/0.0293/0.0370/0.0562` at H=1/2/5/10/20. These positive values
+are preliminary magnitude evidence, not a selected alpha. The corresponding
+family-level White Reality Check p-values for squared-error improvement are
+`0.342/0.263/0.417/0.532/0.499` with 20-date blocks and
+`0.311/0.296/0.424/0.568/0.502` with 60-date blocks. None supports a
+selection-adjusted conditional-mean claim. Directional hit-rate gains are also
+not family-level significant; several high-R-squared forecasts have lower raw
+sign accuracy than the positive-mean static baseline.
+
+The homoskedastic and heteroskedastic direct-market variants at a given ridge
+penalty have exactly the same forecast location and Student-t degrees of
+freedom. Their log-score difference therefore isolates the fitted conditional
+scale. At penalty `1e-2`, that scale contribution is
+`+0.0380/+0.0509/+0.0454/+0.0185/-0.0202` nats per date at
+H=1/2/5/10/20. A four-corner Shapley decomposition against the static
+Student-t baseline assigns a negative location contribution to this 54-field
+direct model at every horizon; its short-horizon gain is carried by scale.
+
+Applying the same location-versus-distribution Shapley decomposition to the
+reported horizon winner assigns about `88%-94%` of its pooled log-score gain
+to scale and tail-distribution parameters, not location. This decomposition is
+descriptive because the fitted law is imperfect and the outer dates have been
+inspected, but it materially sharpens the conclusion: the strongest evidence
+found so far concerns conditional risk, not return direction.
 
 ### Joint path comparison
 
@@ -280,7 +321,11 @@ kernel.
    and forced-single-kernel claims are retired.
 4. Direct, iterated, and joint classes remain genuinely different. No class
    wins every horizon, score, and dependence diagnostic.
-5. Nothing in this experiment estimates executable stock returns, net costs,
+5. Positive descriptive OOS R-squared values do not survive family-level
+   selection correction, directional accuracy is weak, and roughly `88%-94%`
+   of the reported winning log-score gain is distributional. The current
+   evidence is therefore a risk-forecast result, not directional alpha.
+6. Nothing in this experiment estimates executable stock returns, net costs,
    fill probabilities, portfolio covariance, or account wealth. It cannot
    justify a trading rule or a profit claim.
 

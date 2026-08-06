@@ -110,6 +110,24 @@ HAR Student-t improves joint log score only about 0.010 and its family-level
 Reality Check is not significant. No model class, feature set, or penalty is
 selected, and these results are not a profitability claim.
 
+A post-run audit of the final per-date forecasts separates conditional mean
+from conditional scale. The best descriptive location OOS R-squared is about
+`2.0%/3.0%/2.9%/3.7%/5.6%` at H=1/2/5/10/20, but the family-level White
+Reality Check p-values for squared-error improvement are all about `0.26-0.57`
+and directional hit-rate gains are not supported. A location-versus-
+distribution Shapley decomposition assigns about `88%-94%` of the reported
+winning log-score gain to scale and tail-distribution parameters. In the
+same-mean direct-market pair, changing only the conditional scale creates the
+short-horizon gain. This strengthens the boundary: corrected-data evidence so
+far is mainly risk predictability, not directional alpha.
+
+The durable record's stale claim about concatenating market and minute fields
+has been corrected against the final per-date file. At ridge `1e-2`, the pooled
+market-plus-minute minus market-only log-score differences are
+`+0.0137/+0.0108/+0.0024/+0.0035/-0.0102` at H=1/2/5/10/20; other penalties
+make H=5-10 change sign, annual signs vary, and H=20 remains non-positive.
+This is mixed estimation evidence, not a selected feature-set result.
+
 The single-step kernel remains a candidate with time-consistency advantages,
 not a mathematically privileged model. Direct and joint laws must remain in the
 comparison until state sufficiency, time homogeneity, and error accumulation
