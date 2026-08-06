@@ -300,3 +300,5 @@ The next frozen comparison should proceed in this order:
 - Preflight run: `experiments/preflight_2022_h10_core/`
 - Full development run:
   `experiments/development_2017_2022_h10_h20_feature_blocks/`
+- Post-hoc directional and strategy-feasibility follow-up:
+  `directional_structure_followup.md`

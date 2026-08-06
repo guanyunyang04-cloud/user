@@ -1,0 +1,38 @@
+{
+  "schema": "seq100_directional_structure_followup/1",
+  "status": "post_hoc_exploratory_no_strategy_selected",
+  "study_id": "seq100_stock_distribution_v1",
+  "record_date": "2026-08-06",
+  "score": {
+    "definition": "one minus the equal-weight within-date percentile ranks of log_turnover_pct_1d, ma_distance_60d, return_20d, atr_60d, and volatility_60d",
+    "selection_status": "constructed_after_inspecting_current_results",
+    "confirmation_eligible": false
+  },
+  "univariate_high_minus_low_decile_executable_return": {
+    "log_turnover_pct_1d": {"d10": -0.013223, "d20": -0.024768},
+    "ma_distance_60d": {"d10": -0.012916, "d20": -0.020928},
+    "return_20d": {"d10": -0.010985, "d20": -0.018561},
+    "atr_60d": {"d10": -0.010324, "d20": -0.020574},
+    "volatility_60d": {"d10": -0.009900, "d20": -0.019779}
+  },
+  "direction_diagnostics": {
+    "d10_2017_2022": {"rank_ic": 0.0765, "positive_ic_rate": 0.674, "top_decile_up_rate": 0.49691, "universe_up_rate": 0.47743, "up_rate_increment": 0.01949},
+    "d10_2023_2025": {"rank_ic": 0.0955, "positive_ic_rate": 0.683, "top_decile_up_rate": 0.50201, "universe_up_rate": 0.47304, "up_rate_increment": 0.02898},
+    "d20_2017_2022": {"rank_ic": 0.0967, "positive_ic_rate": 0.719, "top_decile_up_rate": 0.49119, "universe_up_rate": 0.46605, "up_rate_increment": 0.02514},
+    "d20_2023_2025": {"rank_ic": 0.1105, "positive_ic_rate": 0.706, "top_decile_up_rate": 0.51600, "universe_up_rate": 0.47267, "up_rate_increment": 0.04333}
+  },
+  "k48_stress_daily_cohort_audit": {
+    "d10_2017_2022": {"mean": -0.004665, "hac_95": [-0.009994, 0.000663]},
+    "d20_2017_2022": {"mean": -0.004759, "hac_95": [-0.014403, 0.004885]},
+    "d10_2023_2025": {"mean": -0.000105, "hac_95": [-0.006660, 0.006450]},
+    "d20_2023_2025": {"mean": 0.003702, "hac_95": [-0.008395, 0.015799]}
+  },
+  "capacity": {
+    "development_k3_median_signal_amount_participation": 0.0043249,
+    "development_k3_share_above_0_1pct": 0.857,
+    "development_k48_median_signal_amount_participation": 0.0002913,
+    "development_k48_share_above_0_1pct": 0.054
+  },
+  "conclusion": "directional information exists mainly as a negative-tail veto; a standalone extreme Top-K contrarian strategy is not supported",
+  "next_model": "bad-tail hurdle plus separate non-vetoed return ranking, conditional scale and skew, tau_sell hazard, cash-permitted net-utility gate"
+}

@@ -23,10 +23,12 @@ The formal research contract is now fixed at 2012-01-01 through 2025-12-31;
 2010 and 2011 are burn-in only. The latest data certification is `certified`
 with all blocking checks passing. The 557-field input now has finite-horizon
 T+1-compatible labels, factor/idiosyncratic targets, and a transparent rolling
-baseline. Corrected-data evidence supports conditional risk scale much more
-strongly than residual return direction. The next step is a nested comparison
-of complete direct, joint, and iterated stock-path laws, including sell-delay
-hazards, not another outer-period execution search.
+baseline. Conditional scale remains the strongest result, while the directional
+information found so far is nonlinear and concentrated in a crowded,
+price-extended, high-volatility negative tail. The next step is a nested
+comparison of complete direct, joint, and iterated stock-path laws, including a
+bad-tail hurdle and sell-delay hazards, not another outer-period execution
+search.
 
 ## In-place security-status repair (2026-08-06)
 
@@ -173,6 +175,18 @@ exits and 8,620/15,557 right-censored exits over the formal history, so a
 sell-delay hazard remains part of the required law. The current baseline does
 not model `tau_sell`, joint horizons, common-factor forecasts, costs, or utility.
 No portfolio or profit claim is authorized.
+
+A post-hoc directional follow-up refines the risk-only interpretation. A simple
+within-date contrarian score built from turnover, 60-day mean distance, 20-day
+return, ATR, and volatility has retrospective D10/D20 Rank IC around
+`0.08-0.11`. Its information is highly asymmetric: the crowded/high-scale
+bottom score decile loses heavily, while the upper half is comparatively flat.
+This is evidence for a negative-tail veto, not reliable winner identification.
+The score's isolated Top-K cohorts remain negative in 2017-2022 after stress
+costs; the positive 2023-2025 D20 point estimate has a wide interval crossing
+zero and a negative 2023. Concentrated variants also select low-capacity names.
+No strategy is selected. The durable follow-up is
+`daily_research/research_records/seq100/seq100_stock_distribution_v1_20260806/directional_structure_followup.md`.
 
 The durable record is
 `daily_research/research_records/seq100/seq100_stock_distribution_v1_20260806/`.

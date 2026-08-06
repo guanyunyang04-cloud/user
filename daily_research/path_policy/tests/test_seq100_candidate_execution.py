@@ -85,7 +85,9 @@ def test_t_plus_one_clamps_day_one_and_supports_global_date_values() -> None:
         np.asarray([[11.0, 12.0, 13.0, 14.0]]),
         np.ones((1, 4), dtype=bool),
         manifest=_manifest(),
-        date_values=("2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08"),
+        date_values=np.asarray(
+            ("2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-08")
+        ),
         top_k_values=(1,),
     )
 

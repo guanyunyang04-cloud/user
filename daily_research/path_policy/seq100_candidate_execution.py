@@ -148,6 +148,8 @@ def _terminal_recovery_fraction(manifest: Mapping[str, Any]) -> float:
 
 
 def _normalize_date(value: Any, *, name: str) -> str:
+    if isinstance(value, np.str_):
+        value = str(value)
     try:
         timestamp = pd.Timestamp(value)
     except (TypeError, ValueError) as exc:
