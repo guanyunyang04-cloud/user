@@ -24,3 +24,7 @@ daily_research/data/research_store/*
 !daily_research/data/research_store/.gitkeep
 daily_research/output/*
 !daily_research/output/.gitkeep
+
+# Reproducible hot-money event-study data products are too large for GitHub.
+daily_research/research_records/seq100/seq100_hot_money_event_study_v1_20260806/*.parquet
+daily_research/research_records/seq100/seq100_hot_money_event_study_v1_20260806/path_hits/*.parquet

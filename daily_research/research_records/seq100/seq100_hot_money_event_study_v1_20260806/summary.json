@@ -1,0 +1,48 @@
+{
+  "study_id": "seq100_hot_money_event_study_v1",
+  "status": "completed",
+  "signal_start": "2012-01-01",
+  "signal_end": "2025-12-31",
+  "forbidden_year": 2026,
+  "daily_event_rows": 1567669,
+  "minute_covered_rows": 1513536,
+  "minute_feature_files": [
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2012.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2013.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2014.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2015.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2016.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2017.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2018.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2019.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2020.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2021.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2022.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2023.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2024.parquet",
+    "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\minute_candidate_features_2025.parquet"
+  ],
+  "cost_bps": 60.0,
+  "event_columns": [
+    "participation_shock",
+    "positive_participation_shock",
+    "range_expansion",
+    "breakout20",
+    "breakout60",
+    "breakout_confirmed",
+    "retest20",
+    "rebreakout20",
+    "climax_fade",
+    "minute_trend_confirmed",
+    "minute_closing_pressure",
+    "minute_intraday_fade",
+    "hot_confirmed",
+    "breakout_confirmed_intraday",
+    "retest_confirmed"
+  ],
+  "outputs": {
+    "daily_events": "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\daily_events.parquet",
+    "event_summary": "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\event_summary.csv",
+    "research_record": "H:\\quant_project\\daily_research\\research_records\\seq100\\seq100_hot_money_event_study_v1_20260806\\research_record.md"
+  }
+}

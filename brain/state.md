@@ -30,6 +30,58 @@ comparison of complete direct, joint, and iterated stock-path laws, including a
 bad-tail hurdle and sell-delay hazards, not another outer-period execution
 search.
 
+## Observable hot-money and breakout event study (2026-08-06)
+
+The first independent event study for the short-term/leader hypothesis is
+complete at
+`daily_research/research_records/seq100/seq100_hot_money_event_study_v1_20260806/`.
+It uses the active point-in-time main-board daily raw table and raw 5-minute
+table, signals at the close, enters at the next observed open, subtracts a
+60bp round-trip cost, and never reads 2026 outcomes. The T+1-corrected full
+rebuild kept DuckDB at a 512MB memory limit. The study contains 1,567,669
+daily event rows;
+1,513,536 have at least 30 valid five-minute bars (96.5%); event and path
+files are unique by symbol/date and all path years 2012-2025 have complete
+event-to-path coverage.
+
+The durable evidence is negative for the initial "volume shock + breakout =
+buy" assumption. In 2023-2025, participation shocks have about 0.00% D5
+gross return and -0.60% net return with a date-cluster HAC net lower bound near
+-1.17%; positive participation shocks are about -0.48% gross/-1.08% net. A
+20-day breakout is about -0.56% gross/-1.16% net at D5, and a breakout confirmed
+by high participation is about -1.20% gross/-1.80% net. The result is negative
+in each OOS year for D5 in the main breakout groups. A same-date universe
+excess diagnostic is also negative at D5/D20, so this is not only a market-wide
+downturn artifact.
+
+Price location matters conditionally but does not yet clear costs. OOS
+breakouts less than 1.5% above the prior 20-day high are materially better than
+breakouts above 1.5%; the latter have about -1.35% D5 gross. Shallow retests
+within 0-0.5% of the prior resistance are the best retest bucket, but their D5
+gross is only about +0.55% before the frozen 60bp cost and their HAC interval
+does not support a strategy. The minute path confirmation/fade flags change
+relative returns, but no OOS absolute net lower bound is positive.
+
+The first-hit audit is
+`daily_research/research_records/seq100/seq100_hot_money_event_study_v1_20260806/path_hits/path_hit_record.md`.
+For 2023-2025, the corrected date-equal probability of reaching +10% before
+-5% from legal path day 2 is about 25.7%/31.8%/32.5% for participation shocks
+and 26.5%/29.6%/32.0% for confirmed breakouts; retests are lower at
+19.2%/27.7%/26.0%. This is opportunity probability, not profit: the adverse
+path frequently occurs first, and no fixed exit policy was selected. The event
+study code now marks D1 terminal return as shadow-only under T+1, uses legal
+MFE from D2 onward, and keeps entry-day MAE as an exposure diagnostic.
+
+Formal interpretation: 5-minute OHLCV can measure participation, attention,
+range expansion, intraday trend efficiency, closing pressure, and support/
+resistance proximity, but cannot identify a trader's identity or latent
+"main-player funds" directly. The current evidence supports a conditional-state
+and negative-tail veto research object, not a deployable chase strategy. The
+next valid experiment is a causal-filtration entry-timing comparison
+(signal-close, next-open, and confirmed pullback), followed by a hurdle-plus-
+ranking model with path-ordered utility labels and a fresh confirmation period;
+do not tune the current thresholds on 2023-2025.
+
 ## In-place security-status repair (2026-08-06)
 
 Historical ST state is now derived from dated name-change intervals rather
