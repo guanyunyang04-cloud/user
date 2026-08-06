@@ -13,7 +13,7 @@ There are no generation, candidate, publish, rollback, legacy lake, memmap, or
 
 ## Current boundary
 
-- Active date: `2026-07-21`; 14 active domains; quick check passes.
+- Active date: `2026-07-21`; 27 active domains; quick check passes.
 - The PIT main-board inventory contains 3,419 securities; 3,416 have daily
   history. Historical restoration added 378 securities, including 228
   delisted names, plus dated ST and suspension state.

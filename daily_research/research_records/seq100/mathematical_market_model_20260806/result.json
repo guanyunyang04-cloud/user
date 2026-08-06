@@ -1,0 +1,75 @@
+{
+  "status": "completed_retrospective_no_selection",
+  "study_id": "seq100_mathematical_market_model_v1",
+  "date": "2026-08-06",
+  "input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+  "candidate_rows": 4191476,
+  "market_dates": 3400,
+  "formal_years": [2012, 2025],
+  "burn_in_years": [2010, 2011],
+  "development_years": [2017, 2018, 2019, 2020, 2021, 2022],
+  "retrospective_oos_years": [2023, 2024, 2025],
+  "horizons": [1, 2, 5, 10, 20],
+  "primary_baseline": "static_student_t",
+  "joint_primary_baseline": "joint_static_student_t",
+  "pooled_outer_best_log_score": {
+    "1": {
+      "model": "ewma_student_t_hl5",
+      "gain_vs_static_student_t": 0.06562428981901373,
+      "white_reality_check_p_block20": 0.031984007996002,
+      "white_reality_check_p_block60": 0.026486756621689155
+    },
+    "2": {
+      "model": "direct_har_student_t_hetero_ridge_1e-03",
+      "gain_vs_static_student_t": 0.07649290926848736,
+      "white_reality_check_p_block20": 0.047476261869065464,
+      "white_reality_check_p_block60": 0.08395802098950525
+    },
+    "5": {
+      "model": "ewma_student_t_hl5",
+      "gain_vs_static_student_t": 0.07839171667607459,
+      "white_reality_check_p_block20": 0.14342828585707146,
+      "white_reality_check_p_block60": 0.13493253373313343
+    },
+    "10": {
+      "model": "ewma_student_t_hl20",
+      "gain_vs_static_student_t": 0.0807875477619402,
+      "white_reality_check_p_block20": 0.21889055472263868,
+      "white_reality_check_p_block60": 0.24437781109445277
+    },
+    "20": {
+      "model": "ewma_student_t_hl20",
+      "gain_vs_static_student_t": 0.0615735648960618,
+      "white_reality_check_p_block20": 0.5032483758120939,
+      "white_reality_check_p_block60": 0.5452273863068466
+    }
+  },
+  "joint_best": {
+    "log_score_model": "joint_direct_har_student_t_ridge_1e-02",
+    "log_score_gain": 0.010307084171469645,
+    "log_score_white_reality_check_p_block20": 0.8290854572713643,
+    "log_score_white_reality_check_p_block60": 0.783608195902049,
+    "energy_score_gain": 0.0011699338185800748,
+    "variogram_score_model": "joint_direct_market_student_t_ridge_1e-02",
+    "variogram_score_gain": 0.0009060795531502273
+  },
+  "state_diagnostics": {
+    "robust_pca_pc1": 0.2835981002185796,
+    "robust_pca_first3": 0.6523127575660356,
+    "ordinary_pca_pc1": 0.2692932597856003,
+    "ordinary_pca_first3": 0.5638732079468528,
+    "return_only_pca_pc1": 0.5308910335805526,
+    "return_only_pca_first3": 0.8953400672803157,
+    "log_realized_volatility_acf1": 0.8352759483842601,
+    "gph_log_realized_volatility_d": 0.6395050462581994,
+    "gph_log_realized_volatility_standard_error": 0.08511470340432678
+  },
+  "decision": {
+    "model_selection_performed": false,
+    "feature_selection_performed": false,
+    "portfolio_selection_performed": false,
+    "profit_claim_allowed": false,
+    "next_contract": "finite T+1-compatible executable stock conditional distribution with factor/idiosyncratic decomposition"
+  },
+  "machine_output_root": "daily_research/output/path_policy/studies/seq100_mathematical_market_model"
+}

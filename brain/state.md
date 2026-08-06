@@ -14,15 +14,19 @@ audit are also complete. No production deployment policy, stop, deep model, or
 reinforcement-learning policy has been selected.
 
 The current active work is the mathematically grounded replacement model on
-the corrected data. The underlying status defect and downstream preparation
-chain are now repaired, but no model has been trained on the corrected input.
+the corrected data. The market-layer candidate comparison is now complete as an
+exploratory diagnostic; no stock-level production model has been trained or
+selected on the corrected input. The underlying status defect and downstream
+preparation chain are repaired.
 
 The formal research contract is now fixed at 2012-01-01 through 2025-12-31;
 2010 and 2011 are burn-in only. The latest data certification is `certified`
-with all blocking checks passing. The current 557-field input is ready for a
-new model, but no corrected-data model result exists yet. The next scientific
-step is a transaction-day market-state transition/distribution model, not
-another hand-selected horizon or execution-policy search.
+with all blocking checks passing. The 557-field input is ready for the next
+stock-level executable conditional-distribution contract. The market study
+found time-varying and long-memory volatility but did not select a kernel,
+direct model, feature set, or portfolio policy. The next step is finite-horizon
+T+1-compatible target and factor/idiosyncratic distribution design, not another
+outer-period execution search.
 
 ## In-place security-status repair (2026-08-06)
 
@@ -82,31 +86,42 @@ has been trained.
 
 The effective market-level sample in the corrected formal support is 3,400
 trading days, not 4.19 million independent observations. Daily equal-weight
-market returns have heavy tails (sample excess kurtosis about 6.6), negative
-skew, and volatility clustering (lag-1 autocorrelation of absolute returns
-about 0.30). A constant Student-t distribution beats a constant Gaussian
-baseline on held-out log score in each 2023-2025 year; an expanding EWMA
-Student-t baseline improves further in the volatile years. This makes a
-distributional, time-varying volatility model a testable requirement rather
-than a stylistic preference.
+market log returns have skew about -1.05, excess kurtosis about 5.47, and
+absolute-return ACF(1) about 0.252. Cross-sectional mean minute realized
+volatility has log-ACF 0.835/0.699/0.567/0.381/0.296 at lags 1/5/20/60/120;
+the GPH memory diagnostic is d about 0.64 (SE about 0.085). HAR forecasts
+improve OOS log-RV RMSE/log score over AR(1), but test residual dependence
+remains in several folds, so one-day state sufficiency is not established.
 
-The 54 existing market-state fields are highly collinear: the first robust PCA
-component explains about 90% of their daily variation. Gaussian-mixture BIC
-does not identify a stable small number of discrete regimes, so the canonical
-candidate is a continuous low-rank Student-t state-space/factor model. A
-regime-mixture version is only a challenger and must earn its complexity by
-out-of-sample proper scores. Stock returns are to be decomposed into common
-market/industry factors and an idiosyncratic conditional distribution; raw
-stock-day rows must not be treated as independent market samples.
+The previous PC1-about-90% statement is retired. On the corrected 54-field
+panel, robust PCA explains 28.4% in PC1 and 65.2% in the first three;
+ordinary PCA explains 26.9% and 56.4%. The return-only 12-field subspace is
+more concentrated (53.1% / 89.5%), which is a different calculation. These
+figures are method-specific diagnostics, not a prescribed factor count.
 
-The target is the distribution of the next executable return under the actual
-information filtration. D2/D5/D10/D20 are derived by iterating one transition
-kernel, not separately invented labels. Feature inclusion is justified only
-when it improves blocked out-of-sample log score/CRPS after conditioning on
-the state and factor structure. Portfolio weights are a downstream constrained
-expected-log-utility/CVaR problem with costs, T+1, long-only and sparse-capacity
-constraints; an 8% event is not a fundamental target. No model training or
-execution search has started under this specification.
+The candidate-neutral market experiment now compares static Gaussian/Student-t,
+EWMA half-lives 5/20/60, GARCH, direct ridge Student-t (market/minute/HAR
+inputs), joint Gaussian/Student-t paths, and iterated PCA-VAR kernels. It uses
+2017-2022 development folds and 2023-2025 retrospective OOS, date-level
+log-score/CRPS/PIT and joint scores, HAC, moving blocks, and White Reality
+Check. The best marginal log-score gain versus static Student-t is about
+0.062-0.080 by horizon, but winners switch between EWMA and HAR; joint direct
+HAR Student-t improves joint log score only about 0.010 and its family-level
+Reality Check is not significant. No model class, feature set, or penalty is
+selected, and these results are not a profitability claim.
+
+The single-step kernel remains a candidate with time-consistency advantages,
+not a mathematically privileged model. Direct and joint laws must remain in the
+comparison until state sufficiency, time homogeneity, and error accumulation
+are empirically supported. The durable record is
+`daily_research/research_records/seq100/mathematical_market_model_20260806/`.
+
+The next research object is an executable stock-level conditional distribution
+under the actual close-to-next-open filtration, with finite T+1-compatible
+labels, costs, fill/censoring states, common-factor/idiosyncratic decomposition,
+and a later cash-permitted expected-log-utility/CVaR decision layer. An 8% event
+is a descriptive slice only. No production model or execution search has been
+selected under this specification.
 
 ## Current QDP and pre-training state (2026-08-02)
 

@@ -1,0 +1,98 @@
+{
+  "study_id": "seq100_mathematical_market_model_v1",
+  "status": "completed_retrospective_no_selection",
+  "purpose": "Test market distribution model classes on the corrected input without treating any prior project conclusion as a model-selection prior.",
+  "epistemic_contract": {
+    "brain_and_prior_results_are": "historical observations and falsifiable hypotheses only",
+    "single_step_kernel_is_privileged": false,
+    "discrete_regimes_are_privileged": false,
+    "fixed_return_barrier_is_privileged": false,
+    "candidate_classes": [
+      "iterated_single_step_transition_kernel",
+      "direct_horizon_conditional_distributions",
+      "joint_multi_horizon_path_distribution",
+      "long_memory_or_augmented_state_volatility_models"
+    ]
+  },
+  "source": {
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "expected_candidate_rows": 4191476,
+    "expected_market_dates": 3400,
+    "maximum_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "diagnostic_target": {
+    "name": "next_market_equal_weight_log_return",
+    "source_field": "market_all__ret1_mean",
+    "formula": "log1p(market_all__ret1_mean[t+1])",
+    "horizons": [1, 2, 5, 10, 20],
+    "multi_horizon_formula": "sum of the same one-day log-return observations",
+    "role": "market-state model-class diagnostic, not an executable stock return or trading objective"
+  },
+  "candidate_inputs": {
+    "market54": "all certified date-invariant market_* fields",
+    "minute5": [
+      "cross-sectional mean minute_realized_volatility",
+      "cross-sectional mean minute_downside_semivolatility",
+      "cross-sectional mean minute_upside_semivolatility",
+      "cross-sectional mean minute_amount_entropy",
+      "cross-sectional mean minute_open_close_return"
+    ],
+    "market54_plus_minute5": "concatenation used only as a complexity challenger",
+    "har_state": [
+      "current and trailing 5/22/66-date log mean realized-volatility proxies",
+      "downside/upside realized-semivariance balance",
+      "same-day mean open-close return",
+      "same-day mean amount entropy"
+    ]
+  },
+  "candidate_models": [
+    "static_gaussian",
+    "static_student_t",
+    "ewma_student_t_hl5",
+    "ewma_student_t_hl20",
+    "ewma_student_t_hl60",
+    "garch_normal",
+    "garch_t",
+    "direct_market_student_t_ridge_{1e-4,1e-3,1e-2}",
+    "direct_market_student_t_hetero_ridge_{1e-4,1e-3,1e-2}",
+    "direct_minute_student_t_hetero_ridge_{1e-4,1e-3,1e-2}",
+    "direct_market_plus_minute_student_t_hetero_ridge_{1e-4,1e-3,1e-2}",
+    "direct_har_student_t_hetero_ridge_{1e-4,1e-3,1e-2}",
+    "joint_static_gaussian",
+    "joint_static_student_t",
+    "joint_direct_market_{gaussian,student_t}_ridge_{1e-4,1e-3,1e-2}",
+    "joint_direct_har_{gaussian,student_t}_ridge_{1e-4,1e-3,1e-2}",
+    "iterated_var_gaussian_k1",
+    "iterated_var_gaussian_k3",
+    "iterated_var_gaussian_k5",
+    "iterated_var_augmented_gaussian_k3"
+  ],
+  "evaluation": {
+    "development_years": [2017, 2018, 2019, 2020, 2021, 2022],
+    "outer_years": [2023, 2024, 2025],
+    "semantics": "retrospective rolling OOS; these years are not an untouched holdout",
+    "training_window": "expanding",
+    "purge": "each direct target is purged by its complete future horizon",
+    "common_oos_support": "all horizons stop 20 trading days before the dataset end",
+    "marginal_scores": ["log_score", "CRPS", "PIT", "50% coverage", "90% coverage"],
+    "joint_scores": ["multivariate_log_score", "energy_score", "variogram_score"],
+    "dependence_inference": ["date-level HAC", "moving-block bootstrap"],
+    "family_selection_correction": "White Reality Check against the declared baseline family",
+    "primary_baseline": "static_student_t",
+    "joint_primary_baseline": "joint_static_student_t",
+    "hac_bandwidths": [20, 60],
+    "moving_block_lengths": [20, 60],
+    "bootstrap_repetitions": 2000
+  },
+  "decision_boundary": {
+    "model_selection_performed": false,
+    "portfolio_selection_performed": false,
+    "execution_search_performed": false,
+    "profit_claim_allowed": false,
+    "next_requirement": "derive an executable stock-return distribution and cost-based minimum useful effect before any portfolio decision",
+    "research_record": "daily_research/research_records/seq100/mathematical_market_model_20260806/research_record.md",
+    "output_root": "daily_research/output/path_policy/studies/seq100_mathematical_market_model"
+  }
+}

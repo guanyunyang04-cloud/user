@@ -1,5 +1,10 @@
 # A-share Quant Research: Mathematical Foundations Audit (2011-2025)
 
+> **Superseded for corrected-data model decisions.** This historical report
+> uses the pre-status-repair support and is retained as background evidence
+> only. Use `mathematical_market_model_20260806/research_record.md` for the
+> corrected-input, candidate-neutral market-model study.
+
 Status: technical research report, generated 2026-08-05. The analysis is
 read-only: it does not train a model, mutate QDP, or consume 2026 data.
 

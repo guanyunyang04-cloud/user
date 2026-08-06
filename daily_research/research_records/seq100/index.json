@@ -1,10 +1,15 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-27",
+  "updated_at": "2026-08-06",
   "current_model": "structured_joint_turnover_180x35_v2",
   "selection_window": "2023-2025",
   "confirmation_window": "2026",
   "records": [
+    {
+      "id": "mathematical_market_model_20260806",
+      "status": "completed_research_no_selection",
+      "path": "daily_research/research_records/seq100/mathematical_market_model_20260806/research_record.md"
+    },
     {
       "id": "current_report",
       "status": "current",

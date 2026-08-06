@@ -16,5 +16,6 @@ dependencies:
   - pytorch-cuda=12.4
   - pip:
       - requests>=2.31
+      - arch==8.0.0
       - baostock==0.9.3
       - mootdx==0.11.7
