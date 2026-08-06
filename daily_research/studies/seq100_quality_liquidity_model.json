@@ -9,9 +9,8 @@
     "input_directory_name": "model_inputs"
   },
   "period": {
-    "burn_in_year": 2010,
+    "burn_in_years": [2010, 2011],
     "research_years": [
-      2011,
       2012,
       2013,
       2014,

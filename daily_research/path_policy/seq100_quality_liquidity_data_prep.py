@@ -276,13 +276,27 @@ def _qdp_snapshot(
     pinned_dataset_ids: Mapping[str, str] | None = None,
 ) -> tuple[dict[str, str], dict[str, tuple[Path, ...]]]:
     root = qdp_v2_root(workspace)
+    active = active_dataset_map(read_active_manifest(root))
+    if pinned_dataset_ids:
+        stale = {
+            str(domain): {
+                "pinned": str(dataset_id),
+                "active": str(active.get(str(domain), "")),
+            }
+            for domain, dataset_id in pinned_dataset_ids.items()
+            if str(active.get(str(domain), "")) != str(dataset_id)
+        }
+        if stale:
+            raise DataPreparationError(
+                f"pinned_qdp_datasets_not_active:{json.dumps(stale, sort_keys=True)}"
+            )
     datasets = (
         {
             str(domain): str(dataset_id)
             for domain, dataset_id in pinned_dataset_ids.items()
         }
         if pinned_dataset_ids
-        else active_dataset_map(read_active_manifest(root))
+        else active
     )
     paths: dict[str, tuple[Path, ...]] = {}
     for domain, dataset_id in datasets.items():

@@ -51,7 +51,7 @@ from quant_data_platform.qdp_v2.status import active_dataset_map
 UPDATE_ID = "financial_statement_quarterly_pit_v2"
 LEGACY_UPDATE_ID = "financial_statement_quarterly_pit_v1"
 BALANCE_CONFLICT_REPAIR_ID = "balance_extension_conflict_semantics_repair_v2"
-SOURCE_SCHEMA_VERSION = 3
+SOURCE_SCHEMA_VERSION = 5
 START_DATE = "2010-01-01"
 END_DATE = "2025-12-31"
 MAX_REPORT_PERIOD = "2025-09-30"
@@ -107,13 +107,17 @@ BALANCE_METRICS = {
     "money_cap": "cash_and_equivalents",
     "notes_receiv": "notes_receivable",
     "accounts_receiv": "accounts_receivable",
+    "accounts_receiv_bill": "accounts_receivable_and_notes_reported",
+    "receiv_financing": "receivables_financing",
     "oth_receiv": "other_receivables",
     "oth_rcv_total": "other_receivables_total",
     "prepayment": "prepayments",
     "inventories": "inventory",
     "total_cur_assets": "current_assets",
     "fix_assets": "fixed_assets",
+    "fix_assets_total": "fixed_assets_total_reported",
     "cip": "construction_in_progress",
+    "cip_total": "construction_in_progress_total_reported",
     "intan_assets": "intangible_assets",
     "goodwill": "goodwill",
     "total_nca": "noncurrent_assets",
@@ -121,6 +125,7 @@ BALANCE_METRICS = {
     "st_borr": "short_term_borrowings",
     "notes_payable": "notes_payable",
     "acct_payable": "accounts_payable",
+    "accounts_pay": "accounts_payable_and_notes_reported",
     "adv_receipts": "advances_from_customers",
     "contract_liab": "contract_liabilities",
     "payroll_payable": "employee_compensation_payable",
@@ -198,6 +203,18 @@ BALANCE_DERIVED_COLUMNS = (
     "other_receivables_total_field_state",
     "other_payables_total_field_state",
     "contract_liabilities_field_state",
+    "trade_receivables_total",
+    "trade_receivables_to_current_assets",
+    "trade_receivables_to_total_assets",
+    "trade_receivables_field_state",
+    "fixed_assets_measure",
+    "fixed_assets_measure_field_state",
+    "construction_in_progress_measure",
+    "construction_in_progress_measure_field_state",
+    "trade_payables_total",
+    "trade_payables_to_current_liabilities",
+    "trade_payables_to_total_assets",
+    "trade_payables_field_state",
 )
 BALANCE_EXTENSION_NUMERIC_COLUMNS = (
     "other_receivables_total",
@@ -206,6 +223,30 @@ BALANCE_EXTENSION_NUMERIC_COLUMNS = (
     "customer_advances_and_contract_liabilities",
 )
 BALANCE_EXTENSION_CONFLICT_COLUMN = "balance_extension_source_conflict"
+BALANCE_SEMANTIC_SOURCE_COLUMNS = (
+    "accounts_receivable_and_notes_reported",
+    "receivables_financing",
+    "fixed_assets_total_reported",
+    "construction_in_progress_total_reported",
+    "accounts_payable_and_notes_reported",
+)
+BALANCE_SEMANTIC_NUMERIC_COLUMNS = (
+    "trade_receivables_total",
+    "trade_receivables_to_current_assets",
+    "trade_receivables_to_total_assets",
+    "fixed_assets_measure",
+    "construction_in_progress_measure",
+    "trade_payables_total",
+    "trade_payables_to_current_liabilities",
+    "trade_payables_to_total_assets",
+)
+BALANCE_SEMANTIC_STATE_COLUMNS = (
+    "trade_receivables_field_state",
+    "fixed_assets_measure_field_state",
+    "construction_in_progress_measure_field_state",
+    "trade_payables_field_state",
+)
+BALANCE_SEMANTIC_CONFLICT_COLUMN = "balance_semantic_source_conflict"
 
 COMMON_OUTPUT_COLUMNS = (
     "symbol",
@@ -321,6 +362,32 @@ def download(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         and state.get("source_schema_version") == SOURCE_SCHEMA_VERSION
     ):
         return state
+    if state.get("source_schema_version") != SOURCE_SCHEMA_VERSION:
+        previous_schema_version = state.get("source_schema_version")
+        current = active_dataset_map(
+            read_active_manifest(qdp_v2_root(workspace))
+        )
+        state = {
+            "update_id": UPDATE_ID,
+            "status": "pending",
+            "start_date": START_DATE,
+            "end_date": END_DATE,
+            "source_schema_version": SOURCE_SCHEMA_VERSION,
+            "upgraded_from_source_schema_version": previous_schema_version,
+            "input_dataset_ids": {
+                domain: dataset_id
+                for domain, dataset_id in current.items()
+                if domain
+                in {
+                    DataDomain.INCOME_STATEMENT_QUARTERLY,
+                    DataDomain.BALANCE_SHEET_QUARTERLY,
+                    DataDomain.CASH_FLOW_STATEMENT_QUARTERLY,
+                }
+            },
+            "completed": {},
+            "provider_future_rows_discarded": 0,
+        }
+        _write_state(workspace, state)
     client = _TushareClient(_resolve_tushare_token(workspace), workspace_root=workspace)
     periods = _report_periods()
     completed = dict(state.get("completed", {}) or {})
@@ -418,6 +485,95 @@ def _balance_component_state(
     )
 
 
+def _safe_series_ratio(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    result = pd.Series(np.nan, index=numerator.index, dtype="float64")
+    valid = numerator.notna() & denominator.notna() & denominator.abs().gt(1.0e-12)
+    result.loc[valid] = numerator.loc[valid] / denominator.loc[valid]
+    return result
+
+
+def _populate_balance_semantic_fields(data: pd.DataFrame) -> None:
+    special_structure = data["company_type"].astype(str).isin({"2", "3", "4"})
+
+    reported_receivables = data["accounts_receivable_and_notes_reported"]
+    component_receivables = data["notes_receivable"] + data["accounts_receivable"]
+    receivable_components_complete = (
+        data["notes_receivable"].notna() & data["accounts_receivable"].notna()
+    )
+    receivable_base = reported_receivables.where(
+        reported_receivables.notna(),
+        component_receivables.where(receivable_components_complete),
+    )
+    financing = data["receivables_financing"]
+    data["trade_receivables_total"] = receivable_base.where(
+        receivable_base.isna(), receivable_base + financing.fillna(0.0)
+    )
+    data["trade_receivables_to_current_assets"] = _safe_series_ratio(
+        data["trade_receivables_total"], data["current_assets"]
+    )
+    data["trade_receivables_to_total_assets"] = _safe_series_ratio(
+        data["trade_receivables_total"], data["total_assets"]
+    )
+    data["trade_receivables_field_state"] = np.select(
+        [
+            reported_receivables.notna() & financing.notna(),
+            reported_receivables.notna(),
+            receivable_components_complete & financing.notna(),
+            receivable_components_complete,
+            special_structure,
+        ],
+        [
+            "combined_plus_financing_observed",
+            "combined_observed_financing_unreported",
+            "components_plus_financing_observed",
+            "components_observed_financing_unreported",
+            "not_applicable",
+        ],
+        default="unknown",
+    )
+
+    for reported, component, output, state_column in (
+        (
+            "fixed_assets_total_reported",
+            "fixed_assets",
+            "fixed_assets_measure",
+            "fixed_assets_measure_field_state",
+        ),
+        (
+            "construction_in_progress_total_reported",
+            "construction_in_progress",
+            "construction_in_progress_measure",
+            "construction_in_progress_measure_field_state",
+        ),
+    ):
+        data[output] = data[reported].where(data[reported].notna(), data[component])
+        data[state_column] = np.select(
+            [data[reported].notna(), data[component].notna(), special_structure],
+            ["total_observed", "component_fallback", "not_applicable"],
+            default="unknown",
+        )
+
+    reported_payables = data["accounts_payable_and_notes_reported"]
+    payable_components_complete = (
+        data["notes_payable"].notna() & data["accounts_payable"].notna()
+    )
+    component_payables = data["notes_payable"] + data["accounts_payable"]
+    data["trade_payables_total"] = reported_payables.where(
+        reported_payables.notna(), component_payables.where(payable_components_complete)
+    )
+    data["trade_payables_to_current_liabilities"] = _safe_series_ratio(
+        data["trade_payables_total"], data["current_liabilities"]
+    )
+    data["trade_payables_to_total_assets"] = _safe_series_ratio(
+        data["trade_payables_total"], data["total_assets"]
+    )
+    data["trade_payables_field_state"] = np.select(
+        [reported_payables.notna(), payable_components_complete, special_structure],
+        ["combined_observed", "components_observed", "not_applicable"],
+        default="unknown",
+    )
+
+
 def _normalize_statement_part(
     raw: pd.DataFrame,
     *,
@@ -490,6 +646,7 @@ def _normalize_statement_part(
             data[f"{column}_field_state"] = _balance_component_state(
                 data[column], data["company_type"]
             )
+        _populate_balance_semantic_fields(data)
     valid = (
         data["symbol"].isin(identity_symbols)
         & publish.between(START_DATE, END_DATE)
@@ -517,6 +674,14 @@ def _balance_extension_hash_sql(*, prefix: str = "") -> str:
     return f"md5(concat_ws('|',{values}))"
 
 
+def _balance_semantic_hash_sql(*, prefix: str = "") -> str:
+    values = ",".join(
+        f"coalesce(cast({prefix}\"{column}\" AS VARCHAR),'<NA>')"
+        for column in BALANCE_SEMANTIC_NUMERIC_COLUMNS
+    )
+    return f"md5(concat_ws('|',{values}))"
+
+
 def _prepare_statement(
     workspace: Path,
     *,
@@ -534,9 +699,19 @@ def _prepare_statement(
                 f"statement_raw_part_missing:{spec.name}:{period}"
             )
         output_path = _normalized_path(workspace, spec, period)
+        normalized_required = {
+            *COMMON_OUTPUT_COLUMNS,
+            *spec.metric_map.values(),
+            *(
+                BALANCE_DERIVED_COLUMNS
+                if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+                else ()
+            ),
+        }
         if (
             not output_path.is_file()
             or raw_path.stat().st_mtime_ns > output_path.stat().st_mtime_ns
+            or not normalized_required.issubset(pq.read_schema(output_path).names)
         ):
             normalized = _normalize_statement_part(
                 pd.read_parquet(raw_path),
@@ -571,6 +746,11 @@ def _prepare_statement(
             if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
             else []
         ),
+        *(
+            [BALANCE_SEMANTIC_CONFLICT_COLUMN]
+            if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+            else []
+        ),
         "lag_policy",
         "source",
     ]
@@ -583,6 +763,13 @@ def _prepare_statement(
         if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
         else ""
     )
+    semantic_conflict_sql = (
+        ",\n          count(DISTINCT "
+        f"{_balance_semantic_hash_sql()}) OVER (PARTITION BY {key_sql}) > 1 "
+        f"AS {BALANCE_SEMANTIC_CONFLICT_COLUMN}"
+        if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+        else ""
+    )
     sql = f"""
     COPY (
       WITH source AS (
@@ -590,7 +777,7 @@ def _prepare_statement(
       ), ranked AS (
         SELECT *,
           count(*) OVER (PARTITION BY {key_sql}) AS source_duplicate_count,
-          count(DISTINCT _metric_hash) OVER (PARTITION BY {key_sql}) > 1 AS source_conflict{extension_conflict_sql},
+          count(DISTINCT _metric_hash) OVER (PARTITION BY {key_sql}) > 1 AS source_conflict{extension_conflict_sql}{semantic_conflict_sql},
           row_number() OVER (
             PARTITION BY {key_sql}
             ORDER BY update_flag DESC, _completeness DESC, _source_row_hash DESC
@@ -611,9 +798,15 @@ def _prepare_statement(
             if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
             else "NULL"
         )
+        semantic_conflict_sum = (
+            f"sum({BALANCE_SEMANTIC_CONFLICT_COLUMN})"
+            if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
+            else "NULL"
+        )
         row = connection.execute(
             f"SELECT count(*),sum(source_duplicate_count>1),sum(source_conflict),"
-            f"{extension_conflict_sum},min(publish_date),max(publish_date) "
+            f"{extension_conflict_sum},{semantic_conflict_sum},"
+            "min(publish_date),max(publish_date) "
             f"FROM read_parquet('{str(temporary).replace(chr(39), chr(39) * 2)}')"
         ).fetchone()
     finally:
@@ -629,8 +822,9 @@ def _prepare_statement(
         "rows_from_duplicate_source_groups": int(row[1] or 0),
         "source_conflict_row_count": int(row[2] or 0),
         "balance_extension_source_conflict_count": int(row[3] or 0),
-        "start_date": str(row[4]),
-        "end_date": str(row[5]),
+        "balance_semantic_source_conflict_count": int(row[4] or 0),
+        "start_date": str(row[5]),
+        "end_date": str(row[6]),
         "sha256": _sha256(prepared),
     }
 
@@ -671,28 +865,17 @@ def _align_balance_to_active(
     output = _runtime(workspace) / "prepared" / f"{domain}.parquet"
     temporary = output.with_suffix(".tmp.parquet")
     key_sql = ",".join(f'"{column}"' for column in PRIMARY_KEY)
-    appended_columns = (
-        "other_receivables_total",
-        "other_payables_total",
-        "contract_liabilities",
-        *BALANCE_DERIVED_COLUMNS,
-        BALANCE_EXTENSION_CONFLICT_COLUMN,
-    )
-    appended_expressions = []
-    for column in appended_columns:
-        if column == "customer_liability_field_state":
-            expression = f'coalesce(r."{column}",\'neither_observed\') AS "{column}"'
-        elif column.endswith("_field_state"):
-            expression = (
-                f"coalesce(r.\"{column}\",CASE WHEN b.company_type IN ('2','3','4') "
-                f"THEN 'not_applicable' ELSE 'unknown' END) AS \"{column}\""
+    refreshed_columns = tuple(
+        dict.fromkeys(
+            (
+                *BALANCE_EXTENSION_NUMERIC_COLUMNS,
+                *BALANCE_SEMANTIC_SOURCE_COLUMNS,
+                *BALANCE_DERIVED_COLUMNS,
+                BALANCE_EXTENSION_CONFLICT_COLUMN,
+                BALANCE_SEMANTIC_CONFLICT_COLUMN,
             )
-        elif column == BALANCE_EXTENSION_CONFLICT_COLUMN:
-            expression = f'r."{column}"'
-        else:
-            expression = f'r."{column}"'
-        appended_expressions.append(expression)
-    appended_select = ",".join(appended_expressions)
+        )
+    )
     base_scan = f"read_parquet([{_sql_paths(base_paths)}], union_by_name=true)"
     refreshed_scan = f"read_parquet('{str(refreshed).replace(chr(39), chr(39) * 2)}')"
     connection = duckdb.connect()
@@ -703,11 +886,33 @@ def _align_balance_to_active(
                 f"DESCRIBE SELECT * FROM {base_scan}"
             ).fetchall()
         ]
-        base_select = ",".join(f'"{column}"' for column in base_columns)
+        refreshed_schema = {
+            str(row[0])
+            for row in connection.execute(
+                f"DESCRIBE SELECT * FROM {refreshed_scan}"
+            ).fetchall()
+        }
+        missing_refreshed_columns = sorted(
+            set(refreshed_columns).difference(refreshed_schema)
+        )
+        if missing_refreshed_columns:
+            raise FinancialStatementUpdateError(
+                f"balance_refreshed_columns_missing:{missing_refreshed_columns}"
+            )
+        preserved_columns = [
+            column for column in base_columns if column not in set(refreshed_columns)
+        ]
+        base_select = ",".join(f'"{column}"' for column in preserved_columns)
+        output_select = ",".join(
+            [
+                *(f'b."{column}"' for column in preserved_columns),
+                *(f'r."{column}"' for column in refreshed_columns),
+            ]
+        )
         connection.execute(
             f"""
             COPY (
-              SELECT b.*,{appended_select}
+              SELECT {output_select}
               FROM {base_scan} b
               LEFT JOIN {refreshed_scan} r USING({key_sql})
               ORDER BY b.publish_date,b.symbol,b.report_date,b.report_type,
@@ -754,11 +959,12 @@ def _align_balance_to_active(
         )
     finally:
         connection.close()
-    if base_count != output_count or core_mismatch or duplicate_count:
+    if base_count != output_count or unmatched or core_mismatch or duplicate_count:
         raise FinancialStatementUpdateError(
             "balance_alignment_contract_failed:"
             f"base={base_count}:output={output_count}:"
-            f"core_mismatch={core_mismatch}:duplicates={duplicate_count}"
+            f"unmatched={unmatched}:core_mismatch={core_mismatch}:"
+            f"duplicates={duplicate_count}"
         )
     os.replace(temporary, output)
     return {
@@ -779,7 +985,10 @@ def _align_balance_to_active(
 def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     state = _read_state(workspace)
-    if state.get("status") in {"prepared", "applied"}:
+    if (
+        state.get("status") in {"prepared", "applied"}
+        and state.get("source_schema_version") == SOURCE_SCHEMA_VERSION
+    ):
         return state
     if state.get("status") != "downloaded":
         raise FinancialStatementUpdateError(
@@ -876,9 +1085,9 @@ def _install_domain(
         layer="raw",
         frequency="quarterly_event",
         contract_version=(
-            f"qdp_v2_{spec.domain}_pit_v4"
+            f"qdp_v2_{spec.domain}_pit_v5"
             if spec.domain == DataDomain.BALANCE_SHEET_QUARTERLY
-            and BALANCE_EXTENSION_CONFLICT_COLUMN in pq.read_schema(shard).names
+            and BALANCE_SEMANTIC_CONFLICT_COLUMN in pq.read_schema(shard).names
             else f"qdp_v2_{spec.domain}_pit_v2"
         ),
         primary_key=list(PRIMARY_KEY),
@@ -918,6 +1127,9 @@ def _install_domain(
             "the provider does not expose complete correction timestamps for every restatement",
             "v2 preserves every v1 key and existing value; only audited balance-sheet fields are appended",
             "balance extension source conflicts are retained separately from legacy core-field conflicts",
+            "combined statement fields are retained as reported and are never split into fabricated components",
+            "stable trade-receivable, trade-payable, fixed-asset, and construction-in-progress measures retain explicit source states",
+            "semantic-field conflicts are retained separately from other extension conflicts",
             "special financial-company statement structures retain not_applicable rather than numeric zero",
         ],
     )
@@ -935,7 +1147,10 @@ def _install_domain(
 def commit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     workspace = _workspace(workspace_root)
     state = _read_state(workspace)
-    if state.get("status") == "applied":
+    if (
+        state.get("status") == "applied"
+        and state.get("source_schema_version") == SOURCE_SCHEMA_VERSION
+    ):
         return state
     if state.get("status") != "prepared":
         raise FinancialStatementUpdateError(
@@ -955,6 +1170,10 @@ def commit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     root = qdp_v2_root(workspace)
     active = read_active_manifest(root)
     expected_unchanged = dict(state.get("input_dataset_ids", {}) or {})
+    if str(dict(active.get("datasets", {}) or {}).get(
+        DataDomain.BALANCE_SHEET_QUARTERLY, ""
+    )) != str(expected_unchanged.get(DataDomain.BALANCE_SHEET_QUARTERLY, "")):
+        raise FinancialStatementUpdateError("balance_statement_domain_drifted")
     for domain in (
         DataDomain.INCOME_STATEMENT_QUARTERLY,
         DataDomain.CASH_FLOW_STATEMENT_QUARTERLY,
@@ -995,7 +1214,11 @@ def repair_balance_extension_conflict_metadata(
     existing_columns = [str(item.get("name", "")) for item in current_manifest.schema]
     if (
         BALANCE_EXTENSION_CONFLICT_COLUMN in existing_columns
-        and current_manifest.contract_version == "qdp_v2_balance_sheet_quarterly_pit_v4"
+        and current_manifest.contract_version
+        in {
+            "qdp_v2_balance_sheet_quarterly_pit_v4",
+            "qdp_v2_balance_sheet_quarterly_pit_v5",
+        }
     ):
         return {
             "status": "already_repaired",
@@ -1228,7 +1451,32 @@ def _active_domain_record(workspace: Path, domain: str) -> dict[str, Any]:
                 "OR other_payables_total_field_state IS NULL),"
                 "count(*) FILTER(WHERE contract_liabilities_field_state NOT IN "
                 "('observed','unknown','not_applicable') "
-                "OR contract_liabilities_field_state IS NULL) "
+                "OR contract_liabilities_field_state IS NULL),"
+                "count(trade_receivables_total),"
+                "count(trade_payables_total),"
+                "count(fixed_assets_measure),"
+                "count(construction_in_progress_measure),"
+                "count(*) FILTER(WHERE trade_receivables_field_state NOT IN "
+                "('combined_plus_financing_observed',"
+                "'combined_observed_financing_unreported',"
+                "'components_plus_financing_observed',"
+                "'components_observed_financing_unreported',"
+                "'unknown','not_applicable') "
+                "OR trade_receivables_field_state IS NULL "
+                "OR trade_payables_field_state NOT IN "
+                "('combined_observed','components_observed','unknown','not_applicable') "
+                "OR trade_payables_field_state IS NULL "
+                "OR fixed_assets_measure_field_state NOT IN "
+                "('total_observed','component_fallback','unknown','not_applicable') "
+                "OR fixed_assets_measure_field_state IS NULL "
+                "OR construction_in_progress_measure_field_state NOT IN "
+                "('total_observed','component_fallback','unknown','not_applicable') "
+                "OR construction_in_progress_measure_field_state IS NULL),"
+                "count(accounts_receivable_and_notes_reported),"
+                "count(accounts_payable_and_notes_reported),"
+                "count(receivables_financing),"
+                "count(fixed_assets_total_reported),"
+                "count(construction_in_progress_total_reported) "
                 f"FROM read_parquet([{quoted}])"
             ).fetchone()
     finally:
@@ -1280,6 +1528,28 @@ def _active_domain_record(workspace: Path, domain: str) -> dict[str, Any]:
                 "invalid_component_state_count": int(
                     sum(int(value or 0) for value in balance_coverage[6:9])
                 ),
+                "trade_receivables_nonnull_count": int(balance_coverage[9] or 0),
+                "trade_payables_nonnull_count": int(balance_coverage[10] or 0),
+                "fixed_assets_measure_nonnull_count": int(balance_coverage[11] or 0),
+                "construction_in_progress_measure_nonnull_count": int(
+                    balance_coverage[12] or 0
+                ),
+                "invalid_semantic_state_count": int(balance_coverage[13] or 0),
+                "reported_receivables_combination_nonnull_count": int(
+                    balance_coverage[14] or 0
+                ),
+                "reported_payables_combination_nonnull_count": int(
+                    balance_coverage[15] or 0
+                ),
+                "receivables_financing_nonnull_count": int(
+                    balance_coverage[16] or 0
+                ),
+                "reported_fixed_assets_total_nonnull_count": int(
+                    balance_coverage[17] or 0
+                ),
+                "reported_construction_in_progress_total_nonnull_count": int(
+                    balance_coverage[18] or 0
+                ),
             }
         )
     return result
@@ -1328,6 +1598,29 @@ def evaluate(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
         )
         == 0
         and int(balance.get("invalid_component_state_count", -1)) == 0,
+        "balance_semantic_states_valid": int(
+            balance.get("invalid_semantic_state_count", -1)
+        )
+        == 0,
+        "balance_semantic_measures_populated": all(
+            int(balance.get(field, 0)) > 0
+            for field in (
+                "trade_receivables_nonnull_count",
+                "trade_payables_nonnull_count",
+                "fixed_assets_measure_nonnull_count",
+                "construction_in_progress_measure_nonnull_count",
+            )
+        ),
+        "balance_combined_provider_fields_populated": all(
+            int(balance.get(field, 0)) > 0
+            for field in (
+                "reported_receivables_combination_nonnull_count",
+                "reported_payables_combination_nonnull_count",
+                "receivables_financing_nonnull_count",
+                "reported_fixed_assets_total_nonnull_count",
+                "reported_construction_in_progress_total_nonnull_count",
+            )
+        ),
         "balance_total_fields_q1_q3_coverage_recovered": float(
             balance.get("other_receivables_total_q1_q3_coverage", 0.0)
         )

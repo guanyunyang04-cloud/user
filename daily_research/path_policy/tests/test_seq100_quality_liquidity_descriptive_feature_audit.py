@@ -12,7 +12,7 @@ from daily_research.path_policy import (
 
 
 def test_period_for_year_covers_only_research_years() -> None:
-    assert audit.period_for_year(2011) == "2011_2015"
+    assert audit.period_for_year(2012) == "2012_2015"
     assert audit.period_for_year(2018) == "2016_2020"
     assert audit.period_for_year(2025) == "2021_2025"
 
@@ -295,7 +295,7 @@ def test_feature_catalog_uses_canonical_listing_age_and_keeps_count(tmp_path) ->
             "eligibility": "formal_candidate",
             "eligibility_reason": "test",
         }
-        for index in range(110)
+        for index in range(118)
     )
     registry_path = tmp_path / "registry.parquet"
     pd.DataFrame(registry_rows).to_parquet(registry_path, index=False)
@@ -306,7 +306,7 @@ def test_feature_catalog_uses_canonical_listing_age_and_keeps_count(tmp_path) ->
 
     catalog = audit._feature_catalog(source_manifest, tmp_path)
 
-    assert len(catalog) == 628
+    assert len(catalog) == 636
     assert catalog["feature_name"].eq("listing_age_open_days").sum() == 1
     assert not catalog["feature_name"].eq("listing_age_days").any()
     listing = catalog.loc[catalog["feature_name"].eq("listing_age_open_days")].iloc[0]

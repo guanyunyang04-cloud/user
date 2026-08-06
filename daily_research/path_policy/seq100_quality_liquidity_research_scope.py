@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Derive the formal 2011-2025 research scope from the 2010 burn-in dataset."""
+"""Derive the formal 2012-2025 research scope from the 2010-2011 burn-in data."""
 
 import argparse
 import hashlib
@@ -17,18 +17,18 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_quality_liquidity_research_scope"
 SOURCE_STUDY_ID = "seq100_quality_liquidity_data_prep"
 DATA_HISTORY_START = "2010-01-01"
-RESEARCH_START = "2011-01-01"
+RESEARCH_START = "2012-01-01"
 END_DATE = "2025-12-31"
-BURN_IN_YEARS = (2010,)
-RESEARCH_YEARS = tuple(range(2011, 2026))
+BURN_IN_YEARS = (2010, 2011)
+RESEARCH_YEARS = tuple(range(2012, 2026))
 OOS_YEARS = (2023, 2024, 2025)
 FEATURE_FAMILIES = ("minute", "fundamental", "event")
-EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_361_485
+EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_191_476
 EXPECTED_FEATURE_COUNT = 518
 EXPECTED_TRAINING_ROWS = {
-    2023: 3_147_686,
-    2024: 3_550_401,
-    2025: 3_956_386,
+    2023: 2_977_677,
+    2024: 3_380_392,
+    2025: 3_786_377,
 }
 
 DEFAULT_STUDY_PATH = (
@@ -210,7 +210,7 @@ def _support_semantics(
                    count(DISTINCT candidate_id) AS unique_candidate_count,
                    min(trade_date) AS min_date,
                    max(trade_date) AS max_date,
-                   sum(CASE WHEN year<2011 OR trade_date<'2011-01-01'
+                   sum(CASE WHEN year<2012 OR trade_date<'2012-01-01'
                             THEN 1 ELSE 0 END) AS pre_scope_rows,
                    sum(CASE WHEN year>=2026 OR trade_date>='2026-01-01'
                             THEN 1 ELSE 0 END) AS forbidden_2026_rows,
@@ -680,10 +680,10 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         "source_prep_preserved": state.get("source_study_id")
         == expected_source_study_id,
         "burn_in_not_eligible": state.get("burn_in_years") == list(BURN_IN_YEARS)
-        and 2010 not in state.get("research_years", []),
+        and not set(BURN_IN_YEARS).intersection(state.get("research_years", [])),
         "research_years_exact": tuple(state.get("research_years", ()))
         == RESEARCH_YEARS,
-        "full_2011_start": semantics["min_date"] == "2011-01-04",
+        "full_2012_start": semantics["min_date"] == "2012-01-04",
         "ends_in_2025": semantics["max_date"] == END_DATE,
         "row_count_matches": semantics["row_count"]
         == int(state["common_support_row_count"])
@@ -750,9 +750,9 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
 
 
 def self_test() -> dict[str, Any]:
-    if RESEARCH_YEARS != tuple(range(2011, 2026)):
+    if RESEARCH_YEARS != tuple(range(2012, 2026)):
         raise AssertionError("research year boundary changed")
-    if BURN_IN_YEARS != (2010,) or set(BURN_IN_YEARS) & set(RESEARCH_YEARS):
+    if BURN_IN_YEARS != (2010, 2011) or set(BURN_IN_YEARS) & set(RESEARCH_YEARS):
         raise AssertionError("burn-in entered formal research years")
     if OOS_YEARS != (2023, 2024, 2025) or 2026 in RESEARCH_YEARS:
         raise AssertionError("OOS or forbidden year changed")

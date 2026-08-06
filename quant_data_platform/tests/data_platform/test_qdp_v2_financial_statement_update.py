@@ -6,11 +6,13 @@ import pandas as pd
 from quant_data_platform.qdp_v2.financial_statement_update import (
     BALANCE_EXTENSION_NUMERIC_COLUMNS,
     BALANCE_METRICS,
+    BALANCE_SEMANTIC_NUMERIC_COLUMNS,
     CASH_FLOW_METRICS,
     START_DATE,
     STATEMENT_SPECS,
     V2_STATEMENT_SPECS,
     _balance_extension_hash_sql,
+    _balance_semantic_hash_sql,
     _in_scope_provider_rows,
     _normalize_statement_part,
     _report_periods,
@@ -154,6 +156,20 @@ def test_balance_v2_maps_totals_without_overwriting_split_fields() -> None:
     assert BALANCE_METRICS["oth_pay_total"] == "other_payables_total"
     assert BALANCE_METRICS["adv_receipts"] == "advances_from_customers"
     assert BALANCE_METRICS["contract_liab"] == "contract_liabilities"
+    assert (
+        BALANCE_METRICS["accounts_receiv_bill"]
+        == "accounts_receivable_and_notes_reported"
+    )
+    assert BALANCE_METRICS["receiv_financing"] == "receivables_financing"
+    assert BALANCE_METRICS["fix_assets_total"] == "fixed_assets_total_reported"
+    assert (
+        BALANCE_METRICS["cip_total"]
+        == "construction_in_progress_total_reported"
+    )
+    assert (
+        BALANCE_METRICS["accounts_pay"]
+        == "accounts_payable_and_notes_reported"
+    )
     assert [spec.name for spec in V2_STATEMENT_SPECS] == ["balance_sheet"]
 
 
@@ -174,6 +190,29 @@ def test_balance_extension_conflict_hash_uses_only_extension_values() -> None:
         connection.register("rows", frame)
         changed_versions = connection.execute(
             f"SELECT count(DISTINCT {_balance_extension_hash_sql()}) FROM rows"
+        ).fetchone()[0]
+
+    assert versions == 1
+    assert changed_versions == 2
+
+
+def test_balance_semantic_conflict_hash_uses_only_semantic_values() -> None:
+    frame = pd.DataFrame(
+        {
+            **{column: [1.0, 1.0] for column in BALANCE_SEMANTIC_NUMERIC_COLUMNS},
+            "contract_liabilities": [10.0, 20.0],
+        }
+    )
+    with duckdb.connect() as connection:
+        connection.register("rows", frame)
+        versions = connection.execute(
+            f"SELECT count(DISTINCT {_balance_semantic_hash_sql()}) FROM rows"
+        ).fetchone()[0]
+        frame.loc[1, "trade_payables_total"] = 2.0
+        connection.unregister("rows")
+        connection.register("rows", frame)
+        changed_versions = connection.execute(
+            f"SELECT count(DISTINCT {_balance_semantic_hash_sql()}) FROM rows"
         ).fetchone()[0]
 
     assert versions == 1
@@ -229,3 +268,75 @@ def test_balance_v2_combination_and_null_states_are_explicit() -> None:
     assert result.loc[3, "other_receivables_total_field_state"] == "unknown"
     assert result.loc[4, "other_receivables_total_field_state"] == "not_applicable"
     assert result.loc[4, "contract_liabilities_field_state"] == "not_applicable"
+
+
+def test_balance_semantic_measures_prefer_combined_fields_without_splitting() -> None:
+    spec = STATEMENT_SPECS[1]
+    row_count = 4
+    raw = pd.DataFrame(
+        {
+            **{column: [None] * row_count for column in spec.fields},
+            "ts_code": ["000001.SZ"] * row_count,
+            "ann_date": ["20240102"] * row_count,
+            "f_ann_date": ["20240102"] * row_count,
+            "end_date": ["20231231"] * row_count,
+            "report_type": [str(value) for value in range(1, row_count + 1)],
+            "comp_type": ["1", "1", "1", "2"],
+            "end_type": ["4"] * row_count,
+            "accounts_receiv_bill": [100.0, None, None, None],
+            "notes_receiv": [10.0, 10.0, None, None],
+            "accounts_receiv": [90.0, 90.0, 90.0, None],
+            "receiv_financing": [20.0, None, 5.0, None],
+            "total_cur_assets": [200.0] * row_count,
+            "total_assets": [400.0] * row_count,
+            "fix_assets_total": [80.0, None, None, None],
+            "fix_assets": [70.0, 70.0, None, None],
+            "cip_total": [30.0, None, None, None],
+            "cip": [25.0, 25.0, None, None],
+            "accounts_pay": [60.0, None, None, None],
+            "notes_payable": [10.0, 10.0, None, None],
+            "acct_payable": [50.0, 50.0, 50.0, None],
+            "total_cur_liab": [120.0] * row_count,
+            "update_flag": ["1"] * row_count,
+        }
+    )
+    open_dates = np.asarray(
+        pd.to_datetime(["2024-01-02", "2024-01-03"]),
+        dtype="datetime64[ns]",
+    )
+
+    result = _normalize_statement_part(
+        raw,
+        spec=spec,
+        identity_symbols={"000001.SZ"},
+        open_dates=open_dates,
+    )
+
+    assert result["trade_receivables_total"].tolist()[:2] == [120.0, 100.0]
+    assert pd.isna(result.loc[2, "trade_receivables_total"])
+    assert result.loc[0, "trade_receivables_to_current_assets"] == 0.6
+    assert result.loc[0, "trade_receivables_to_total_assets"] == 0.3
+    assert result["trade_receivables_field_state"].tolist() == [
+        "combined_plus_financing_observed",
+        "components_observed_financing_unreported",
+        "unknown",
+        "not_applicable",
+    ]
+    assert result["fixed_assets_measure"].tolist()[:2] == [80.0, 70.0]
+    assert result["fixed_assets_measure_field_state"].tolist() == [
+        "total_observed",
+        "component_fallback",
+        "unknown",
+        "not_applicable",
+    ]
+    assert result["construction_in_progress_measure"].tolist()[:2] == [30.0, 25.0]
+    assert result["trade_payables_total"].tolist()[:2] == [60.0, 60.0]
+    assert pd.isna(result.loc[2, "trade_payables_total"])
+    assert result.loc[0, "trade_payables_to_current_liabilities"] == 0.5
+    assert result.loc[0, "trade_payables_to_total_assets"] == 0.15
+    assert result["trade_payables_field_state"].tolist() == [
+        "combined_observed",
+        "components_observed",
+        "unknown",
+        "not_applicable",
+    ]

@@ -18,6 +18,7 @@ from quant_data_platform.qdp_v2.database_audit import (
     _daily_intraday_consistency_check,
     _factor_semantic_check,
     _ordered_intraday_primary_key_check,
+    _snapshot_manifest_as_of,
     _status_daily_partition_check,
     audit_database,
     audit_latest_keys,
@@ -116,6 +117,52 @@ def _write_domain(
         ),
     )
     return resolved_id
+
+
+def test_as_of_snapshot_filters_crossing_shard_before_audit(tmp_path: Path) -> None:
+    workspace = _workspace(tmp_path)
+    root = qdp_v2_root(workspace)
+    dataset_id = _write_domain(
+        root,
+        "market_daily_raw",
+        pd.DataFrame(
+            {
+                "trade_date": ["2025-12-31", "2026-01-02"],
+                "symbol": ["000001.SZ", "000001.SZ"],
+                "open": [10.0, 11.0],
+                "high": [10.0, 11.0],
+                "low": [10.0, 11.0],
+                "close": [10.0, 11.0],
+                "volume": [1.0, 1.0],
+                "amount": [10.0, 11.0],
+                "source": ["unit", "unit"],
+                "adjusted_flag": [False, False],
+            }
+        ),
+        contract="qdp_v2_market_daily_raw_v1",
+        primary_key=["trade_date", "symbol"],
+        quality={"ohlcv_non_null": True, "primary_key_unique": True},
+    )
+    manifest = read_dataset_manifest(
+        root / "datasets" / "market_daily_raw" / dataset_id / "dataset.json"
+    )
+
+    with open_guarded_duckdb(
+        temp_directory=tmp_path / "spill", threads=1
+    ) as connection:
+        snapshot, profile = _snapshot_manifest_as_of(
+            connection,
+            source_root=root,
+            source_manifest=manifest,
+            as_of_date="2025-12-31",
+            materialized_root=tmp_path / "materialized",
+        )
+
+    assert snapshot.row_count == 1
+    assert profile["audit_snapshot_max_date"] == "2025-12-31"
+    assert profile["source_rows_after_cutoff_excluded"] == 1
+    assert profile["forbidden_after_cutoff_row_count_in_audit_snapshot"] == 0
+    assert profile["materialized_boundary_shard_count"] == 1
 
 
 def _write_active(

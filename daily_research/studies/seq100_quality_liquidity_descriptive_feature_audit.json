@@ -4,13 +4,13 @@
   "purpose": "Describe target, risk, state, coverage, drift, and feature-family relationships on the current corrected quality-liquidity package without fitting any model.",
   "source_training_ready_study_id": "seq100_quality_liquidity_training_ready",
   "period": {
-    "research_start_date": "2011-01-01",
+    "research_start_date": "2012-01-01",
     "end_date": "2025-12-31",
-    "burn_in_year": 2010,
+    "burn_in_years": [2010, 2011],
     "forbidden_year": 2026,
-    "years": [2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
     "eras": {
-      "2011_2015": [2011, 2012, 2013, 2014, 2015],
+      "2012_2015": [2012, 2013, 2014, 2015],
       "2016_2020": [2016, 2017, 2018, 2019, 2020],
       "2021_2025": [2021, 2022, 2023, 2024, 2025]
     }
@@ -48,7 +48,7 @@
   "pools": {
     "research_pool": "quality_liquidity_complete_pit",
     "daily_reference_pool": "quality_liquidity_pit",
-    "excluded_minute_support_rows_expected": 152
+    "excluded_minute_support_rows_expected": 127
   },
   "training": {
     "performed": false,

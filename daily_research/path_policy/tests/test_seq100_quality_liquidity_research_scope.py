@@ -33,18 +33,18 @@ def _config() -> dict[str, object]:
     }
 
 
-def test_config_keeps_2010_as_burn_in_only(tmp_path) -> None:
+def test_config_keeps_2010_2011_as_burn_in_only(tmp_path) -> None:
     path = tmp_path / "study.json"
     path.write_text(json.dumps(_config()), encoding="utf-8")
 
     config = scope._load_config(path)
 
-    assert config["period"]["research_start_date"] == "2011-01-01"
+    assert config["period"]["research_start_date"] == "2012-01-01"
     assert config["burn_in"]["available_for_feature_history"] is True
     assert config["burn_in"]["eligible_for_training"] is False
 
 
-def test_config_rejects_2010_as_training_year(tmp_path) -> None:
+def test_config_rejects_burn_in_as_training_year(tmp_path) -> None:
     config = _config()
     config["burn_in"]["eligible_for_training"] = True
     path = tmp_path / "study.json"
@@ -57,7 +57,7 @@ def test_config_rejects_2010_as_training_year(tmp_path) -> None:
 @pytest.mark.parametrize(
     "field", ["eligible_for_atlas_statistics", "eligible_for_labels"]
 )
-def test_config_rejects_2010_in_formal_derivations(tmp_path, field) -> None:
+def test_config_rejects_burn_in_in_formal_derivations(tmp_path, field) -> None:
     config = _config()
     config["burn_in"][field] = True
     path = tmp_path / "study.json"
@@ -106,7 +106,7 @@ def test_feature_block_hash_excludes_burn_in_partition() -> None:
     assert base._feature_blocks_hash(state, years=(2010, 2011)) != without_burn_in
 
 
-def test_rolling_folds_start_in_2011_and_expand() -> None:
+def test_rolling_folds_start_in_2012_and_expand() -> None:
     membership = {
         str(year): {
             "start_date": f"{year}-01-01",
@@ -119,12 +119,12 @@ def test_rolling_folds_start_in_2011_and_expand() -> None:
     folds = scope._rolling_oos_folds(membership)
 
     assert [fold["evaluation_year"] for fold in folds] == [2023, 2024, 2025]
-    assert folds[0]["training_years"] == list(range(2011, 2023))
-    assert folds[1]["training_years"] == list(range(2011, 2024))
-    assert folds[2]["training_years"] == list(range(2011, 2025))
-    assert all(2010 not in fold["training_years"] for fold in folds)
+    assert folds[0]["training_years"] == list(range(2012, 2023))
+    assert folds[1]["training_years"] == list(range(2012, 2024))
+    assert folds[2]["training_years"] == list(range(2012, 2025))
+    assert all(not {2010, 2011}.intersection(fold["training_years"]) for fold in folds)
     assert folds[0]["training_candidate_row_count_before_target_purge"] == sum(
-        range(2011, 2023)
+        range(2012, 2023)
     )
 
 
@@ -149,5 +149,5 @@ def test_self_test_forbids_2026_and_training() -> None:
     result = scope.self_test()
 
     assert result["status"] == "ok"
-    assert result["checks"]["research_start_date"] == "2011-01-01"
+    assert result["checks"]["research_start_date"] == "2012-01-01"
     assert result["checks"]["training_performed"] is False

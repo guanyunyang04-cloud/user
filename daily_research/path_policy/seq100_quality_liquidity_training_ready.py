@@ -29,13 +29,13 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_quality_liquidity_training_ready"
 SOURCE_SCOPE_STUDY_ID = scope.STUDY_ID
 DATA_HISTORY_START = "2010-01-01"
-RESEARCH_START = "2011-01-01"
+RESEARCH_START = "2012-01-01"
 END_DATE = "2025-12-31"
 FORBIDDEN_YEAR = 2026
-RESEARCH_YEARS = tuple(range(2011, 2026))
+RESEARCH_YEARS = tuple(range(2012, 2026))
 OOS_YEARS = (2023, 2024, 2025)
-EXPECTED_OOS_TRAINING_ROW_COUNTS = {2023: 3_147_686, 2024: 3_550_401, 2025: 3_956_386}
-EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_361_485
+EXPECTED_OOS_TRAINING_ROW_COUNTS = {2023: 2_977_677, 2024: 3_380_392, 2025: 3_786_377}
+EXPECTED_COMMON_SUPPORT_ROW_COUNT = 4_191_476
 EXPECTED_EXISTING_FEATURE_COUNT = 518
 EXPECTED_FACTOR_FIELD_COUNT = 261
 EXPECTED_FACTOR_SCHEMA_HASH = (
@@ -72,6 +72,23 @@ BALANCE_EXTENSION_STATE_FIELDS = (
     "contract_liabilities_field_state",
 )
 BALANCE_EXTENSION_CONFLICT_FIELD = "balance_extension_source_conflict"
+BALANCE_SEMANTIC_NUMERIC_FIELDS = (
+    "trade_receivables_total",
+    "trade_receivables_to_current_assets",
+    "trade_receivables_to_total_assets",
+    "fixed_assets_measure",
+    "construction_in_progress_measure",
+    "trade_payables_total",
+    "trade_payables_to_current_liabilities",
+    "trade_payables_to_total_assets",
+)
+BALANCE_SEMANTIC_STATE_FIELDS = (
+    "trade_receivables_field_state",
+    "fixed_assets_measure_field_state",
+    "construction_in_progress_measure_field_state",
+    "trade_payables_field_state",
+)
+BALANCE_SEMANTIC_CONFLICT_FIELD = "balance_semantic_source_conflict"
 LEGACY_LISTING_AGE_FIELD = "listing_age_days"
 LISTING_AGE_OPEN_DAYS_FIELD = "listing_age_open_days"
 
@@ -460,7 +477,7 @@ def _load_config(path: Path) -> dict[str, Any]:
     ):
         raise TrainingReadyError("training_ready_date_boundary_changed")
     if (
-        tuple(burn_in.get("years", ())) != (2010,)
+        tuple(burn_in.get("years", ())) != (2010, 2011)
         or burn_in.get("available_for_feature_history") is not True
         or burn_in.get("eligible_for_training") is not False
         or burn_in.get("eligible_for_evaluation") is not False
@@ -1015,6 +1032,7 @@ def _feature_select_sql(
     fields: Sequence[str],
     source_domain: str,
     lagged: bool,
+    daily_paths: Sequence[Path] = (),
 ) -> str:
     source = _scan(source_paths)
     identity = _projection("s", ROW_SPINE_COLUMNS)
@@ -1022,20 +1040,44 @@ def _feature_select_sql(
         join = "f.security_id=s.security_id AND f.feature_available_date=s.trade_date"
     else:
         join = "f.security_id=s.security_id AND f.trade_date=s.trade_date"
-    selected = ",\n           ".join(
-        f"f.{_quoted(field)} AS {_quoted(field)}" for field in fields
-    )
     prefix = (
         "" if source_domain == DataDomain.STK_FACTOR_PRO_RAW else source_domain + "_"
     )
+    price_gate = "TRUE"
+    daily_join = ""
+    if source_domain == DataDomain.STK_FACTOR_PRO_RAW and daily_paths:
+        price_gate = """
+          d.symbol IS NOT NULL
+          AND greatest(
+            abs(try_cast(f.open AS DOUBLE)/nullif(try_cast(d.open AS DOUBLE),0)-1),
+            abs(try_cast(f.high AS DOUBLE)/nullif(try_cast(d.high AS DOUBLE),0)-1),
+            abs(try_cast(f.low AS DOUBLE)/nullif(try_cast(d.low AS DOUBLE),0)-1),
+            abs(try_cast(f.close AS DOUBLE)/nullif(try_cast(d.close AS DOUBLE),0)-1)
+          )<=0.005
+        """
+        daily_join = (
+            f"LEFT JOIN {_scan(daily_paths)} d "
+            "ON f.symbol=d.symbol AND f.trade_date=d.trade_date"
+        )
     selected = ",\n           ".join(
-        f"f.{_quoted(field)} AS {_quoted(prefix + field)}" for field in fields
+        (
+            f"CASE WHEN {price_gate} THEN f.{_quoted(field)} END "
+            f"AS {_quoted(prefix + field)}"
+            if source_domain == DataDomain.STK_FACTOR_PRO_RAW and daily_paths
+            else f"f.{_quoted(field)} AS {_quoted(prefix + field)}"
+        )
+        for field in fields
     )
     if source_domain == DataDomain.STK_FACTOR_PRO_RAW and fields:
         all_missing = " AND ".join(f"f.{_quoted(field)} IS NULL" for field in fields)
         coverage_state = (
             "CASE WHEN f.security_id IS NULL THEN 'source_unavailable' "
-            f"WHEN {all_missing} THEN 'warmup_missing' ELSE 'observed' END"
+            + (
+                f"WHEN NOT ({price_gate}) THEN 'source_price_mismatch' "
+                if daily_paths
+                else ""
+            )
+            + f"WHEN {all_missing} THEN 'warmup_missing' ELSE 'observed' END"
         )
     else:
         coverage_state = (
@@ -1049,6 +1091,7 @@ def _feature_select_sql(
            {selected}
     FROM read_parquet('{str(spine_path).replace("'", "''")}') s
     LEFT JOIN {source} f ON {join}
+    {daily_join}
     ORDER BY s.candidate_id
     """
 
@@ -1072,6 +1115,11 @@ def _build_feature_block(
             "partitions": {},
         }
     partitions: dict[str, Any] = {}
+    daily_paths = (
+        _active_paths(workspace, "market_daily_raw", dataset_ids)
+        if domain == DataDomain.STK_FACTOR_PRO_RAW
+        else []
+    )
     for year in RESEARCH_YEARS:
         spine_path = Path(str(row_spines[str(year)]["path"]))
         output_path = (
@@ -1088,6 +1136,7 @@ def _build_feature_block(
                     fields=fields,
                     source_domain=domain,
                     lagged=lagged,
+                    daily_paths=daily_paths,
                 ),
                 output_path,
             )
@@ -1142,24 +1191,40 @@ def _balance_extension_sql(
 ) -> str:
     identity = _projection("s", ROW_SPINE_COLUMNS)
     numeric = ",\n           ".join(
-        "CASE WHEN coalesce(e."
-        f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)},false) THEN NULL "
-        f"ELSE e.{_quoted(field)} END AS {_quoted('balance_' + field)}"
-        for field in BALANCE_EXTENSION_NUMERIC_FIELDS
+        [
+            "CASE WHEN coalesce(e."
+            f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)},false) THEN NULL "
+            f"ELSE e.{_quoted(field)} END AS {_quoted('balance_' + field)}"
+            for field in BALANCE_EXTENSION_NUMERIC_FIELDS
+        ]
+        + [
+            "CASE WHEN coalesce(e."
+            f"{_quoted(BALANCE_SEMANTIC_CONFLICT_FIELD)},false) THEN NULL "
+            f"ELSE e.{_quoted(field)} END AS {_quoted('balance_' + field)}"
+            for field in BALANCE_SEMANTIC_NUMERIC_FIELDS
+        ]
     )
     states = ",\n           ".join(
         f"e.{_quoted(field)} AS {_quoted('balance_' + field)}"
-        for field in BALANCE_EXTENSION_STATE_FIELDS
+        for field in (
+            *BALANCE_EXTENSION_STATE_FIELDS,
+            *BALANCE_SEMANTIC_STATE_FIELDS,
+        )
     )
     event_fields = (
         *BALANCE_EXTENSION_NUMERIC_FIELDS,
         *BALANCE_EXTENSION_STATE_FIELDS,
         BALANCE_EXTENSION_CONFLICT_FIELD,
+        *BALANCE_SEMANTIC_NUMERIC_FIELDS,
+        *BALANCE_SEMANTIC_STATE_FIELDS,
+        BALANCE_SEMANTIC_CONFLICT_FIELD,
     )
     conflict_output = (
         ",\n           e."
         f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)} AS "
-        f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)}"
+        f"{_quoted(BALANCE_EXTENSION_CONFLICT_FIELD)},\n           e."
+        f"{_quoted(BALANCE_SEMANTIC_CONFLICT_FIELD)} AS "
+        f"{_quoted(BALANCE_SEMANTIC_CONFLICT_FIELD)}"
     )
     return f"""
     WITH events AS (
@@ -1198,6 +1263,9 @@ def _build_balance_extension_block(
         BALANCE_EXTENSION_STATE_FIELDS
     )
     required.add(BALANCE_EXTENSION_CONFLICT_FIELD)
+    required.update(BALANCE_SEMANTIC_NUMERIC_FIELDS)
+    required.update(BALANCE_SEMANTIC_STATE_FIELDS)
+    required.add(BALANCE_SEMANTIC_CONFLICT_FIELD)
     missing = sorted(required.difference(pq.read_schema(source_paths[0]).names))
     if missing:
         raise TrainingReadyError(f"balance_extension_fields_missing:{missing}")
@@ -1262,6 +1330,8 @@ def _build_balance_extension_block(
         "availability_state_fields": [
             *BALANCE_EXTENSION_STATE_FIELDS,
             BALANCE_EXTENSION_CONFLICT_FIELD,
+            *BALANCE_SEMANTIC_STATE_FIELDS,
+            BALANCE_SEMANTIC_CONFLICT_FIELD,
         ],
     }
 
@@ -1776,7 +1846,10 @@ def prepare(
                     "eligibility_reason": "pit_valid_extended_statement_field",
                     "availability_lag": "next_open_day",
                 }
-                for field in BALANCE_EXTENSION_NUMERIC_FIELDS
+                for field in (
+                    *BALANCE_EXTENSION_NUMERIC_FIELDS,
+                    *BALANCE_SEMANTIC_NUMERIC_FIELDS,
+                )
             ]
             + [
                 {
@@ -1789,19 +1862,26 @@ def prepare(
                     "eligibility_reason": "missingness_semantics_not_numeric_signal",
                     "availability_lag": "next_open_day",
                 }
-                for field in BALANCE_EXTENSION_STATE_FIELDS
+                for field in (
+                    *BALANCE_EXTENSION_STATE_FIELDS,
+                    *BALANCE_SEMANTIC_STATE_FIELDS,
+                )
             ]
             + [
                 {
-                    "feature_name": BALANCE_EXTENSION_CONFLICT_FIELD,
-                    "physical_column": BALANCE_EXTENSION_CONFLICT_FIELD,
+                    "feature_name": field,
+                    "physical_column": field,
                     "block": "financial_statement_extensions",
                     "source_domain": DataDomain.BALANCE_SHEET_QUARTERLY,
-                    "source_field": BALANCE_EXTENSION_CONFLICT_FIELD,
+                    "source_field": field,
                     "eligibility": "availability_metadata",
                     "eligibility_reason": "conflicting_extension_values_are_gated",
                     "availability_lag": "next_open_day",
                 }
+                for field in (
+                    BALANCE_EXTENSION_CONFLICT_FIELD,
+                    BALANCE_SEMANTIC_CONFLICT_FIELD,
+                )
             ]
         )
     feature_registry = pd.concat(
@@ -1907,7 +1987,7 @@ def prepare(
         "source_query_contract": source_query_contract,
         "data_history": {
             "start_date": DATA_HISTORY_START,
-            "burn_in_years": [2010],
+            "burn_in_years": [2010, 2011],
             "burn_in_available_for_feature_history": True,
             "burn_in_eligible_for_training": False,
             "burn_in_eligible_for_evaluation": False,
@@ -2048,7 +2128,7 @@ def prepare(
         "annual_coverage": coverage.to_dict("records"),
         "coverage_findings": coverage_findings,
         "time_boundaries": {
-            "burn_in_year": 2010,
+            "burn_in_years": [2010, 2011],
             "burn_in_formal_row_count": 0,
             "research_start_date": RESEARCH_START,
             "research_end_date": END_DATE,
@@ -2251,6 +2331,12 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
         "expected_existing_formal_candidate_count"
     )
     expected_diagnostic_count = config.get("expected_existing_diagnostic_only_count")
+    expected_availability_gated_count = config.get(
+        "expected_availability_gated_count"
+    )
+    expected_availability_metadata_count = config.get(
+        "expected_availability_metadata_count"
+    )
     expected_daily_row_count = config.get("expected_daily_support_rows")
     pools = dict(manifest.get("pools", {}) or {})
     checks = {
@@ -2346,6 +2432,26 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
                 "availability_metadata",
             }.issubset(set(registry["eligibility"].astype(str)))
         ),
+        "availability_counts_exact": (
+            expected_availability_gated_count is None
+            or int((registry["eligibility"] == "availability_gated").sum())
+            == int(expected_availability_gated_count)
+        )
+        and (
+            expected_availability_metadata_count is None
+            or int((registry["eligibility"] == "availability_metadata").sum())
+            == int(expected_availability_metadata_count)
+        ),
+        "stable_balance_semantic_fields_registered": set(
+            "balance_" + field for field in BALANCE_SEMANTIC_NUMERIC_FIELDS
+        ).issubset(
+            set(
+                registry.loc[
+                    registry["eligibility"] == "availability_gated",
+                    "feature_name",
+                ].astype(str)
+            )
+        ),
         "physical_columns_registered": bool(registry["physical_column"].notna().all()),
         "coverage_registry_contract": allowed_coverage_states.issubset(coverage.columns)
         and set(coverage["year"].astype(int)) == set(RESEARCH_YEARS),
@@ -2382,7 +2488,7 @@ def evaluate(*, output_root: Path = DEFAULT_OUTPUT_ROOT) -> dict[str, Any]:
 
 
 def self_test() -> dict[str, Any]:
-    if RESEARCH_YEARS != tuple(range(2011, 2026)):
+    if RESEARCH_YEARS != tuple(range(2012, 2026)):
         raise AssertionError("research years changed")
     if FORBIDDEN_YEAR in RESEARCH_YEARS or DATA_HISTORY_START != "2010-01-01":
         raise AssertionError("date boundary changed")
@@ -2406,7 +2512,7 @@ def self_test() -> dict[str, Any]:
         "checks": {
             "research_start": RESEARCH_START,
             "end_date": END_DATE,
-            "burn_in_only": [2010],
+            "burn_in_only": [2010, 2011],
             "existing_feature_count": EXPECTED_EXISTING_FEATURE_COUNT,
             "factor_field_count": EXPECTED_FACTOR_FIELD_COUNT,
             "qfq_formal": False,

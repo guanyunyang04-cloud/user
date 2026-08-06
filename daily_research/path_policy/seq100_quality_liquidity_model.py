@@ -32,7 +32,7 @@ from daily_research.path_policy import seq100_quality_liquidity_training_ready a
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_quality_liquidity_model"
-YEARS = tuple(range(2011, 2026))
+YEARS = tuple(range(2012, 2026))
 ROLLING_YEARS = (2023, 2024, 2025)
 FORBIDDEN_YEAR = 2026
 MAXIMUM_OUTCOME_DATE = "2025-12-31"
@@ -46,7 +46,7 @@ TARGETS = ("mfe_10", "mfe_20", "risk_10", "risk_20", "state_10")
 COMPACT_VARIANT = "compact_core"
 MODEL_INPUT_DIR_NAME = "model_inputs"
 FORMAL_TASK_SCOPE = "compact_core_only"
-MODEL_INPUT_BUILDER_VERSION = 2
+MODEL_INPUT_BUILDER_VERSION = 3
 
 RETURN_HORIZONS = (1, 3, 5, 10, 20)
 RETURN_TARGETS = tuple(f"return_{horizon}" for horizon in RETURN_HORIZONS)
@@ -109,6 +109,18 @@ COMPACT_FINANCIAL_REPLACEMENTS = {
     "balance_advances_from_customers": (
         "balance_customer_advances_and_contract_liabilities"
     ),
+    "balance_notes_receivable": "balance_trade_receivables_total",
+    "balance_accounts_receivable": "balance_trade_receivables_to_current_assets",
+    "balance_receivables_ratio": "balance_trade_receivables_to_total_assets",
+    "balance_fixed_assets": "balance_fixed_assets_measure",
+    "balance_construction_in_progress": (
+        "balance_construction_in_progress_measure"
+    ),
+    "balance_notes_payable": "balance_trade_payables_total",
+    "balance_accounts_payable": (
+        "balance_trade_payables_to_current_liabilities"
+    ),
+    "income_discontinued_net_income": "balance_trade_payables_to_total_assets",
 }
 REFRESHED_BASE_FEATURES = (
     "industry_ret1_mean",
@@ -236,7 +248,7 @@ def _load_config(study_path: Path = DEFAULT_STUDY_PATH) -> dict[str, Any]:
         != ROLLING_YEARS
     ):
         raise ModelError("rolling_year_contract_mismatch")
-    if int(period.get("burn_in_year", -1)) != 2010:
+    if tuple(int(year) for year in period.get("burn_in_years", ())) != (2010, 2011):
         raise ModelError("burn_in_contract_mismatch")
     if (
         int(dict(config.get("source", {}) or {}).get("forbidden_year", -1))
@@ -302,7 +314,7 @@ def _catalog_and_registry(
         raise ModelError(
             f"numeric_catalog_columns_missing:{sorted(required - set(catalog.columns))}"
         )
-    if len(catalog) != 628 or catalog["feature_name"].duplicated().any():
+    if len(catalog) != 636 or catalog["feature_name"].duplicated().any():
         raise ModelError("numeric_catalog_count_or_uniqueness_mismatch")
     if bool(catalog["feature_name"].isin(["listing_age_days"]).any()):
         raise ModelError("defective_listing_age_days_in_model_catalog")
@@ -389,7 +401,7 @@ def _feature_contract(
     for name in full_core:
         if name in drops:
             if name in COMPACT_CONSTANT_DROPS:
-                reason = "constant_on_frozen_2011_2025_support"
+                reason = "constant_on_frozen_2012_2025_support"
             elif name in COMPACT_REDUNDANCY_DROPS:
                 reason = "conservative_semantic_redundancy"
             else:
@@ -3279,7 +3291,7 @@ def prepare_returns(
         "coverage": _file_record(coverage_path, row_count=len(coverage)),
         "formal_years": list(YEARS),
         "rolling_years": list(ROLLING_YEARS),
-        "burn_in_year": 2010,
+        "burn_in_years": [2010, 2011],
         "forbidden_year": FORBIDDEN_YEAR,
         "maximum_outcome_date": MAXIMUM_OUTCOME_DATE,
         "training_performed": False,
@@ -4393,7 +4405,7 @@ def prepare_close_d1(
         "evaluation_semantics": "retrospective_rolling_oos",
         "formal_years": list(YEARS),
         "rolling_years": list(ROLLING_YEARS),
-        "burn_in_year": 2010,
+        "burn_in_years": [2010, 2011],
         "forbidden_year": FORBIDDEN_YEAR,
         "maximum_outcome_date": MAXIMUM_OUTCOME_DATE,
         "model_parameters": {

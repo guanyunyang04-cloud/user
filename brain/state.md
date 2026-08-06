@@ -17,6 +17,13 @@ The current active work is the mathematically grounded replacement model on
 the corrected data. The underlying status defect and downstream preparation
 chain are now repaired, but no model has been trained on the corrected input.
 
+The formal research contract is now fixed at 2012-01-01 through 2025-12-31;
+2010 and 2011 are burn-in only. The latest data certification is `certified`
+with all blocking checks passing. The current 557-field input is ready for a
+new model, but no corrected-data model result exists yet. The next scientific
+step is a transaction-day market-state transition/distribution model, not
+another hand-selected horizon or execution-policy search.
+
 ## In-place security-status repair (2026-08-06)
 
 Historical ST state is now derived from dated name-change intervals rather
@@ -33,18 +40,18 @@ new logical dataset or changing `active.json`.
 The rebuilt pack has 8,461,165 candidates and 8,323,878 sequence samples.
 There are 10,437,593 known-status universe cells and 119,191 unknown cells;
 unknown status can never enter the eligible candidate mask. The full-history
-complete support has 4,401,464 rows. The current formal 2011-2025 daily and
-complete supports have 4,361,635 and 4,361,485 rows. Expanding pre-purge
-training counts for 2023/2024/2025 are 3,147,686, 3,550,401, and 3,956,386.
+complete support has 4,401,464 rows. The current formal 2012-2025 daily and
+complete supports have 4,191,601 and 4,191,476 rows. Expanding pre-purge
+training counts for 2023/2024/2025 are 2,977,677, 3,380,392, and 3,786,377.
 
-The corrected self-contained feature input is 4,361,485 rows by 557 fields.
+The corrected self-contained feature input is 4,191,476 rows by 557 fields.
 It has no infinite values, no all-missing row, and no all-missing feature.
 Thirty-one repaired 2014 rows for `000972.SZ` did not exist in the legacy
 feature/label base; their legacy fields are missing and every existing target
 is explicitly invalid, so they cannot contaminate training. The name-change
 evidence confirms that the stock's prior `*ST` interval ended in 2013. Strict
 market ST-rate features remain missing where any market member's status is
-unknown; in particular this affects the 2011 cross-section rather than
+unknown; the affected 2010-2011 cross-sections remain burn-in only rather than
 fabricating a zero or non-ST value.
 
 Research-scope and training-ready evaluations pass on the corrected support,
@@ -55,6 +62,21 @@ trained on the corrected input fingerprint. Core, direct-return, and close-D1
 evaluation now require the root input-manifest hash, input fingerprint, and
 every task fingerprint to match the current data and experiment; all three
 entry points reject the retained pre-repair outputs.
+
+## Corrected-input data certification (2026-08-06)
+
+The in-place repair chain is now certified through 2025-12-31. The formal
+support is 4,191,476 rows and the compact input has exactly 557 finite fields;
+there are no all-missing rows, all-missing fields, infinite values, forbidden
+2026 rows, or all-year-missing feature/year combinations. The stable balance
+semantic replacements are present, the seven legacy statement-format fields
+are absent, and `income_discontinued_net_income` is excluded because its
+source-era coverage is not stable. All 12 blocking checks pass, including
+PIT timing, next-open leakage, raw-price/tradeability, same-day minute
+recomputation, and full input hashes. Annual distribution diagnostics report
+five event-rate shifts and 114 conditional-distribution shifts; these are
+monitoring findings, not automatic model exclusions. No corrected-data model
+has been trained.
 
 ## Current QDP and pre-training state (2026-08-02)
 
@@ -84,13 +106,12 @@ certification.
   2021 is restored, full pages are continued by offset, and confirmed empty
   days require two consistent responses. Reports become visible on the next
   exchange-open day.
-- `balance_sheet_quarterly__c97d2e51362266b0b097f3bb` retains its 179,220
-  PIT rows and adds separately named total other-receivable/payable fields,
-  contract liabilities, a customer-liability combination, and explicit field
-  states. It does not overwrite component fields or turn not-applicable and
-  unknown values into zero. Its extension-conflict flag compares only the four
-  extension numeric values: 314 events conflict. The earlier broad flag found
-  2,723 whole-balance-sheet conflicts and is retained in the superseded version.
+- `balance_sheet_quarterly__b0126161d6d748babe789a48` is the active v5 PIT
+  table with 179,220 rows. It adds separately named total receivable/payable
+  fields and stable total-asset ratios while preserving supplier components,
+  not-applicable values, unknown values, and explicit source states. The new
+  semantic conflict count is 365; the older extension-only conflict count is
+  314. The data-preparation chain is bound to this active ID.
 - `share_capital__dd8dd0446ecc5d2343606d14` has 10,212,710 rows. Missing
   `total_share` values were repaired only from same-day provider evidence after
   converting ten-thousand-share units to shares. Existing non-null values were
@@ -121,13 +142,12 @@ certification.
 The canonical freeze chain is now the source of truth for new research:
 
 - `seq100_quality_liquidity_data_prep` materializes both pools without
-  changing the pool thresholds. After the status repair, the formal 2011-2025
-  daily pool has 4,361,635 rows; the complete daily/minute support has
-  4,361,485 rows. 2010 is burn-in
-  only and 2026 reads/writes are zero.
+  changing the pool thresholds. The formal 2012-2025 daily pool has
+  4,191,601 rows; the complete daily/minute support has 4,191,476 rows.
+  2010-2011 are burn-in only and 2026 reads/writes are zero.
 - `seq100_quality_liquidity_research_scope` pins repaired dataset IDs and
   both row spines. Expanding training counts for the 2023/2024/2025 folds are
-  3,147,686, 3,550,401, and 3,956,386.
+  2,977,677, 3,380,392, and 3,786,377.
 - `seq100_quality_liquidity_training_ready` is
   `ready_with_documented_optional_gaps`: 518 existing features, 106 new formal
   candidates, 83 diagnostic-only fields, and four availability-gated numeric
@@ -138,12 +158,13 @@ The canonical freeze chain is now the source of truth for new research:
   gating.
 - Historical model experiments such as `seq100_entry_contract_oos_v4` remain
   readable and are not part of this preparation-chain cleanup. Future model
-  reports using knowledge from all 2011-2025 descriptive research are called
+  reports using knowledge from the full burn-in plus formal history are called
   retrospective rolling OOS rather than untouched confirmatory OOS.
 
 The retained pre-status-repair
-`seq100_quality_liquidity_descriptive_feature_audit` completed on every one of
-the then-current 4,476,851 formal rows and 628 numeric candidates, with
+`seq100_quality_liquidity_descriptive_feature_audit` completed on the
+historical 2011-2025 support (then 4,476,851 formal rows) and 628 numeric
+candidates, with
 overall, annual, and three-period views. It used daily cross-sectional
 Top-1%/Top-5% true MFE
 labels, separate risk/state coordinates, explicit source-state semantics, and
@@ -176,7 +197,7 @@ is part of the canonical workflow.
 ## Historical quality-liquidity core model (2026-08-04)
 
 `seq100_quality_liquidity_model` completed the 2023-2025 retrospective rolling
-study on the then-current 4,476,851-row complete support. Its trained outputs
+study on the historical pre-status-repair 4,476,851-row complete support. Its trained outputs
 predate the status repair and were not retrained. The current corrected input
 described above is a self-contained row-major `compact_core` cache with 557
 fields and `training_performed=false`. The 557-field contract starts from
@@ -809,7 +830,8 @@ following trading-day open. The primary back-adjusted return is accompanied by
 separate entry-open-to-close and close-to-exit-open components. Their stored
 identity reconciles to within `2.36e-08`.
 
-The contract covers all 4,476,851 formal complete-support rows. It has 4,456,500
+The historical pre-status-repair contract covered 4,476,851 formal
+complete-support rows and had 4,456,500
 valid price labels; the maximum signal date read is 2025-12-29, the maximum
 outcome date is 2025-12-31, and 2026 reads are zero. Price observation defines
 label validity. Future entry buyability and exit-open sellability are separate

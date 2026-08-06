@@ -42,7 +42,11 @@ from quant_data_platform.qdp_v2.repair import (
 from quant_data_platform.qdp_v2.status import active_dataset_map
 
 REPAIR_ID = "pit_metadata_repair_v1"
-SUPPORTED_DOMAINS = ("universe-list-date", "industry-unknown")
+SUPPORTED_DOMAINS = (
+    "universe-list-date",
+    "universe-name-pit",
+    "industry-unknown",
+)
 
 
 class PitMetadataRepairError(RuntimeError):
@@ -259,6 +263,322 @@ def _prepare_list_date(workspace: Path, *, apply: bool) -> dict[str, Any]:
         payload.update({"status": "applied", "mutation": mutation, "metadata": metadata})
     atomic_write_json(runtime / "plan.json", json_safe(payload))
     shutil.rmtree(runtime / "prepared", ignore_errors=not apply)
+    return json_safe(payload)
+
+
+def _name_event_contract(root: Path) -> tuple[tuple[Path, ...], dict[str, Any]]:
+    paths = _active_paths(root, "name_change")
+    required = {
+        "symbol",
+        "trade_date",
+        "old_name",
+        "new_name",
+        "change_type",
+    }
+    available = set().union(*(_schema_columns(path) for path in paths))
+    missing = sorted(required.difference(available))
+    if missing:
+        raise PitMetadataRepairError(
+            f"name_change_columns_missing:{','.join(missing)}"
+        )
+    spill = root / "tmp" / f"{REPAIR_ID}_name_event_contract_spill"
+    with open_guarded_duckdb(temp_directory=spill, threads=2) as con:
+        row = con.execute(
+            """
+            WITH events AS (
+              SELECT symbol,trade_date,trim(old_name) AS old_name,
+                     trim(new_name) AS new_name,change_type
+              FROM read_parquet(?, union_by_name=true)
+            ), ordered AS (
+              SELECT *,lag(new_name) OVER(
+                PARTITION BY symbol ORDER BY trade_date
+              ) AS previous_new_name
+              FROM events
+            ), duplicate_dates AS (
+              SELECT symbol,trade_date
+              FROM events
+              GROUP BY symbol,trade_date
+              HAVING count(*)>1
+            )
+            SELECT count(*) AS event_rows,
+                   count(DISTINCT symbol) AS event_symbols,
+                   min(trade_date) AS min_date,
+                   max(trade_date) AS max_date,
+                   count(*) FILTER(
+                     WHERE coalesce(symbol,'')='' OR
+                           try_cast(trade_date AS DATE) IS NULL OR
+                           coalesce(old_name,'')='' OR
+                           coalesce(new_name,'')='' OR old_name=new_name
+                   ) AS invalid_rows,
+                   (SELECT count(*) FROM duplicate_dates) AS duplicate_dates,
+                   count(*) FILTER(
+                     WHERE previous_new_name IS NOT NULL AND
+                           previous_new_name<>old_name
+                   ) AS broken_chain_rows
+            FROM ordered
+            """,
+            [[str(path) for path in paths]],
+        ).fetchone()
+    shutil.rmtree(spill, ignore_errors=True)
+    contract = {
+        "event_row_count": int(row[0] or 0),
+        "event_symbol_count": int(row[1] or 0),
+        "minimum_event_date": str(row[2] or ""),
+        "maximum_event_date": str(row[3] or ""),
+        "invalid_event_row_count": int(row[4] or 0),
+        "duplicate_symbol_date_count": int(row[5] or 0),
+        "broken_event_chain_count": int(row[6] or 0),
+    }
+    if (
+        not contract["event_row_count"]
+        or contract["invalid_event_row_count"]
+        or contract["duplicate_symbol_date_count"]
+        or contract["broken_event_chain_count"]
+    ):
+        raise PitMetadataRepairError(
+            "name_change_event_contract_failed:"
+            f"{json.dumps(contract, ensure_ascii=True, sort_keys=True)}"
+        )
+    return paths, contract
+
+
+def _resolved_universe_name_cte() -> str:
+    return """
+    WITH name_events AS (
+      SELECT symbol,trade_date,trim(old_name) AS old_name,
+             trim(new_name) AS new_name
+      FROM read_parquet(?, union_by_name=true)
+    ), first_events AS (
+      SELECT symbol,arg_min(old_name,trade_date) AS first_old_name
+      FROM name_events
+      GROUP BY symbol
+    ), resolved AS (
+      SELECT u.*,
+             trim(cast(u.name AS VARCHAR)) AS current_name,
+             CASE WHEN e.symbol IS NOT NULL THEN e.new_name
+                  WHEN f.symbol IS NOT NULL THEN f.first_old_name
+                  ELSE u.name END AS expected_name
+      FROM read_parquet(?, union_by_name=true) u
+      ASOF LEFT JOIN name_events e
+        ON u.symbol=e.symbol AND u.trade_date>=e.trade_date
+      LEFT JOIN first_events f ON u.symbol=f.symbol
+    )
+    """
+
+
+def _prepare_universe_name_pit(workspace: Path, *, apply: bool) -> dict[str, Any]:
+    root = _root(workspace)
+    universe_paths = _active_paths(root, "universe_snapshot")
+    event_paths, event_contract = _name_event_contract(root)
+    active = read_active_manifest(root)
+    datasets = active_dataset_map(active)
+    runtime = _runtime(workspace) / "universe_name_pit"
+    prepared = runtime / "prepared"
+    prepared.mkdir(parents=True, exist_ok=True)
+    replacements: list[tuple[Path, Path]] = []
+    replacement_hashes: dict[str, str] = {}
+    changed_rows = 0
+    changed_symbols: set[str] = set()
+    changed_rows_by_year: dict[str, int] = {}
+    changed_date_min = ""
+    changed_date_max = ""
+    event_arguments = [str(path) for path in event_paths]
+    cte = _resolved_universe_name_cte()
+
+    for index, old_path in enumerate(universe_paths):
+        columns = _schema_columns(old_path)
+        required = {"symbol", "trade_date", "name"}
+        missing = sorted(required.difference(columns))
+        if missing:
+            raise PitMetadataRepairError(
+                f"universe_name_columns_missing:{old_path}:{','.join(missing)}"
+            )
+        spill = runtime / f"profile_spill_{index:04d}"
+        with open_guarded_duckdb(temp_directory=spill, threads=2) as con:
+            profile = con.execute(
+                cte
+                + """
+                SELECT count(*) AS row_count,
+                       count(*) FILTER(
+                         WHERE current_name IS DISTINCT FROM expected_name
+                       ) AS changed_rows,
+                       count(DISTINCT symbol) FILTER(
+                         WHERE current_name IS DISTINCT FROM expected_name
+                       ) AS changed_symbols,
+                       min(trade_date) FILTER(
+                         WHERE current_name IS DISTINCT FROM expected_name
+                       ) AS changed_date_min,
+                       max(trade_date) FILTER(
+                         WHERE current_name IS DISTINCT FROM expected_name
+                       ) AS changed_date_max
+                FROM resolved
+                """,
+                [event_arguments, str(old_path)],
+            ).fetchone()
+            shard_changed = int(profile[1] or 0)
+            if not shard_changed:
+                shutil.rmtree(spill, ignore_errors=True)
+                continue
+            year_rows = con.execute(
+                cte
+                + """
+                SELECT substr(trade_date,1,4) AS year,count(*) AS changed_rows
+                FROM resolved
+                WHERE current_name IS DISTINCT FROM expected_name
+                GROUP BY year ORDER BY year
+                """,
+                [event_arguments, str(old_path)],
+            ).fetchall()
+            symbols = con.execute(
+                cte
+                + """
+                SELECT DISTINCT symbol
+                FROM resolved
+                WHERE current_name IS DISTINCT FROM expected_name
+                """,
+                [event_arguments, str(old_path)],
+            ).fetchall()
+            changed_rows += shard_changed
+            changed_symbols.update(str(row[0]) for row in symbols)
+            for year, count in year_rows:
+                changed_rows_by_year[str(year)] = (
+                    changed_rows_by_year.get(str(year), 0) + int(count)
+                )
+            shard_min = str(profile[3] or "")
+            shard_max = str(profile[4] or "")
+            if shard_min and (not changed_date_min or shard_min < changed_date_min):
+                changed_date_min = shard_min
+            if shard_max and (not changed_date_max or shard_max > changed_date_max):
+                changed_date_max = shard_max
+
+            if not apply:
+                replacements.append((old_path, old_path))
+                shutil.rmtree(spill, ignore_errors=True)
+                continue
+
+            projection = ",".join(
+                (
+                    'r.expected_name AS "name"'
+                    if column == "name"
+                    else f"r.{_sql_identifier(column)} AS {_sql_identifier(column)}"
+                )
+                for column in columns
+            )
+            target = prepared / f"universe_{index:04d}.parquet"
+            temporary = target.with_suffix(target.suffix + ".tmp")
+            target.unlink(missing_ok=True)
+            temporary.unlink(missing_ok=True)
+            con.execute(
+                f"COPY ({cte} SELECT {projection} FROM resolved r "
+                f"ORDER BY r.trade_date,r.symbol) TO {_sql_literal(str(temporary))} "
+                "(FORMAT PARQUET, COMPRESSION ZSTD, ROW_GROUP_SIZE 250000)",
+                [event_arguments, str(old_path)],
+            )
+            temporary.replace(target)
+            post = con.execute(
+                cte
+                + """
+                SELECT count(*),count(*) FILTER(
+                  WHERE current_name IS DISTINCT FROM expected_name
+                )
+                FROM resolved
+                """,
+                [event_arguments, str(target)],
+            ).fetchone()
+        shutil.rmtree(spill, ignore_errors=True)
+        if int(post[0] or 0) != int(profile[0] or 0) or int(post[1] or 0):
+            raise PitMetadataRepairError(
+                f"universe_name_postcheck_failed:{old_path}:"
+                f"rows={post[0]}:mismatches={post[1]}"
+            )
+        if _schema_columns(target) != columns:
+            raise PitMetadataRepairError(
+                f"universe_name_schema_changed:{old_path}"
+            )
+        _assert_untargeted_columns_equal(old_path, target, columns, ("name",))
+        replacements.append((old_path, target))
+        replacement_hashes[str(old_path)] = _sha256(target)
+
+    payload: dict[str, Any] = {
+        "domain": "universe_snapshot",
+        "status": "planned" if not apply else "prepared",
+        "dataset_id": str(datasets["universe_snapshot"]),
+        "name_change_dataset_id": str(datasets["name_change"]),
+        "old_shard_count": len(universe_paths),
+        "replacement_count": len(replacements),
+        "changed_row_count": int(changed_rows),
+        "changed_symbol_count": len(changed_symbols),
+        "changed_rows_by_year": dict(sorted(changed_rows_by_year.items())),
+        "changed_date_min": changed_date_min,
+        "changed_date_max": changed_date_max,
+        "event_contract": event_contract,
+        "resolution_contract": {
+            "on_or_after_event_date": "latest_new_name",
+            "before_first_event_date": "first_old_name",
+            "symbol_without_event": "preserve_universe_name",
+            "only_changed_column": "name",
+        },
+        "replacement_hashes": replacement_hashes,
+        "created_at": utc_now(),
+    }
+    if apply and replacements:
+        mutation = mutate_active_shards_from_parquet(
+            "universe_snapshot",
+            replacements=replacements,
+            reason="restore PIT universe names from dated name-change events",
+            workspace_root=workspace,
+        )
+        metadata = update_active_manifest_metadata(
+            "universe_snapshot",
+            reason="record PIT universe-name repair",
+            workspace_root=workspace,
+            source_updates={
+                "name_pit_repaired_at": utc_now(),
+                "name_pit_repair_id": REPAIR_ID,
+                "name_pit_source_dataset_id": str(datasets["name_change"]),
+                "name_pit_source_contract": (
+                    "latest dated new_name; first old_name before first event; "
+                    "preserve original name without event evidence"
+                ),
+            },
+            quality_updates={
+                "name_pit_mismatch_rows": 0,
+                "name_pit_repaired_rows": int(changed_rows),
+                "name_pit_repaired_symbols": len(changed_symbols),
+            },
+        )
+        current_paths = _active_paths(root, "universe_snapshot")
+        with open_guarded_duckdb(
+            temp_directory=runtime / "post_commit_spill", threads=2
+        ) as con:
+            post_mismatch = int(
+                con.execute(
+                    cte
+                    + """
+                    SELECT count(*) FROM resolved
+                    WHERE current_name IS DISTINCT FROM expected_name
+                    """,
+                    [event_arguments, [str(path) for path in current_paths]],
+                ).fetchone()[0]
+            )
+        shutil.rmtree(runtime / "post_commit_spill", ignore_errors=True)
+        if post_mismatch:
+            raise PitMetadataRepairError(
+                f"universe_name_post_commit_mismatch:{post_mismatch}"
+            )
+        payload.update(
+            {
+                "status": "applied",
+                "post_commit_mismatch_rows": post_mismatch,
+                "mutation": mutation,
+                "metadata": metadata,
+            }
+        )
+    elif apply:
+        payload["status"] = "already_consistent"
+        payload["post_commit_mismatch_rows"] = 0
+    atomic_write_json(runtime / "plan.json", json_safe(payload))
+    shutil.rmtree(prepared, ignore_errors=True)
     return json_safe(payload)
 
 
@@ -479,6 +799,10 @@ def run_repair(
     results: dict[str, Any] = {}
     if "universe-list-date" in selected:
         results["universe-list-date"] = _prepare_list_date(workspace, apply=apply)
+    if "universe-name-pit" in selected:
+        results["universe-name-pit"] = _prepare_universe_name_pit(
+            workspace, apply=apply
+        )
     if "industry-unknown" in selected:
         results["industry-unknown"] = _prepare_industry(workspace, apply=apply)
     return json_safe({"status": "applied" if apply else "planned", "domains": results})

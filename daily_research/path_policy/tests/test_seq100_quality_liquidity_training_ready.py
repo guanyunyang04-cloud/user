@@ -20,7 +20,7 @@ def _config() -> dict[str, object]:
             "future_oos_prediction_years": list(ready.OOS_YEARS),
         },
         "burn_in": {
-            "years": [2010],
+            "years": [2010, 2011],
             "available_for_feature_history": True,
             "eligible_for_training": False,
             "eligible_for_evaluation": False,
@@ -56,13 +56,13 @@ def _spine_frame() -> pd.DataFrame:
     )
 
 
-def test_config_keeps_2010_out_of_formal_rows(tmp_path) -> None:
+def test_config_keeps_burn_in_out_of_formal_rows(tmp_path) -> None:
     path = tmp_path / "study.json"
     path.write_text(json.dumps(_config()), encoding="utf-8")
 
     result = ready._load_config(path)
 
-    assert result["period"]["research_start_date"] == "2011-01-01"
+    assert result["period"]["research_start_date"] == "2012-01-01"
     assert result["burn_in"]["eligible_for_training"] is False
 
 
@@ -278,6 +278,54 @@ def test_technical_block_marks_joined_all_null_row_as_warmup(tmp_path) -> None:
     assert result.loc[0, "coverage_state"] == "warmup_missing"
 
 
+def test_technical_block_gates_material_cross_provider_price_mismatch(
+    tmp_path,
+) -> None:
+    spine = tmp_path / "spine.parquet"
+    source = tmp_path / "source.parquet"
+    daily = tmp_path / "daily.parquet"
+    _spine_frame().iloc[:1].to_parquet(spine, index=False)
+    pd.DataFrame(
+        {
+            "security_id": ["SZ-1"],
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2011-01-05"],
+            "source_date": ["2011-01-05"],
+            "feature_available_date": ["2011-01-05"],
+            "open": [11.0],
+            "high": [11.0],
+            "low": [11.0],
+            "close": [11.0],
+            "rsi_bfq_6": [55.0],
+        }
+    ).to_parquet(source, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "trade_date": ["2011-01-05"],
+            "open": [10.0],
+            "high": [10.0],
+            "low": [10.0],
+            "close": [10.0],
+        }
+    ).to_parquet(daily, index=False)
+
+    with duckdb.connect() as connection:
+        result = connection.execute(
+            ready._feature_select_sql(
+                spine_path=spine,
+                source_paths=[source],
+                fields=["rsi_bfq_6"],
+                source_domain=ready.DataDomain.STK_FACTOR_PRO_RAW,
+                lagged=False,
+                daily_paths=[daily],
+            )
+        ).fetchdf()
+
+    assert result.loc[0, "coverage_state"] == "source_price_mismatch"
+    assert pd.isna(result.loc[0, "rsi_bfq_6"])
+
+
 def test_partition_profile_records_ordered_key_and_null_evidence(tmp_path) -> None:
     path = tmp_path / "block.parquet"
     profile_path = tmp_path / "block.profile.json"
@@ -483,6 +531,12 @@ def test_balance_extension_uses_next_open_pit_asof_semantics(tmp_path) -> None:
             "other_payables_total_field_state": ["observed"],
             "contract_liabilities_field_state": ["observed"],
             "balance_extension_source_conflict": [False],
+            **{field: [1.0] for field in ready.BALANCE_SEMANTIC_NUMERIC_FIELDS},
+            "trade_receivables_field_state": ["combined_observed_financing_unreported"],
+            "fixed_assets_measure_field_state": ["component_fallback"],
+            "construction_in_progress_measure_field_state": ["component_fallback"],
+            "trade_payables_field_state": ["components_observed"],
+            "balance_semantic_source_conflict": [False],
         }
     ).to_parquet(source, index=False)
 
@@ -521,6 +575,12 @@ def test_balance_extension_conflict_gates_numeric_values(tmp_path) -> None:
             "other_payables_total_field_state": ["observed"],
             "contract_liabilities_field_state": ["observed"],
             "balance_extension_source_conflict": [True],
+            **{field: [1.0] for field in ready.BALANCE_SEMANTIC_NUMERIC_FIELDS},
+            "trade_receivables_field_state": ["combined_observed_financing_unreported"],
+            "fixed_assets_measure_field_state": ["component_fallback"],
+            "construction_in_progress_measure_field_state": ["component_fallback"],
+            "trade_payables_field_state": ["components_observed"],
+            "balance_semantic_source_conflict": [False],
         }
     ).to_parquet(source, index=False)
 
@@ -534,7 +594,50 @@ def test_balance_extension_conflict_gates_numeric_values(tmp_path) -> None:
 
     numeric = [f"balance_{field}" for field in ready.BALANCE_EXTENSION_NUMERIC_FIELDS]
     assert result.loc[0, numeric].isna().all()
+    semantic = [f"balance_{field}" for field in ready.BALANCE_SEMANTIC_NUMERIC_FIELDS]
+    assert result.loc[0, semantic].notna().all()
     assert bool(result.loc[0, "balance_extension_source_conflict"])
+
+
+def test_balance_semantic_conflict_gates_only_semantic_values(tmp_path) -> None:
+    spine = tmp_path / "spine.parquet"
+    source = tmp_path / "balance.parquet"
+    _spine_frame().to_parquet(spine, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["000001.SZ"],
+            "feature_available_date": ["2011-01-05"],
+            "source_date": ["2011-01-04"],
+            "report_date": ["2010-12-31"],
+            "report_type": ["1"],
+            "update_flag": [0],
+            **{field: [1.0] for field in ready.BALANCE_EXTENSION_NUMERIC_FIELDS},
+            "customer_liability_field_state": ["both_observed"],
+            "other_receivables_total_field_state": ["observed"],
+            "other_payables_total_field_state": ["observed"],
+            "contract_liabilities_field_state": ["observed"],
+            "balance_extension_source_conflict": [False],
+            **{field: [2.0] for field in ready.BALANCE_SEMANTIC_NUMERIC_FIELDS},
+            "trade_receivables_field_state": ["combined_observed_financing_unreported"],
+            "fixed_assets_measure_field_state": ["component_fallback"],
+            "construction_in_progress_measure_field_state": ["component_fallback"],
+            "trade_payables_field_state": ["components_observed"],
+            "balance_semantic_source_conflict": [True],
+        }
+    ).to_parquet(source, index=False)
+
+    with duckdb.connect() as connection:
+        result = connection.execute(
+            ready._balance_extension_sql(spine_path=spine, source_paths=[source])
+        ).fetchdf()
+
+    old_numeric = [
+        f"balance_{field}" for field in ready.BALANCE_EXTENSION_NUMERIC_FIELDS
+    ]
+    semantic = [f"balance_{field}" for field in ready.BALANCE_SEMANTIC_NUMERIC_FIELDS]
+    assert result.loc[0, old_numeric].notna().all()
+    assert result.loc[0, semantic].isna().all()
+    assert bool(result.loc[0, "balance_semantic_source_conflict"])
 
 
 def test_self_test_locks_qfq_and_date_boundaries() -> None:

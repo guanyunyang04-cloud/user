@@ -6,6 +6,7 @@ import warnings
 import duckdb
 import numpy as np
 import pandas as pd
+import pytest
 
 from daily_research.path_policy import seq100_quality_liquidity_data_prep as prep
 from daily_research.path_policy.seq100_quality_liquidity_data_prep import (
@@ -24,6 +25,22 @@ from daily_research.path_policy.seq100_quality_liquidity_data_prep import (
     _validate_feature_block,
     _year_bounds,
 )
+
+
+def test_qdp_snapshot_rejects_stale_pinned_dataset(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(prep, "qdp_v2_root", lambda _: tmp_path)
+    monkeypatch.setattr(prep, "read_active_manifest", lambda _: {"datasets": {}})
+    monkeypatch.setattr(
+        prep,
+        "active_dataset_map",
+        lambda _: {"balance_sheet_quarterly": "active-balance"},
+    )
+
+    with pytest.raises(prep.DataPreparationError, match="pinned_qdp_datasets_not_active"):
+        prep._qdp_snapshot(
+            tmp_path,
+            pinned_dataset_ids={"balance_sheet_quarterly": "stale-balance"},
+        )
 
 
 def test_five_minute_contract_has_exact_exchange_end_labels() -> None:

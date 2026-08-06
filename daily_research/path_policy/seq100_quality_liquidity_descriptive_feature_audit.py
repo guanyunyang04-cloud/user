@@ -21,8 +21,8 @@ from daily_research.path_policy import seq100_quality_liquidity_data_prep as dat
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 STUDY_ID = "seq100_quality_liquidity_descriptive_feature_audit"
 SOURCE_STUDY_ID = "seq100_quality_liquidity_training_ready"
-BUILDER_VERSION = "seq100_quality_liquidity_descriptive_feature_audit/1.1"
-YEARS = tuple(range(2011, 2026))
+BUILDER_VERSION = "seq100_quality_liquidity_descriptive_feature_audit/1.2"
+YEARS = tuple(range(2012, 2026))
 HORIZONS = (10, 20)
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT
@@ -129,8 +129,8 @@ def _weighted_median(values: pd.Series, weights: pd.Series) -> float:
 
 
 def period_for_year(year: int) -> str:
-    if 2011 <= year <= 2015:
-        return "2011_2015"
+    if 2012 <= year <= 2015:
+        return "2012_2015"
     if 2016 <= year <= 2020:
         return "2016_2020"
     if 2021 <= year <= 2025:
@@ -275,7 +275,7 @@ def _feature_catalog(
     combined = combined.drop_duplicates("feature_name", keep="first").reset_index(
         drop=True
     )
-    if len(combined) != 628:
+    if len(combined) != 636:
         raise DescriptiveAuditError(f"unexpected_numeric_feature_count:{len(combined)}")
     return combined
 
@@ -1911,7 +1911,7 @@ def prepare(
         raise DescriptiveAuditError("source_contains_forbidden_2026_rows")
     if tuple(int(year) for year in config["period"]["years"]) != YEARS:
         raise DescriptiveAuditError("research_year_contract_mismatch")
-    if int(config["period"]["burn_in_year"]) != 2010:
+    if tuple(int(year) for year in config["period"]["burn_in_years"]) != (2010, 2011):
         raise DescriptiveAuditError("burn_in_contract_mismatch")
     if int(config["period"]["forbidden_year"]) != 2026:
         raise DescriptiveAuditError("forbidden_year_contract_mismatch")
@@ -2013,10 +2013,12 @@ def prepare(
     checks = {
         "all_years_completed": set(state["completed_years"])
         == {str(year) for year in YEARS},
-        "formal_years_are_2011_2025": min(YEARS) == 2011 and max(YEARS) == 2025,
-        "burn_in_2010_not_read": "2010" not in state["completed_years"],
+        "formal_years_are_2012_2025": min(YEARS) == 2012 and max(YEARS) == 2025,
+        "burn_in_2010_2011_not_read": not {"2010", "2011"}.intersection(
+            state["completed_years"]
+        ),
         "forbidden_2026_not_read": "2026" not in state["completed_years"],
-        "numeric_feature_count_is_628": len(catalog) == 628,
+        "numeric_feature_count_is_636": len(catalog) == 636,
         "excluded_minute_rows_match": aggregate["excluded_minute_rows"]
         == excluded_expected,
         "training_not_performed": True,
@@ -2066,6 +2068,7 @@ def prepare(
         },
         "scope": {
             "years": list(YEARS),
+            "burn_in_years": [2010, 2011],
             "burn_in_year_read_count": 0,
             "forbidden_2026_read_count": 0,
             "common_support_row_count": int(
