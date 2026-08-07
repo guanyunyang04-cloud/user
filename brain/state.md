@@ -133,6 +133,27 @@ earlier cutoff. Using them in an expanding learner would leak future policy
 information through sample inclusion even when the numeric reward prefix ends
 before the recorded resolution date.
 
+The annual causal-prefix ledger removes that leakage by solving 28 independent
+prefix oracles: 2012-2025 year ends under base and double-slippage costs. It
+contains 15,832,630 timestamped experience versions, 8,329,390 first-learnable
+rows, and 7,313,322 following-year revisions. Per cost scenario, 4,164,695 of
+4,174,511 final-valid actions become naturally learnable by 2025; 4,047,617 are
+available at their signal-year end and 117,078 first become available at the
+following year end. This establishes annual as-of availability only, not the
+exact day on which a label first became available. The independent validator
+traced 432 version rows, exactly matched the final-2025 prefix policies to the
+original oracle, and found no blocking issue.
+
+Annual revisions are concentrated at the cutoff boundary. Once a prefix has at
+least 10 observed sessions after branch coalescence, none of roughly 3.52
+million update rows per cost scenario changes by more than `0.0002`; the few
+remaining sign crossings are numerically near zero rather than economically
+meaningful. The latest available annual version satisfies this maturity rule
+for about `99.53%` of final-valid actions. Freeze
+`sessions_after_resolution >= 10` for the first transparent baseline study.
+This is a label-maturity buffer, not a holding horizon, entry rule, exit rule,
+or profitability result.
+
 ## Current decisions and prohibitions
 
 - Do not train a fixed-D "good stock" classifier or imitate final-oracle action
@@ -150,23 +171,25 @@ before the recorded resolution date.
 
 ## True pause point and next steps
 
-The dynamic-oracle resolution implementation, full dual-cost run, prefix
-truncation check, independent branch validator, 42-test regression suite, and
-static checks are complete. The next work is not another fixed-horizon model.
+The annual causal-prefix ledger, dual-cost full run, independent validator, and
+focused regression and static checks are complete. No predictor or causal
+trading policy has yet been trained or evaluated. The next work is the first
+strictly causal transparent action-value study:
 
-1. Recompute the oracle and branch coalescence using only each historical
-   prefix. Start with chronological fold cutoffs for correctness; use a finer
-   incremental schedule only after equivalence is established.
-2. At every cutoff, expose only actions whose values have resolved under that
-   prefix oracle. Record when an experience first becomes learnable and how its
-   target changes as the prefix grows.
-3. Compare strictly causal matched history, conditional bins or smooth
-   additive baselines, and transparent sequence/value baselines on continuous
-   action advantage and regret. Include matched failures, annual/regime signs,
-   calibration, cost stress, and feature-family ablation.
-4. Only if an observable estimator adds stable net decision value, replay it in
-   the full legal account with cash and competing candidates. A multiscale
-   encoder is a later challenger, not the starting assumption.
+1. For each out-of-sample year, train only on experience versions available by
+   the preceding year end and require `sessions_after_resolution >= 10`.
+2. Predict continuous buy advantage versus cash, its uncertainty, and
+   cross-sectional ranking. Do not convert it into a fixed-D or "good stock"
+   label.
+3. Compare a past-only unconditional/regime prior, matched historical
+   neighbors, conditional-bin or smooth additive estimates, and a transparent
+   continuous-value baseline on identical folds and inputs.
+4. Audit matched failures, calibration, top-ranked realized advantage, regret,
+   annual and regime stability, feature-family ablation, and both cost
+   scenarios. Freeze choices inside each training prefix.
+5. Only after a baseline shows stable incremental decision value should it be
+   replayed in the full legal account. Deep sequence/world models remain later
+   challengers rather than assumed solutions.
 
 ## Current authoritative paths
 
@@ -177,14 +200,18 @@ static checks are complete. The next work is not another fixed-horizon model.
 - Natural-resolution study and validator:
   `daily_research/path_policy/seq100_dynamic_oracle_resolution.py` and
   `daily_research/path_policy/seq100_dynamic_oracle_resolution_validate.py`
+- Annual causal-prefix ledger and validator:
+  `daily_research/path_policy/seq100_dynamic_oracle_causal_prefix.py` and
+  `daily_research/path_policy/seq100_dynamic_oracle_causal_prefix_validate.py`
 - Study configurations:
   `daily_research/studies/seq100_dynamic_oracle_v1.json`,
-  `daily_research/studies/seq100_dynamic_oracle_observable_audit_v1.json`, and
-  `daily_research/studies/seq100_dynamic_oracle_resolution_v1.json`
+  `daily_research/studies/seq100_dynamic_oracle_observable_audit_v1.json`,
+  `daily_research/studies/seq100_dynamic_oracle_resolution_v1.json`,
+  `daily_research/studies/seq100_dynamic_oracle_causal_prefix_v1.json`
 - Validated outputs:
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_observable_audit_v1/`,
-  and
-  `daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/`
+  `daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/`,
+  `daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/`
 - Durable prior evidence:
   `daily_research/research_records/seq100/`

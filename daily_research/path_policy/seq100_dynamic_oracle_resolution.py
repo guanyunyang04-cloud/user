@@ -242,11 +242,29 @@ def _load_array(record: Mapping[str, Any], *, mmap: bool = False) -> np.ndarray:
 def build_cash_policy_graph(
     *, market: replay.ReplayMarket, oracle_record: Mapping[str, Any]
 ) -> CashPolicyGraph:
-    day_count = market.day_count
-    symbol_count = market.symbol_count
     cash_action = _load_array(oracle_record["cash_action_symbol"])
     cash_log = _load_array(oracle_record["cash_log_value"])
     hold_exit = _load_array(oracle_record["holding_exit_policy"], mmap=True)
+    return build_cash_policy_graph_from_arrays(
+        market=market,
+        cash_action_symbol=cash_action,
+        cash_log_value=cash_log,
+        holding_exit_policy=hold_exit,
+    )
+
+
+def build_cash_policy_graph_from_arrays(
+    *,
+    market: replay.ReplayMarket,
+    cash_action_symbol: np.ndarray,
+    cash_log_value: np.ndarray,
+    holding_exit_policy: np.ndarray,
+) -> CashPolicyGraph:
+    day_count = market.day_count
+    symbol_count = market.symbol_count
+    cash_action = np.asarray(cash_action_symbol)
+    cash_log = np.asarray(cash_log_value)
+    hold_exit = np.asarray(holding_exit_policy)
     if cash_action.shape != (day_count,) or cash_log.shape != (day_count,):
         raise ValueError("dynamic_oracle_resolution_cash_array_shape")
     if hold_exit.shape != (day_count, symbol_count):
