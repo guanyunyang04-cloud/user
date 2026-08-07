@@ -1,0 +1,129 @@
+{
+  "study_id": "seq100_dynamic_action_value_baselines_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Test whether causally mature no-fixed-horizon buy action values can be estimated from signal-close observables by transparent past-only baselines before any account replay or deep model is attempted.",
+  "source": {
+    "causal_prefix_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/manifest.json",
+    "expected_causal_prefix_manifest_sha256": "790a2b72570dc63ad5c24e777f13ea6a98f0d04761ddaadd784180df9fa3f63c",
+    "causal_prefix_validation": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/validation.json",
+    "expected_causal_prefix_validation_sha256": "0c8d29a9853c2cab6547426fde06b214e67fe3963374a86ee6ec5f475dc2f3b2",
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "expected_model_input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
+    "feature_variant": "compact_core",
+    "expected_feature_count": 557,
+    "quality_pool_name": "quality_liquidity_pit",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "formal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "initial_training_years": [2012],
+    "strict_oos_years": [2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "training_cutoff": "last observed exchange date of the calendar year immediately preceding the OOS year",
+    "training_version": "latest annual prefix version whose as_of_year is no later than the training cutoff",
+    "evaluation_version": "latest annual prefix version no later than the following year end, capped at 2025",
+    "daily_first_availability_claimed": false
+  },
+  "target": {
+    "name": "buy_advantage_vs_cash",
+    "definition": "prefix-oracle value of buying the stock at the next legal open minus waiting in cash at the signal close",
+    "continuous_target": true,
+    "minimum_sessions_after_resolution": 10,
+    "naturally_resolved_only": true,
+    "fixed_holding_horizon_used": false,
+    "binary_good_stock_label_used": false,
+    "final_2025_oracle_row_labels_allowed": false
+  },
+  "coordinates": {
+    "univariate_bins": 10,
+    "matched_bins": 3,
+    "missing_bin_explicit": true,
+    "date_equal_weighting": true,
+    "specifications": [
+      {"name": "market_ret20_rank", "family": "market", "transform": "causal_expanding_date_percentile", "sources": ["market_all__ret20_mean"]},
+      {"name": "market_breadth_rank", "family": "market", "transform": "causal_expanding_date_percentile", "sources": ["market_all__breadth_above_ma20"]},
+      {"name": "market_volatility_rank", "family": "market", "transform": "causal_expanding_date_percentile", "sources": ["market_all__vol20_mean"]},
+      {"name": "market_dispersion_rank", "family": "market", "transform": "causal_expanding_date_percentile", "sources": ["market_all__ret1_dispersion"]},
+
+      {"name": "return_1d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__return_1d"]},
+      {"name": "return_5d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__return_5d"]},
+      {"name": "return_20d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__return_20d"]},
+      {"name": "return_60d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__return_60d"]},
+      {"name": "range_position_20d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__price_range_position_20d"]},
+      {"name": "trend_slope_20d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__trend_slope_20d"]},
+      {"name": "trend_r2_20d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__trend_r2_20d"]},
+      {"name": "efficiency_20d_rank", "family": "path", "transform": "identity_percentile", "sources": ["cs_percentile__efficiency_ratio_20d"]},
+
+      {"name": "relative_turnover_rank", "family": "activity", "transform": "identity_percentile", "sources": ["cs_percentile__relative_turnover_20d"]},
+      {"name": "intraday_range_rank", "family": "activity", "transform": "identity_percentile", "sources": ["cs_percentile__intraday_range_1d"]},
+      {"name": "volatility_20d_rank", "family": "activity", "transform": "identity_percentile", "sources": ["cs_percentile__volatility_20d"]},
+      {"name": "amount_rank", "family": "activity", "transform": "identity_percentile", "sources": ["cs_percentile__log_amount_1d"]},
+
+      {"name": "minute_close_location_rank", "family": "intraday", "transform": "same_date_percentile", "sources": ["minute_close_location"]},
+      {"name": "minute_last_30m_return_rank", "family": "intraday", "transform": "same_date_percentile", "sources": ["minute_last_30m_return"]},
+      {"name": "minute_realized_volatility_rank", "family": "intraday", "transform": "same_date_percentile", "sources": ["minute_realized_volatility"]},
+      {"name": "minute_trend_efficiency_rank", "family": "intraday", "transform": "same_date_percentile", "sources": ["minute_trend_efficiency"]},
+      {"name": "minute_last_hour_amount_share_rank", "family": "intraday", "transform": "same_date_percentile", "sources": ["minute_last_hour_amount_share"]},
+      {"name": "minute_max_bar_amount_share_rank", "family": "intraday", "transform": "same_date_percentile", "sources": ["minute_max_bar_amount_share"]},
+
+      {"name": "industry_relative_ret20_rank", "family": "context", "transform": "same_date_percentile", "sources": ["industry_relative_ret20"]},
+      {"name": "circulating_market_value_rank", "family": "context", "transform": "same_date_percentile", "sources": ["log_circulating_market_value"]},
+      {"name": "turnover_rate_rank", "family": "context", "transform": "same_date_percentile", "sources": ["log_turnover_rate"]},
+      {"name": "listing_age_rank", "family": "context", "transform": "same_date_percentile", "sources": ["listing_age_open_days"]},
+
+      {"name": "large_moneyflow_imbalance_rank", "family": "flow_event", "transform": "large_moneyflow_imbalance_same_date_percentile", "sources": ["moneyflow_buy_lg_amount", "moneyflow_sell_lg_amount", "moneyflow_buy_elg_amount", "moneyflow_sell_elg_amount"]},
+      {"name": "announcement_total_5d_rank", "family": "flow_event", "transform": "same_date_percentile", "sources": ["announcement_total_5d"]}
+    ],
+    "matched_coordinates": [
+      "market_ret20_rank",
+      "market_volatility_rank",
+      "return_20d_rank",
+      "relative_turnover_rank",
+      "range_position_20d_rank",
+      "minute_trend_efficiency_rank",
+      "large_moneyflow_imbalance_rank"
+    ]
+  },
+  "estimators": {
+    "market_univariate_smoothing_date_equivalents": 20.0,
+    "stock_univariate_smoothing_date_equivalents": 20.0,
+    "matched_cell_smoothing_date_equivalents": 50.0,
+    "matched_smoothing_sensitivity_date_equivalents": [0.0, 5.0, 20.0, 50.0, 100.0, 200.0],
+    "market_model": "global date-equal prior plus the mean of shrunken univariate market-bin effects",
+    "stock_family_model": "market prediction plus the mean shrunken within-date residual effect for coordinates in one family",
+    "additive_model": "market prediction plus the equal-weight mean of the five stock-family effects",
+    "matched_history_model": "matched-state-cell conditional mean shrunk toward the additive prediction",
+    "threshold": "buy only when predicted continuous advantage is greater than zero",
+    "hyperparameter_selection_performed": false
+  },
+  "evaluation": {
+    "models": ["prior", "market", "additive", "matched_history", "family_only", "leave_one_family_out"],
+    "proper_scores": ["date_equal_mse", "date_equal_mae"],
+    "ranking_scores": ["mean_daily_spearman", "top1_realized_advantage", "top5_realized_advantage"],
+    "decision_scores": ["zero_threshold_policy_value", "daily_oracle_regret", "HAC_lower_bound"],
+    "uncertainty": "historical date-count standard-error proxy plus Newey-West HAC with lag 20 on daily decision values",
+    "matched_failures_required": true,
+    "cost_scenarios": ["base", "double_slippage"],
+    "promotion_gate": "positive HAC lower bound, positive majority-year decision value, positive daily rank association, and lower regret than the market baseline under both costs",
+    "account_replay_gate": "no account replay unless a transparent baseline passes the promotion gate"
+  },
+  "resources": {
+    "adaptive_memory": true,
+    "reserve_memory_mb": 2048,
+    "available_memory_fraction": 0.6,
+    "maximum_threads": 8,
+    "coordinate_cache_years": 2,
+    "parquet_row_group_size": 100000,
+    "validator_trace_rows_per_partition": 8
+  },
+  "boundaries": {
+    "training_performed": true,
+    "prediction_performed": true,
+    "causal_action_value_evaluation_performed": true,
+    "portfolio_execution_performed": false,
+    "profit_claim_allowed": false,
+    "production_policy_selection_allowed": false,
+    "deep_model_selection_allowed": false,
+    "report_generation_performed": false
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1"
+}

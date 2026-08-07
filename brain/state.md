@@ -17,8 +17,9 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
-No production model, portfolio, stop, or trading policy has been selected.
-There is no active training or execution process.
+No production model, portfolio, stop, or trading policy has been selected. Two
+strictly causal transparent predictor studies are complete; neither passed the
+account-replay gate. There is no active training or execution process.
 
 ## Formal research contract
 
@@ -154,6 +155,48 @@ for about `99.53%` of final-valid actions. Freeze
 This is a label-maturity buffer, not a holding horizon, entry rule, exit rule,
 or profitability result.
 
+## Causal action-value evidence
+
+The first transparent continuous-value baseline evaluated 7,892,894 strict
+out-of-sample predictions over 2013-2025 and both cost scenarios. Observable
+coordinates have weak but stable ranking information: the additive mean daily
+Spearman is about `0.0446`. All smoothed expected action values remain negative,
+the zero-threshold policy never acts, and unsmoothed matched cells lose money.
+Similar observable failures exist for roughly `99.8%` of daily selections.
+This rules out a simple shrinkage or threshold-tuning explanation and prohibits
+account replay.
+
+The follow-up distribution study expands the transparent representation to 66
+multi-scale daily and five-minute coordinates and separately estimates positive
+opportunity probability, upside contribution, downside contribution, and their
+reconstructed expected value. It evaluates 1,575,340 strict out-of-sample rows
+inside a top-20% activity gate. The activity rank is first computed on the full
+PIT quality-liquidity pool and only then mapped to mature experiences; ranking
+inside the outcome-eligible subset would be a sample-selection leak.
+
+The activity gate is real but not sufficient. Under base costs, the positive
+action fraction rises from about `5.11%` in the full pool to `7.73%` in top-20%
+activity and `8.67%` in top-10%, while mean action value worsens from about
+`-9.69%` to `-9.99%` in top-10%. Transparent additive models rank the positive
+component with daily AUC about `0.635-0.643`; selecting the highest predicted
+positive probability raises the realized positive fraction to roughly
+`15-17%`, but also selects much larger negative outcomes, so mean action value
+remains around `-10%`. No distribution model predicts a positive expected
+action, passes the promotion gate, or authorizes account replay.
+
+Within the active pool, `98.23%` of positive cases have a same-date failure in
+the same coarse volatility, downside-volatility, range, minute-volatility, and
+relative-turnover cell. Matched diagnostics do reveal narrow regularities:
+high five-day price-amount correlation improves action value by about `0.32`
+percentage point versus its low half under both costs (`10/13` positive years,
+BH-adjusted `q` about `0.045`), but does not materially improve positive-event
+probability and remains far from an absolute edge. High five-day volatility is
+a weaker near-significant value clue; large minute range raises opportunity
+probability but its value effect is episodic. Strong last-30-minute return,
+high close-versus-VWAP, high close location, and late-hour amount concentration
+are stable adverse next-open action clues inside already-active matched states.
+These are hypotheses about severity and timing, not executable rules.
+
 ## Current decisions and prohibitions
 
 - Do not train a fixed-D "good stock" classifier or imitate final-oracle action
@@ -171,25 +214,35 @@ or profitability result.
 
 ## True pause point and next steps
 
-The annual causal-prefix ledger, dual-cost full run, independent validator, and
-focused regression and static checks are complete. No predictor or causal
-trading policy has yet been trained or evaluated. The next work is the first
-strictly causal transparent action-value study:
+The continuous-value and opportunity/upside/downside transparent studies, full
+dual-cost runs, independent validators, focused tests, and static checks are
+complete. They establish that activity and several path coordinates contain
+real opportunity information, but current summaries mostly distinguish
+high-opportunity/high-loss states from lower-risk states rather than identify a
+positive expected buy. Account replay remains prohibited.
 
-1. For each out-of-sample year, train only on experience versions available by
-   the preceding year end and require `sessions_after_resolution >= 10`.
-2. Predict continuous buy advantage versus cash, its uncertainty, and
-   cross-sectional ranking. Do not convert it into a fixed-D or "good stock"
-   label.
-3. Compare a past-only unconditional/regime prior, matched historical
-   neighbors, conditional-bin or smooth additive estimates, and a transparent
-   continuous-value baseline on identical folds and inputs.
-4. Audit matched failures, calibration, top-ranked realized advantage, regret,
-   annual and regime stability, feature-family ablation, and both cost
-   scenarios. Freeze choices inside each training prefix.
-5. Only after a baseline shows stable incremental decision value should it be
-   replayed in the full legal account. Deep sequence/world models remain later
-   challengers rather than assumed solutions.
+The next study is a causal multi-scale path-structure representation rather
+than another threshold tweak:
+
+1. Formalize provisional and confirmed pivots, strokes, segments,
+   consolidation zones, divergence, breakout, pullback, and exhaustion using
+   only bars available at each date. Chan-theory-style structures are candidate
+   grammars to test, not accepted truths; inclusion handling, scale, and future
+   confirmation must be explicit and non-repainting.
+2. Preserve several volatility-normalized scales instead of declaring one
+   pivot threshold to be the true top or bottom. Compare the formal grammar to
+   simpler causal zigzag/change-point and raw multi-scale sequence baselines.
+3. Inside the full-pool causal activity gate, compare every candidate structure
+   with same-date risk-matched failures. Focus first on whether price-amount
+   confirmation and avoidance of late-day chase explain downside severity, not
+   on maximizing the number of named patterns.
+4. Evaluate positive probability, conditional upside, conditional downside,
+   continuous action value, annual stability, multiple-testing correction, and
+   both cost scenarios. A deterministic-looking chart pattern is not promoted
+   unless its absolute expected action value is positive after costs.
+5. Only a representation that passes this gate may advance to the legal account
+   replay; a raw/deep sequence model remains a later challenger if transparent
+   path grammars leave incremental information unexplained.
 
 ## Current authoritative paths
 
@@ -203,15 +256,25 @@ strictly causal transparent action-value study:
 - Annual causal-prefix ledger and validator:
   `daily_research/path_policy/seq100_dynamic_oracle_causal_prefix.py` and
   `daily_research/path_policy/seq100_dynamic_oracle_causal_prefix_validate.py`
+- Transparent continuous-value baseline and validator:
+  `daily_research/path_policy/seq100_dynamic_action_value_baselines.py` and
+  `daily_research/path_policy/seq100_dynamic_action_value_baselines_validate.py`
+- Opportunity/upside/downside distribution study and validator:
+  `daily_research/path_policy/seq100_dynamic_action_distribution.py` and
+  `daily_research/path_policy/seq100_dynamic_action_distribution_validate.py`
 - Study configurations:
   `daily_research/studies/seq100_dynamic_oracle_v1.json`,
   `daily_research/studies/seq100_dynamic_oracle_observable_audit_v1.json`,
   `daily_research/studies/seq100_dynamic_oracle_resolution_v1.json`,
-  `daily_research/studies/seq100_dynamic_oracle_causal_prefix_v1.json`
+  `daily_research/studies/seq100_dynamic_oracle_causal_prefix_v1.json`,
+  `daily_research/studies/seq100_dynamic_action_value_baselines_v1.json`,
+  `daily_research/studies/seq100_dynamic_action_distribution_v1.json`
 - Validated outputs:
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_observable_audit_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/`,
-  `daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/`
+  `daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/`,
+  `daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/`,
+  `daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/`
 - Durable prior evidence:
   `daily_research/research_records/seq100/`
