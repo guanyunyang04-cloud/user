@@ -1,0 +1,84 @@
+{
+  "study_id": "seq100_dynamic_oracle_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Measure the full-universe, no-fixed-horizon value of legal daily cash, buy, hold, and exit actions before fitting a new market representation or trading model.",
+  "source": {
+    "corrected_pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "expected_corrected_pack_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "quality_training_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+    "expected_quality_training_sha256": "46f6e2ab8d1276758cce205660f45b454e10823d8533f64794327a55cbfa535e",
+    "quality_pool_name": "quality_liquidity_pit",
+    "expected_quality_pool_rows": 4191601,
+    "forbidden_year": 2026
+  },
+  "period": {
+    "formal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "first_decision_date": "2012-01-04",
+    "terminal_cash_date": "2025-12-31",
+    "terminal_state": "cash only; an open position has no terminal value unless it was legally sold by the terminal close"
+  },
+  "oracle": {
+    "decision_time": "each observed market close",
+    "cash_actions": ["remain_cash", "buy_one_quality_pool_stock_at_the_following_open"],
+    "holding_actions": ["continue_holding", "request_sale_at_the_next_legal_close"],
+    "replacement_timing": "after a legal close sale, the same close may select a replacement for the following open",
+    "earliest_sale_after_entry": "the close after the entry-day close, satisfying T+1",
+    "objective": "maximize terminal log cash wealth with one concentrated slot and no leverage",
+    "fixed_holding_horizon_used": false,
+    "top_or_bottom_label_used": false,
+    "candidate_rank_filter_used": false,
+    "future_path_used": true,
+    "entry_fill_foresight_used": true,
+    "sellability_foresight_used": true,
+    "cost_scenarios": ["base", "double_slippage"],
+    "tie_break": "prefer no transaction; then the lowest symbol index"
+  },
+  "relaxed_upper_bound": {
+    "position_slots": 1,
+    "fractional_shares": true,
+    "proportional_fees": true,
+    "minimum_commission_omitted": true,
+    "board_lot_omitted": true,
+    "capacity_omitted": true,
+    "cash_interest_rate": 0.0,
+    "role": "deliberate hindsight upper bound, never a causal strategy or profit claim"
+  },
+  "finite_replay": {
+    "starting_cash_cny": [100000.0, 1000000.0, 10000000.0],
+    "capacity_modes": ["signal_amount_0p5pct"],
+    "maximum_signal_day_amount_fraction": 0.005,
+    "lot_size_from_pack": true,
+    "minimum_commission_from_pack": true,
+    "cash_allowed": true,
+    "allow_leverage": false,
+    "role": "strictly executable capacity-bounded replay of the relaxed oracle action path, not the exact finite-capital optimum; the uncapped fractional-share result is already represented by the relaxed upper bound"
+  },
+  "evaluation": {
+    "primary_outputs": [
+      "terminal_log_wealth_upper_bound",
+      "selected_dynamic_trade_path",
+      "cash_action_margin",
+      "buy_advantage_for_every_quality_pool_stock_day",
+      "hold_vs_exit_advantage_for_every_quality_pool_stock_day",
+      "finite_account_return",
+      "finite_account_drawdown",
+      "capacity_and_discrete_cost_loss"
+    ],
+    "profit_claim_allowed": false,
+    "production_policy_selection_allowed": false
+  },
+  "resources": {
+    "adaptive_memory": true,
+    "reserve_memory_mb": 2048,
+    "available_memory_fraction": 0.6,
+    "parquet_row_group_size": 100000
+  },
+  "boundaries": {
+    "universe": "quality_liquidity_pit at each cash-state decision close; an existing holding may remain after leaving the pool",
+    "outputs_are_future_informed_teacher_values": true,
+    "training_performed": false,
+    "causal_policy_evaluated": false,
+    "report_generation_performed": false
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1"
+}

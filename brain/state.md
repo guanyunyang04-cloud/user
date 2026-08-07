@@ -140,15 +140,35 @@ The candidate opportunity is therefore far below the realized switching-cost
 budget. Another posterior cutoff cannot repair this result, and no full account
 policy is promoted.
 
-The active next step is an event-driven impulse-control feasibility ceiling,
-not further threshold tuning. On the same legal paths, compute how much a
-dynamic hold/cash/switch policy could earn after costs under progressively
-restricted information: ex-post oracle, current-state conditional oracle, and
-strict causal nonparametric policy. This will establish whether useful dynamic
-switching value exists at all, separate candidate-selection failure from action-
-timing failure, and quantify the minimum gross ranking edge needed before any
-new model is justified. Fixed D labels and arbitrary posterior cutoffs remain
-prohibited.
+## Dynamic no-fixed-horizon oracle and observable audit (2026-08-07)
+
+The event-driven hindsight ceiling is complete on all 4,191,601 point-in-time
+quality-pool stock-days for 2012-2025. A backward Bellman recursion and an
+independent chronological weighted-interval recursion agree within `2.3e-13`.
+The one-slot fractional upper bound selects about 1,500 mostly two-session
+trades under either cost scenario. Its enormous terminal value is a perfect-
+future-information ceiling, not predictability or a profit claim. Strict lot,
+minimum-commission, T+1, capacity, cash and terminal-liquidation replays pass.
+
+The first 557-field observable audit is also complete on the exact 4,191,476-row
+input intersection. Base and double-slippage selected paths have Jaccard about
+`0.995`, so the ceiling is not a fragile fee artifact. Oracle winners have a
+very stable high-volatility, high-turnover and active-five-minute signature,
+but this does not translate into broad action-value ordering: the strongest
+mean daily linear IC is only about `0.031`. The five closest same-date observable
+neighbors are future-positive only about `12.3%` of the time and have negative
+mean action advantage, while a close failed neighbor exists on every one of
+3,288 analyzed buy dates. Observable hot state is therefore an opportunity
+gate, not enough to identify the ex-post winner.
+
+No causal policy has been trained. Full-terminal oracle advantages cannot be
+fed directly into an expanding learner because their information-resolution
+date is not yet stored. The active next step is to derive branch-coalescence or
+other exact action-value resolution timestamps, then compare strictly causal
+matched-history, transparent sequence baselines and a multiscale encoder on
+continuous action advantage/regret. Only a legal account replay may convert
+that evidence into a policy. Fixed D labels, binary "good stock" imitation and
+arbitrary posterior cutoffs remain prohibited.
 
 ## Hot-path industry, size and liquidity audit (2026-08-06)
 

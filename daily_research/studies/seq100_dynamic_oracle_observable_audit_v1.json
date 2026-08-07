@@ -1,0 +1,54 @@
+{
+  "study_id": "seq100_dynamic_oracle_observable_audit_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Measure whether the no-fixed-horizon hindsight action values have stable, pre-signal observable structure before fitting any causal policy.",
+  "source": {
+    "oracle_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+    "expected_oracle_manifest_sha256": "531a92166f1caedebad6f7a265d02504f0122f8cad794bde2ba39cee5be3af46",
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "expected_model_input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
+    "feature_variant": "compact_core",
+    "expected_feature_count": 557,
+    "quality_pool_name": "quality_liquidity_pit",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "formal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+  },
+  "target": {
+    "primary": "buy_advantage_vs_cash",
+    "definition": "Q_star_buy_one_stock_at_next_open_minus_V_star_wait_in_cash_one_close",
+    "fixed_holding_horizon_used": false,
+    "binary_good_stock_label_used": false,
+    "future_path_used": true,
+    "causal_training_label": false
+  },
+  "diagnostics": {
+    "cost_scenarios": ["base", "double_slippage"],
+    "winner_signature": "within-date midrank percentile of each observable feature for the oracle cash candidate",
+    "continuous_association": "within-date Pearson correlation between each observable feature and continuous action advantage",
+    "nearest_neighbor": "family-balanced squared distance after within-date standardization and clipping",
+    "neighbor_count": 5,
+    "minimum_common_feature_weight_fraction": 0.5,
+    "standardized_feature_clip": 5.0,
+    "hac_lag_sessions": 20,
+    "fdr_level": 0.05,
+    "bounded_value_perturbations_bps": [5, 10, 25, 50, 100]
+  },
+  "resources": {
+    "adaptive_memory": true,
+    "reserve_memory_mb": 2048,
+    "available_memory_fraction": 0.6,
+    "parquet_row_group_size": 100000
+  },
+  "boundaries": {
+    "alignment_key": ["date_idx", "symbol_idx"],
+    "training_performed": false,
+    "causal_policy_evaluated": false,
+    "profit_claim_allowed": false,
+    "production_policy_selection_allowed": false,
+    "report_generation_performed": false,
+    "interpretation": "ex-post observable separability audit only; strict causal learning requires action-value resolution timestamps and expanding-history evaluation"
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_observable_audit_v1"
+}
