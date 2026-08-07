@@ -1,0 +1,56 @@
+{
+  "study_id": "seq100_turning_path_quality_pool_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Study continuous turning paths only at decision dates belonging to the established point-in-time quality-liquidity pool, without truncating the underlying stock price history.",
+  "source": {
+    "turning_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
+    "turning_analysis_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
+    "expected_turning_fingerprint": "0dca220d4c70ad4905c00ed5b7762d05e8876f8c8b2d947736a4ecddb576d9fd",
+    "training_ready_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+    "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+    "quality_pool_name": "quality_liquidity_pit",
+    "expected_quality_pool_hash": "21e2bd2af1281d07d515f781f3f4a7b9e8a8a6545034bc818e4bf0d6e180d950",
+    "expected_quality_pool_rows": 4191601,
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "formal_start": "2012-01-01",
+    "formal_end": "2025-12-31",
+    "discovery_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018],
+    "rolling_evaluation_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025]
+  },
+  "universe_semantics": {
+    "membership_time": "probe onset date",
+    "path_geometry": "turning points are detected on each stock's full valid adjusted-close history; pool membership filters decision events and never compresses gaps in the path",
+    "daily_pool": "quality_liquidity_pit",
+    "complete_5m_pool_role": "used only for later five-minute incremental-information tests"
+  },
+  "feature_semantics": {
+    "legacy_signal_panel": "left joined for interpretable signal-time ranks",
+    "missing_legacy_state": "preserved and explicitly marked, never silently dropped",
+    "outcome_use": "retrospective discovery and chronological scoring only"
+  },
+  "analysis": {
+    "hac_lag": 20,
+    "profile_offset_start": -20,
+    "profile_offset_end": 40,
+    "maximum_profile_events_per_date_outcome": 4,
+    "profile_reference_scale_pair": {"probe_multiplier": 2, "major_multiplier": 8},
+    "representative_example_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "training_performed": false,
+    "portfolio_selection_performed": false,
+    "profit_claim_allowed": false
+  },
+  "resources": {
+    "duckdb_adaptive": true,
+    "duckdb_min_memory_mb": 1024,
+    "duckdb_max_memory_mb": 6144,
+    "duckdb_reserve_memory_mb": 2048,
+    "duckdb_available_memory_fraction": 0.60,
+    "duckdb_max_threads": 8,
+    "duckdb_reserve_logical_cores": 2,
+    "duckdb_memory_per_thread_mb": 512
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1"
+}

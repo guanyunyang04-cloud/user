@@ -14,6 +14,7 @@ instead of being silently skipped by a per-stock ``lead`` operation.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import math
@@ -25,7 +26,6 @@ from typing import Any
 import duckdb
 import numpy as np
 import pandas as pd
-
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_STUDY_PATH = (
@@ -208,12 +208,105 @@ def _input_contract(
     )
 
 
-def _connect(output_root: Path, study: Mapping[str, Any]) -> duckdb.DuckDBPyConnection:
+def _available_physical_memory_bytes() -> int | None:
+    """Return currently available physical memory without requiring psutil."""
+
+    try:
+        if os.name == "nt":
+            class _MemoryStatusEx(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = _MemoryStatusEx()
+            status.dwLength = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.ullAvailPhys)
+            return None
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
+        return page_size * available_pages
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+
+
+def _duckdb_runtime_resources(
+    study: Mapping[str, Any],
+    *,
+    available_memory_bytes: int | None = None,
+    logical_cpu_count: int | None = None,
+) -> dict[str, Any]:
+    """Resolve fixed or adaptive DuckDB resources and retain system headroom."""
+
     resources = dict(study.get("resources", {}) or {})
+    if not bool(resources.get("duckdb_adaptive", False)):
+        return {
+            "adaptive": False,
+            "memory_limit": str(resources.get("duckdb_memory_limit", "512MB")),
+            "threads": max(1, int(resources.get("duckdb_threads", 2))),
+            "available_memory_mb": None,
+            "logical_cpu_count": int(logical_cpu_count or os.cpu_count() or 1),
+        }
+
+    mebibyte = 1024 * 1024
+    available = (
+        _available_physical_memory_bytes()
+        if available_memory_bytes is None
+        else int(available_memory_bytes)
+    )
+    available_mb = int(available // mebibyte) if available is not None else None
+    logical = max(1, int(logical_cpu_count or os.cpu_count() or 1))
+    minimum_mb = max(256, int(resources.get("duckdb_min_memory_mb", 1024)))
+    maximum_mb = max(minimum_mb, int(resources.get("duckdb_max_memory_mb", 6144)))
+    reserve_mb = max(0, int(resources.get("duckdb_reserve_memory_mb", 2048)))
+    fraction = float(resources.get("duckdb_available_memory_fraction", 0.60))
+    if not 0 < fraction <= 1:
+        raise ValueError("duckdb_available_memory_fraction_out_of_range")
+
+    if available_mb is None:
+        memory_mb = minimum_mb
+    else:
+        fraction_budget = int(available_mb * fraction)
+        reserve_budget = max(0, available_mb - reserve_mb)
+        candidate = min(fraction_budget, reserve_budget)
+        if available_mb >= minimum_mb + reserve_mb:
+            candidate = max(candidate, minimum_mb)
+        memory_mb = max(256, min(maximum_mb, candidate))
+
+    maximum_threads = max(1, int(resources.get("duckdb_max_threads", 8)))
+    reserve_threads = max(0, int(resources.get("duckdb_reserve_logical_cores", 2)))
+    memory_per_thread_mb = max(
+        128, int(resources.get("duckdb_memory_per_thread_mb", 512))
+    )
+    cpu_budget = max(1, logical - reserve_threads)
+    memory_thread_budget = max(1, memory_mb // memory_per_thread_mb)
+    threads = min(maximum_threads, cpu_budget, memory_thread_budget)
+    return {
+        "adaptive": True,
+        "memory_limit": f"{memory_mb}MB",
+        "threads": int(threads),
+        "available_memory_mb": available_mb,
+        "logical_cpu_count": logical,
+        "reserve_memory_mb": reserve_mb,
+        "reserve_logical_cores": reserve_threads,
+    }
+
+
+def _connect(output_root: Path, study: Mapping[str, Any]) -> duckdb.DuckDBPyConnection:
+    runtime = _duckdb_runtime_resources(study)
     connection = duckdb.connect()
-    connection.execute(f"PRAGMA threads={int(resources.get('duckdb_threads', 2))}")
+    connection.execute(f"PRAGMA threads={int(runtime['threads'])}")
+    connection.execute("PRAGMA enable_progress_bar=false")
     connection.execute("PRAGMA preserve_insertion_order=false")
-    memory_limit = str(resources.get("duckdb_memory_limit", "512MB"))
+    memory_limit = str(runtime["memory_limit"])
     connection.execute(f"PRAGMA memory_limit={_sql_quote(memory_limit)}")
     temp_dir = output_root / "duckdb_tmp"
     temp_dir.mkdir(parents=True, exist_ok=True)

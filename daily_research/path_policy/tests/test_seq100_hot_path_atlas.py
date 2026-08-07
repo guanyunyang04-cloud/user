@@ -48,9 +48,7 @@ def _dense_fixture() -> pd.DataFrame:
     entry = "2020-01-03"
     day2 = "2020-01-06"
 
-    suspended = (frame["symbol"] == "600001.SH") & (
-        frame["trade_date"] == entry
-    )
+    suspended = (frame["symbol"] == "600001.SH") & (frame["trade_date"] == entry)
     frame.loc[suspended, "is_suspended"] = True
     frame.loc[
         suspended,
@@ -70,9 +68,7 @@ def _dense_fixture() -> pd.DataFrame:
     ] = np.nan
     frame.loc[suspended, "bar_valid"] = False
 
-    ambiguous = (frame["symbol"] == "600002.SH") & (
-        frame["trade_date"] == day2
-    )
+    ambiguous = (frame["symbol"] == "600002.SH") & (frame["trade_date"] == day2)
     frame.loc[ambiguous, ["raw_high", "adj_high"]] = 11.0
     frame.loc[ambiguous, ["raw_low", "adj_low"]] = 9.5
     frame.loc[ambiguous, ["raw_close", "adj_close"]] = 10.2
@@ -85,6 +81,45 @@ def test_study_contract_forbids_a_single_discovery_label() -> None:
     assert study["epistemic_contract"]["single_profit_label_is_forbidden_in_discovery"]
     assert study["price_and_path"]["market_day_offsets_not_stock_observation_offsets"]
     assert study["analysis"]["training_performed"] is False
+
+
+def test_adaptive_duckdb_resources_use_capacity_but_keep_headroom() -> None:
+    study = {
+        "resources": {
+            "duckdb_adaptive": True,
+            "duckdb_min_memory_mb": 1024,
+            "duckdb_max_memory_mb": 6144,
+            "duckdb_reserve_memory_mb": 2048,
+            "duckdb_available_memory_fraction": 0.60,
+            "duckdb_max_threads": 8,
+            "duckdb_reserve_logical_cores": 2,
+            "duckdb_memory_per_thread_mb": 512,
+        }
+    }
+    runtime = atlas._duckdb_runtime_resources(
+        study,
+        available_memory_bytes=10 * 1024 * 1024 * 1024,
+        logical_cpu_count=16,
+    )
+    assert runtime["adaptive"] is True
+    assert runtime["memory_limit"] == "6144MB"
+    assert runtime["threads"] == 8
+    assert runtime["available_memory_mb"] == 10 * 1024
+
+
+def test_fixed_duckdb_resources_remain_reproducible() -> None:
+    runtime = atlas._duckdb_runtime_resources(
+        {"resources": {"duckdb_memory_limit": "768MB", "duckdb_threads": 3}},
+        available_memory_bytes=10 * 1024 * 1024 * 1024,
+        logical_cpu_count=16,
+    )
+    assert runtime == {
+        "adaptive": False,
+        "memory_limit": "768MB",
+        "threads": 3,
+        "available_memory_mb": None,
+        "logical_cpu_count": 16,
+    }
 
 
 def test_dense_query_multiplies_raw_ohlc_by_adjustment_factor() -> None:
@@ -111,9 +146,9 @@ def test_market_day_path_does_not_skip_suspension_and_keeps_barrier_ambiguity(
     dense_path = tmp_path / "dense.parquet"
     pool_path = tmp_path / "pool.parquet"
     _dense_fixture().to_parquet(dense_path, index=False)
-    pd.DataFrame(
-        {"symbol": ["600002.SH"], "trade_date": ["2020-01-02"]}
-    ).to_parquet(pool_path, index=False)
+    pd.DataFrame({"symbol": ["600002.SH"], "trade_date": ["2020-01-02"]}).to_parquet(
+        pool_path, index=False
+    )
 
     query = atlas._year_panel_query(
         dense_path,

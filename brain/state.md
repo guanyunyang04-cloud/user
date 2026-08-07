@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-06
+Updated: 2026-08-07
 
 ## Objective
 
@@ -13,22 +13,35 @@ The strict T+1 direct-return heads and their bounded low-position execution
 audit are also complete. No production deployment policy, stop, deep model, or
 reinforcement-learning policy has been selected.
 
-The current active work is the mathematically grounded replacement model on
-the corrected data. The market-layer candidate comparison and the first
-stock-level executable conditional-distribution development baseline are now
-complete. No stock-level production model or portfolio has been selected. The
-underlying status defect and downstream preparation chain are repaired.
+The current active work treats the complete stock path as the research object,
+before choosing a trading label or model. The primary probe universe is frozen
+to the point-in-time `quality_liquidity_pit` pool; turning geometry still uses
+each stock's complete valid adjusted-price history and applies membership only
+at the probe date. No production model, portfolio, or trading rule is selected.
 
 The formal research contract is now fixed at 2012-01-01 through 2025-12-31;
 2010 and 2011 are burn-in only. The latest data certification is `certified`
 with all blocking checks passing. The 557-field input now has finite-horizon
 T+1-compatible labels, factor/idiosyncratic targets, and a transparent rolling
-baseline. Conditional scale remains the strongest result, while the directional
-information found so far is nonlinear and concentrated in a crowded,
-price-extended, high-volatility negative tail. The next step is a nested
-comparison of complete direct, joint, and iterated stock-path laws, including a
-bad-tail hurdle and sell-delay hazards, not another outer-period execution
-search.
+baseline. Earlier conditional-scale and negative-tail findings remain evidence,
+but they do not constrain the continuous-path research to a single model class.
+
+## Multi-scale turning-path research (2026-08-07)
+
+The first rolling online study is complete across eight probe-to-major scales.
+On complete 2019-2024 outcomes, at-the-time observable path geometry adds `0.033036` bit/event
+over a scale-frequency prior, and observable activity/price state adds another
+`0.008489` bit/event; both increments are positive in every year. This supports
+stable but modest information about bottom confirmation and terminal tops. It
+does not establish profitability or causality; 2025 remains provisional because
+some episodes are right-censored.
+
+The next scientific step is economic identification, not another classification
+score search: estimate remaining upside, downside, and duration at legal entry;
+ablate feature families; then test T+1, limits, suspensions, costs, capacity,
+concurrent candidates, cash, and exit utility. Research outputs remain
+recomputable tables, predictions, figures, and manifests; explain conclusions in
+the conversation rather than generating a separate report.
 
 ## Hot-path industry, size and liquidity audit (2026-08-06)
 

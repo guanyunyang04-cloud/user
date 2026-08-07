@@ -1,0 +1,107 @@
+{
+  "study_id": "seq100_turning_path_online_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Test whether causal path geometry and signal-time activity/price state reduce uncertainty about multi-scale turning outcomes inside the established point-in-time quality-liquidity pool.",
+  "source": {
+    "quality_pool_analysis_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
+    "expected_quality_pool_fingerprint": "fa818cd219d2d68acc727736f3a7b7accaa89e10da434b2af70c7f3a1705f4bc",
+    "quality_pool_name": "quality_liquidity_pit",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "initial_fit_resolution_end_exclusive": "2016-01-01",
+    "regularization_selection_years": [2016, 2017, 2018],
+    "rolling_evaluation_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "complete_evaluation_years": [2019, 2020, 2021, 2022, 2023, 2024],
+    "provisional_right_truncated_years": [2025],
+    "annual_fit_rule": "For evaluation year y, fit only episodes whose resolution date index is strictly earlier than the first evaluated onset date index in y."
+  },
+  "outcome_semantics": {
+    "same_day_resolutions": "known state confirmations excluded from both fitting and prediction",
+    "right_censored": "excluded from scored binary outcomes and separately counted",
+    "up_pullback_positive": "terminal_top",
+    "down_rebound_positive": "major_bottom_confirmed",
+    "no_fixed_holding_horizon": true
+  },
+  "scale_pairs": [
+    {"probe_multiplier": 1, "major_multiplier": 4},
+    {"probe_multiplier": 1, "major_multiplier": 8},
+    {"probe_multiplier": 1, "major_multiplier": 16},
+    {"probe_multiplier": 2, "major_multiplier": 4},
+    {"probe_multiplier": 2, "major_multiplier": 8},
+    {"probe_multiplier": 2, "major_multiplier": 16},
+    {"probe_multiplier": 4, "major_multiplier": 8},
+    {"probe_multiplier": 4, "major_multiplier": 16}
+  ],
+  "feature_sets": {
+    "geometry": [
+      "log_probe_overshoot",
+      "log_major_leg_magnitude",
+      "log_anchor_age_years",
+      "log_days_since_major_confirmation_years"
+    ],
+    "activity_price_rank_inputs": [
+      "turnover_proxy_rank",
+      "attention_rank",
+      "attention_mean5_rank",
+      "amount_shock_rank",
+      "volume_shock_rank",
+      "range_shock_rank",
+      "amount_cross_section_rank",
+      "ret1_rank",
+      "ret5_rank",
+      "position20_rank",
+      "ret20_rank",
+      "trend_efficiency20_rank",
+      "volatility20_rank",
+      "pullback5_rank",
+      "distance_ma20_rank",
+      "close_location_rank",
+      "bar_open_close_rank",
+      "bar_range_rank",
+      "bar_mfe_rank",
+      "bar_mae_rank",
+      "bar_vwap_close_rank"
+    ],
+    "controls": ["size_decile_centered", "legacy_rank_state_missing"],
+    "missing_rank_value": 0.5,
+    "fit_standardization": "mean and population standard deviation from already-resolved training episodes only"
+  },
+  "models": {
+    "scale_prior": "Jeffreys Beta(1/2,1/2) posterior mean within episode type and scale pair",
+    "conditional_family": "separate L2-regularized Bernoulli logistic regression for every episode type and scale pair",
+    "solver": "newton-cholesky",
+    "regularization_c_candidates": [0.001, 0.01, 0.1, 1.0],
+    "regularization_selection": "global within each feature family by discovery-period date-equal log loss, using the strongest regularization inside one HAC standard error of the minimum",
+    "maximum_iterations": 100,
+    "tolerance": 1e-08
+  },
+  "evaluation": {
+    "hac_lag": 20,
+    "calibration_bins": 10,
+    "headline_weighting": "first equal-weight episode outcomes within each date/type/scale cell, then equal-weight cells within date",
+    "proper_scores": ["log_loss", "brier"],
+    "information_unit": "bits per prediction from out-of-sample log-loss reduction",
+    "discrimination": ["event_auc", "mean_daily_auc"],
+    "multiple_testing": "Benjamini-Hochberg two-sided q-values across the 16 episode-type/scale cells"
+  },
+  "resources": {
+    "duckdb_adaptive": true,
+    "duckdb_min_memory_mb": 1024,
+    "duckdb_max_memory_mb": 6144,
+    "duckdb_reserve_memory_mb": 2048,
+    "duckdb_available_memory_fraction": 0.60,
+    "duckdb_max_threads": 8,
+    "duckdb_reserve_logical_cores": 2,
+    "duckdb_memory_per_thread_mb": 512
+  },
+  "boundaries": {
+    "training_performed": true,
+    "portfolio_selection_performed": false,
+    "execution_backtest_performed": false,
+    "profit_claim_allowed": false,
+    "causal_effect_claim_allowed": false
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_turning_path_online_v1"
+}
