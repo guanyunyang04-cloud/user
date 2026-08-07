@@ -18,8 +18,9 @@ be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
 No production model, portfolio, stop, or trading policy has been selected. Two
-strictly causal transparent predictor studies are complete; neither passed the
-account-replay gate. There is no active training or execution process.
+strictly causal transparent predictor studies and one non-repainting
+path-structure diagnostic are complete; none passed the account-replay gate.
+There is no active training or execution process.
 
 ## Formal research contract
 
@@ -197,6 +198,46 @@ high close-versus-VWAP, high close location, and late-hour amount concentration
 are stable adverse next-open action clues inside already-active matched states.
 These are hypotheses about severity and timing, not executable rules.
 
+## Causal path-structure evidence
+
+The first strictly causal multi-scale path grammar is complete. It emits daily
+provisional and confirmed directional changes plus explicit Chan-style
+candidate fractals, strokes, segments, centers, breakouts, retests, reentries,
+and exhaustion. The grammar is a hypothesis representation, not a claim that
+orthodox Chan theory is true. Its 2012-2025 quality-pool panel has all
+4,191,476 rows with no duplicate, missing, or 2026 row.
+
+Prefix validation reran 24 stocks at 192 truncated cutoffs and compared about
+22.25 million feature cells without a historical-state change. Persisted-panel
+and diagnostic recomputation also passed; float differences are storage
+quantization only. Thus the representation is usable for causal research and
+does not annotate an earlier date with a later-confirmed pivot.
+
+None of 11 predeclared candidate patterns has positive absolute dynamic action
+advantage or passes the dual-cost promotion gate. These values are forced-buy
+advantage versus the causal-prefix oracle cash branch, not literal trade
+returns. A negative value means the pattern alone does not identify when buying
+beats waiting under the action-value objective.
+
+The one corrected narrow dependency is an upward center breakout followed by a
+causally observed boundary retest that closes above it. Its same-date,
+same-risk-cell action-value increment is about `+0.267` percentage point under
+base cost and `+0.265` under double slippage, with BH-adjusted `q` about
+`0.026-0.027`. The improvement comes from roughly `0.28` percentage point less
+downside, not a higher positive-event probability. Absolute action advantage
+remains about `-9.5%`, all 13 annual absolute means are negative, only 7/13
+matched annual differences are positive, and about 70% of positive retest
+cases still have a same-pattern matched failure.
+
+Buying the initial center breakout, buying a small-scale upward
+reacceleration, and their union as an up-continuation rule are worse than
+matched controls. Late-chase breakouts are especially adverse: about `-0.33`
+percentage point matched action value, primarily from larger downside. A
+breakout with above-median five-day price-amount correlation and below-median
+last-30-minute return is relatively better in 10/13 years, but uncertainty
+still crosses zero after correction. Nested pullback and exhaustion states do
+not provide a cost-robust absolute edge.
+
 ## Current decisions and prohibitions
 
 - Do not train a fixed-D "good stock" classifier or imitate final-oracle action
@@ -214,35 +255,31 @@ These are hypotheses about severity and timing, not executable rules.
 
 ## True pause point and next steps
 
-The continuous-value and opportunity/upside/downside transparent studies, full
-dual-cost runs, independent validators, focused tests, and static checks are
-complete. They establish that activity and several path coordinates contain
-real opportunity information, but current summaries mostly distinguish
-high-opportunity/high-loss states from lower-risk states rather than identify a
-positive expected buy. Account replay remains prohibited.
+The non-repainting structure grammar, full panel, dual-cost matched diagnostics,
+independent prefix checks, persisted-panel traces, sampled daily recomputation,
+and independent HAC recomputation are complete. Account replay remains
+prohibited. The broad named patterns mostly separate downside severity, not
+winner identity.
 
-The next study is a causal multi-scale path-structure representation rather
-than another threshold tweak:
+The next study should resolve the only supported local lead without tuning the
+same boolean rules:
 
-1. Formalize provisional and confirmed pivots, strokes, segments,
-   consolidation zones, divergence, breakout, pullback, and exhaustion using
-   only bars available at each date. Chan-theory-style structures are candidate
-   grammars to test, not accepted truths; inclusion handling, scale, and future
-   confirmation must be explicit and non-repainting.
-2. Preserve several volatility-normalized scales instead of declaring one
-   pivot threshold to be the true top or bottom. Compare the formal grammar to
-   simpler causal zigzag/change-point and raw multi-scale sequence baselines.
-3. Inside the full-pool causal activity gate, compare every candidate structure
-   with same-date risk-matched failures. Focus first on whether price-amount
-   confirmation and avoidance of late-day chase explain downside severity, not
-   on maximizing the number of named patterns.
-4. Evaluate positive probability, conditional upside, conditional downside,
-   continuous action value, annual stability, multiple-testing correction, and
-   both cost scenarios. A deterministic-looking chart pattern is not promoted
-   unless its absolute expected action value is positive after costs.
-5. Only a representation that passes this gate may advance to the legal account
-   replay; a raw/deep sequence model remains a later challenger if transparent
-   path grammars leave incremental information unexplained.
+1. Extend the causal retest state with continuous coordinates: time since
+   breakout, breakout excursion, retest depth, repeated-touch count, center
+   width and age, nested-scale position, current-versus-prior leg slope, and
+   amount contraction. These are state coordinates, not new profit labels.
+2. Inside retest and price-amount-confirmed breakout states, compare positive
+   actions with same-date risk-matched failures across those continuous
+   coordinates. Preserve the weak later-year behavior rather than selecting a
+   threshold on the pooled result.
+3. Run strict expanding-year distributional baselines on continuous action
+   value, positive probability, upside, and downside. Compare transparent
+   additive/spline and historical-neighbor estimators with the existing
+   66-coordinate baseline; require incremental value under both costs.
+4. Do not replay an account unless a prospective rule or estimator predicts
+   positive absolute action advantage with uncertainty and annual stability.
+   A raw/deep sequence model remains a later challenger only if transparent
+   retest-state coordinates leave reproducible residual information.
 
 ## Current authoritative paths
 
@@ -262,19 +299,24 @@ than another threshold tweak:
 - Opportunity/upside/downside distribution study and validator:
   `daily_research/path_policy/seq100_dynamic_action_distribution.py` and
   `daily_research/path_policy/seq100_dynamic_action_distribution_validate.py`
+- Causal path-structure study and validator:
+  `daily_research/path_policy/seq100_causal_path_structure.py` and
+  `daily_research/path_policy/seq100_causal_path_structure_validate.py`
 - Study configurations:
   `daily_research/studies/seq100_dynamic_oracle_v1.json`,
   `daily_research/studies/seq100_dynamic_oracle_observable_audit_v1.json`,
   `daily_research/studies/seq100_dynamic_oracle_resolution_v1.json`,
   `daily_research/studies/seq100_dynamic_oracle_causal_prefix_v1.json`,
   `daily_research/studies/seq100_dynamic_action_value_baselines_v1.json`,
-  `daily_research/studies/seq100_dynamic_action_distribution_v1.json`
+  `daily_research/studies/seq100_dynamic_action_distribution_v1.json`,
+  `daily_research/studies/seq100_causal_path_structure_v1.json`
 - Validated outputs:
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_observable_audit_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/`,
-  `daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/`
+  `daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/`,
+  `daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/`
 - Durable prior evidence:
   `daily_research/research_records/seq100/`
