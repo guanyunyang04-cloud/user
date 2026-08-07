@@ -1,0 +1,127 @@
+{
+  "study_id": "seq100_hot_path_state_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Separate market, stock-daily, complete daily-bar, and genuinely intraday information about fixed D1-D20 path archetypes before searching chronologically stable state rules.",
+  "source": {
+    "atlas_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+    "atlas_analysis_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/analysis/manifest.json",
+    "path_cluster_assignments": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/analysis/path_cluster_assignments.parquet",
+    "expected_atlas_fingerprint": "e6a716e509ed570adfcca2ebad60c8a992459c31a0c457cb05236117263df11b",
+    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "minute_domain": "market_intraday_5m",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "model_fit_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018],
+    "fixed_evaluation_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "rolling_rule_evaluation_years": [2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+  },
+  "target": {
+    "primary": "three-class fixed future-path archetype distribution",
+    "diagnostics": ["rising_path_probability", "bad_path_probability"],
+    "single_profit_label": false,
+    "path_clusters_are": "descriptive future-law coordinates, not causal market regimes"
+  },
+  "feature_sets": {
+    "market_state": [
+      "market_ret_1d",
+      "market_breadth_up",
+      "market_dispersion_1d"
+    ],
+    "daily_state": [
+      "attention_score",
+      "attention_velocity",
+      "attention_mean5",
+      "amount_shock_rank",
+      "volume_shock_rank",
+      "range_shock_rank",
+      "amount_cross_section_rank",
+      "ret1_rank",
+      "ret5_rank",
+      "position20_rank",
+      "ret_1d",
+      "ret_5d",
+      "ret_20d",
+      "distance_prev20_high",
+      "distance_ma20",
+      "pullback_from_high5",
+      "close_location_1d",
+      "trend_efficiency20",
+      "volatility20_prev",
+      "market_ret_1d",
+      "market_breadth_up",
+      "market_dispersion_1d",
+      "days_since_attention_onset"
+    ],
+    "daily_bar_state": [
+      "bar_open_close_return",
+      "bar_range",
+      "bar_mfe_from_open",
+      "bar_mae_from_open",
+      "bar_vwap_close_deviation"
+    ],
+    "intraday_state": [
+      "minute_realized_volatility",
+      "minute_downside_semivolatility",
+      "minute_upside_semivolatility",
+      "minute_first_30m_return",
+      "minute_last_30m_return",
+      "minute_first_hour_amount_share",
+      "minute_last_hour_amount_share",
+      "minute_max_bar_amount_share",
+      "minute_positive_bar_fraction",
+      "minute_trend_efficiency",
+      "minute_price_above_vwap_share",
+      "minute_amount_concentration_hhi",
+      "minute_amount_entropy",
+      "minute_volume_half_imbalance",
+      "minute_high_time_fraction",
+      "minute_low_time_fraction"
+    ]
+  },
+  "conditional_laws": {
+    "unconditional_prior": "empirical discovery-period class frequency",
+    "additive_logit": {
+      "C": 0.1,
+      "imputation": "discovery median",
+      "standardization": true,
+      "maximum_iterations": 500
+    },
+    "bounded_histogram_boosting": {
+      "maximum_iterations": 160,
+      "learning_rate": 0.05,
+      "maximum_leaf_nodes": 15,
+      "minimum_samples_leaf": 300,
+      "l2_regularization": 10.0,
+      "random_seed": 17
+    },
+    "hyperparameter_selection_on_fixed_years": false
+  },
+  "evaluation": {
+    "primary_score": "multiclass_log_loss_gain_over_causal_rolling_prior",
+    "diagnostics": [
+      "rising_path_AUC",
+      "bad_path_AUC",
+      "multiclass_Brier",
+      "date-level top-decile path and net-return diagnostics"
+    ],
+    "causal_prior": {
+      "lookback_days": 252,
+      "label_delay_days": 20,
+      "smoothing": 0.5
+    },
+    "information_decomposition": "market-only, stock-daily, daily OHLC/amount-volume geometry, then genuinely intraday order/concentration/path features",
+    "minute_increment": "daily_plus_intraday minus daily_plus_bar on identical minute-covered rows",
+    "date_equal_HAC_lag": 20,
+    "moving_block_length": 20,
+    "profit_claim_allowed": false,
+    "portfolio_selection_performed": false
+  },
+  "resources": {
+    "duckdb_memory_limit": "512MB",
+    "duckdb_threads": 1,
+    "minute_year_partitions": true
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_hot_path_state_v1"
+}

@@ -30,6 +30,43 @@ comparison of complete direct, joint, and iterated stock-path laws, including a
 bad-tail hurdle and sell-delay hazards, not another outer-period execution
 search.
 
+## Hot-path industry, size and liquidity audit (2026-08-06)
+
+The nonparametric hot-path atlas, conditional-state audit, marginal-rule audit,
+pair audit and neutral follow-up are complete. The neutral audit is retained at
+`daily_research/research_records/seq100/seq100_hot_path_neutral_v1_20260806/`.
+It covers 8,438,151 unique symbol/date rows over 2012-2025, uses point-in-time
+industry and float market value, has no invalid-cap rows, and reads no 2026
+data. DuckDB stayed at 512MB and one thread.
+
+The rolling pair rule was attention quintile 3 plus the lowest same-date
+absolute-amount quintile in every 2019-2025 year. After date, industry and
+float-market-cap-decile matching, its incremental D20 activation effect is only
+`+0.0362%`, with HAC 95% interval `[-0.0585%, +0.1309%]` and four of seven
+positive years. The activation gate fails; the earlier pair result cannot be
+interpreted as a persistent 20-day "funds entering" or main-rise effect.
+
+An independently sampled D5 diagnostic remains positive: matched activation
+increment `+0.0545%`, HAC interval `[+0.0116%, +0.0974%]`, six of seven years
+positive. But the selected cohort's absolute D5 return is only `+0.1030%`
+after the frozen 60bp cost proxy, implying break-even round-trip cost near
+70.3bp. The evidence is a short-lived conditional-information increment with
+a narrow cost budget, not a profitable strategy.
+
+Most D20 pair return comes from the low-amount coordinate. Its path has a lower
+probability of reaching +10% before -5% and lower MFE but less MAE, which is inconsistent
+with a leader/main-rise interpretation. The cohort is concentrated in small,
+low-turnover names. Once turnover-proxy matching is added, common support falls
+to 25%-40% and the estimate becomes sensitive to coarsening, so a distinct
+low-amount alpha is not identified separately from liquidity.
+
+The next bounded hot-path experiment is a fixed D5 legal-execution and
+state-dependent-cost audit with cash allowed. It must reuse the frozen signal,
+not retune attention or amount thresholds on 2019-2025, and must report T+1,
+participation, slippage/cost stress, ranking-inside-gate and continuous-account
+results. The longer-horizon hierarchical stock-law comparison remains a
+separate open research track.
+
 ## Observable hot-money and breakout event study (2026-08-06)
 
 The first independent event study for the short-term/leader hypothesis is

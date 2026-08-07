@@ -1,0 +1,95 @@
+{
+  "study_id": "seq100_hot_path_neutral_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Determine whether the rolling hot-path pair result contains an activation effect after separating low absolute turnover, industry, and signal-date float-market-cap exposure.",
+  "source": {
+    "pair_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_pairs_v1/manifest.json",
+    "expected_pair_fingerprint": "f2e6f4e9888e33246881fb619243031d9a595f362c074958dea1a6b8370ad8a4",
+    "rule_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+    "expected_rule_fingerprint": "30e36c2b94f1ab6299243eca564ecad4d97613dd08a761fe483177f7d27f553c",
+    "atlas_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+    "expected_atlas_fingerprint": "e6a716e509ed570adfcca2ebad60c8a992459c31a0c457cb05236117263df11b",
+    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "valuation_domain": "valuation",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "discovery_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018],
+    "rolling_evaluation_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "all_research_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "semantics": "The primary rule must equal the rule selected using only earlier years in every rolling evaluation year. Discovery-period estimates are in-sample descriptions; 2019-2025 estimates are chronological rolling audits, not an untouched final holdout."
+  },
+  "primary_rule": {
+    "activation_feature": "attention",
+    "activation_bin": 3,
+    "quality_feature": "amount_cross_section",
+    "quality_bin": 0,
+    "quintile_count": 5
+  },
+  "contrasts": [
+    {
+      "name": "pair_total",
+      "treatment": "selected_pair",
+      "control": "all_nonpair",
+      "role": "Total pair effect after neutralizing industry and size; it still contains the low-amount coordinate."
+    },
+    {
+      "name": "activation_increment",
+      "treatment": "selected_pair",
+      "control": "same_amount_other_attention",
+      "role": "Primary test of whether activation adds return inside the same low-amount quintile."
+    },
+    {
+      "name": "activation_vs_less_active",
+      "treatment": "selected_pair",
+      "control": "same_amount_less_active",
+      "role": "Monotone-direction diagnostic against lower activation bins only."
+    },
+    {
+      "name": "activation_vs_neighbor",
+      "treatment": "selected_pair",
+      "control": "same_amount_neighbor",
+      "role": "Local diagnostic against the adjacent activation quintile."
+    },
+    {
+      "name": "low_amount_increment",
+      "treatment": "low_amount",
+      "control": "higher_amount",
+      "role": "Separates the low absolute turnover coordinate from the activation coordinate."
+    }
+  ],
+  "neutralization": {
+    "size_field": "circ_mv",
+    "match_specs": [
+      {"name": "date_only", "match_industry": false, "size_bins": null},
+      {"name": "date_industry", "match_industry": true, "size_bins": null},
+      {"name": "date_size10", "match_industry": false, "size_bins": 10},
+      {"name": "date_industry_size5", "match_industry": true, "size_bins": 5},
+      {"name": "date_industry_size10", "match_industry": true, "size_bins": 10},
+      {"name": "date_size10_turnover10", "match_industry": false, "size_bins": 10, "turnover_bins": 10},
+      {"name": "date_industry_size5_turnover5", "match_industry": true, "size_bins": 5, "turnover_bins": 5},
+      {"name": "date_industry_size5_turnover10", "match_industry": true, "size_bins": 5, "turnover_bins": 10}
+    ],
+    "primary_match_spec": "date_industry_size10",
+    "estimator": "date-equal coarsened exact-matching ATT; stratum control means are weighted by treatment counts",
+    "minimum_primary_outcome_match_coverage": 0.70
+  },
+  "analysis": {
+    "round_trip_cost_bps": 60,
+    "hac_lag": 20,
+    "primary_contrast": "activation_increment",
+    "minimum_positive_rolling_years": 5,
+    "short_horizon_diagnostic": "Report D5 activation information separately from the D20 activation gate and from any profit claim.",
+    "multiple_testing": "Benjamini-Hochberg over contrast D20-return tests within each period and match specification",
+    "activation_gate": "primary matched D20-return HAC lower bound above zero, at least five positive rolling years, and primary outcome-match coverage at least 70%",
+    "profit_claim_allowed": false,
+    "portfolio_selection_performed": false
+  },
+  "resources": {
+    "duckdb_memory_limit": "512MB",
+    "duckdb_threads": 1,
+    "year_partitioned_outputs": true
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1"
+}

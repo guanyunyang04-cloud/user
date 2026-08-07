@@ -1,0 +1,32 @@
+{
+  "study_id": "seq100_hot_path_neutral_v1",
+  "status": "completed",
+  "experiment_fingerprint": "0b76e54341dcb2493bc3d76be9052a009a73296d32075168c914d2e3b42963b9",
+  "formal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+  "panel_rows": 8438151,
+  "primary_match_spec": "date_industry_size10",
+  "activation_gate_passed": false,
+  "d20_activation_increment": {
+    "mean": 0.0003618285892798253,
+    "hac_lcb_95": -0.0005854527684986169,
+    "hac_ucb_95": 0.0013091099470582675,
+    "positive_years": 4,
+    "evaluated_years": 7,
+    "outcome_match_coverage": 0.7950881586402203
+  },
+  "d5_activation_diagnostic": {
+    "information_supported": true,
+    "mean": 0.0005451031762843069,
+    "hac_lcb_95": 0.00011635792586848066,
+    "hac_ucb_95": 0.0009738484267001332,
+    "positive_years": 6,
+    "evaluated_years": 7,
+    "outcome_match_coverage": 0.796307499056681,
+    "selected_net_return_after_60bp": 0.0010301206421232288,
+    "break_even_round_trip_cost_bps": 70.30120642123228
+  },
+  "formal_conclusion": "d20_activation_not_supported_d5_information_has_narrow_cost_budget",
+  "analysis_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1/analysis_manifest.json",
+  "detailed_record": "daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1/research_record.md"
+}
+

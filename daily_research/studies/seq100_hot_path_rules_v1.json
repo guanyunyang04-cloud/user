@@ -1,0 +1,62 @@
+{
+  "study_id": "seq100_hot_path_rules_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Map complete-panel signal-time state to executable D5-D20 path distributions nonparametrically, then permit only rules selected from earlier years to be evaluated in later years.",
+  "source": {
+    "atlas_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+    "expected_atlas_fingerprint": "e6a716e509ed570adfcca2ebad60c8a992459c31a0c457cb05236117263df11b",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "discovery_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018],
+    "fixed_evaluation_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "rolling_evaluation_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "semantics": "Every rolling rule for year Y may use outcomes only through Y-1. Fixed evaluation is retrospective, not an untouched final holdout."
+  },
+  "feature_ranks": [
+    "attention",
+    "attention_mean5",
+    "amount_shock",
+    "volume_shock",
+    "range_shock",
+    "amount_cross_section",
+    "ret1",
+    "ret5",
+    "position20",
+    "ret20",
+    "trend_efficiency20",
+    "volatility20",
+    "pullback5",
+    "distance_ma20",
+    "close_location",
+    "bar_open_close",
+    "bar_range",
+    "bar_mfe",
+    "bar_mae",
+    "bar_vwap_close"
+  ],
+  "analysis": {
+    "quintile_count": 5,
+    "round_trip_cost_bps": 60,
+    "hac_lag": 20,
+    "multiple_testing": "Benjamini-Hochberg over all feature-quintile cells within each reported period",
+    "candidate_contract": {
+      "discovery_net_d20_positive": true,
+      "discovery_d20_excess_positive": true,
+      "discovery_up10_before_down5_lift_positive": true,
+      "minimum_positive_excess_years": 4,
+      "minimum_mean_signal_share": 0.10,
+      "maximum_mean_signal_share": 0.30,
+      "maximum_one_sided_bh_q": 0.10
+    },
+    "profit_claim_allowed": false,
+    "portfolio_selection_performed": false
+  },
+  "resources": {
+    "duckdb_memory_limit": "512MB",
+    "duckdb_threads": 1,
+    "year_partitioned_outputs": true
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_hot_path_rules_v1"
+}

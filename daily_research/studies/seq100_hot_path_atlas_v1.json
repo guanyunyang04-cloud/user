@@ -1,0 +1,111 @@
+{
+  "study_id": "seq100_hot_path_atlas_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Discover and validate observable hot-stock lifecycle structure from complete adjusted D1-D20 paths before selecting a label, prediction model, or trading policy.",
+  "epistemic_contract": {
+    "prior_project_results_are": "falsifiable hypotheses only",
+    "single_profit_label_is_forbidden_in_discovery": true,
+    "path_distribution_precedes_model_selection": true,
+    "future_path_archetypes_are_descriptive_not_causal_states": true,
+    "simple_rules_are_preferred_when_they_express_the_evidence": true,
+    "profit_claim_allowed": false
+  },
+  "source": {
+    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "formal_quality_pool_index": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+    "required_domains": [
+      "market_daily_raw",
+      "adjust_factor",
+      "security_status",
+      "universe_snapshot",
+      "industry_concept",
+      "market_intraday_5m"
+    ],
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "burn_in_start": "2010-01-01",
+    "signal_start": "2012-01-01",
+    "signal_end": "2025-12-31",
+    "path_archetype_discovery_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018],
+    "fixed_archetype_assignment_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "rolling_rule_evaluation_years": [2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "semantics": "All 2012-2025 data may contribute to research, but each reported predictive rule must be evaluated chronologically using only earlier years. No untouched final period is claimed."
+  },
+  "universe": {
+    "exchange": ["SH", "SZ"],
+    "board": "main",
+    "same_day_status_required_known": true,
+    "same_day_forbidden_statuses": ["st", "suspended", "delisted"],
+    "minimum_listed_open_days": 60,
+    "minimum_prior_valid_bars_20": 15,
+    "quality_filter": "none",
+    "market_cap_filter": "none",
+    "absolute_liquidity_filter": "none",
+    "formal_quality_pool_is": "comparison coordinate only"
+  },
+  "price_and_path": {
+    "price_adjustment": "raw_ohlc_times_qdp_adjust_factor",
+    "signal_time": "signal-day close",
+    "entry_anchor": "next market trading-day adjusted open",
+    "horizon_days": 20,
+    "market_day_offsets_not_stock_observation_offsets": true,
+    "t_plus_one_first_legal_exit_day": 2,
+    "entry_day_adversity_is_exposure_not_an_executable_stop": true,
+    "missing_or_suspended_market_day_is_not_skipped": true,
+    "round_trip_cost_bps": 60
+  },
+  "state_coordinates": {
+    "attention": [
+      "robust amount innovation",
+      "robust volume innovation",
+      "range innovation",
+      "short-to-long volatility ratio",
+      "cross-sectional attention rank"
+    ],
+    "direction": [
+      "D1/D3/D5/D10/D20 adjusted return",
+      "market and industry relative strength",
+      "trend efficiency",
+      "daily close location"
+    ],
+    "position": [
+      "distance to prior 20/60-day high",
+      "distance to prior 20-day low",
+      "distance to prior moving averages",
+      "five-day pullback"
+    ],
+    "lifecycle": [
+      "attention velocity",
+      "recent attention persistence",
+      "days since attention onset"
+    ],
+    "market_context": [
+      "equal-weight return",
+      "breadth",
+      "cross-sectional dispersion"
+    ]
+  },
+  "analysis": {
+    "attention_quantiles": [0.5, 0.7, 0.8, 0.9, 0.95, 0.99],
+    "path_cluster_candidates": [3, 4, 5, 6, 7, 8],
+    "maximum_cluster_rows_per_date_attention_decile": 8,
+    "random_seed": 17,
+    "inference": [
+      "date-equal aggregation",
+      "HAC lag 20",
+      "moving-block bootstrap length 20",
+      "year-by-year sign stability",
+      "Benjamini-Hochberg correction for exploratory state cells"
+    ],
+    "training_performed": false,
+    "portfolio_selection_performed": false
+  },
+  "resources": {
+    "duckdb_memory_limit": "512MB",
+    "duckdb_threads": 1,
+    "year_partitioned_outputs": true
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1"
+}
