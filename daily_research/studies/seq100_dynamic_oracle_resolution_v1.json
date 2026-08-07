@@ -1,0 +1,52 @@
+{
+  "study_id": "seq100_dynamic_oracle_resolution_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Separate policy-conditional branch coalescence from genuinely prefix-stable action values before any expanding-history learner uses the dynamic oracle as a teacher.",
+  "source": {
+    "oracle_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+    "expected_oracle_manifest_sha256": "531a92166f1caedebad6f7a265d02504f0122f8cad794bde2ba39cee5be3af46",
+    "market_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/market_manifest.json",
+    "expected_market_manifest_sha256": "1c9f28f6765e95003109397005a60e1d9374db1024ff8c838862ee123bb80bcb",
+    "oracle_study": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+    "expected_oracle_study_sha256": "7648b60cd4d01424b3d0a4e3fdefb7c3faebc9dbcbc86b1cf087b7bf84d059c6",
+    "quality_pool_name": "quality_liquidity_pit",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "formal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]
+  },
+  "resolution": {
+    "cost_scenarios": ["base", "double_slippage"],
+    "initial_buy_branch": "holding the candidate at the following close after a legal next-open entry",
+    "initial_wait_branch": "cash at the following close",
+    "policy_conditional_resolution": "first common cash state reached by the two final-terminal oracle policy branches",
+    "fixed_holding_horizon_used": false,
+    "binary_good_stock_label_used": false,
+    "coalescence_is_causal_label_claim_allowed": false,
+    "value_identity_tolerance": 0.0002
+  },
+  "prefix_audit": {
+    "cost_scenario": "base",
+    "include_every_oracle_cash_selection": true,
+    "random_positive_rows_per_year": 32,
+    "random_nonpositive_rows_per_year": 32,
+    "sample_seed": 20260807,
+    "recompute_terminal": "policy_conditional_cash_resolution_date",
+    "prefix_stability_tolerance": 0.0002,
+    "interpretation": "realized-path sensitivity diagnostic only; equality does not by itself create an observable stopping-time label"
+  },
+  "resources": {
+    "adaptive_memory": true,
+    "reserve_memory_mb": 2048,
+    "available_memory_fraction": 0.6,
+    "parquet_row_group_size": 100000
+  },
+  "boundaries": {
+    "training_performed": false,
+    "causal_policy_evaluated": false,
+    "profit_claim_allowed": false,
+    "production_policy_selection_allowed": false,
+    "report_generation_performed": false
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1"
+}
