@@ -238,6 +238,23 @@ rows and scope constraints, and independently recomputes 12 model and 104
 coordinate HAC summaries. It passes; the maximum stored float difference is
 `9.47e-6` from float32 panel quantization.
 
+## Exploratory financing-balance evidence
+
+A causal point-in-time probe aligned margin source dates to their recorded
+availability dates and joined 2,661,196 quality-pool stock-days (2012-2025,
+3,349 dates, 1,955 symbols) to next-open path outcomes. It is exploratory,
+not a frozen predictor study or promotion candidate. Five-observation log
+growth in financing balance `rzye` is not bullish alone: the highest decile's
+D5 gross mean is about `+0.236%` versus `+0.382%` in the lowest; proportional
+base net means are about `-0.058%` versus `+0.087%`, and double-slippage means
+are negative in both. The high-balance-growth/low-price-growth quadrant is
+only about `+0.038` percentage point better than low-balance-growth/low-price-
+growth (HAC interval crosses zero, positive in 9/14 years). Its much larger
+advantage over high-balance-growth/high-price-growth is primarily short-term
+price reversal. A discarded first query used the raw source date as the signal
+date and would have leaked one day; it is not evidence. Details are in
+`daily_research/research_records/seq100/seq100_margin_balance_probe_20260808/`.
+
 ## Causal path-structure evidence
 
 The first strictly causal multi-scale path grammar is complete. It emits daily
@@ -292,34 +309,38 @@ not provide a cost-robust absolute edge.
   incremental continuous action value after costs.
 - Do not remove legal constraints, failed neighbors, delisted/suspended paths,
   unavailable data, cash, or opportunity cost to make a result look stronger.
+- Do not interpret a rising `rzye` or a financing/price divergence as proof of
+  fund accumulation or a buy signal; distinguish balance, reported new flow,
+  price scaling, eligibility, and publication timing.
 
 ## True pause point and next steps
 
-The non-repainting structure grammar, full panel, dual-cost matched diagnostics,
-independent prefix checks, persisted-panel traces, sampled daily recomputation,
-and independent HAC recomputation are complete. Account replay remains
-prohibited. The broad named patterns mostly separate downside severity, not
-winner identity.
+The non-repainting structure grammar and continuous retest-state study are
+complete and independently validated. Account replay remains prohibited. The
+broad named patterns and continuous retest coordinates mostly separate
+downside severity, not winner identity. The financing-balance result is only an
+exploratory causal probe and has not been independently frozen or validated.
 
-The next study should resolve the only supported local lead without tuning the
-same boolean rules:
+The next bounded work is:
 
-1. Extend the causal retest state with continuous coordinates: time since
-   breakout, breakout excursion, retest depth, repeated-touch count, center
-   width and age, nested-scale position, current-versus-prior leg slope, and
-   amount contraction. These are state coordinates, not new profit labels.
-2. Inside retest and price-amount-confirmed breakout states, compare positive
-   actions with same-date risk-matched failures across those continuous
-   coordinates. Preserve the weak later-year behavior rather than selecting a
-   threshold on the pooled result.
-3. Run strict expanding-year distributional baselines on continuous action
-   value, positive probability, upside, and downside. Compare transparent
-   additive/spline and historical-neighbor estimators with the existing
-   66-coordinate baseline; require incremental value under both costs.
-4. Do not replay an account unless a prospective rule or estimator predicts
-   positive absolute action advantage with uncertainty and annual stability.
-   A raw/deep sequence model remains a later challenger only if transparent
-   retest-state coordinates leave reproducible residual information.
+1. Freeze two distinct evaluation objects. Absolute executable net wealth
+   versus cash answers whether a causal strategy can make money; dynamic action
+   advantage versus the hindsight-oracle cash branch remains a stricter winner-
+   identification diagnostic. A negative oracle-relative value must not by
+   itself reject a positive executable strategy.
+2. Turn the financing probe into a preregistered study with exact publication
+   timing; separate balance, reported new financing minus repayment, and
+   balance relative to float market value. Match price reversal, size,
+   liquidity, industry, and market regime and evaluate strict expanding years.
+3. Test whether the retest drawdown-fraction clue and any financing/weak-price
+   interaction add residual information beyond the existing 66 coordinates.
+   Direct path distributions and causal dynamic exits are primary; fixed D
+   views are diagnostics rather than the definition of a good stock.
+4. Replay a legal account only after a frozen candidate has positive absolute
+   net value under base and double-slippage costs, a positive uncertainty lower
+   bound, and majority-year stability. A raw/deep sequence model remains a
+   later challenger only if transparent coordinates leave reproducible
+   residual information.
 
 ## Current authoritative paths
 
