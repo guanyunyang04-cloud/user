@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-07
+Updated: 2026-08-08
 
 ## Active objective
 
@@ -17,7 +17,7 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
-No production model, portfolio, stop, or trading policy has been selected. Two
+No production model, portfolio, stop, or trading policy has been selected. Three
 strictly causal transparent predictor studies and one non-repainting
 path-structure diagnostic are complete; none passed the account-replay gate.
 There is no active training or execution process.
@@ -197,6 +197,46 @@ probability but its value effect is episodic. Strong last-30-minute return,
 high close-versus-VWAP, high close location, and late-hour amount concentration
 are stable adverse next-open action clues inside already-active matched states.
 These are hypotheses about severity and timing, not executable rules.
+
+## Continuous causal retest-state evidence
+
+The independent `seq100_causal_retest_state_v1` study expands an upward center
+breakout into a locked, prefix-only state: breakout strength and scale, time
+since breakout, boundary distance, peak and trough excursion, drawdown from the
+peak, touch episodes, path efficiency, amount contraction, and current versus
+prior directional-leg coordinates. It replays 10,138,279 valid dense path rows
+and emits all 4,191,476 quality-pool rows. The panel contains 39,523 upward
+breakout events, 75,333 causal retest rows, 13,197 reentries, and 1,285,988
+active-breakout rows. No 2026 row, duplicate, or missing pool row exists.
+
+Strict expanding-year training covers both base and double-slippage costs,
+two predeclared scopes (retest event and price-amount-confirmed breakout), and
+the inherited 66-coordinate active-state baseline. It produces 48,160
+sample-out-of-sample rows in 52 partitions. The spline and historical-neighbor
+estimators never produce a positive, stable absolute action-value policy. On
+retest rows, the spline top-ranked forced-buy value is about `-9.25%` (base) and
+`-9.34%` (double slippage), only about `+0.10` and `+0.08` percentage point
+relative to the inherited top-20% additive ranking, with confidence intervals
+crossing zero. The neighbor estimator is worse; breakout ranking is also worse
+than the inherited baseline. The promotion gate and account replay remain
+prohibited.
+
+The most reproducible continuous diagnostic is the fraction of breakout
+expansion subsequently given back by the current close. Its high-versus-low
+same-date, risk-matched contrast is about `+0.52` percentage point in action
+value under both costs, with BH `q` about `0.041`, positive in 11 of 13 years.
+The change is chiefly about `-0.50` percentage point less downside and only
+about `+0.02` percentage point more upside/positive probability. It is a
+conditional severity clue, not evidence that the action has positive absolute
+value; similar failures remain common. Very large pooled contrasts for medium
+retracement occur on only seven dates and are not evidence. Repeated touches,
+breakout strength, and most other coordinates are unstable or non-significant.
+
+The independent validator replays 24 symbols at 192 prefix cutoffs, compares
+9,370,176 state cells and 70,656 persisted cells, checks all 48,160 prediction
+rows and scope constraints, and independently recomputes 12 model and 104
+coordinate HAC summaries. It passes; the maximum stored float difference is
+`9.47e-6` from float32 panel quantization.
 
 ## Causal path-structure evidence
 
