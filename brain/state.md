@@ -43,6 +43,113 @@ concurrent candidates, cash, and exit utility. Research outputs remain
 recomputable tables, predictions, figures, and manifests; explain conclusions in
 the conversation rather than generating a separate report.
 
+## Daily causal path-neighbor research (2026-08-07)
+
+The first causal daily path study is complete on the point-in-time
+`quality_liquidity_pit` pool. It contains 4,191,601 research rows for 2012-2025
+and 7,935,537 expanding-history OOS prediction cells for 2019-2025. Independent
+validation found no duplicate keys, forbidden 2026 rows, nonfinite
+probabilities, or causal label-update violations. Strict 2019-2023 outcomes are
+uncensored; 2024 has 195 censored scale-16 rows and 2025 remains provisional.
+
+Observable path geometry adds `0.051491` bit/date-cell over the causal prior in
+strict 2019-2023, with HAC 95% interval `[0.047993, 0.054989]`, positive in all
+five years. Macro event AUC is `0.6391`; daily AUC is `0.6334`; discrimination
+increases from about `0.56` at turning scale 4 to about `0.70` at scale 16.
+Confirmation-time and remaining-extreme-time MAE improve about `5.06%` and
+`4.18%`, but remaining directional-return MAE improves only `0.50%` and
+confirmation-return MAE worsens `0.25%`. The current evidence therefore supports
+learnable phase and timing, not reliable remaining-profit magnitude.
+
+The raw sequence prototype loses `0.023300` bit to geometry in strict OOS, so
+the formal one-standard-error choice gives it zero incremental weight. A frozen
+diagnostic 0.1 blend nevertheless adds `0.000854` bit over geometry, with HAC
+lower bound `+0.000657` bit and positive annual signs through 2025. This is
+residual-path evidence for developing a better sequence representation, not
+permission to replace the formal model or claim alpha.
+
+Exploratory pullback/rebound ranking is directionally meaningful: at scale 16,
+uptrend-pullback peak-ahead frequency rises from `35.8%` to `68.1%`, and
+downtrend-rebound bottom-passed frequency rises from `28.5%` to `56.2%`, from
+the lowest to highest score quintile. However, confirmation-close returns are
+not a legal dynamic exit and are not stable across years. No trading policy or
+profitability claim is selected.
+
+The path-neighbor evidence is a research input, not a selected trading rule.
+
+## Daily phase execution audit (2026-08-07)
+
+The causal phase beliefs were connected to a finite-capital account with legal
+next-open entry, T+1, close sellability deferral, 100-share lots, cash,
+concurrent slots, a 0.5% signal-day amount cap, and base/double-slippage costs.
+The run contains 48 account tasks and 108,643 trades. Independent replay found
+zero blocking accounting, T+1, capacity, or 2026-date violations; maximum cash
+and equity discrepancies are below `4.4e-9` CNY. The apparent D20 gains are
+mostly market exposure: exposure-matched total returns are about `157.38%`
+and `165.90%`, versus `81.93%` and `87.34%` for the two combined profiles;
+annualized exposure-adjusted alpha is `-3.48%` and `-2.99%`. No account policy
+is selected.
+
+## Daily continuation-value audit (2026-08-07)
+
+The next-close versus one-extra-session counterfactual is fully resolved for
+4,191,601 stock-days, with 2,645,179 causal OOS predictions over 2019-2025.
+The outcome is zero when both requests resolve to the same legal sale. The
+independent validator checked 14,000 outcome rows and all account tasks;
+maximum value discrepancy is `1.62e-8`, with no duplicate, nonfinite,
+right-boundary, or causal-update violation.
+
+In strict 2019-2023, geometry's MSE increment versus its state prior is
+`-2.33e-6` (HAC 95% lower bound `-3.54e-6`), and the frozen 0.1 sequence blend
+is `-2.00e-6` (lower bound `-3.12e-6`). Repeated stopping therefore turns a
+near-zero continuation signal into excessive turnover: the best base-cost
+account loses about `16.87%` and double-slippage loses `48.23%`; no production
+exit rule is selected.
+
+## Relative action-value audit (2026-08-07)
+
+The first `Q_hold` versus `Q_exit+replace` study is complete. It reconstructs
+35,162 close-time states from the audited rolling-phase and fixed-D20 reference
+accounts, and produces 29,898 causal predictions over 2020-2025. Exit occurs at
+the next legal close; the replacement is selected with information observed at
+that close and bought at the following open. Costs, T+1, lots, the 0.5% amount
+cap, cash, concurrent held names, blocked sales, holding age, floating return,
+and close MFE/MAE are explicit. A two-session common resolution is the Bellman
+decision interval imposed by execution latency, not a fixed total holding
+target.
+
+Independent validation found no duplicate, 2026-date, resolution, causal-
+update, or policy-identity violation. Two thousand paired outcomes recompute
+exactly under both cost scenarios; 145 blocked-sale rows have exactly zero
+action difference, and 843 held states outside the current PIT pool remain as
+explicit unknown states rather than being deleted.
+
+The strict 2020-2023 result fails the economic gate. Every model/reference/cost
+combination has negative mean policy gain. For the geometry-only estimator,
+the rolling reference loses about `4.42 bp` per decision date under base costs
+(HAC 95% interval `[-7.62, -1.23] bp`) and `1.67 bp` under double slippage
+(`[-2.76, -0.58] bp`). The fixed-D20 sampling reference loses about `3.06 bp`
+(`[-5.77, -0.34] bp`) and `1.58 bp` (`[-3.23, +0.06] bp`). Adding position
+sign/order state does not improve MSE or policy value.
+
+The decomposition identifies the scale mismatch. Replacement candidates earn
+only about `+5.1/+5.5 bp` gross over their open-to-close interval in the two
+strict reference samples. Net replacement-minus-hold value is about
+`-20.7/-24.1 bp` under base costs and `-34.6/-37.9 bp` under double slippage.
+The candidate opportunity is therefore far below the realized switching-cost
+budget. Another posterior cutoff cannot repair this result, and no full account
+policy is promoted.
+
+The active next step is an event-driven impulse-control feasibility ceiling,
+not further threshold tuning. On the same legal paths, compute how much a
+dynamic hold/cash/switch policy could earn after costs under progressively
+restricted information: ex-post oracle, current-state conditional oracle, and
+strict causal nonparametric policy. This will establish whether useful dynamic
+switching value exists at all, separate candidate-selection failure from action-
+timing failure, and quantify the minimum gross ranking edge needed before any
+new model is justified. Fixed D labels and arbitrary posterior cutoffs remain
+prohibited.
+
 ## Hot-path industry, size and liquidity audit (2026-08-06)
 
 The nonparametric hot-path atlas, conditional-state audit, marginal-rule audit,

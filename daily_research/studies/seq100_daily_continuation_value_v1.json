@@ -1,0 +1,91 @@
+{
+  "study_id": "seq100_daily_continuation_value_v1",
+  "status": "frozen_initial_contract",
+  "purpose": "Estimate the causal one-step wealth value of continuing to hold versus requesting the next legal close exit, then test it as a repeatedly updated stopping rule.",
+  "source": {
+    "path_neighbor_manifest": "daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1/analysis_manifest.json",
+    "expected_path_neighbor_fingerprint": "01e4e981cf081d6f1ffb5ed6ac74043af9ee4a5b29cee00923ca359c61037ea0",
+    "expected_path_neighbor_manifest_sha256": "4b33018fabf75ed8bf78db7de454fbbda34671f49beb5ed2083d1a4aa89a9219",
+    "expected_prototype_models_sha256": "7f016a0a7693d78b4ec1bfe93c10286b78c9a0970e6173d81dce16a87c4ebde7",
+    "phase_belief_manifest": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
+    "expected_phase_belief_rows": 2645179,
+    "corrected_pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "expected_corrected_pack_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "quality_pool_name": "quality_liquidity_pit",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "period": {
+    "outcome_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "prediction_years": [2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "strict_complete_years": [2019, 2020, 2021, 2022, 2023],
+    "near_complete_years": [2019, 2020, 2021, 2022, 2023, 2024],
+    "provisional_years": [2025],
+    "first_signal_date": "2019-01-02",
+    "last_signal_date": "2025-09-02",
+    "last_account_mark_date": "2025-12-31"
+  },
+  "counterfactual": {
+    "decision_time": "signal-day close",
+    "exit_now_action": "request the next trading-session raw close and use the first authoritative sellable close on or after that request",
+    "continue_one_session_action": "forbid sale for one additional trading session, then use the first authoritative sellable raw close",
+    "outcome": "log ratio of continue-action sale price to exit-now-action sale price",
+    "blocked_action_identity": "if both requests resolve to the same legal sale, continuation value is exactly zero",
+    "maximum_sellability_retry_sessions": 80,
+    "fixed_total_holding_horizon_used": false,
+    "cash_return_between_actions": 0.0,
+    "dividend_cashflow_modeled": false
+  },
+  "state": {
+    "turning_scale": 16,
+    "representations": ["geometry", "sequence"],
+    "cluster_count": 128,
+    "smoothing_strength": 200.0,
+    "sequence_diagnostic_weight": 0.1,
+    "prior_groups": "causal next turning direction crossed with observable setup class",
+    "setup_classes": ["other", "uptrend_pullback", "downtrend_rebound"],
+    "online_update_rule": "before predicting date t, use only outcomes whose two counterfactual exits both resolve strictly before t",
+    "threshold_selection_performed": false
+  },
+  "evaluation": {
+    "proper_mean_scores": ["squared_error", "absolute_error"],
+    "distribution_coordinates": ["positive_probability", "conditional_variance"],
+    "cross_sectional_diagnostic": "same-date rank correlation and prediction deciles",
+    "uncertainty": "date-cluster HAC with lag 20",
+    "primary_comparison": "geometry versus causal group prior",
+    "sequence_comparison": "frozen 0.1 sequence blend versus geometry",
+    "profit_claim_allowed": false
+  },
+  "execution": {
+    "entry_profiles": [
+      {"name": "geometry_entry_geometry_value_exit", "entry_probability": "geometry_long_probability", "continuation_value": "geometry_expected_continuation"},
+      {"name": "geometry_entry_prior_value_exit", "entry_probability": "geometry_long_probability", "continuation_value": "prior_expected_continuation"},
+      {"name": "blend01_entry_blend01_value_exit", "entry_probability": "blend01_long_probability", "continuation_value": "blend01_expected_continuation"}
+    ],
+    "entry_gate": "same frozen combined pullback/rebound setup and long-phase posterior greater than 0.5",
+    "entry_ranking": "same frozen long-phase posterior ranking; continuation prediction does not rerank entries",
+    "exit_gate": "after entry, request the following close when expected continuation log value is at most zero or unavailable",
+    "safety_hard_cap_sessions": 60,
+    "daily_top_k": 3,
+    "position_slots": 12,
+    "starting_cash_cny": 1000000.0,
+    "maximum_signal_day_amount_fraction": 0.005,
+    "cost_scenarios": ["base", "double_slippage"],
+    "pyramiding": false,
+    "cash_allowed": true
+  },
+  "resources": {
+    "available_memory_reserve_mb": 2048,
+    "maximum_threads": 8,
+    "parquet_row_group_size": 100000
+  },
+  "boundaries": {
+    "universe": "quality_liquidity_pit at each state date",
+    "future_sellability_is_used_only_to_resolve outcomes and never as a state or entry filter": true,
+    "training_performed": true,
+    "portfolio_execution_performed": true,
+    "production_policy_selection_allowed": false,
+    "report_generation_performed": false
+  },
+  "output_root": "daily_research/output/path_policy/studies/seq100_daily_continuation_value_v1"
+}

@@ -259,6 +259,61 @@ def test_rolling_portfolio_uses_next_close_after_nonpositive_forecast() -> None:
     assert metric["rolling_acceleration_count"] == 1
 
 
+def test_portfolio_enforces_signal_amount_capacity() -> None:
+    market = _market(symbol_count=1)
+    book = ForecastBook("capacity", top_k=1)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0]),
+        score=np.asarray([0.2]),
+        planned_day=np.asarray([2]),
+    )
+    signal_amount = np.full((100, 1), 100_000.0, dtype=np.float32)
+    metric, _equity, trades, _annual = simulate_portfolio(
+        market=market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+        signal_amount_panel=signal_amount,
+        maximum_signal_amount_fraction=0.10,
+    )
+    trade = trades.iloc[0]
+    assert float(trade["buy_notional_cny"]) <= 10_000.0
+    assert float(trade["signal_amount_participation"]) <= 0.10
+    assert metric["capacity_capped_order_count"] == 1
+
+
+def test_rolling_portfolio_exits_after_belief_disappears() -> None:
+    market = _market(symbol_count=1)
+    book = ForecastBook("missing_belief", top_k=1)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0]),
+        score=np.asarray([0.2]),
+        planned_day=np.asarray([60]),
+    )
+    metric, _equity, trades, _annual = simulate_portfolio(
+        market=market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="rolling_reforecast", kind="rolling"),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+        exit_on_missing_forecast=True,
+    )
+    trade = trades.iloc[0]
+    assert int(trade["entry_date_idx"]) == 1
+    assert int(trade["exit_date_idx"]) == 2
+    assert trade["exit_reason"] == "missing_belief"
+    assert metric["rolling_missing_exit_request_count"] == 1
+
+
 def test_stop_portfolio_uses_top3_raw_path_without_future_selection() -> None:
     path = np.full((60, 4), 10.0, dtype=np.float32)
     path[1] = np.asarray([10.0, 11.5, 9.8, 10.5], dtype=np.float32)

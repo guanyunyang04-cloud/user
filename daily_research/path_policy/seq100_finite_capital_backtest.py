@@ -398,6 +398,10 @@ class _Position:
     shares: int
     entry_price_raw: float
     buy_cash: float
+    buy_notional: float
+    signal_amount: float
+    capacity_limit: float
+    initial_score: float
     entry_date_idx: int
     requested_exit_date_idx: int
     hard_cap_date_idx: int
@@ -1056,6 +1060,9 @@ def simulate_portfolio(
     calendar_years: Sequence[int] | None = None,
     top_k: int | None = None,
     entry_signal_date_indices: Sequence[int] | None = None,
+    signal_amount_panel: np.ndarray | None = None,
+    maximum_signal_amount_fraction: float | None = None,
+    exit_on_missing_forecast: bool = False,
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
     policy.validate()
     if int(slots) <= 0:
@@ -1067,6 +1074,22 @@ def simulate_portfolio(
     configured_top_k = int(book.top_k if top_k is None else top_k)
     if configured_top_k <= 0 or configured_top_k > int(book.candidate_scan_k):
         raise ValueError("top_k must be positive and no larger than candidate_scan_k")
+    if (signal_amount_panel is None) != (maximum_signal_amount_fraction is None):
+        raise ValueError(
+            "signal_amount_panel and maximum_signal_amount_fraction must be supplied together"
+        )
+    amount_panel = None
+    capacity_fraction = None
+    if signal_amount_panel is not None:
+        amount_panel = np.asarray(signal_amount_panel)
+        expected_shape = (len(market.date_values), len(market.symbol_values))
+        if amount_panel.shape != expected_shape:
+            raise ValueError(
+                f"signal_amount_panel must have shape {expected_shape}, got {amount_panel.shape}"
+            )
+        capacity_fraction = float(maximum_signal_amount_fraction)
+        if not math.isfinite(capacity_fraction) or capacity_fraction <= 0.0:
+            raise ValueError("maximum_signal_amount_fraction must be finite and positive")
 
     def selected_symbols(day: ForecastDay) -> tuple[int, ...]:
         ranked = day.ranked_symbol_idx or day.top3_symbol_idx
@@ -1123,6 +1146,9 @@ def simulate_portfolio(
         "replacement_candidate_scan_count": 0,
         "replacement_order_count": 0,
         "replacement_exhausted_signal_count": 0,
+        "capacity_capped_order_count": 0,
+        "capacity_missing_order_count": 0,
+        "rolling_missing_exit_request_count": 0,
         "fees_and_slippage_cny": 0.0,
         "turnover_notional_cny": 0.0,
     }
@@ -1158,6 +1184,19 @@ def simulate_portfolio(
                     counters["failed_entry_count"] += 1
                     continue
                 allocation = min(cash, max(float(equity_open), 0.0) / float(slots))
+                signal_amount = math.nan
+                capacity_limit = math.inf
+                if amount_panel is not None and capacity_fraction is not None:
+                    signal_amount = float(
+                        amount_panel[order.signal_date_idx, order.symbol_idx]
+                    )
+                    if not math.isfinite(signal_amount) or signal_amount <= 0.0:
+                        counters["capacity_missing_order_count"] += 1
+                        continue
+                    capacity_limit = signal_amount * capacity_fraction
+                    if capacity_limit < allocation:
+                        counters["capacity_capped_order_count"] += 1
+                    allocation = min(allocation, capacity_limit)
                 shares, buy_cash, buy_cost, buy_notional = _buy_order(
                     available_cash=cash,
                     allocated_cash=allocation,
@@ -1196,6 +1235,10 @@ def simulate_portfolio(
                     shares=int(shares),
                     entry_price_raw=float(entry_price),
                     buy_cash=float(buy_cash),
+                    buy_notional=float(buy_notional),
+                    signal_amount=float(signal_amount),
+                    capacity_limit=float(capacity_limit),
+                    initial_score=float(order.initial_score),
                     entry_date_idx=int(date_idx),
                     requested_exit_date_idx=int(requested),
                     hard_cap_date_idx=int(order.signal_date_idx) + int(market.forward_days),
@@ -1267,6 +1310,7 @@ def simulate_portfolio(
                     "slot_count": int(slots),
                     "cost_scenario": cost_scenario,
                     "symbol": position.symbol,
+                    "symbol_idx": int(position.symbol_idx),
                     "signal_date": str(market.date_values[position.signal_date_idx]),
                     "entry_date": str(market.date_values[position.entry_date_idx]),
                     "exit_date": trade_date,
@@ -1277,6 +1321,16 @@ def simulate_portfolio(
                     "exit_price_raw": float(exit_price),
                     "shares": int(position.shares),
                     "buy_cash_cny": float(position.buy_cash),
+                    "buy_notional_cny": float(position.buy_notional),
+                    "signal_amount_cny": float(position.signal_amount),
+                    "capacity_limit_cny": float(position.capacity_limit),
+                    "signal_amount_participation": (
+                        float(position.buy_notional / position.signal_amount)
+                        if math.isfinite(position.signal_amount)
+                        and position.signal_amount > 0.0
+                        else None
+                    ),
+                    "initial_score": float(position.initial_score),
                     "sell_proceeds_cny": float(proceeds),
                     "net_pnl_cny": net_pnl,
                     "net_return_on_buy_cash": (
@@ -1324,6 +1378,24 @@ def simulate_portfolio(
                 refreshed = book.lookup(date_idx, position.symbol_idx)
                 if refreshed is None:
                     counters["rolling_missing_forecast_count"] += 1
+                    if exit_on_missing_forecast:
+                        old_requested = int(position.requested_exit_date_idx)
+                        updated = min(
+                            old_requested,
+                            int(date_idx) + 1,
+                            int(position.hard_cap_date_idx),
+                        )
+                        position.requested_exit_date_idx = int(updated)
+                        if updated < old_requested:
+                            counters["rolling_acceleration_count"] += 1
+                            counters["rolling_missing_exit_request_count"] += 1
+                            position.stop_plan = StopPlan(
+                                requested_date_idx=int(updated),
+                                trigger_date_idx=None,
+                                trigger_price=None,
+                                event="missing_belief",
+                                ambiguous=False,
+                            )
                     continue
                 counters["rolling_forecast_observation_count"] += 1
                 score, planned_day = refreshed
@@ -1340,6 +1412,13 @@ def simulate_portfolio(
                     counters["rolling_acceleration_count"] += 1
                     if reason == "nonpositive_value":
                         counters["rolling_nonpositive_exit_request_count"] += 1
+                        position.stop_plan = StopPlan(
+                            requested_date_idx=int(updated),
+                            trigger_date_idx=None,
+                            trigger_price=None,
+                            event="phase_deterioration",
+                            ambiguous=False,
+                        )
 
         # After the close, today's target Top-K creates next-open orders.  The
         # opt-in ranked scan can replace only signal-time rejections such as an
@@ -1416,6 +1495,10 @@ def simulate_portfolio(
         sum(len(selected_symbols(day)) < daily_selection_count for day in book.days.values())
     )
     counters["configured_top_k"] = int(daily_selection_count)
+    counters["maximum_signal_amount_fraction"] = (
+        None if capacity_fraction is None else float(capacity_fraction)
+    )
+    counters["exit_on_missing_forecast"] = bool(exit_on_missing_forecast)
     counters["selected_name_count_min"] = int(min(selection_sizes))
     counters["selected_name_count_max"] = int(max(selection_sizes))
     counters["selected_name_count_mean"] = float(np.mean(selection_sizes))
