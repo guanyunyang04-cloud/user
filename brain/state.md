@@ -19,11 +19,12 @@ cannot adequately express a verified conditional dependency.
 
 The Chan primary-source reassessment, first strict-parser vertical slice, the
 curated nine-path boundary audit, and the first outcome-blind stratified audit
-are complete. The immediate subtask is to review the new contact sheet and
-expand the frozen sample before building the resumable all-market five-minute
-structure panel. No return target or policy training is authorized until parser
-coverage, confirmation delay, disagreement, and visual correctness are
-established independently of profit.
+are complete; the 14-chart visual review is now passed. A fast, fixed-horizon
+outcome probe has been added only as a diagnostic gate while the resumable
+all-market panel is being optimized. The immediate research question is
+whether strict buy-point candidates retain incremental, cost-aware path
+information on broader frozen cases; this is not yet an account or profit
+claim.
 
 No production model, portfolio, stop, or trading policy has been selected.
 Multiple strictly causal transparent predictor, path-structure, and executable
@@ -421,10 +422,31 @@ confirmation writeback; all case assertions passed. The primary profile emitted
 resolved as 226 confirmed, 239 invalidated, and 5 unresolved at episode end;
 median pending duration is 47 bars and P90 about 192 bars. These are parser
 coverage and causal-lag measurements, not market-performance results. The
-contact sheet is generated, but `visual_review_status` remains `unreviewed`
-until the 14 cases receive explicit human review. This stratified run is still a
-small deterministic audit sample, not statistically sufficient full-market
-validation.
+contact sheet and all 14 chart records have `visual_review_status: passed`.
+This stratified run is still a small deterministic audit sample, not
+statistically sufficient full-market validation.
+
+## Strict panel and fast outcome gate
+
+`daily_research/path_policy/seq100_strict_chan_panel.py` and
+`daily_research/studies/seq100_strict_chan_panel_v1.json` define the resumable
+2010-2025 five-minute panel. It now reads a contiguous sorted-symbol bucket in
+one DuckDB batch, caches the symbol universe, writes burn-in events with an
+explicit `is_formal` flag, publishes only 2012-2025 daily snapshots, and tracks
+the latest state of each pending candidate. A one-symbol real run completed in
+about 30 seconds; a three-symbol long-history run completed in about 145
+seconds. Full-market execution is therefore not being started blindly; the
+remaining bottleneck is Parquet I/O for long-history symbols, not parser
+correctness.
+
+`daily_research/path_policy/seq100_strict_chan_outcome_probe.py` evaluates the
+frozen 14-case parser events at the next trading-date open with T+1 and base /
+stress proportional costs (including minimum commission). The run produced
+343 deduplicated buy candidates and 1,567 event-horizon rows. In the primary
+profile, type-3 candidates are negative over 1-10 sessions; type-2 candidates
+are positive in the small 5/3/2-case denominators at 5/10/20 sessions, but this
+does not persist as a broad or independent stability result. The probe is a
+path diagnostic only; no account replay or production policy is authorized.
 
 ## Absolute causal K-line strategy evidence
 
@@ -545,18 +567,17 @@ the exit day is prospectively identifiable.
 
 The source audit, frozen definition dependency table, independent parser,
 five-minute adjustment/missingness adapter, synthetic tests, one-symbol output,
-curated nine-path audit, and first 14-case stratified prefix/variant audit are
-complete. The stratified contact sheet is generated but awaits explicit visual
-review, and the sample is not statistically broad enough to support a market
-claim. The full 2010-2025 market panel and future-path comparison have not
-started. Account replay and model training remain prohibited. The next bounded
-work is:
+curated nine-path audit, 14-case stratified prefix/variant audit, and first
+outcome gate are complete. The sample is not statistically broad enough to
+support a market claim. The full 2010-2025 market panel is implemented but not
+yet run end-to-end because the I/O path needs further batching or a cached
+partition. Account replay and model training remain prohibited until the next
+outcome gate is broad enough. The next bounded work is:
 
-1. Review and ledger the 14 stratified charts, recording parser errors separately
-   from legitimate definition disagreement; then expand the deterministic
-   sample by liquidity, price, listing age, episode-break, and data-completeness
-   strata without using future outcomes or parser events.
-2. Implement a resumable, resource-adaptive partition builder for the complete
+1. Expand the outcome probe to a larger outcome-blind structure sample and
+   require positive case/year coverage under both cost scenarios before any
+   account replay.
+2. Benchmark a cached or year-sharded Parquet partition for the complete
    2010-2025 five-minute store. Preserve per-symbol episode boundaries and emit
    daily close-time snapshots for later `quality_liquidity_pit` joins without
    treating missing intraday history as a universe filter.

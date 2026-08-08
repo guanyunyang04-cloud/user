@@ -1,0 +1,38 @@
+{
+  "study_id": "seq100_strict_chan_panel_v1",
+  "status": "frozen_panel_contract",
+  "purpose": "Build a resumable full-market five-minute strict Chan structure panel before any outcome or profit study.",
+  "data_contract": {
+    "qdp_root": "quant_data_platform/data/qdp_v2",
+    "datasets": {
+      "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
+      "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
+      "market_daily_raw": "market_daily_raw__0559f722eb9142e5f476854a"
+    },
+    "burn_in_start": "2010-01-01",
+    "formal_start": "2012-01-01",
+    "formal_end": "2025-12-31",
+    "forbidden_year": 2026,
+    "quality_pool": "quality_liquidity_pit"
+  },
+  "execution": {
+    "default_bucket_count": 256,
+    "partition": "contiguous ranges of the sorted symbol universe for Parquet row-group pruning",
+    "resume_key": "input_fingerprint",
+    "batch_read": "one DuckDB connection and one symbol-batch query per bucket",
+    "memory_policy": "adaptive DuckDB memory limit from available host memory"
+  },
+  "outputs": {
+    "events": "events.parquet",
+    "daily_snapshots": "daily_snapshots.parquet",
+    "completion": "done.json",
+    "burn_in_events_retained": true,
+    "formal_snapshots_only": true
+  },
+  "boundaries": {
+    "profit_claim_allowed": false,
+    "account_replay_allowed": false,
+    "future_path_labels_allowed": false,
+    "model_training_allowed": false
+  }
+}

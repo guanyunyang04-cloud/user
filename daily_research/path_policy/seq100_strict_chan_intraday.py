@@ -200,6 +200,73 @@ def _query_symbol_inputs(
     return intraday, factors, daily
 
 
+def _query_symbols_inputs(
+    connection: duckdb.DuckDBPyConnection,
+    paths: Mapping[str, Sequence[Path]],
+    *,
+    symbols: Sequence[str],
+    start_date: str,
+    end_date: str,
+    contiguous_symbol_range: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Read one symbol batch while reusing the same Parquet scan and connection."""
+    requested = sorted({str(symbol) for symbol in symbols})
+    if not requested:
+        empty = pd.DataFrame()
+        return empty, empty.copy(), empty.copy()
+    if contiguous_symbol_range:
+        symbol_predicate = "symbol BETWEEN ? AND ?"
+        symbol_parameters = [requested[0], requested[-1]]
+    else:
+        placeholders = ",".join("?" for _ in requested)
+        symbol_predicate = f"symbol IN ({placeholders})"
+        symbol_parameters = requested
+    parameters = [*symbol_parameters, start_date, end_date]
+    intraday_scan = _scan(paths["market_intraday_5m"])
+    factor_scan = _scan(paths["adjust_factor"])
+    daily_scan = _scan(paths["market_daily_raw"])
+    intraday = connection.execute(
+        f"""
+        SELECT symbol, trade_date, bar_time, open, high, low, close,
+               volume, amount, source, adjusted_flag
+        FROM {intraday_scan}
+        WHERE {symbol_predicate}
+          AND trade_date BETWEEN ? AND ?
+        ORDER BY symbol, trade_date, bar_time
+        """,
+        parameters,
+    ).fetchdf()
+    factors = connection.execute(
+        f"""
+        SELECT symbol, trade_date, adjust_factor, factor_source_date,
+               ffill_days, factor_semantics, factor_provider
+        FROM {factor_scan}
+        WHERE {symbol_predicate}
+          AND trade_date BETWEEN ? AND ?
+        QUALIFY row_number() OVER (
+            PARTITION BY symbol, trade_date
+            ORDER BY factor_source_date DESC NULLS LAST
+        ) = 1
+        ORDER BY symbol, trade_date
+        """,
+        parameters,
+    ).fetchdf()
+    daily = connection.execute(
+        f"""
+        SELECT symbol, trade_date, open, high, low, close, volume, amount
+        FROM {daily_scan}
+        WHERE {symbol_predicate}
+          AND trade_date BETWEEN ? AND ?
+        QUALIFY row_number() OVER (
+            PARTITION BY symbol, trade_date ORDER BY source DESC NULLS LAST
+        ) = 1
+        ORDER BY symbol, trade_date
+        """,
+        parameters,
+    ).fetchdf()
+    return intraday, factors, daily
+
+
 def _complete_intraday_dates(intraday: pd.DataFrame) -> tuple[set[str], dict[str, Any]]:
     expected = set(EXPECTED_5M_TIMES)
     complete: set[str] = set()
@@ -309,35 +376,19 @@ def _assign_episode_ids(
     return mapping
 
 
-def load_symbol_episodes(
+def _prepare_symbol_episodes(
     symbol: str,
+    intraday: pd.DataFrame,
+    factors: pd.DataFrame,
+    daily: pd.DataFrame,
     *,
-    start_date: str = "2010-01-01",
-    end_date: str = "2025-12-31",
-    definition_path: str | Path = parser.DEFAULT_DEFINITION_PATH,
-    temporary_root: str | Path | None = None,
+    start_date: str,
+    end_date: str,
+    pinned: Mapping[str, str],
+    manifests: Mapping[str, Any],
+    runtime: Mapping[str, Any],
 ) -> IntradayEpisodes:
-    spec = parser.load_definition_spec(definition_path)
-    contract = dict(spec["data_contract"])
-    if start_date < str(contract["burn_in_start"]):
-        raise ValueError("strict_chan_intraday_start_before_contract")
-    if end_date > str(contract["formal_end"]) or end_date.startswith(
-        str(contract["forbidden_year"])
-    ):
-        raise ValueError("strict_chan_intraday_forbidden_date")
-    _, pinned, paths, manifests = _snapshot(spec)
-    temporary = Path(temporary_root) if temporary_root else None
-    connection, runtime = _connect(temporary)
-    try:
-        intraday, factors, daily = _query_symbol_inputs(
-            connection,
-            paths,
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-        )
-    finally:
-        connection.close()
+    """Apply the causal completeness, adjustment, and episode contract to one symbol."""
     if intraday.empty:
         raise ValueError(f"strict_chan_intraday_symbol_empty:{symbol}")
     intraday["trade_date"] = intraday["trade_date"].astype(str)
@@ -405,6 +456,95 @@ def load_symbol_episodes(
     if len(selected) != audit["expected_rows_from_days"]:
         raise ValueError("strict_chan_intraday_usable_row_count_mismatch")
     return IntradayEpisodes(frame=selected, audit=audit)
+
+
+def _validate_load_window(
+    spec: Mapping[str, Any], *, start_date: str, end_date: str
+) -> None:
+    contract = dict(spec["data_contract"])
+    if start_date < str(contract["burn_in_start"]):
+        raise ValueError("strict_chan_intraday_start_before_contract")
+    if end_date > str(contract["formal_end"]) or end_date.startswith(
+        str(contract["forbidden_year"])
+    ):
+        raise ValueError("strict_chan_intraday_forbidden_date")
+
+
+def load_symbols_episodes(
+    symbols: Sequence[str],
+    *,
+    start_date: str = "2010-01-01",
+    end_date: str = "2025-12-31",
+    definition_path: str | Path = parser.DEFAULT_DEFINITION_PATH,
+    temporary_root: str | Path | None = None,
+    contiguous_symbol_range: bool = False,
+) -> dict[str, IntradayEpisodes]:
+    """Load a batch of symbols using one pinned snapshot and one DuckDB connection."""
+    requested = sorted({str(symbol) for symbol in symbols})
+    if not requested:
+        return {}
+    spec = parser.load_definition_spec(definition_path)
+    _validate_load_window(spec, start_date=start_date, end_date=end_date)
+    _, pinned, paths, manifests = _snapshot(spec)
+    temporary = Path(temporary_root) if temporary_root else None
+    connection, runtime = _connect(temporary)
+    try:
+        intraday, factors, daily = _query_symbols_inputs(
+            connection,
+            paths,
+            symbols=requested,
+            start_date=start_date,
+            end_date=end_date,
+            contiguous_symbol_range=contiguous_symbol_range,
+        )
+    finally:
+        connection.close()
+    intraday_by_symbol = {
+        str(symbol): group.copy()
+        for symbol, group in intraday.groupby("symbol", sort=False)
+    }
+    factors_by_symbol = {
+        str(symbol): group.copy()
+        for symbol, group in factors.groupby("symbol", sort=False)
+    }
+    daily_by_symbol = {
+        str(symbol): group.copy()
+        for symbol, group in daily.groupby("symbol", sort=False)
+    }
+    loaded: dict[str, IntradayEpisodes] = {}
+    empty_intraday = intraday.iloc[0:0].copy()
+    empty_factors = factors.iloc[0:0].copy()
+    empty_daily = daily.iloc[0:0].copy()
+    for symbol in requested:
+        loaded[symbol] = _prepare_symbol_episodes(
+            symbol,
+            intraday_by_symbol.get(symbol, empty_intraday),
+            factors_by_symbol.get(symbol, empty_factors),
+            daily_by_symbol.get(symbol, empty_daily),
+            start_date=start_date,
+            end_date=end_date,
+            pinned=pinned,
+            manifests=manifests,
+            runtime=runtime,
+        )
+    return loaded
+
+
+def load_symbol_episodes(
+    symbol: str,
+    *,
+    start_date: str = "2010-01-01",
+    end_date: str = "2025-12-31",
+    definition_path: str | Path = parser.DEFAULT_DEFINITION_PATH,
+    temporary_root: str | Path | None = None,
+) -> IntradayEpisodes:
+    return load_symbols_episodes(
+        [symbol],
+        start_date=start_date,
+        end_date=end_date,
+        definition_path=definition_path,
+        temporary_root=temporary_root,
+    )[str(symbol)]
 
 
 def run_symbol_study(

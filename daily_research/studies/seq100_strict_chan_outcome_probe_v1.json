@@ -1,0 +1,50 @@
+{
+  "study_id": "seq100_strict_chan_outcome_probe_v1",
+  "status": "frozen_outcome_probe_contract",
+  "purpose": "Measure post-confirmation paths of strict-parser buy-point candidates on the frozen outcome-blind stratified cases.",
+  "source": {
+    "stratified_audit_output": "daily_research/output/path_policy/studies/seq100_strict_chan_stratified_audit_v1",
+    "profiles": [
+      "primary",
+      "strict_containment",
+      "disjoint_fractals_only",
+      "fluctuation_interval_relation",
+      "outer_bar_tiebreak",
+      "initial_direction_lookahead"
+    ],
+    "event_type": "trade_point",
+    "sides": ["buy"],
+    "forbidden_year": 2026,
+    "formal_start": "2012-01-01",
+    "formal_end": "2025-12-31"
+  },
+  "execution": {
+    "entry": "first available trading date after confirmation date open",
+    "t_plus_one": true,
+    "horizons_sessions": [1, 3, 5, 10, 20],
+    "same_case_profile_point_entry_date_deduplication": "keep earliest confirmed event",
+    "incomplete_horizon": "exclude from that horizon and report denominator",
+    "baseline": "all eligible next-date-open entries in the same case and horizon",
+    "costs": {
+      "lot_size": 100,
+      "commission_bps": 3.0,
+      "minimum_commission_cny": 5.0,
+      "transfer_fee_bps": 0.1,
+      "slippage_bps": 7.0,
+      "stress_slippage_multiplier": 2.0,
+      "stamp_tax_bps_before_2023_08_28": 10.0,
+      "stamp_tax_bps_from_2023_08_28": 5.0
+    }
+  },
+  "outputs": {
+    "event_outcomes": "event_outcomes.parquet",
+    "aggregate": "aggregate.parquet",
+    "summary": "summary.json"
+  },
+  "boundaries": {
+    "profit_claim_allowed": false,
+    "account_replay_allowed": false,
+    "model_training_allowed": false,
+    "fixed_horizon_is_diagnostic_only": true
+  }
+}
