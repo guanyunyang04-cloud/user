@@ -1,0 +1,251 @@
+{
+  "study_id": "seq100_strict_chan_audit_v1",
+  "status": "frozen_parser_validation_plan",
+  "parent_study_id": "seq100_strict_chan_definition_v1",
+  "purpose": "Validate the strict causal Chan parser on diverse real five-minute paths before any future-path, return, execution, or model study.",
+  "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+  "boundaries": {
+    "future_path_test_performed": false,
+    "return_test_performed": false,
+    "profit_claim_allowed": false,
+    "account_replay_allowed": false,
+    "model_training_allowed": false,
+    "case_selection_role": "Parser correctness and definition-disagreement audit only; cases must never be used to select a profitable variant."
+  },
+  "profiles": {
+    "primary": {},
+    "strict_containment": {
+      "inclusion_equality": "strict_containment"
+    },
+    "outer_bar_tiebreak": {
+      "fractal_equality": "outer_bar_tiebreak"
+    },
+    "initial_direction_lookahead": {
+      "initial_inclusion_direction": "first_noninclusive_lookahead"
+    },
+    "disjoint_fractals_only": {
+      "stroke_rule": "disjoint_fractals_only"
+    },
+    "stroke_base_diagnostic": {
+      "lowest_center_component": "stroke_diagnostic"
+    },
+    "fluctuation_interval_relation": {
+      "center_relation": "fluctuation_interval_overlap"
+    }
+  },
+  "prefix_validation": {
+    "profiles": "all",
+    "cutoffs_per_episode": 4,
+    "maximum_episodes_per_case": 3,
+    "exact_discrete_event_match": true
+  },
+  "visualization": {
+    "show_adjusted_path": true,
+    "show_raw_vs_adjusted_normalized_path": true,
+    "show_fractals": true,
+    "show_strokes": true,
+    "show_segments": true,
+    "show_primary_centers": true,
+    "show_pending_state_events": true,
+    "show_trade_point_candidates": true,
+    "maximum_center_level": 2
+  },
+  "cases": [
+    {
+      "case_id": "long_uptrend_002583_2024",
+      "category": "long_trend",
+      "symbol": "002583.SZ",
+      "start_date": "2024-03-01",
+      "end_date": "2024-11-29",
+      "display_start_date": "2024-07-31",
+      "display_end_date": "2024-10-31",
+      "focal_date": "2024-10-31",
+      "quality_pool_expected": true,
+      "selection_basis": "Deterministic 60-session adjusted-return scan inside the point-in-time quality pool; retained only as a long-trend geometry case.",
+      "assertions": [
+        {
+          "metric": "display_window_return",
+          "operator": ">=",
+          "value": 3.0
+        }
+      ]
+    },
+    {
+      "case_id": "oscillation_603721_2024",
+      "category": "oscillation",
+      "symbol": "603721.SH",
+      "start_date": "2023-09-01",
+      "end_date": "2024-03-29",
+      "display_start_date": "2023-11-20",
+      "display_end_date": "2024-02-20",
+      "focal_date": "2024-02-20",
+      "quality_pool_expected": true,
+      "selection_basis": "Deterministic 60-session scan for high absolute path length and near-zero net adjusted return inside the point-in-time quality pool.",
+      "assertions": [
+        {
+          "metric": "display_abs_window_return",
+          "operator": "<=",
+          "value": 0.05
+        },
+        {
+          "metric": "display_absolute_log_path",
+          "operator": ">=",
+          "value": 2.0
+        }
+      ]
+    },
+    {
+      "case_id": "suspension_resume_601211_2024",
+      "category": "suspension_and_gap",
+      "symbol": "601211.SH",
+      "start_date": "2024-05-01",
+      "end_date": "2024-11-29",
+      "display_start_date": "2024-08-01",
+      "display_end_date": "2024-10-31",
+      "focal_date": "2024-10-10",
+      "quality_pool_expected": true,
+      "selection_basis": "Longest 2024 quality-pool gap between positive-volume daily bars among the bounded candidate scan.",
+      "assertions": [
+        {
+          "metric": "display_max_calendar_gap_days",
+          "operator": ">=",
+          "value": 30
+        }
+      ]
+    },
+    {
+      "case_id": "corporate_action_002594_2025",
+      "category": "corporate_action_boundary",
+      "symbol": "002594.SZ",
+      "start_date": "2025-03-01",
+      "end_date": "2025-08-29",
+      "display_start_date": "2025-07-15",
+      "display_end_date": "2025-08-15",
+      "focal_date": "2025-07-29",
+      "quality_pool_expected": true,
+      "selection_basis": "Large same-day adjustment-factor change with a small adjusted opening gap inside the point-in-time quality pool.",
+      "assertions": [
+        {
+          "metric": "display_max_abs_factor_change",
+          "operator": ">=",
+          "value": 1.0
+        },
+        {
+          "metric": "display_max_abs_adjusted_open_gap",
+          "operator": "<=",
+          "value": 0.08
+        }
+      ]
+    },
+    {
+      "case_id": "short_history_603406_2025",
+      "category": "short_history",
+      "symbol": "603406.SH",
+      "start_date": "2025-08-08",
+      "end_date": "2025-12-31",
+      "display_start_date": "2025-08-08",
+      "display_end_date": "2025-12-31",
+      "focal_date": "2025-08-08",
+      "quality_pool_expected": false,
+      "selection_basis": "Recent listing with fewer than 100 positive-volume sessions through 2025; included only to test parser startup behavior outside the return-study universe.",
+      "assertions": [
+        {
+          "metric": "display_usable_days",
+          "operator": "<=",
+          "value": 100
+        }
+      ]
+    },
+    {
+      "case_id": "one_price_limit_cluster_000981_2024",
+      "category": "limit_move_cluster",
+      "symbol": "000981.SZ",
+      "start_date": "2024-05-01",
+      "end_date": "2024-08-30",
+      "display_start_date": "2024-07-15",
+      "display_end_date": "2024-08-15",
+      "focal_date": "2024-07-30",
+      "quality_pool_expected": true,
+      "selection_basis": "Quality-pool path containing consecutive one-price limit-like daily bars.",
+      "assertions": [
+        {
+          "metric": "display_max_daily_return",
+          "operator": ">=",
+          "value": 0.10
+        },
+        {
+          "metric": "display_one_price_days",
+          "operator": ">=",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "case_id": "limit_down_reversal_000656_2023",
+      "category": "limit_down_and_reversal",
+      "symbol": "000656.SZ",
+      "start_date": "2023-03-01",
+      "end_date": "2023-07-31",
+      "display_start_date": "2023-05-15",
+      "display_end_date": "2023-07-15",
+      "focal_date": "2023-05-25",
+      "quality_pool_expected": true,
+      "selection_basis": "Quality-pool path containing a one-price limit-like down move followed by a sharp reversal.",
+      "assertions": [
+        {
+          "metric": "display_min_daily_return",
+          "operator": "<=",
+          "value": -0.10
+        },
+        {
+          "metric": "display_max_daily_return",
+          "operator": ">=",
+          "value": 0.10
+        }
+      ]
+    },
+    {
+      "case_id": "segment_break_case1_600000_2024",
+      "category": "segment_break_case_1",
+      "symbol": "600000.SH",
+      "start_date": "2024-01-01",
+      "end_date": "2024-06-30",
+      "display_start_date": "2024-04-29",
+      "display_end_date": "2024-05-20",
+      "focal_date": "2024-05-06",
+      "quality_pool_expected": true,
+      "selection_basis": "Primary-parser case-1 segment break on a complete adjusted five-minute path while the symbol is in the point-in-time quality pool.",
+      "assertions": [
+        {
+          "metric": "primary_case1_segments",
+          "operator": ">=",
+          "value": 1
+        }
+      ]
+    },
+    {
+      "case_id": "segment_break_case2_600000_2024",
+      "category": "segment_break_case_2",
+      "symbol": "600000.SH",
+      "start_date": "2024-01-01",
+      "end_date": "2024-08-31",
+      "display_start_date": "2024-05-20",
+      "display_end_date": "2024-06-20",
+      "focal_date": "2024-06-03",
+      "quality_pool_expected": true,
+      "selection_basis": "Previously verified primary-parser gap break that opens a pending middle state before case-2 confirmation.",
+      "assertions": [
+        {
+          "metric": "primary_case2_segments",
+          "operator": ">=",
+          "value": 1
+        },
+        {
+          "metric": "primary_pending_opened",
+          "operator": ">=",
+          "value": 1
+        }
+      ]
+    }
+  ]
+}

@@ -17,10 +17,12 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
-The immediate subtask is a primary-source reassessment of Chan theory before
-any further path-policy training. Its deterministic market grammar, causal
-confirmation rules, and empirical profit claims must be separated and tested
-independently.
+The Chan primary-source reassessment, first strict-parser vertical slice, and a
+curated nine-path boundary audit are complete. The immediate subtask is to
+expand deterministic stratified validation, then build the resumable all-market
+five-minute structure panel. No return target or policy training is authorized
+until parser coverage, confirmation delay, disagreement, and visual correctness
+are established independently of profit.
 
 No production model, portfolio, stop, or trading policy has been selected.
 Multiple strictly causal transparent predictor, path-structure, and executable
@@ -325,6 +327,71 @@ and attributed replies in `stockServ/chzhshch-108-plus` as the primary public
 cross-check, with FURLEADER only as secondary corroboration. Direct scholarly
 search found no reliable peer-reviewed causal test of complete Chan theory.
 
+## Strict Chan parser foundation
+
+The frozen dependency contract is
+`daily_research/studies/seq100_strict_chan_definition_v1.json`. It separates 23
+executable definitions from engineering conventions, ambiguity variants,
+quantitative divergence coordinates, and empirical profit hypotheses. The new
+implementation is independent of the validated weak grammar and does not
+replace or reinterpret its historical results.
+
+`seq100_strict_chan_parser.py` now emits inclusion-normalized bars, confirmed
+fractals, conservatively locked strokes, standard feature sequences, both
+segment-break cases, explicit pending/middle states, segment events, recursive
+centers, center extension/expansion/new birth, same-level movements, trend
+snapshots, named divergence coordinates, and first/second/third-point
+candidates. Every immutable event records both structural event time and first
+causal confirmation time. Candidate points are annotations only; no future-path,
+profit, execution, or policy test has been run.
+
+The QDP adapter pins the current five-minute, adjustment-factor, and raw-daily
+datasets. It requires canonical 48-bar days, multiplies raw intraday OHLC by the
+same-day cumulative `adjust_factor`, and splits parser episodes when a
+positive-volume daily bar lacks complete five-minute data or a valid causal
+factor. It never fabricates suspension bars. Fifteen external-archive shards
+have malformed date metadata such as `2024-01-`, although their Parquet
+`trade_date` values are valid full dates. The adapter audits this anomaly and
+filters on the actual column rather than trusting shard metadata; an immutable
+QDP metadata repair remains separate follow-up work.
+
+A bounded real smoke test on `600000.SH` from 2024-01-01 through 2025-12-31
+uses 23,280 complete adjusted bars with no missing positive day. The primary
+variant produces 9,905 locked normalized bars, 5,166 fractals, 1,117 locked
+strokes, 79 segments, 12 level-1 and 3 level-2 centers, 5 divergence-coordinate
+events, and 16 point candidates. These are coverage counts, not evidence of
+market validity. Eight prefix cutoffs compare 61,854 event records and about
+1.20 million fields exactly with no future-confirmed writeback.
+
+Real prefix recomputation exposed and fixed three confirmation-order defects:
+case-2 invalidation could precede candidate recognition, a later segment could
+be confirmed before an unresolved predecessor, and divergence or point events
+could depend on unconfirmed structures. Candidate decisions now inherit the
+latest dependency time, and every parse ends with a complete confirmation-time
+DAG check.
+
+The frozen nine-path audit spans trends, oscillations, long gaps, an adjustment
+boundary, short history, one-price limit clusters, a limit-down reversal, and
+both segment-break cases. Across 54,000 five-minute bars, 1,125 usable days, and
+seven definition profiles, all case assertions and visual checks pass. Exact
+prefix reruns compare 554,740 event records and 10,747,435 fields with no future
+confirmation writeback. The primary view emits 192 segments, 33 centers, and 24
+point candidates. Its 127 pending segment candidates include 59 confirmations,
+67 invalidations, and one terminal unresolved state; median duration is 67 bars
+and the 90th percentile is about 225 bars, so pending state and confirmation lag
+cannot be collapsed into event time.
+
+Definition sensitivity remains material across the audit. Strict containment
+has segment/stroke Jaccard about `0.0445/0.1492` versus the primary view;
+disjoint-fractal strokes have about `0.1012/0.4985`. Stroke-based lowest centers
+produce 416 centers versus 33 and no identical point candidate. Fluctuation-
+interval center relations leave the lower structures unchanged but reduce trend
+Jaccard to about `0.623`, point-candidate Jaccard to `0.75`, and divergence count
+to zero. Equality tiebreaks are inactive here and initial-direction lookahead is
+confined to startup. These selected paths are parser boundary coverage, not a
+statistically sufficient all-market sample and not grounds for choosing a
+profitable or theoretically privileged variant.
+
 ## Absolute causal K-line strategy evidence
 
 The `seq100_causal_pattern_strategy_probe_v1` study separates literal trade
@@ -442,23 +509,26 @@ mechanical results reject simple fixed or hand-written exits. The ceiling shows
 large ex-post headroom but does not establish that either the entry shape or
 the exit day is prospectively identifiable.
 
-The user has temporarily prioritized a deeper Chan-theory reassessment before
-the stopping study. The next bounded work is:
+The source audit, frozen definition dependency table, independent parser,
+five-minute adjustment/missingness adapter, synthetic tests, one-symbol output,
+and curated nine-path prefix/variant/visual audit are complete. The curated set
+is deliberately selected for boundary coverage and is not statistically broad
+validation. The full 2010-2025 market panel and future-path comparison have not
+started. Account replay and model training remain prohibited. The next bounded
+work is:
 
-1. Freeze a definition-dependency specification that distinguishes strict
-   definitions, chosen engineering conventions, confirmation delay, unresolved
-   ambiguity, and profit hypotheses. Do not treat a selected parser convention
-   as a discovered natural market law.
-2. Build a separate strict causal Chan parser from five-minute data upward,
-   without replacing the validated weak grammar. Implement feature sequences,
-   both segment-break cases, pending/middle-yin states, recursive centers,
-   center extension/expansion/new birth, same-level decomposition, and explicit
-   event and confirmation timestamps.
-3. Compare parser alternatives where the source leaves choices open, including
-   equality rules, initial direction, strict-stroke conventions, base-unit
-   construction, decomposition mode, and competing quantitative definitions of
-   strength/divergence. Require prefix invariance and report coverage,
-   confirmation lag, and disagreement before testing returns.
+1. Expand prefix and variant validation to a deterministic stratified
+   symbol/date sample selected without future returns or parser outcomes. Report
+   coverage, confirmation-lag distributions, pending-state duration,
+   disagreement, episode breaks, and visual-review sampling before choosing any
+   primary research view.
+2. Implement a resumable, resource-adaptive partition builder for the complete
+   2010-2025 five-minute store. Preserve per-symbol episode boundaries and emit
+   daily close-time snapshots for later `quality_liquidity_pit` joins without
+   treating missing intraday history as a universe filter.
+3. Repair the malformed external-archive shard date metadata through an
+   immutable QDP metadata version or explicit audit artifact; do not mutate the
+   pinned dataset manifest in place.
 4. Test whether the complete structures add future-path information beyond
    volatility, activity, market regime, and the existing weak grammar. Only
    then test executable first/second/third-point policies under both costs.
@@ -507,6 +577,14 @@ the stopping study. The next bounded work is:
 - Causal path-structure study and validator:
   `daily_research/path_policy/seq100_causal_path_structure.py` and
   `daily_research/path_policy/seq100_causal_path_structure_validate.py`
+- Strict Chan definition, parser, QDP adapter, validator, and audit:
+  `daily_research/studies/seq100_strict_chan_definition_v1.json`,
+  `daily_research/path_policy/seq100_strict_chan_parser.py`,
+  `daily_research/path_policy/seq100_strict_chan_intraday.py`, and
+  `daily_research/path_policy/seq100_strict_chan_validate.py`; frozen audit plan
+  and runner are
+  `daily_research/studies/seq100_strict_chan_audit_v1.json` and
+  `daily_research/path_policy/seq100_strict_chan_audit.py`
 - Absolute causal K-line strategy probe and validator:
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe.py` and
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe_validate.py`
@@ -524,6 +602,8 @@ the stopping study. The next bounded work is:
   `daily_research/studies/seq100_dynamic_action_value_baselines_v1.json`,
   `daily_research/studies/seq100_dynamic_action_distribution_v1.json`,
   `daily_research/studies/seq100_causal_path_structure_v1.json`,
+  `daily_research/studies/seq100_strict_chan_definition_v1.json`,
+  `daily_research/studies/seq100_strict_chan_audit_v1.json`,
   `daily_research/studies/seq100_causal_pattern_strategy_probe_v1.json`,
   `daily_research/studies/seq100_causal_exit_baselines_v1.json`,
   `daily_research/studies/seq100_exit_stopping_ceiling_v1.json`
@@ -535,6 +615,8 @@ the stopping study. The next bounded work is:
   `daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/`,
+  `daily_research/output/path_policy/studies/seq100_strict_chan_definition_v1/`,
+  `daily_research/output/path_policy/studies/seq100_strict_chan_audit_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/`,
   `daily_research/output/path_policy/studies/seq100_exit_stopping_ceiling_v1/`

@@ -1,0 +1,377 @@
+{
+  "study_id": "seq100_strict_chan_definition_v1",
+  "status": "frozen_parser_contract",
+  "purpose": "Separate the deterministic Chan path grammar, causal confirmation conventions, unresolved source ambiguities, quantitative divergence coordinates, and empirical profit hypotheses before any return study.",
+  "source_corpus": {
+    "repository": "https://github.com/stockServ/chzhshch-108-plus",
+    "commit": "d2a87d5bd9c84baac2918edca668b9f82a20be52",
+    "role": "Primary public lesson-by-lesson cross-check. Attributed replies are supporting context; later editor notes are not definitions.",
+    "lessons": {
+      "17": "trend completion and recursive movement types",
+      "18": "lowest-level center and recursive level construction",
+      "20": "center extension, expansion, new birth, and third points",
+      "21": "completeness claims for the three point classes",
+      "24": "MACD as an auxiliary divergence measure",
+      "27": "trend versus consolidation divergence",
+      "29": "turning strength and level",
+      "35": "center and movement-type review",
+      "38": "same-level decomposition",
+      "62": "inclusion-normalized bars, fractals, strokes, and segments",
+      "65": "ordered inclusion processing, stroke filtering, and segment destruction",
+      "67": "feature sequences and the two segment-break cases",
+      "71": "feature-sequence inclusion scope and unresolved middle state",
+      "77": "concept clarifications and gap handling",
+      "81": "corrections and non-uniqueness of the base construction",
+      "83": "segments rather than strokes as the preferred lowest-center components",
+      "91": "provisional versus extending stroke state",
+      "101": "recursive function view and replaceable base construction",
+      "107": "theoretical next-leg existence does not imply executable profit after fees"
+    }
+  },
+  "epistemic_classes": {
+    "strict_definition": "A geometric relation stated sufficiently clearly to encode directly.",
+    "engineering_convention": "A causal or data-system choice needed for an online implementation but not uniquely selected by the source.",
+    "ambiguity_variant": "A source-compatible alternative that must remain separately measurable.",
+    "quantitative_coordinate": "A numerical representation of an under-specified qualitative concept; no variant is treated as the true measure.",
+    "empirical_hypothesis": "A claim about future paths, execution, or profit that the parser cannot prove."
+  },
+  "causal_contract": {
+    "event_time": "The source-bar timestamp of the structural extreme or boundary event.",
+    "confirmation_time": "The first timestamp at which all bars and lower-level structures required by the selected rule are locked.",
+    "writeback": "A later confirmation is emitted on its confirmation timestamp and is never written into an earlier feature row.",
+    "provisional_state": "The last inclusion-normalized bar, the last accepted stroke, and unresolved gap segment breaks remain provisional.",
+    "downstream_locking": "Segments consume only strokes locked by a following accepted stroke; this conservative delay prevents a later same-kind fractal from rewriting a consumed endpoint.",
+    "future_data_allowed": false
+  },
+  "data_contract": {
+    "qdp_root": "quant_data_platform/data/qdp_v2",
+    "datasets": {
+      "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
+      "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
+      "market_daily_raw": "market_daily_raw__0559f722eb9142e5f476854a"
+    },
+    "quality_pool": "quality_liquidity_pit",
+    "burn_in_start": "2010-01-01",
+    "formal_start": "2012-01-01",
+    "formal_end": "2025-12-31",
+    "forbidden_year": 2026,
+    "expected_bar_count_per_complete_day": 48,
+    "price_adjustment": "Multiply raw intraday OHLC by the same-day cumulative adjust_factor. Do not use a future-normalized forward-adjustment factor.",
+    "missingness": "A positive-volume daily bar without a complete canonical 48-bar intraday day breaks the parser episode. Suspension-only gaps do not fabricate bars and do not by themselves break the episode.",
+    "manifest_date_policy": "Shard date metadata is audited but date filtering uses the actual Parquet trade_date column because some installed archive shard metadata is malformed."
+  },
+  "variants": {
+    "inclusion_equality": {
+      "primary": "closed_interval",
+      "options": [
+        "closed_interval",
+        "strict_containment"
+      ]
+    },
+    "fractal_equality": {
+      "primary": "strict",
+      "options": [
+        "strict",
+        "outer_bar_tiebreak"
+      ]
+    },
+    "initial_inclusion_direction": {
+      "primary": "previous_noninclusive_then_close",
+      "options": [
+        "previous_noninclusive_then_close",
+        "first_noninclusive_lookahead"
+      ]
+    },
+    "stroke_rule": {
+      "primary": "disjoint_fractals_and_price_ranges",
+      "options": [
+        "disjoint_fractals_and_price_ranges",
+        "disjoint_fractals_only"
+      ]
+    },
+    "lowest_center_component": {
+      "primary": "segment",
+      "options": [
+        "segment",
+        "stroke_diagnostic"
+      ]
+    },
+    "center_relation": {
+      "primary": "core_interval_overlap",
+      "options": [
+        "core_interval_overlap",
+        "fluctuation_interval_overlap"
+      ]
+    },
+    "divergence_metrics": {
+      "primary": "macd_histogram_area",
+      "options": [
+        "macd_histogram_area",
+        "duration_normalized_price_change",
+        "amount_per_bar"
+      ]
+    }
+  },
+  "definitions": [
+    {
+      "id": "raw_5m_bar",
+      "layer": 0,
+      "depends_on": [],
+      "class": "engineering_convention",
+      "source_lessons": [],
+      "rule": "A canonical, complete, adjusted five-minute OHLCV bar with a unique symbol, trade_date, and bar_time key.",
+      "confirmation": "bar close",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "inclusion_normalized_bar",
+      "layer": 1,
+      "depends_on": ["raw_5m_bar"],
+      "class": "strict_definition",
+      "source_lessons": [62, 65],
+      "rule": "Process containment sequentially. In an up context keep the larger high and larger low; in a down context keep the smaller high and smaller low.",
+      "confirmation": "locked when the first raw bar of the next non-inclusive normalized bar arrives",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "fractal",
+      "layer": 2,
+      "depends_on": ["inclusion_normalized_bar"],
+      "class": "strict_definition",
+      "source_lessons": [62, 65],
+      "rule": "A top has a middle normalized bar with both high and low above both neighbors; a bottom has both below.",
+      "confirmation": "when the right normalized neighbor is locked",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "stroke",
+      "layer": 3,
+      "depends_on": ["fractal"],
+      "class": "ambiguity_variant",
+      "source_lessons": [62, 65, 91, 101],
+      "rule": "Connect alternating top and bottom fractals under the selected separation and price-overlap rule; retain the more extreme same-kind endpoint while the stroke is provisional.",
+      "confirmation": "accepted at the endpoint fractal confirmation; locked for segment use by the next accepted stroke",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "feature_sequence",
+      "layer": 4,
+      "depends_on": ["stroke"],
+      "class": "strict_definition",
+      "source_lessons": [67, 71],
+      "rule": "For an up-starting segment use its down strokes as feature elements; for a down-starting segment use its up strokes.",
+      "confirmation": "each element uses only a locked stroke",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "standard_feature_sequence",
+      "layer": 5,
+      "depends_on": ["feature_sequence"],
+      "class": "strict_definition",
+      "source_lessons": [67, 71],
+      "rule": "Apply ordered inclusion processing only among elements belonging to the same feature sequence.",
+      "confirmation": "a standardized element is locked by the next non-inclusive feature element",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "feature_fractal",
+      "layer": 6,
+      "depends_on": ["standard_feature_sequence"],
+      "class": "strict_definition",
+      "source_lessons": [67],
+      "rule": "Inspect only top feature fractals for up segments and bottom feature fractals for down segments.",
+      "confirmation": "when the right standardized feature element is locked",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "segment_break_case_1",
+      "layer": 7,
+      "depends_on": ["feature_fractal"],
+      "class": "strict_definition",
+      "source_lessons": [67],
+      "rule": "If the first and second feature-fractal elements have no gap, the segment ends at the feature-fractal extreme.",
+      "confirmation": "feature-fractal confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "segment_break_case_2",
+      "layer": 7,
+      "depends_on": ["feature_fractal"],
+      "class": "strict_definition",
+      "source_lessons": [67, 71],
+      "rule": "If the first and second feature-fractal elements have a gap, require a fractal in the opposite segment's feature sequence before confirming the earlier endpoint.",
+      "confirmation": "opposite feature-fractal confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "pending_middle_state",
+      "layer": 7,
+      "depends_on": ["segment_break_case_2"],
+      "class": "engineering_convention",
+      "source_lessons": [71],
+      "rule": "Expose the first breaking stroke as unresolved until case 2 confirms or a new original-direction extreme invalidates it; do not assign it retrospectively to a completed segment.",
+      "confirmation": "explicit pending, confirmed, or invalidated event",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "segment",
+      "layer": 8,
+      "depends_on": ["segment_break_case_1", "segment_break_case_2", "pending_middle_state"],
+      "class": "strict_definition",
+      "source_lessons": [65, 67, 71],
+      "rule": "At least three overlapping strokes, terminated by one of the two feature-sequence cases.",
+      "confirmation": "the selected break-case confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "lowest_center",
+      "layer": 9,
+      "depends_on": ["segment"],
+      "class": "ambiguity_variant",
+      "source_lessons": [18, 83, 101],
+      "rule": "The non-empty intersection of three consecutive selected lowest-level components; segments are primary and strokes are a diagnostic alternative.",
+      "confirmation": "third component confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "center_extension",
+      "layer": 10,
+      "depends_on": ["lowest_center"],
+      "class": "strict_definition",
+      "source_lessons": [20, 35],
+      "rule": "A later same-level component that continues to intersect the locked center core extends the center.",
+      "confirmation": "component confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "center_new_birth",
+      "layer": 10,
+      "depends_on": ["lowest_center"],
+      "class": "strict_definition",
+      "source_lessons": [20, 35],
+      "rule": "A later same-level center whose selected comparison interval is wholly above or below the prior center is a new birth.",
+      "confirmation": "later center confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "center_expansion",
+      "layer": 10,
+      "depends_on": ["lowest_center"],
+      "class": "ambiguity_variant",
+      "source_lessons": [20, 35],
+      "rule": "Two successive same-level centers overlap under the selected core-interval or fluctuation-interval relation and are promoted as a higher-level overlap candidate.",
+      "confirmation": "later center confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "same_level_movement",
+      "layer": 11,
+      "depends_on": ["center_extension", "center_new_birth", "center_expansion"],
+      "class": "ambiguity_variant",
+      "source_lessons": [17, 38, 81, 101],
+      "rule": "Decompose between consecutive confirmed same-level centers and retain the selected decomposition mode in every object.",
+      "confirmation": "the next same-level center confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "recursive_center",
+      "layer": 12,
+      "depends_on": ["same_level_movement"],
+      "class": "strict_definition",
+      "source_lessons": [17, 18, 83],
+      "rule": "Apply the three-component overlap construction recursively to completed lower-level movements.",
+      "confirmation": "third lower-level movement confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "consolidation_type",
+      "layer": 13,
+      "depends_on": ["recursive_center"],
+      "class": "strict_definition",
+      "source_lessons": [17, 18, 27],
+      "rule": "A completed movement snapshot with one same-level center and no confirmed monotone center sequence.",
+      "confirmation": "movement snapshot confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "trend_type",
+      "layer": 13,
+      "depends_on": ["recursive_center"],
+      "class": "strict_definition",
+      "source_lessons": [17, 18, 27],
+      "rule": "At least two same-level centers born monotonically in the same direction.",
+      "confirmation": "second qualifying center confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "divergence_candidate",
+      "layer": 14,
+      "depends_on": ["trend_type"],
+      "class": "quantitative_coordinate",
+      "source_lessons": [24, 27, 29],
+      "rule": "Compare consecutive same-direction trend legs using every frozen metric separately; never collapse them into one asserted true strength measure.",
+      "confirmation": "current leg confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "first_point_candidate",
+      "layer": 15,
+      "depends_on": ["divergence_candidate"],
+      "class": "ambiguity_variant",
+      "source_lessons": [21, 24, 27],
+      "rule": "A trend-end buy or sell candidate attached to a named divergence metric and causal trend snapshot.",
+      "confirmation": "divergence confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "second_point_candidate",
+      "layer": 15,
+      "depends_on": ["first_point_candidate", "segment"],
+      "class": "strict_definition",
+      "source_lessons": [21, 29],
+      "rule": "The first same-direction retest after a first point that does not exceed the first-point extreme.",
+      "confirmation": "retest segment confirmation",
+      "implemented_in_parser_v1": true
+    },
+    {
+      "id": "third_point_candidate",
+      "layer": 15,
+      "depends_on": ["lowest_center", "segment"],
+      "class": "strict_definition",
+      "source_lessons": [20, 21],
+      "rule": "After leaving a center, the first opposite segment whose endpoint remains outside the center core.",
+      "confirmation": "return segment confirmation",
+      "implemented_in_parser_v1": true
+    }
+  ],
+  "empirical_hypotheses": [
+    {
+      "id": "structure_adds_incremental_future_path_information",
+      "class": "empirical_hypothesis",
+      "parser_truth": false
+    },
+    {
+      "id": "three_point_candidates_are_profitable_after_confirmation_delay_and_costs",
+      "class": "empirical_hypothesis",
+      "parser_truth": false
+    },
+    {
+      "id": "recursive_self_similarity_is_stable_in_observed_markets",
+      "class": "empirical_hypothesis",
+      "parser_truth": false
+    }
+  ],
+  "validation": {
+    "require_dependency_dag": true,
+    "require_prefix_invariance": true,
+    "require_exact_discrete_event_match": true,
+    "compare_variants_before_returns": true,
+    "report_coverage_confirmation_lag_and_disagreement": true
+  },
+  "boundaries": {
+    "replaces_weak_grammar": false,
+    "profit_claim_allowed": false,
+    "account_replay_allowed": false,
+    "model_training_allowed": false
+  }
+}
