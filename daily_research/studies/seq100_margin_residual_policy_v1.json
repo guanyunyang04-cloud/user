@@ -1,0 +1,105 @@
+{
+  "study_id": "seq100_margin_residual_policy_v1",
+  "status": "frozen_expanded_development_contract",
+  "purpose": "Test whether the supported D20 stock-residual forecast becomes a cost-robust long-only policy when restricted to causally observed margin-detail names and diversified across PIT industries.",
+  "epistemic_contract": {
+    "candidate_was_frozen_after_2017_2022_exploration": true,
+    "new_2014_2016_predictions_are_untouched_before_freeze": true,
+    "existing_2017_2022_predictions_are_reused_without_refit": true,
+    "retrospective_2023_2025_is_consumed_only_after_expanded_development_passes": true,
+    "margin_balance_growth_is_not_assumed_bullish": true,
+    "cash_is_used_for_unfilled_or_unselected_slots": true,
+    "account_replay_requires_development_and_confirmation_gates": true,
+    "forbidden_2026_data_remain_untouched": true
+  },
+  "source": {
+    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "training_ready_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+    "training_ready_manifest_sha256": "46f6e2ab8d1276758cce205660f45b454e10823d8533f64794327a55cbfa535e",
+    "frozen_2017_2022_summary": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
+    "frozen_2017_2022_summary_sha256": "61d0d4f3025b9a884e9620e2e7d10ebb7c522f1bc38f9d6f115f24e7ecd82468",
+    "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "expected_label_fingerprint": "c93cf15be7f58642b34e086c0c25e00b56a4f46de514d01a35b3132f2e0bc65d",
+    "expected_row_count": 4191476,
+    "formal_start_year": 2012,
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "target": {
+    "horizon": 20,
+    "gross": "executable_log_return_20",
+    "residual": "residual_log_return_20",
+    "entry": "next legal open after the signal close",
+    "exit": "planned D20 close with bounded legal-sale retry",
+    "cost_proxy": 0.006
+  },
+  "stock_models": {
+    "feature_block": "core_minute",
+    "residual_objective": "regression_l2",
+    "bad_tail_objective": "binary executable_log_return_20 <= 0",
+    "runtime_version": "4.6.0",
+    "num_boost_round": 128,
+    "learning_rate": 0.05,
+    "num_leaves": 15,
+    "max_depth": 4,
+    "min_data_in_leaf": 512,
+    "lambda_l2": 1.0,
+    "max_bin": 127,
+    "feature_fraction": 1.0,
+    "bagging_fraction": 1.0,
+    "num_threads": 8,
+    "seed": 20260806
+  },
+  "policy": {
+    "primary": "margin_observed_residual_veto10_industry_cap4_top48",
+    "candidate_universe": "quality_liquidity_pit full signal-date universe",
+    "margin_gate": "margin_detail_coverage_state == observed at the signal close",
+    "margin_gate_interpretation": "observable financing-detail and margin-eligible coverage constraint, not a positive-balance-growth signal",
+    "bad_tail_veto_fraction": 0.1,
+    "bad_tail_veto_scope": "full signal-date quality pool before the margin gate",
+    "ranking": "descending frozen residual mean with ascending candidate_id tie break",
+    "maximum_names_per_pit_industry": 4,
+    "top_k": 48,
+    "future_entry_outcome_or_sell_state_used_for_selection": false
+  },
+  "evaluation": {
+    "expanded_development_years": [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022],
+    "new_untouched_development_years": [2014, 2015, 2016],
+    "reused_development_years": [2017, 2018, 2019, 2020, 2021, 2022],
+    "retrospective_confirmation_years": [2023, 2024, 2025],
+    "training_window": "expanding",
+    "purge_days": 40,
+    "maximum_train_rows_per_date": 64,
+    "calendar_censoring_policy": "exclude only signal dates whose D20 plus retry outcome lies beyond the fixed 2025-12-31 cutoff; never filter names by realized execution state",
+    "inference": {
+      "hac_lag": 20,
+      "moving_block_length": 20,
+      "bootstrap_repetitions": 5000,
+      "seed": 20260808
+    },
+    "development_gate": {
+      "stress_net_hac_lower_bound_strictly_positive": true,
+      "stress_net_block_lower_bound_strictly_positive": true,
+      "minimum_positive_years": 6,
+      "minimum_mean_selected_count": 40,
+      "minimum_observed_outcome_fraction": 0.98,
+      "selected_excess_hac_lower_bound_strictly_positive": true
+    },
+    "confirmation_gate": {
+      "stress_net_hac_lower_bound_strictly_positive": true,
+      "stress_net_block_lower_bound_strictly_positive": true,
+      "minimum_positive_years": 2,
+      "minimum_observed_outcome_fraction": 0.98,
+      "no_policy_change": true
+    }
+  },
+  "decision_boundary": {
+    "development_may_authorize_confirmation_only": true,
+    "confirmation_may_authorize_exact_account_replay_only": true,
+    "account_replay_performed": false,
+    "portfolio_optimization_performed": false,
+    "profit_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1"
+  }
+}

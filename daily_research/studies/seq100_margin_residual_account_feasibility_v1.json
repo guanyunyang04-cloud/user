@@ -1,0 +1,84 @@
+{
+  "study_id": "seq100_margin_residual_account_feasibility_v1",
+  "status": "frozen_nonpromotional_mechanical_falsification",
+  "purpose": "Determine whether the near-confirmed margin-observed residual Top48 cohort survives finite cash, lots, minimum commissions, T+1, blocked exits, duplicate holdings, and continuous slot reuse without tuning the policy.",
+  "interpretation": {
+    "source_confirmation_gate_passed": false,
+    "source_confirmation_failure": "absolute stress-net HAC and moving-block 95% lower bounds were slightly below zero despite all three annual point estimates being positive",
+    "account_success_cannot_override_confirmation_failure": true,
+    "account_failure_falsifies_mechanical_feasibility": true,
+    "parameter_search_performed": false,
+    "profit_claim_allowed": false
+  },
+  "source": {
+    "margin_policy_study": "daily_research/studies/seq100_margin_residual_policy_v1.json",
+    "development_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+    "development_summary_sha256": "e91bb273686ef0cc17f94d020914ac2f2a03a45f0d176ae525a52d52ab647ff3",
+    "confirmation_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+    "confirmation_summary_sha256": "26242ecb01c89789b8af9b4fd15cdd3f6c955577ea74110b05506e3842897c0a",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
+    "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
+    "maximum_signal_date": "2025-09-02",
+    "maximum_account_mark_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "daily_ranked_candidate_count": 48,
+    "position_slots": 48,
+    "entry": "next open using authoritative entry_filled",
+    "exit": "fixed D20 close request with authoritative sellability deferral through D80",
+    "cost_scenario": "double_slippage",
+    "pyramiding": false,
+    "replace_duplicate_or_unavailable_ranked_names": true,
+    "lot_size": 100,
+    "capacity_constraint": "each order is capped at 0.5% of causal signal-day amount and the filled ledger is audited against the same limit",
+    "maximum_signal_day_amount_fraction": 0.005,
+    "confirmation_account_restart": "repeat the identical account from fresh 1000000 CNY at the first 2023 signal",
+    "corporate_action_accounting": "primary account uses raw execution prices and costs, but multiplies holding value and sale proceeds by the pack-pinned back-adjust-factor ratio as a total-return equivalent; raw-price-only replay is retained as a sensitivity control",
+    "corporate_action_limitation": "the factor method is a total-return equivalent, not an exact cash-dividend payment-date and odd-lot share ledger"
+  },
+  "evaluation": {
+    "years": [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "no_alternative_slot_count_top_k_exit_or_cost_grid": true,
+    "report": [
+      "liquidated_total_return",
+      "annual_net_return",
+      "maximum_drawdown",
+      "minimum_equity",
+      "trade_count",
+      "win_rate",
+      "capital_utilization",
+      "blocked_and_failed_execution_counts"
+    ]
+  },
+  "risk_budget_diagnostic": {
+    "status": "frozen_before_execution",
+    "derivation_end_date": "2022-12-31",
+    "target_annualized_volatility": 0.15,
+    "minimum_gross_fraction": 0.25,
+    "maximum_gross_fraction": 1.0,
+    "derivation": "target volatility divided by realized daily account volatility through 2022, clipped once to the declared interval",
+    "parameter_grid_performed": false,
+    "confirmation_years": [2023, 2024, 2025],
+    "development_gate": {
+      "maximum_drawdown": 0.35,
+      "maximum_annualized_volatility": 0.18,
+      "minimum_positive_years": 5
+    },
+    "confirmation_gate": {
+      "maximum_drawdown": 0.25,
+      "maximum_annualized_volatility": 0.18,
+      "minimum_positive_years": 3
+    },
+    "interpretation": "mechanical risk scaling can improve usability but cannot repair or override the failed absolute alpha confirmation gate"
+  },
+  "decision_boundary": {
+    "production_policy_selected": false,
+    "account_optimization_performed": false,
+    "profit_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_margin_residual_account_feasibility_v1"
+  }
+}

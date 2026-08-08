@@ -21,7 +21,6 @@ from daily_research.path_policy.seq100_exit_policy_audit import (
     _sell_order,
 )
 
-
 WORKSPACE = Path(r"H:\quant_project")
 DEFAULT_STUDY_ROOT = WORKSPACE / (
     "daily_research/output/path_policy/studies/"
@@ -132,7 +131,9 @@ class ForecastBook:
         ):
             raise ValueError("forecast day arrays have different lengths")
         if int(date_idx) in self.days:
-            raise ValueError(f"duplicate forecast date_idx={date_idx} for {self.profile}")
+            raise ValueError(
+                f"duplicate forecast date_idx={date_idx} for {self.profile}"
+            )
         order = np.argsort(symbols, kind="mergesort")
         symbols = symbols[order]
         scores = scores[order]
@@ -167,7 +168,9 @@ class ForecastBook:
         if day is None:
             return None
         position = int(np.searchsorted(day.symbol_idx, int(symbol_idx)))
-        if position >= len(day.symbol_idx) or int(day.symbol_idx[position]) != int(symbol_idx):
+        if position >= len(day.symbol_idx) or int(day.symbol_idx[position]) != int(
+            symbol_idx
+        ):
             return None
         return float(day.score[position]), int(day.planned_day[position])
 
@@ -223,7 +226,9 @@ class StudyEvaluationSpec:
 
     def validate(self) -> None:
         if not self.study_id or not self.profiles or not self.years:
-            raise ValueError("study evaluation spec requires an id, profiles, and years")
+            raise ValueError(
+                "study evaluation spec requires an id, profiles, and years"
+            )
         if len(set(self.profiles)) != len(self.profiles):
             raise ValueError("study evaluation profiles must be unique")
         if len(set(self.years)) != len(self.years):
@@ -242,9 +247,14 @@ class StudyEvaluationSpec:
                 raise ValueError("Top-K and slot grids must be positive and non-empty")
             if any(int(value) < int(top_k) for value in slots):
                 raise ValueError("slot counts must be at least their Top-K")
-        if int(self.candidate_scan_k) < max(int(value) for value in self.top_k_slot_grid):
+        if int(self.candidate_scan_k) < max(
+            int(value) for value in self.top_k_slot_grid
+        ):
             raise ValueError("candidate_scan_k must cover every configured Top-K")
-        if not math.isfinite(float(self.starting_cash_cny)) or float(self.starting_cash_cny) <= 0.0:
+        if (
+            not math.isfinite(float(self.starting_cash_cny))
+            or float(self.starting_cash_cny) <= 0.0
+        ):
             raise ValueError("starting_cash_cny must be finite and positive")
         if not self.policies:
             raise ValueError("study evaluation requires at least one policy")
@@ -257,7 +267,9 @@ class StudyEvaluationSpec:
         if int(self.expected_job_count) > 0 and len(_study_jobs(self)) != int(
             self.expected_job_count
         ):
-            raise ValueError("resolved study job count does not match expected_job_count")
+            raise ValueError(
+                "resolved study job count does not match expected_job_count"
+            )
 
 
 @dataclass(frozen=True)
@@ -407,6 +419,8 @@ class _Position:
     hard_cap_date_idx: int
     terminal_date_idx: int
     last_mark_price: float
+    entry_adjust_factor: float
+    last_adjust_factor: float
     stop_plan: StopPlan | None = None
 
 
@@ -422,6 +436,38 @@ class BacktestMarket:
     terminal_recovery_fraction: float
     forward_days: int = 60
     execution_days: int = 80
+    adjust_factor: np.ndarray | None = None
+
+
+def _portfolio_equity_with_adjustment(
+    *,
+    cash: float,
+    positions: Mapping[int, _Position],
+    mark_panel: np.ndarray,
+    date_idx: int,
+    adjust_factor: np.ndarray | None,
+) -> float:
+    """Mark positions with raw prices and optional total-return factor ratios."""
+
+    if adjust_factor is None:
+        return _portfolio_equity(
+            cash=cash,
+            positions=positions,
+            mark_panel=mark_panel,
+            date_idx=date_idx,
+        )
+    value = float(cash)
+    for position in positions.values():
+        symbol_idx = int(position.symbol_idx)
+        mark = float(mark_panel[int(date_idx), symbol_idx])
+        if math.isfinite(mark) and mark >= 0.0:
+            position.last_mark_price = mark
+        factor = float(adjust_factor[int(date_idx), symbol_idx])
+        if math.isfinite(factor) and factor > 0.0:
+            position.last_adjust_factor = factor
+        ratio = float(position.last_adjust_factor / position.entry_adjust_factor)
+        value += int(position.shares) * float(position.last_mark_price) * ratio
+    return float(value)
 
 
 def _stop_policy_name(mode: str, take_profit: float, stop_loss: float) -> str:
@@ -490,7 +536,11 @@ def _take_price_path(
     date_indices: np.ndarray,
     symbol_indices: np.ndarray,
 ) -> np.ndarray:
-    source = dataset.future_path if dataset.future_path is not None else dataset.future_ohlcva_path
+    source = (
+        dataset.future_path
+        if dataset.future_path is not None
+        else dataset.future_ohlcva_path
+    )
     if source is None:
         raise RuntimeError("future OHLC path is unavailable")
     dates = np.asarray(date_indices, dtype=np.int64)
@@ -498,10 +548,14 @@ def _take_price_path(
     if hasattr(source, "take"):
         values = source.take(dates, symbols, field_slice=slice(0, 4))
         return np.asarray(values[:, : dataset.forward_days, :4], dtype=np.float64)
-    return np.asarray(source[dates, symbols, : dataset.forward_days, :4], dtype=np.float64)
+    return np.asarray(
+        source[dates, symbols, : dataset.forward_days, :4], dtype=np.float64
+    )
 
 
-def _reconstruct_raw_ohlc(adjusted_returns: np.ndarray, raw_close: np.ndarray) -> np.ndarray:
+def _reconstruct_raw_ohlc(
+    adjusted_returns: np.ndarray, raw_close: np.ndarray
+) -> np.ndarray:
     adjusted = np.asarray(adjusted_returns, dtype=np.float64)
     close = np.asarray(raw_close[:, : adjusted.shape[1]], dtype=np.float64)
     denominator = 1.0 + adjusted[:, :, 3]
@@ -585,14 +639,20 @@ def _load_material(
                 },
             )
             if len(frame) != len(candidates):
-                raise RuntimeError(f"prediction/sample count mismatch: {profile}:{year}")
+                raise RuntimeError(
+                    f"prediction/sample count mismatch: {profile}:{year}"
+                )
             if not np.array_equal(frame["trade_date"].to_numpy(), expected_dates):
                 raise RuntimeError(f"prediction date order mismatch: {profile}:{year}")
             if not np.array_equal(frame["symbol"].to_numpy(), expected_symbols):
-                raise RuntimeError(f"prediction symbol order mismatch: {profile}:{year}")
+                raise RuntimeError(
+                    f"prediction symbol order mismatch: {profile}:{year}"
+                )
             scores = frame["score"].to_numpy(dtype=np.float64, copy=True)
             planned = np.clip(
-                np.rint(frame["predicted_exit_day"].to_numpy(dtype=np.float64, copy=True)),
+                np.rint(
+                    frame["predicted_exit_day"].to_numpy(dtype=np.float64, copy=True)
+                ),
                 2,
                 60,
             ).astype(np.int16)
@@ -625,7 +685,9 @@ def _load_material(
             )
             if raw_close is None:
                 raise RuntimeError("raw close execution panel is unavailable")
-            raw_ohlc = _reconstruct_raw_ohlc(adjusted, np.asarray(raw_close, dtype=np.float64))
+            raw_ohlc = _reconstruct_raw_ohlc(
+                adjusted, np.asarray(raw_close, dtype=np.float64)
+            )
             for date_idx, symbol_idx, path in zip(
                 selected_dates,
                 selected_symbols,
@@ -635,7 +697,11 @@ def _load_material(
                 key = (int(date_idx), int(symbol_idx))
                 if key in raw_paths:
                     previous = raw_paths[key]
-                    if not bool(np.allclose(previous, path, equal_nan=True, atol=1.0e-7, rtol=1.0e-7)):
+                    if not bool(
+                        np.allclose(
+                            previous, path, equal_nan=True, atol=1.0e-7, rtol=1.0e-7
+                        )
+                    ):
                         raise RuntimeError(f"raw Top3 path drift for key={key}")
                 else:
                     raw_paths[key] = np.asarray(path, dtype=np.float32).copy()
@@ -734,11 +800,19 @@ def load_study_evaluation_material(
                 raise FileNotFoundError(prediction_path)
             frame = _read_compact_prediction_frame(prediction_path)
             if len(frame) != len(candidates):
-                raise RuntimeError(f"prediction/sample count mismatch: {profile}:{year}")
-            if not np.array_equal(frame["trade_date"].astype(str).to_numpy(), expected_dates):
+                raise RuntimeError(
+                    f"prediction/sample count mismatch: {profile}:{year}"
+                )
+            if not np.array_equal(
+                frame["trade_date"].astype(str).to_numpy(), expected_dates
+            ):
                 raise RuntimeError(f"prediction date order mismatch: {profile}:{year}")
-            if not np.array_equal(frame["symbol"].astype(str).to_numpy(), expected_symbols):
-                raise RuntimeError(f"prediction symbol order mismatch: {profile}:{year}")
+            if not np.array_equal(
+                frame["symbol"].astype(str).to_numpy(), expected_symbols
+            ):
+                raise RuntimeError(
+                    f"prediction symbol order mismatch: {profile}:{year}"
+                )
             scores = frame["score"].to_numpy(dtype=np.float64, copy=True)
             planned_values = frame["predicted_exit_day"].to_numpy(
                 dtype=np.float64, copy=True
@@ -795,7 +869,9 @@ def load_study_evaluation_material(
             )
             if raw_close is None:
                 raise RuntimeError("raw close execution panel is unavailable")
-            raw_ohlc = _reconstruct_raw_ohlc(adjusted, np.asarray(raw_close, dtype=np.float64))
+            raw_ohlc = _reconstruct_raw_ohlc(
+                adjusted, np.asarray(raw_close, dtype=np.float64)
+            )
             for date_idx, symbol_idx, path in zip(
                 selected_dates, selected_symbols, raw_ohlc, strict=True
             ):
@@ -883,7 +959,11 @@ def _calendar_year_metrics(
         path = np.r_[previous_equity, year_equity]
         drawdown = path / np.maximum.accumulate(path) - 1.0
         daily_return = path[1:] / path[:-1] - 1.0
-        volatility = float(np.std(daily_return, ddof=1) * math.sqrt(252.0)) if len(daily_return) > 1 else 0.0
+        volatility = (
+            float(np.std(daily_return, ddof=1) * math.sqrt(252.0))
+            if len(daily_return) > 1
+            else 0.0
+        )
         mean_return = float(np.mean(daily_return)) if len(daily_return) else 0.0
         sharpe = (
             float(mean_return / np.std(daily_return, ddof=1) * math.sqrt(252.0))
@@ -906,7 +986,9 @@ def _calendar_year_metrics(
                 "annualized_volatility": volatility,
                 "sharpe_zero_rate": sharpe,
                 "mean_position_count": float(year_frame["position_count"].mean()),
-                "mean_capital_utilization": float(year_frame["capital_utilization"].mean()),
+                "mean_capital_utilization": float(
+                    year_frame["capital_utilization"].mean()
+                ),
                 "trading_session_count": int(len(year_frame)),
             }
         )
@@ -933,7 +1015,9 @@ def _simulation_metric(
     calendar_years: Sequence[int] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     signal_frame = equity_frame[
-        equity_frame["date_idx"].astype(int).between(
+        equity_frame["date_idx"]
+        .astype(int)
+        .between(
             int(first_signal_date_idx), int(last_signal_date_idx), inclusive="both"
         )
     ]
@@ -966,7 +1050,9 @@ def _simulation_metric(
     annual = _calendar_year_metrics(
         equity_frame,
         starting_cash=float(starting_cash),
-        years=YEARS if calendar_years is None else tuple(int(value) for value in calendar_years),
+        years=YEARS
+        if calendar_years is None
+        else tuple(int(value) for value in calendar_years),
     )
     win_rate = 0.0
     mean_occupied = 0.0
@@ -1003,7 +1089,9 @@ def _simulation_metric(
             else 0.0
         ),
         "liquidated_ending_equity_cny": liquidated_equity,
-        "liquidated_total_return": float(liquidated_equity / float(starting_cash) - 1.0),
+        "liquidated_total_return": float(
+            liquidated_equity / float(starting_cash) - 1.0
+        ),
         "liquidation_tail_return_effect": (
             float(liquidated_equity / float(signal_equity[-1]) - 1.0)
             if float(signal_equity[-1]) > 0.0
@@ -1014,8 +1102,12 @@ def _simulation_metric(
         "minimum_equity_cny": float(equity_frame["equity"].min()),
         "mean_signal_position_count": float(signal_frame["position_count"].mean()),
         "maximum_position_count": int(equity_frame["position_count"].max()),
-        "mean_signal_capital_utilization": float(signal_frame["capital_utilization"].mean()),
-        "mean_slot_fill_ratio": float(signal_frame["position_count"].mean() / int(slots)),
+        "mean_signal_capital_utilization": float(
+            signal_frame["capital_utilization"].mean()
+        ),
+        "mean_slot_fill_ratio": float(
+            signal_frame["position_count"].mean() / int(slots)
+        ),
         "closed_trade_count": int(len(trade_frame)),
         "winning_trade_rate": win_rate,
         "mean_occupied_sessions": mean_occupied,
@@ -1063,14 +1155,26 @@ def simulate_portfolio(
     signal_amount_panel: np.ndarray | None = None,
     maximum_signal_amount_fraction: float | None = None,
     exit_on_missing_forecast: bool = False,
+    target_gross_fraction: float = 1.0,
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
     policy.validate()
     if int(slots) <= 0:
         raise ValueError("slots must be positive")
     if cost_scenario not in {"base", "double_slippage"}:
         raise ValueError(f"unknown cost scenario: {cost_scenario}")
+    gross_fraction = float(target_gross_fraction)
+    if not math.isfinite(gross_fraction) or not 0.0 < gross_fraction <= 1.0:
+        raise ValueError("target_gross_fraction must be in (0, 1]")
     if not book.days:
         raise ValueError("forecast book must contain at least one signal date")
+    factor_panel = None
+    if market.adjust_factor is not None:
+        factor_panel = np.asarray(market.adjust_factor)
+        expected_shape = (len(market.date_values), len(market.symbol_values))
+        if factor_panel.shape != expected_shape:
+            raise ValueError(
+                f"adjust_factor must have shape {expected_shape}, got {factor_panel.shape}"
+            )
     configured_top_k = int(book.top_k if top_k is None else top_k)
     if configured_top_k <= 0 or configured_top_k > int(book.candidate_scan_k):
         raise ValueError("top_k must be positive and no larger than candidate_scan_k")
@@ -1089,7 +1193,9 @@ def simulate_portfolio(
             )
         capacity_fraction = float(maximum_signal_amount_fraction)
         if not math.isfinite(capacity_fraction) or capacity_fraction <= 0.0:
-            raise ValueError("maximum_signal_amount_fraction must be finite and positive")
+            raise ValueError(
+                "maximum_signal_amount_fraction must be finite and positive"
+            )
 
     def selected_symbols(day: ForecastDay) -> tuple[int, ...]:
         ranked = day.ranked_symbol_idx or day.top3_symbol_idx
@@ -1098,12 +1204,18 @@ def simulate_portfolio(
     selection_sizes = [len(selected_symbols(day)) for day in book.days.values()]
     selection_counts = set(selection_sizes)
     if any(count < 0 or count > configured_top_k for count in selection_counts):
-        raise ValueError(f"forecast book contains an invalid daily selection count: {selection_counts}")
+        raise ValueError(
+            f"forecast book contains an invalid daily selection count: {selection_counts}"
+        )
     # Preserve the established explicitly-truncated Top-K contract when every
     # day has the same positive width.  V4 cash filtering may vary by day (and
     # may select nobody), in which case book.top_k remains the configured cap.
     daily_selection_count = configured_top_k
-    if top_k is None and len(selection_counts) == 1 and int(next(iter(selection_counts))) > 0:
+    if (
+        top_k is None
+        and len(selection_counts) == 1
+        and int(next(iter(selection_counts))) > 0
+    ):
         daily_selection_count = int(next(iter(selection_counts)))
     entry_signal_dates = (
         None
@@ -1148,6 +1260,8 @@ def simulate_portfolio(
         "replacement_exhausted_signal_count": 0,
         "capacity_capped_order_count": 0,
         "capacity_missing_order_count": 0,
+        "adjust_factor_missing_entry_count": 0,
+        "adjust_factor_exit_fallback_count": 0,
         "rolling_missing_exit_request_count": 0,
         "fees_and_slippage_cny": 0.0,
         "turnover_notional_cny": 0.0,
@@ -1159,15 +1273,17 @@ def simulate_portfolio(
 
         # Open: execute only the orders generated after the previous close.
         if pending:
-            equity_open = _portfolio_equity(
+            equity_open = _portfolio_equity_with_adjustment(
                 cash=cash,
                 positions=positions,
                 mark_panel=market.entry_open_raw,
                 date_idx=date_idx,
+                adjust_factor=factor_panel,
             )
             for order in pending:
                 duplicate_active = any(
-                    position.symbol_idx == order.symbol_idx for position in positions.values()
+                    position.symbol_idx == order.symbol_idx
+                    for position in positions.values()
                 )
                 if duplicate_active and not allow_pyramiding:
                     counters["skipped_duplicate_pending_count"] += 1
@@ -1183,7 +1299,21 @@ def simulate_portfolio(
                 ):
                     counters["failed_entry_count"] += 1
                     continue
-                allocation = min(cash, max(float(equity_open), 0.0) / float(slots))
+                entry_adjust_factor = 1.0
+                if factor_panel is not None:
+                    entry_adjust_factor = float(
+                        factor_panel[date_idx, order.symbol_idx]
+                    )
+                    if (
+                        not math.isfinite(entry_adjust_factor)
+                        or entry_adjust_factor <= 0.0
+                    ):
+                        counters["adjust_factor_missing_entry_count"] += 1
+                        continue
+                allocation = min(
+                    cash,
+                    max(float(equity_open), 0.0) * gross_fraction / float(slots),
+                )
                 signal_amount = math.nan
                 capacity_limit = math.inf
                 if amount_panel is not None and capacity_fraction is not None:
@@ -1241,9 +1371,13 @@ def simulate_portfolio(
                     initial_score=float(order.initial_score),
                     entry_date_idx=int(date_idx),
                     requested_exit_date_idx=int(requested),
-                    hard_cap_date_idx=int(order.signal_date_idx) + int(market.forward_days),
-                    terminal_date_idx=int(order.signal_date_idx) + int(market.execution_days),
+                    hard_cap_date_idx=int(order.signal_date_idx)
+                    + int(market.forward_days),
+                    terminal_date_idx=int(order.signal_date_idx)
+                    + int(market.execution_days),
                     last_mark_price=float(entry_price),
+                    entry_adjust_factor=float(entry_adjust_factor),
+                    last_adjust_factor=float(entry_adjust_factor),
                     stop_plan=stop_plan,
                 )
                 next_position_id += 1
@@ -1254,15 +1388,21 @@ def simulate_portfolio(
             mark = float(market.exit_close_raw[date_idx, position.symbol_idx])
             if math.isfinite(mark) and mark >= 0.0:
                 position.last_mark_price = mark
+            if factor_panel is not None:
+                factor = float(factor_panel[date_idx, position.symbol_idx])
+                if math.isfinite(factor) and factor > 0.0:
+                    position.last_adjust_factor = factor
 
         for position_id, position in list(positions.items()):
             symbol_idx = int(position.symbol_idx)
             if date_idx < int(position.requested_exit_date_idx):
                 continue
             close_price = float(market.exit_close_raw[date_idx, symbol_idx])
-            sellable = bool(market.exit_sellable[date_idx, symbol_idx]) and math.isfinite(
-                close_price
-            ) and close_price >= 0.0
+            sellable = (
+                bool(market.exit_sellable[date_idx, symbol_idx])
+                and math.isfinite(close_price)
+                and close_price >= 0.0
+            )
             terminal = date_idx >= int(position.terminal_date_idx) and not sellable
             if not sellable and not terminal:
                 continue
@@ -1290,9 +1430,20 @@ def simulate_portfolio(
                     and math.isfinite(float(stop_plan.trigger_price))
                 ):
                     exit_price = float(stop_plan.trigger_price)
+            exit_adjust_factor = float(position.last_adjust_factor)
+            economic_exit_price = float(exit_price)
+            if factor_panel is not None and not terminal:
+                current_factor = float(factor_panel[date_idx, symbol_idx])
+                if math.isfinite(current_factor) and current_factor > 0.0:
+                    exit_adjust_factor = current_factor
+                else:
+                    counters["adjust_factor_exit_fallback_count"] += 1
+                economic_exit_price *= float(
+                    exit_adjust_factor / position.entry_adjust_factor
+                )
             proceeds, sell_cost, sell_notional = _sell_order(
                 shares=position.shares,
-                exit_price=float(exit_price),
+                exit_price=float(economic_exit_price),
                 exit_date_idx=date_idx,
                 date_values=market.date_values,
                 contract=market.costs,
@@ -1319,6 +1470,12 @@ def simulate_portfolio(
                     "exit_date_idx": int(date_idx),
                     "entry_price_raw": float(position.entry_price_raw),
                     "exit_price_raw": float(exit_price),
+                    "entry_adjust_factor": float(position.entry_adjust_factor),
+                    "exit_adjust_factor": float(exit_adjust_factor),
+                    "corporate_action_value_multiplier": float(
+                        exit_adjust_factor / position.entry_adjust_factor
+                    ),
+                    "exit_price_economic_equivalent": float(economic_exit_price),
                     "shares": int(position.shares),
                     "buy_cash_cny": float(position.buy_cash),
                     "buy_notional_cny": float(position.buy_notional),
@@ -1341,7 +1498,10 @@ def simulate_portfolio(
                     "occupied_sessions": int(date_idx - position.entry_date_idx + 1),
                     "requested_exit_date": str(
                         market.date_values[
-                            min(position.requested_exit_date_idx, len(market.date_values) - 1)
+                            min(
+                                position.requested_exit_date_idx,
+                                len(market.date_values) - 1,
+                            )
                         ]
                     ),
                     "exit_reason": exit_reason,
@@ -1349,11 +1509,12 @@ def simulate_portfolio(
             )
             positions.pop(position_id)
 
-        equity = _portfolio_equity(
+        equity = _portfolio_equity_with_adjustment(
             cash=cash,
             positions=positions,
             mark_panel=market.exit_close_raw,
             date_idx=date_idx,
+            adjust_factor=factor_panel,
         )
         utilization = 0.0 if equity <= 0.0 else float(1.0 - cash / equity)
         equity_rows.append(
@@ -1492,7 +1653,10 @@ def simulate_portfolio(
         counters["turnover_notional_cny"] / float(starting_cash)
     )
     counters["cash_filtered_signal_days"] = int(
-        sum(len(selected_symbols(day)) < daily_selection_count for day in book.days.values())
+        sum(
+            len(selected_symbols(day)) < daily_selection_count
+            for day in book.days.values()
+        )
     )
     counters["configured_top_k"] = int(daily_selection_count)
     counters["maximum_signal_amount_fraction"] = (
@@ -1502,6 +1666,7 @@ def simulate_portfolio(
     counters["selected_name_count_min"] = int(min(selection_sizes))
     counters["selected_name_count_max"] = int(max(selection_sizes))
     counters["selected_name_count_mean"] = float(np.mean(selection_sizes))
+    counters["target_gross_fraction"] = gross_fraction
     equity_frame = pd.DataFrame(equity_rows)
     trade_frame = pd.DataFrame(trade_rows)
     metric, annual = _simulation_metric(
@@ -1523,6 +1688,7 @@ def simulate_portfolio(
         candidate_scan_k=int(book.candidate_scan_k),
         calendar_years=calendar_years,
     )
+    metric["corporate_action_adjusted_equivalent"] = bool(factor_panel is not None)
     return metric, equity_frame, trade_frame, annual
 
 
@@ -1591,9 +1757,7 @@ def study_evaluation_config(
         },
         "source_pack_manifest": str(material.manifest_path),
         "execution_costs": asdict(material.market.costs),
-        "terminal_recovery_fraction": float(
-            material.market.terminal_recovery_fraction
-        ),
+        "terminal_recovery_fraction": float(material.market.terminal_recovery_fraction),
         "starting_cash_cny": float(spec.starting_cash_cny),
         "top_k_slot_grid": {
             str(top_k): [int(value) for value in slots]
@@ -1624,7 +1788,9 @@ def study_evaluation_config(
     }
 
 
-def _selected_detail_policy(profile: str, policy: PolicySpec, cost_scenario: str) -> bool:
+def _selected_detail_policy(
+    profile: str, policy: PolicySpec, cost_scenario: str
+) -> bool:
     if cost_scenario != "base":
         return False
     preferred_fixed = 4 if profile == "legal_flat_baseline" else 16
@@ -1637,7 +1803,8 @@ def _selected_detail_policy(profile: str, policy: PolicySpec, cost_scenario: str
 
 def _config_payload(material: LoadedMaterial) -> dict[str, Any]:
     policy_config = {
-        profile: [asdict(policy) for policy in _policy_grid(profile)] for profile in PROFILES
+        profile: [asdict(policy) for policy in _policy_grid(profile)]
+        for profile in PROFILES
     }
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1776,9 +1943,7 @@ def run_backtests(
         guard.check()
         identifier = _job_id(profile, policy.name, slots, cost_scenario)
         job_path = jobs_dir / f"{identifier}.json"
-        job_semantics = _backtest_job_semantics(
-            profile, policy, slots, cost_scenario
-        )
+        job_semantics = _backtest_job_semantics(profile, policy, slots, cost_scenario)
         existing = _load_completed_job(job_path, job_semantics)
         if existing is not None:
             completed += 1
@@ -1820,7 +1985,9 @@ def run_backtests(
                 "resumed_job_count": int(resumed),
                 "last_job_id": identifier,
                 "elapsed_seconds_this_run": float(elapsed),
-                "available_memory_gib": float(psutil.virtual_memory().available / 1024**3),
+                "available_memory_gib": float(
+                    psutil.virtual_memory().available / 1024**3
+                ),
             }
             _atomic_write_json(output_root / "run_state.json", state)
             print(
@@ -1857,7 +2024,9 @@ def run_study_evaluation(
     guard = _MemoryGuard()
     loaded = material or load_study_evaluation_material(
         spec,
-        include_raw_selected_paths=any(policy.kind == "stop" for policy in spec.policies),
+        include_raw_selected_paths=any(
+            policy.kind == "stop" for policy in spec.policies
+        ),
         memory_guard=guard,
     )
     jobs = _study_jobs(spec)
@@ -1919,7 +2088,9 @@ def run_study_evaluation(
                 "resumed_job_count": int(resumed),
                 "last_job_id": identifier,
                 "elapsed_seconds_this_run": float(time.monotonic() - started_at),
-                "available_memory_gib": float(psutil.virtual_memory().available / 1024**3),
+                "available_memory_gib": float(
+                    psutil.virtual_memory().available / 1024**3
+                ),
             }
             _atomic_write_json(resolved_output / "run_state.json", state)
             print(
@@ -2005,7 +2176,9 @@ def evaluate_daily_independent_cohorts(
                 "unit_capital_day_log_efficiency": (
                     float(log_growth / capital_days)
                     if log_growth is not None and capital_days > 0.0
-                    else 0.0 if log_growth == 0.0 else None
+                    else 0.0
+                    if log_growth == 0.0
+                    else None
                 ),
                 "filled_trade_count": int(metric["buy_count"]),
                 "failed_entry_count": int(metric["failed_entry_count"]),
@@ -2075,7 +2248,9 @@ def select_study_winner(
     }
     payloads = []
     for identifier, expected_job in expected_jobs.items():
-        payload = _load_completed_job(root / "jobs" / f"{identifier}.json", expected_job)
+        payload = _load_completed_job(
+            root / "jobs" / f"{identifier}.json", expected_job
+        )
         if payload is not None:
             payloads.append(payload)
     expected = int(config.get("job_count", len(expected_jobs)) or 0)
@@ -2091,9 +2266,7 @@ def select_study_winner(
             **metric,
             "profile": str(resolved.get("profile", metric.get("profile", ""))),
             "top_k": int(resolved.get("top_k", metric.get("top_k", 0)) or 0),
-            "slot_count": int(
-                resolved.get("slots", metric.get("slot_count", 0)) or 0
-            ),
+            "slot_count": int(resolved.get("slots", metric.get("slot_count", 0)) or 0),
             "policy": str(policy_spec.get("name", metric.get("policy", ""))),
             "policy_kind": str(policy_spec.get("kind", metric.get("policy_kind", ""))),
             "fixed_day": (
@@ -2120,11 +2293,17 @@ def select_study_winner(
                 }
             )
     if set(str(value) for value in profiles) != {row["profile"] for row in rows}:
-        raise RuntimeError("account grid profile set does not match the configured arms")
+        raise RuntimeError(
+            "account grid profile set does not match the configured arms"
+        )
 
     def growth(row: Mapping[str, Any]) -> float:
         value = row.get("liquidated_log_growth")
-        return float(value) if value is not None and math.isfinite(float(value)) else -math.inf
+        return (
+            float(value)
+            if value is not None and math.isfinite(float(value))
+            else -math.inf
+        )
 
     def worst_year(row: Mapping[str, Any]) -> float:
         values = [
@@ -2165,8 +2344,7 @@ def select_study_winner(
         best_fixed = sorted(fixed, key=deterministic_key)[0]
         best_autonomous = sorted(autonomous, key=deterministic_key)[0]
         autonomous_wins = bool(
-            growth(best_autonomous)
-            > growth(best_fixed) + float(fallback_tolerance)
+            growth(best_autonomous) > growth(best_fixed) + float(fallback_tolerance)
         )
         selected = best_autonomous if autonomous_wins else best_fixed
         fallback_rows.append(
@@ -2230,7 +2408,10 @@ def select_study_winner(
         report_root = Path(report_output_root).resolve()
         report_root.mkdir(parents=True, exist_ok=True)
         metric_frame = pd.DataFrame(
-            [{key: value for key, value in row.items() if key != "annual_log_growth"} for row in rows]
+            [
+                {key: value for key, value in row.items() if key != "annual_log_growth"}
+                for row in rows
+            ]
         )
         annual_frame = pd.DataFrame(annual_rows)
         group_frame = pd.DataFrame(
@@ -2282,7 +2463,13 @@ def summarize_backtests(output_root: Path) -> dict[str, Any]:
     for payload in payloads:
         identity = {
             key: payload["metric"][key]
-            for key in ("profile", "policy", "policy_kind", "slot_count", "cost_scenario")
+            for key in (
+                "profile",
+                "policy",
+                "policy_kind",
+                "slot_count",
+                "cost_scenario",
+            )
         }
         for row in payload["annual_metrics"]:
             annual_rows.append({**identity, **row})
@@ -2361,21 +2548,33 @@ def summarize_backtests(output_root: Path) -> dict[str, Any]:
             ascending=[False, False],
             kind="mergesort",
         ).iloc[0]
-        rolling = metrics[
-            metrics["profile"].eq(profile)
-            & metrics["policy"].eq("rolling_reforecast")
-            & metrics["cost_scenario"].eq("base")
-        ].sort_values("signal_period_cagr_trading_days", ascending=False).iloc[0]
-        stop = stop_best[stop_best["profile"].eq(profile)].sort_values(
-            "signal_period_cagr_trading_days", ascending=False
-        ).iloc[0]
+        rolling = (
+            metrics[
+                metrics["profile"].eq(profile)
+                & metrics["policy"].eq("rolling_reforecast")
+                & metrics["cost_scenario"].eq("base")
+            ]
+            .sort_values("signal_period_cagr_trading_days", ascending=False)
+            .iloc[0]
+        )
+        stop = (
+            stop_best[stop_best["profile"].eq(profile)]
+            .sort_values("signal_period_cagr_trading_days", ascending=False)
+            .iloc[0]
+        )
         headline[profile] = {
             "preferred_fixed_policy": policy_name,
             "preferred_fixed_best_slot_count": int(best["slot_count"]),
             "preferred_fixed_best_cagr": float(best["signal_period_cagr_trading_days"]),
-            "preferred_fixed_best_total_return": float(best["signal_period_total_return"]),
-            "preferred_fixed_best_max_drawdown": float(best["signal_period_maximum_drawdown"]),
-            "preferred_fixed_best_utilization": float(best["mean_signal_capital_utilization"]),
+            "preferred_fixed_best_total_return": float(
+                best["signal_period_total_return"]
+            ),
+            "preferred_fixed_best_max_drawdown": float(
+                best["signal_period_maximum_drawdown"]
+            ),
+            "preferred_fixed_best_utilization": float(
+                best["mean_signal_capital_utilization"]
+            ),
             "rolling_best_slot_count": int(rolling["slot_count"]),
             "rolling_best_cagr": float(rolling["signal_period_cagr_trading_days"]),
             "best_observed_stop_policy": str(stop["policy"]),
@@ -2521,7 +2720,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     study_root = Path(args.study_root).resolve()
     output_root = Path(args.output_root).resolve()
     if args.command == "dry-run":
-        print(json.dumps(_dry_run(study_root, output_root), ensure_ascii=False, indent=2))
+        print(
+            json.dumps(_dry_run(study_root, output_root), ensure_ascii=False, indent=2)
+        )
         return 0
     if args.command == "run":
         try:

@@ -1,0 +1,130 @@
+{
+  "study_id": "seq100_hierarchical_residual_policy_v1",
+  "status": "frozen_development_contract",
+  "purpose": "Test whether the already supported cross-sectional residual ranking and bad-tail ordering can be converted into positive absolute D20 cohort value by separately forecasting market and PIT-industry components and permitting cash.",
+  "epistemic_contract": {
+    "primary_policy_is_predeclared": true,
+    "development_predictions_are_reused_without_retuning": true,
+    "retrospective_confirmation_is_consumed_only_after_development_passes": true,
+    "candidate_ranking_precedes_future_outcome_masks": true,
+    "cash_is_an_admissible_action": true,
+    "cohort_value_is_not_a_continuous_account": true,
+    "account_replay_requires_both_development_and_confirmation_gates": true,
+    "forbidden_2026_data_remain_untouched": true
+  },
+  "source": {
+    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "development_run_summary": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
+    "development_run_summary_sha256": "61d0d4f3025b9a884e9620e2e7d10ebb7c522f1bc38f9d6f115f24e7ecd82468",
+    "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "expected_label_fingerprint": "c93cf15be7f58642b34e086c0c25e00b56a4f46de514d01a35b3132f2e0bc65d",
+    "expected_row_count": 4191476,
+    "formal_start_year": 2012,
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "target": {
+    "horizon": 20,
+    "retry_days": 20,
+    "gross": "executable_log_return_20",
+    "residual": "residual_log_return_20",
+    "market": "market_component_20",
+    "industry": "industry_component_20",
+    "bad_tail_event": "executable_log_return_20 <= 0",
+    "decomposition": "gross = market + PIT-industry + stock residual"
+  },
+  "models": {
+    "frozen_stock_residual": {
+      "development_column": "ranking_score__lightgbm_mean_residual",
+      "feature_block": "core_minute",
+      "objective": "regression_l2",
+      "runtime_version": "4.6.0",
+      "num_boost_round": 128,
+      "learning_rate": 0.05,
+      "num_leaves": 15,
+      "max_depth": 4,
+      "min_data_in_leaf": 512,
+      "lambda_l2": 1.0,
+      "max_bin": 127,
+      "feature_fraction": 1.0,
+      "bagging_fraction": 1.0,
+      "num_threads": 8,
+      "seed": 20260806
+    },
+    "frozen_bad_tail_rank": {
+      "development_column": "loss_probability__lightgbm_binary",
+      "feature_block": "core_minute",
+      "objective": "binary",
+      "reuse_stock_model_hyperparameters": true,
+      "probability_is_used_only_for_same_date_ordering": true
+    },
+    "market_component": {
+      "feature_family": "market_state",
+      "group": "signal date",
+      "model": "date-level standardized ridge",
+      "ridge_penalty": 1.0
+    },
+    "industry_component": {
+      "feature_family": "industry_context",
+      "group": "signal date x PIT industry",
+      "model": "date-equal standardized pooled ridge",
+      "ridge_penalty": 1.0
+    }
+  },
+  "policy": {
+    "primary": "cash_gate_residual_veto10_top48",
+    "diagnostics": [
+      "residual_top48",
+      "residual_veto10_top48",
+      "hierarchical_veto10_top48"
+    ],
+    "top_k": 48,
+    "bad_tail_veto_fraction": 0.1,
+    "selection_tie_break": "ascending symbol index after descending score",
+    "primary_rule": "After vetoing the highest same-date bad-tail decile, rank by frozen residual mean. Trade all 48 slots only when the selected basket's mean predicted market plus industry plus residual log return exceeds the stress cost proxy; otherwise hold cash.",
+    "hierarchical_diagnostic_rule": "After the same veto, rank by predicted market plus industry plus residual and retain only names individually above the stress cost proxy.",
+    "holding_semantics": "planned D20 close with bounded legal-sale retry",
+    "future_entry_or_sell_state_used_for_selection": false
+  },
+  "evaluation": {
+    "preflight_year": 2022,
+    "development_years": [2017, 2018, 2019, 2020, 2021, 2022],
+    "retrospective_confirmation_years": [2023, 2024, 2025],
+    "training_window": "expanding",
+    "purge_days": 40,
+    "maximum_train_rows_per_date": 64,
+    "cost_proxies": {
+      "base": 0.003,
+      "stress": 0.006
+    },
+    "inference": {
+      "hac_lag": 20,
+      "moving_block_length": 20,
+      "bootstrap_repetitions": 5000,
+      "seed": 20260808
+    },
+    "development_gate": {
+      "primary_stress_net_hac_lower_bound_strictly_positive": true,
+      "primary_stress_net_block_lower_bound_strictly_positive": true,
+      "minimum_positive_years": 4,
+      "minimum_mean_selected_count_when_invested": 40,
+      "minimum_observed_outcome_fraction": 0.98,
+      "hedged_residual_stress_net_hac_lower_bound_strictly_positive": true
+    },
+    "confirmation_gate": {
+      "primary_stress_net_hac_lower_bound_strictly_positive": true,
+      "primary_stress_net_block_lower_bound_strictly_positive": true,
+      "minimum_positive_years": 2,
+      "no_development_refit_or_policy_change": true
+    }
+  },
+  "decision_boundary": {
+    "development_may_authorize_confirmation_only": true,
+    "confirmation_may_authorize_account_replay_only": true,
+    "portfolio_selected": false,
+    "account_optimization_performed": false,
+    "profit_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_hierarchical_residual_policy_v1"
+  }
+}

@@ -10,8 +10,8 @@ from daily_research.path_policy.seq100_candidate_execution import (
 )
 from daily_research.path_policy.seq100_finite_capital_backtest import (
     BacktestMarket,
-    ForecastDay,
     ForecastBook,
+    ForecastDay,
     PolicySpec,
     StudyEvaluationSpec,
     _all_jobs,
@@ -50,7 +50,9 @@ def _market(*, symbol_count: int = 3, date_count: int = 100) -> BacktestMarket:
     close_price = np.full((date_count, symbol_count), 10.0, dtype=np.float32)
     return BacktestMarket(
         date_values=dates,
-        symbol_values=np.asarray([f"S{idx}" for idx in range(symbol_count)], dtype=object),
+        symbol_values=np.asarray(
+            [f"S{idx}" for idx in range(symbol_count)], dtype=object
+        ),
         entry_open_raw=open_price,
         exit_close_raw=close_price,
         exit_sellable=np.ones((date_count, symbol_count), dtype=bool),
@@ -171,6 +173,102 @@ def test_stateful_portfolio_does_not_replace_top3_or_pyramid() -> None:
     assert metric["skipped_no_slot_signal_count"] == 4
     assert trades.iloc[0]["symbol"] == "S0"
     assert int(trades.iloc[0]["occupied_sessions"]) == 2
+
+
+def test_adjust_factor_preserves_total_return_across_ex_date() -> None:
+    raw_market = _market(symbol_count=1)
+    raw_market.exit_close_raw[2:, 0] = 5.0
+    raw_market.entry_open_raw[2:, 0] = 5.0
+    factor = np.ones((100, 1), dtype=np.float32)
+    factor[2:, 0] = 2.0
+    adjusted_market = BacktestMarket(
+        date_values=raw_market.date_values,
+        symbol_values=raw_market.symbol_values,
+        entry_open_raw=raw_market.entry_open_raw,
+        exit_close_raw=raw_market.exit_close_raw,
+        exit_sellable=raw_market.exit_sellable,
+        entry_filled=raw_market.entry_filled,
+        costs=raw_market.costs,
+        terminal_recovery_fraction=raw_market.terminal_recovery_fraction,
+        forward_days=raw_market.forward_days,
+        execution_days=raw_market.execution_days,
+        adjust_factor=factor,
+    )
+    book = ForecastBook("factor", top_k=1)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0]),
+        score=np.asarray([1.0]),
+        planned_day=np.asarray([2]),
+    )
+    raw_metric, _, raw_trades, _ = simulate_portfolio(
+        market=raw_market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+    )
+    adjusted_metric, _, adjusted_trades, _ = simulate_portfolio(
+        market=adjusted_market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+    )
+
+    assert raw_metric["liquidated_total_return"] < -0.49
+    assert adjusted_metric["liquidated_total_return"] > -0.01
+    assert adjusted_metric["corporate_action_adjusted_equivalent"] is True
+    assert raw_metric["corporate_action_adjusted_equivalent"] is False
+    assert adjusted_trades.iloc[0]["corporate_action_value_multiplier"] == 2.0
+    assert adjusted_trades.iloc[0]["exit_price_economic_equivalent"] == 10.0
+    assert raw_trades.iloc[0]["exit_price_economic_equivalent"] == 5.0
+
+
+def test_target_gross_fraction_scales_entry_cash_without_leverage() -> None:
+    market = _market(symbol_count=1)
+    book = ForecastBook("risk_budget", top_k=1)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0]),
+        score=np.asarray([1.0]),
+        planned_day=np.asarray([2]),
+    )
+    full, _, full_trades, _ = simulate_portfolio(
+        market=market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+    )
+    half, _, half_trades, _ = simulate_portfolio(
+        market=market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+        target_gross_fraction=0.5,
+    )
+
+    ratio = float(
+        half_trades.iloc[0]["buy_notional_cny"]
+        / full_trades.iloc[0]["buy_notional_cny"]
+    )
+    assert 0.49 < ratio < 0.51
+    assert half["target_gross_fraction"] == 0.5
+    assert full["target_gross_fraction"] == 1.0
 
 
 def test_stateful_portfolio_can_scan_ranked_candidates_for_replacement() -> None:
@@ -625,9 +723,7 @@ def test_winner_selection_applies_strict_autonomous_fallback_and_budget_gate(
                         },
                         "annual_metrics": annual,
                     }
-                    configured_jobs.append(
-                        {"job_id": f"job_{count}", **payload["job"]}
-                    )
+                    configured_jobs.append({"job_id": f"job_{count}", **payload["job"]})
                     (jobs_root / f"job_{count}.json").write_text(
                         json.dumps(payload), encoding="utf-8"
                     )

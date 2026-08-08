@@ -1,0 +1,64 @@
+{
+  "schema": "seq100_margin_residual_policy_research_record/1",
+  "status": "strongest_candidate_not_production",
+  "date": "2026-08-08",
+  "strict_chan_strategy_selected": false,
+  "margin_balance_growth_signal_selected": false,
+  "source_alpha_confirmation_gate_passed": false,
+  "risk_budget_development_gate_passed": true,
+  "risk_budget_confirmation_gate_passed": true,
+  "policy": "margin_observed_residual_veto10_industry_cap4_top48_fixed_d20",
+  "development": {
+    "years": [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022],
+    "mean_stress_net_cohort_return": 0.016820868982582723,
+    "hac_lcb_95": 0.00445589305659687,
+    "block_lcb_95": 0.0038193350173450504,
+    "positive_years": 8,
+    "gate_passed": true
+  },
+  "confirmation": {
+    "years": [2023, 2024, 2025],
+    "mean_stress_net_cohort_return": 0.014402543003276723,
+    "hac_lcb_95": -0.002066264850399173,
+    "block_lcb_95": -0.002020656566630973,
+    "positive_years": 3,
+    "gate_passed": false
+  },
+  "full_exposure_account_2014_2025": {
+    "starting_cash_cny": 1000000.0,
+    "ending_equity_cny": 6249536.812344053,
+    "total_return": 5.2495368123440524,
+    "annualized_log_growth": 0.1626600396076868,
+    "maximum_drawdown": -0.5021894767903012,
+    "annualized_volatility": 0.26721598088698173
+  },
+  "risk_budget": {
+    "target_annualized_volatility": 0.15,
+    "frozen_target_gross_fraction": 0.5477997310712247,
+    "confirmation_data_used_in_derivation": false
+  },
+  "risk_account_2014_2025": {
+    "ending_equity_cny": 3096843.276246898,
+    "total_return": 2.096843276246898,
+    "annualized_log_growth": 0.1003369461999038,
+    "maximum_drawdown": -0.29297061814583425,
+    "annualized_volatility": 0.14182998000015704
+  },
+  "risk_account_confirmation_2023_2025": {
+    "starting_cash_cny": 1000000.0,
+    "ending_equity_cny": 1269504.3874208329,
+    "total_return": 0.26950438742083294,
+    "annualized_log_growth": 0.09294265487046784,
+    "maximum_drawdown": -0.16872269425762731,
+    "annualized_volatility": 0.12096330332407836,
+    "annual_returns": {
+      "2023": 0.080268,
+      "2024": 0.101428,
+      "2025": 0.066956
+    },
+    "gate_passed": true
+  },
+  "production_policy_selected": false,
+  "profit_guarantee_allowed": false,
+  "forbidden_2026_read_count": 0
+}
