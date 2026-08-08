@@ -1,0 +1,58 @@
+{
+  "study_id": "seq100_strict_chan_type1_confirmation_v1",
+  "status": "frozen_single_hypothesis_confirmation",
+  "purpose": "Confirm or reject the sole exploratory survivor: primary type-1 amount-per-bar divergence, buy side, next-session open entry, H10 close exit.",
+  "source": {
+    "sample_study": "daily_research/studies/seq100_strict_chan_type1_confirmation_sample_v1.json",
+    "profile": "primary",
+    "side": "buy",
+    "point_types": [1],
+    "variants": ["amount_per_bar"],
+    "signal_window": "display_start_date_through_display_end_date",
+    "formal_start": "2012-01-01",
+    "formal_end": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "execution": {
+    "entry": "first_available_session_after_confirmation_at_open",
+    "exit": "horizon_session_close",
+    "t_plus_one": true,
+    "horizons_sessions": [10],
+    "deduplication": "first_signal_per_case_point_type_confirmation_date",
+    "adjusted_prices_for_returns": true,
+    "raw_prices_for_minimum_commission": true,
+    "costs": {
+      "lot_size": 100,
+      "commission_bps": 3.0,
+      "minimum_commission_cny": 5.0,
+      "transfer_fee_bps": 0.1,
+      "slippage_bps": 7.0,
+      "stress_slippage_multiplier": 2.0,
+      "stamp_tax_bps_before_2023_08_28": 10.0,
+      "stamp_tax_bps_from_2023_08_28": 5.0
+    }
+  },
+  "evaluation": {
+    "development_focal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+    "validation_focal_years": [2020, 2021, 2022, 2023, 2024, 2025],
+    "bootstrap_case_resamples": 4000,
+    "bootstrap_seed": 892301,
+    "minimum_events_per_split": 35,
+    "minimum_cases_development": 35,
+    "minimum_cases_validation": 25,
+    "strict_gate": {
+      "case_mean_net_base_positive": true,
+      "case_mean_net_stress_positive": true,
+      "case_mean_excess_base_positive": true,
+      "bootstrap_95pct_lower_excess_positive": true,
+      "both_development_and_validation_required": true
+    }
+  },
+  "boundaries": {
+    "single_hypothesis_only": true,
+    "diagnostic_fixed_horizon_only": true,
+    "account_replay_performed": false,
+    "stable_profit_claim_allowed": false,
+    "model_training_allowed": false
+  }
+}

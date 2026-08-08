@@ -17,14 +17,15 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
-The Chan primary-source reassessment, first strict-parser vertical slice, the
-curated nine-path boundary audit, and the first outcome-blind stratified audit
-are complete; the 14-chart visual review is now passed. A fast, fixed-horizon
-outcome probe has been added only as a diagnostic gate while the resumable
-all-market panel is being optimized. The immediate research question is
-whether strict buy-point candidates retain incremental, cost-aware path
-information on broader frozen cases; this is not yet an account or profit
-claim.
+The strict Chan definition, causal parser, curated and stratified prefix audits,
+expanded outcome screen, independent confirmation, and transparent-coordinate
+incremental screen are complete. The 14-chart parser review passed, but no
+strict buy-point family or frozen observable gate passed the cost-aware path
+gate. The immediate question is no longer whether a literal first/second/third
+point is a standalone rule; that has failed. The next bounded question is
+whether richer confirmed structure attributes add out-of-time path information
+beyond the existing transparent coordinates on a substantially larger frozen
+sample.
 
 No production model, portfolio, stop, or trading policy has been selected.
 Multiple strictly causal transparent predictor, path-structure, and executable
@@ -426,27 +427,43 @@ contact sheet and all 14 chart records have `visual_review_status: passed`.
 This stratified run is still a small deterministic audit sample, not
 statistically sufficient full-market validation.
 
-## Strict panel and fast outcome gate
+## Strict panel and expanded outcome gates
 
-`daily_research/path_policy/seq100_strict_chan_panel.py` and
-`daily_research/studies/seq100_strict_chan_panel_v1.json` define the resumable
-2010-2025 five-minute panel. It now reads a contiguous sorted-symbol bucket in
-one DuckDB batch, caches the symbol universe, writes burn-in events with an
-explicit `is_formal` flag, publishes only 2012-2025 daily snapshots, and tracks
-the latest state of each pending candidate. A one-symbol real run completed in
-about 30 seconds; a three-symbol long-history run completed in about 145
-seconds. Full-market execution is therefore not being started blindly; the
-remaining bottleneck is Parquet I/O for long-history symbols, not parser
-correctness.
+`daily_research/path_policy/seq100_strict_chan_panel.py` defines the resumable
+2010-2025 five-minute panel. The input adapter now supports per-symbol windows
+through one shared scan, and the optional immutable symbol-bucket cache was
+verified against the raw QDP source on three long-history stocks with exact
+frame and audit equality. The cache reduced that load only from about 31.7 to
+28.9 seconds, so Parquet layout was not the main bottleneck. Lazy feature-
+sequence candidate generation removed repeated suffix reconstruction in the
+segment parser. On the same three-stock panel, all 452,979 event rows and 9,811
+snapshots remained byte-identical while total runtime fell from about 145 to
+70 seconds; one long-history parse itself is now about 6 seconds. A full cache
+or full-market panel is therefore deferred until broader structure features
+show incremental value.
 
-`daily_research/path_policy/seq100_strict_chan_outcome_probe.py` evaluates the
-frozen 14-case parser events at the next trading-date open with T+1 and base /
-stress proportional costs (including minimum commission). The run produced
-343 deduplicated buy candidates and 1,567 event-horizon rows. In the primary
-profile, type-3 candidates are negative over 1-10 sessions; type-2 candidates
-are positive in the small 5/3/2-case denominators at 5/10/20 sessions, but this
-does not persist as a broad or independent stability result. The probe is a
-path diagnostic only; no account replay or production policy is authorized.
+The expanded outcome-blind screen uses 140 globally unique PIT cases across
+seven two-year periods and both exchanges. It produced 300 strict buy points
+and 1,495 horizon rows; none of 15 point-type/horizon families passed the
+predeclared development/validation, base/stress, case-count, and bootstrap
+gate. Type 3 is broadly negative. Type-1 H10 was the only exploratory weak
+survivor, but its median was negative and its validation uncertainty crossed
+zero.
+
+That single hypothesis was frozen as type 1, `amount_per_bar`, H10 and tested
+on 280 new cases whose 280 symbols have zero overlap with the first sample.
+Selection read the prior symbol column but no outcomes. Among 109 signals,
+development case-mean net return was about `-0.29%` and validation about
+`-1.87%`; all three validation two-year periods were negative. The hypothesis
+is rejected and does not authorize account replay.
+
+The follow-up joined 13 previously validated market/daily/industry/five-minute
+coordinates and four frozen composites to this signal family. It aligned 138
+of 166 eligible signals on their confirmation-date close; no single coordinate
+or composite passed both time splits. Several anti-chase coordinates reduced
+losses in one split, but absolute net return or uncertainty failed in the
+other. This rejects the tested transparent gates, not all possible information
+inside the raw sequence or richer structure state.
 
 ## Absolute causal K-line strategy evidence
 
@@ -565,51 +582,29 @@ mechanical results reject simple fixed or hand-written exits. The ceiling shows
 large ex-post headroom but does not establish that either the entry shape or
 the exit day is prospectively identifiable.
 
-The source audit, frozen definition dependency table, independent parser,
-five-minute adjustment/missingness adapter, synthetic tests, one-symbol output,
-curated nine-path audit, 14-case stratified prefix/variant audit, and first
-outcome gate are complete. The sample is not statistically broad enough to
-support a market claim. The full 2010-2025 market panel is implemented but not
-yet run end-to-end because the I/O path needs further batching or a cached
-partition. Account replay and model training remain prohibited until the next
-outcome gate is broad enough. The next bounded work is:
+Parser validity, outcome breadth, independent confirmation, and the first
+transparent-coordinate increment are now sufficient to reject literal strict
+buy points as standalone entries. Account replay and model promotion remain
+prohibited. The full panel is implemented, but running every symbol merely to
+repeat a failed unconditional rule is not the next best use of compute. The
+next bounded work is:
 
-1. Expand the outcome probe to a larger outcome-blind structure sample and
-   require positive case/year coverage under both cost scenarios before any
-   account replay.
-2. Benchmark a cached or year-sharded Parquet partition for the complete
-   2010-2025 five-minute store. Preserve per-symbol episode boundaries and emit
-   daily close-time snapshots for later `quality_liquidity_pit` joins without
-   treating missing intraday history as a universe filter.
-3. Repair the malformed external-archive shard date metadata through an
-   immutable QDP metadata version or explicit audit artifact; do not mutate the
-   pinned dataset manifest in place.
-4. Test whether the complete structures add future-path information beyond
-   volatility, activity, market regime, and the existing weak grammar. Only
-   then test executable first/second/third-point policies under both costs.
-5. Build a same-date, same-risk, same-activity non-pattern control and compare
-   its legal stopping ceiling with each K-line entry type. This determines
-   whether the large headroom belongs to the named pattern or merely to active
-   volatile stocks and the 40-session maximum operator.
-6. Join the existing causal market, industry, cross-sectional, and five-minute
-   coordinates to each open-position day, including same-day signal breadth and
-   explicit missingness when a held stock leaves the current quality pool.
-7. Fit a transparent expanding-year fitted-Q baseline that separately predicts
-   the value of `request_sell` and `hold`, using only prior-year episodes. Each
-   following year is simulated chronologically with daily re-evaluation and no
-   fixed D target. Mechanical policies remain frozen controls.
-8. Determine whether peak giveback, exhaustion, market regime, signal breadth,
-   or intraday state predicts residual waiting value. If causal stopping still
-   loses, reject exit-only rescue and return to regime-conditioned entry
-   selection rather than escalating model complexity.
-9. Use financing balance, net financing flow, and financing/price divergence
-   only as residual covariates after exact publication alignment; do not use
-   them as entry gates unless they improve the stopping/value model out of
-   sample under both costs.
-10. Replay a legal account only after a frozen policy has positive absolute net
+1. Freeze a larger result-blind sample and persist richer point-time structure
+   attributes: divergence strength ratio, segment duration/efficiency/MACD and
+   amount coordinates, center geometry, confirmation delay, and pending-state
+   history. Keep matched failures and all three point classes.
+2. Compare existing transparent coordinates, strict structure attributes, and
+   their combination on complete post-confirmation path distributions with an
+   expanding-time, matched-capacity baseline. The target is incremental path
+   information, not another grid of fixed holding rules.
+3. Build the same-date, same-risk, same-activity non-pattern control before
+   attributing large MFE or stopping headroom to a Chan label.
+4. Run the full cached panel only if the larger sample establishes reproducible
+   incremental value; otherwise move to raw-sequence residual tests rather than
+   scaling a rejected representation.
+5. Replay a legal account only after a frozen policy has positive absolute net
    value under base and double-slippage costs, a positive uncertainty lower
-   bound, and majority-year stability. A raw/deep sequence model remains a
-   later challenger if transparent state leaves reproducible residual value.
+   bound, and majority-period stability.
 
 ## Current authoritative paths
 
@@ -642,7 +637,10 @@ outcome gate is broad enough. The next bounded work is:
   `daily_research/path_policy/seq100_strict_chan_audit.py`; the outcome-blind
   stratified contract and runner are
   `daily_research/studies/seq100_strict_chan_stratified_audit_v1.json` and
-  `daily_research/path_policy/seq100_strict_chan_stratified_audit.py`
+  `daily_research/path_policy/seq100_strict_chan_stratified_audit.py`; expanded
+  outcome, independent-confirmation, and coordinate screens are
+  `daily_research/path_policy/seq100_strict_chan_outcome_screen.py` and
+  `daily_research/path_policy/seq100_strict_chan_coordinate_screen.py`
 - Absolute causal K-line strategy probe and validator:
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe.py` and
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe_validate.py`
@@ -662,6 +660,9 @@ outcome gate is broad enough. The next bounded work is:
   `daily_research/studies/seq100_causal_path_structure_v1.json`,
   `daily_research/studies/seq100_strict_chan_definition_v1.json`,
   `daily_research/studies/seq100_strict_chan_audit_v1.json`,
+  `daily_research/studies/seq100_strict_chan_outcome_screen_v1.json`,
+  `daily_research/studies/seq100_strict_chan_type1_confirmation_v1.json`,
+  `daily_research/studies/seq100_strict_chan_coordinate_screen_v1.json`,
   `daily_research/studies/seq100_causal_pattern_strategy_probe_v1.json`,
   `daily_research/studies/seq100_causal_exit_baselines_v1.json`,
   `daily_research/studies/seq100_exit_stopping_ceiling_v1.json`
@@ -678,6 +679,9 @@ outcome gate is broad enough. The next bounded work is:
   `daily_research/output/path_policy/studies/seq100_strict_chan_stratified_audit_v1/`
   (sample manifest, frozen audit spec, case/event/pending/prefix aggregates, and
   contact sheet),
+  `daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/`,
+  `daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1/`,
+  `daily_research/output/path_policy/studies/seq100_strict_chan_coordinate_screen_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/`,
   `daily_research/output/path_policy/studies/seq100_exit_stopping_ceiling_v1/`

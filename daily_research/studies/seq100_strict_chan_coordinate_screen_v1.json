@@ -1,0 +1,74 @@
+{
+  "study_id": "seq100_strict_chan_coordinate_screen_v1",
+  "status": "frozen_transparent_incremental_screen",
+  "purpose": "Test whether previously established causal market, daily, industry, and five-minute coordinates distinguish successful strict type-1 amount-per-bar buy points from failures.",
+  "source": {
+    "exploratory_outcome_root": "daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1",
+    "confirmation_outcome_root": "daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1",
+    "coordinate_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+    "coordinate_validation": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+    "point_type": 1,
+    "variant": "amount_per_bar",
+    "horizon_sessions": 10,
+    "coordinate_time": "signal_confirmation_date_close",
+    "execution_time": "next_session_open",
+    "forbidden_year": 2026
+  },
+  "coordinates": {
+    "market_ret20_rank": "high",
+    "market_breadth_rank": "high",
+    "market_volatility_rank": "diagnostic",
+    "return_5d_rank": "low",
+    "return_20d_rank": "low",
+    "range_position_20d_rank": "low",
+    "volatility_5d_rank": "diagnostic",
+    "price_amount_correlation_5d_rank": "high",
+    "minute_last_30m_return_rank": "low",
+    "minute_close_location_rank": "low",
+    "minute_vwap_close_deviation_rank": "low",
+    "minute_last_hour_amount_share_rank": "low",
+    "industry_relative_ret5_rank": "high"
+  },
+  "composites": {
+    "anti_chase": [
+      "minute_last_30m_return_rank:low",
+      "minute_close_location_rank:low",
+      "minute_vwap_close_deviation_rank:low",
+      "return_5d_rank:low"
+    ],
+    "quality_flow": [
+      "price_amount_correlation_5d_rank:high",
+      "minute_last_hour_amount_share_rank:low"
+    ],
+    "supportive_regime": [
+      "market_ret20_rank:high",
+      "market_breadth_rank:high",
+      "industry_relative_ret5_rank:high"
+    ],
+    "combined": ["anti_chase:high", "quality_flow:high", "supportive_regime:high"]
+  },
+  "evaluation": {
+    "development_signal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+    "validation_signal_years": [2020, 2021, 2022, 2023, 2024, 2025],
+    "favorable_threshold": 0.5,
+    "bootstrap_case_resamples": 4000,
+    "bootstrap_seed": 318721,
+    "minimum_favorable_events_development": 25,
+    "minimum_favorable_events_validation": 15,
+    "minimum_favorable_cases_development": 20,
+    "minimum_favorable_cases_validation": 12,
+    "strict_gate": {
+      "favorable_case_mean_net_base_positive": true,
+      "favorable_case_mean_net_stress_positive": true,
+      "favorable_minus_unfavorable_positive": true,
+      "bootstrap_95pct_lower_lift_positive": true,
+      "both_development_and_validation_required": true
+    }
+  },
+  "boundaries": {
+    "transparent_coordinates_only": true,
+    "model_training_allowed": false,
+    "account_replay_allowed": false,
+    "stable_profit_claim_allowed": false
+  }
+}

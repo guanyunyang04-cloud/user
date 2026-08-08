@@ -55,11 +55,18 @@ def _cost_multipliers(
     *,
     stress: bool,
     costs: Mapping[str, Any],
+    exit_price: float | None = None,
 ) -> tuple[float, float]:
     lot_size = float(costs["lot_size"])
-    commission = max(
+    buy_commission = max(
         float(costs["commission_bps"]) / 10_000.0,
         float(costs["minimum_commission_cny"]) / max(price * lot_size, 1e-12),
+    )
+    actual_exit_price = float(exit_price if exit_price is not None else price)
+    sell_commission = max(
+        float(costs["commission_bps"]) / 10_000.0,
+        float(costs["minimum_commission_cny"])
+        / max(actual_exit_price * lot_size, 1e-12),
     )
     transfer = float(costs["transfer_fee_bps"]) / 10_000.0
     slip = float(costs["slippage_bps"]) / 10_000.0
@@ -70,23 +77,32 @@ def _cost_multipliers(
         if date < "2023-08-28"
         else float(costs["stamp_tax_bps_from_2023_08_28"])
     )
-    buy = (1.0 + slip) * (1.0 + commission + transfer)
-    sell = (1.0 - slip) * (1.0 - commission - transfer - stamp_bps / 10_000.0)
+    buy = (1.0 + slip) * (1.0 + buy_commission + transfer)
+    sell = (1.0 - slip) * (1.0 - sell_commission - transfer - stamp_bps / 10_000.0)
     return buy, sell
 
 
 def _daily_frame(bars: pd.DataFrame) -> pd.DataFrame:
     bars = bars.copy()
     bars["trade_date"] = bars["trade_date"].astype(str)
+    aggregations: dict[str, tuple[str, str]] = {
+        "open": ("open", "first"),
+        "high": ("high", "max"),
+        "low": ("low", "min"),
+        "close": ("close", "last"),
+    }
+    for column, operation in (
+        ("raw_open", "first"),
+        ("raw_high", "max"),
+        ("raw_low", "min"),
+        ("raw_close", "last"),
+    ):
+        if column in bars:
+            aggregations[column] = (column, operation)
     return (
         bars.sort_values("timestamp")
         .groupby("trade_date", sort=True)
-        .agg(
-            open=("open", "first"),
-            high=("high", "max"),
-            low=("low", "min"),
-            close=("close", "last"),
-        )
+        .agg(**aggregations)
         .reset_index()
     )
 
@@ -132,6 +148,7 @@ def _outcome_rows(
         eligible_count += 1
         entry_date = str(daily.iloc[entry_index]["trade_date"])
         entry_price = float(daily.iloc[entry_index]["open"])
+        actual_entry_price = float(daily.iloc[entry_index].get("raw_open", entry_price))
         if not np.isfinite(entry_price) or entry_price <= 0:
             continue
         for horizon in horizons:
@@ -140,6 +157,9 @@ def _outcome_rows(
                 continue
             window = daily.iloc[entry_index : exit_index + 1]
             exit_price = float(daily.iloc[exit_index]["close"])
+            actual_exit_price = float(
+                daily.iloc[exit_index].get("raw_close", exit_price)
+            )
             if not np.isfinite(exit_price) or exit_price <= 0:
                 continue
             raw_return = exit_price / entry_price - 1.0
@@ -155,16 +175,19 @@ def _outcome_rows(
                 "horizon_sessions": int(horizon),
                 "entry_price": entry_price,
                 "exit_price": exit_price,
+                "raw_entry_price": actual_entry_price,
+                "raw_exit_price": actual_exit_price,
                 "raw_return": raw_return,
                 "mfe": float(window["high"].max() / entry_price - 1.0),
                 "mae": float(window["low"].min() / entry_price - 1.0),
             }
             for stress in (False, True):
                 buy, sell = _cost_multipliers(
-                    entry_price,
+                    actual_entry_price,
                     str(daily.iloc[exit_index]["trade_date"]),
                     stress=stress,
                     costs=costs,
+                    exit_price=actual_exit_price,
                 )
                 row["net_return_stress" if stress else "net_return_base"] = (
                     sell * (1.0 + raw_return) / buy - 1.0
@@ -187,6 +210,7 @@ def _baseline_rows(
     rows: list[dict[str, Any]] = []
     for entry_index in range(len(daily)):
         entry_price = float(daily.iloc[entry_index]["open"])
+        actual_entry_price = float(daily.iloc[entry_index].get("raw_open", entry_price))
         if not np.isfinite(entry_price) or entry_price <= 0:
             continue
         for horizon in horizons:
@@ -194,12 +218,16 @@ def _baseline_rows(
             if exit_index >= len(daily):
                 continue
             exit_price = float(daily.iloc[exit_index]["close"])
+            actual_exit_price = float(
+                daily.iloc[exit_index].get("raw_close", exit_price)
+            )
             for stress in (False, True):
                 buy, sell = _cost_multipliers(
-                    entry_price,
+                    actual_entry_price,
                     str(daily.iloc[exit_index]["trade_date"]),
                     stress=stress,
                     costs=costs,
+                    exit_price=actual_exit_price,
                 )
                 rows.append(
                     {

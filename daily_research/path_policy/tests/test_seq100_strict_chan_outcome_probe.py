@@ -60,3 +60,23 @@ def test_daily_frame_uses_first_open_last_close() -> None:
     result = probe._daily_frame(bars)
     assert result.iloc[0]["open"] == 10.0
     assert result.iloc[0]["close"] == 10.8
+
+
+def test_daily_frame_preserves_raw_prices_for_minimum_commission() -> None:
+    bars = pd.DataFrame(
+        {
+            "trade_date": ["2020-01-02", "2020-01-02"],
+            "timestamp": pd.to_datetime(["2020-01-02 09:35", "2020-01-02 15:00"]),
+            "open": [5.0, 5.2],
+            "high": [5.3, 5.4],
+            "low": [4.9, 5.1],
+            "close": [5.2, 5.3],
+            "raw_open": [10.0, 10.4],
+            "raw_high": [10.6, 10.8],
+            "raw_low": [9.8, 10.2],
+            "raw_close": [10.4, 10.6],
+        }
+    )
+    result = probe._daily_frame(bars)
+    assert result.iloc[0]["raw_open"] == 10.0
+    assert result.iloc[0]["raw_close"] == 10.6

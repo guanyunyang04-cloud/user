@@ -31,6 +31,13 @@ DEFAULT_OUTPUT_ROOT = (
     / "seq100_strict_chan_stratified_audit_v1"
 )
 STUDY_ID = "seq100_strict_chan_stratified_audit_v1"
+OUTCOME_SAMPLE_STUDY_ID = "seq100_strict_chan_outcome_sample_v1"
+OUTCOME_CONFIRMATION_SAMPLE_STUDY_ID = "seq100_strict_chan_type1_confirmation_sample_v1"
+SUPPORTED_STUDY_IDS = {
+    STUDY_ID,
+    OUTCOME_SAMPLE_STUDY_ID,
+    OUTCOME_CONFIRMATION_SAMPLE_STUDY_ID,
+}
 SCHEMA_VERSION = "seq100_strict_chan_stratified_audit/1"
 SELECTION_COLUMNS = ("symbol", "trade_date")
 _REQUIRED_STRATUM_FIELDS = ("stratum_id", "years", "symbol_suffix", "samples")
@@ -98,7 +105,7 @@ def load_stratified_spec(
 
     spec_path = Path(path).resolve()
     spec = json.loads(spec_path.read_text(encoding="utf-8"))
-    if spec.get("study_id") != STUDY_ID:
+    if spec.get("study_id") not in SUPPORTED_STUDY_IDS:
         raise ValueError("strict_chan_stratified_audit_study_id_mismatch")
     if spec.get("parent_study_id") != parser.STUDY_ID:
         raise ValueError("strict_chan_stratified_audit_parent_study_mismatch")
@@ -175,6 +182,14 @@ def load_stratified_spec(
         raise ValueError("strict_chan_stratified_audit_quality_pool_manifest_missing")
     spec["_spec_path"] = str(spec_path)
     spec["_quality_pool_manifest_path"] = str(pool_manifest.resolve())
+    exclude_path_value = selection.get("exclude_selected_cases")
+    if exclude_path_value:
+        exclude_path = (WORKSPACE_ROOT / str(exclude_path_value)).resolve()
+        if not exclude_path.is_file():
+            raise ValueError(
+                "strict_chan_stratified_audit_excluded_cases_source_missing"
+            )
+        spec["_exclude_selected_cases_path"] = str(exclude_path)
     return spec
 
 
@@ -234,6 +249,7 @@ def select_cases_from_frames(
     """
 
     selection = spec["selection"]
+    selection_study_id = str(spec.get("study_id", STUDY_ID))
     seed = int(selection["random_seed"])
     bounds = selection["focal_date_bounds"]
     earliest = pd.Timestamp(str(bounds["earliest"]))
@@ -267,7 +283,7 @@ def select_cases_from_frames(
         ranked = sorted(
             (
                 _stable_rank(
-                    study_id=STUDY_ID,
+                    study_id=selection_study_id,
                     seed=seed,
                     stratum_id=stratum_id,
                     symbol=str(row.symbol),
@@ -387,15 +403,17 @@ def _selection_fingerprint(
     source_partitions: Sequence[Mapping[str, Any]],
     manifest_sha256: str,
     cases: Sequence[Mapping[str, Any]],
+    exclusion_evidence: Mapping[str, Any] | None = None,
 ) -> str:
     payload = {
         "schema": SCHEMA_VERSION,
-        "study_id": STUDY_ID,
+        "study_id": str(spec["study_id"]),
         "spec_sha256": _sha256_file(str(spec["_spec_path"])),
         "runner_sha256": _sha256_file(Path(__file__)),
         "definition_sha256": _sha256_file(parser.DEFAULT_DEFINITION_PATH),
         "quality_pool_manifest_sha256": manifest_sha256,
         "source_partitions": list(source_partitions),
+        "exclusion_evidence": dict(exclusion_evidence or {}),
         "cases": list(cases),
     }
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
@@ -406,6 +424,23 @@ def build_sample_manifest(
 ) -> dict[str, Any]:
     spec = load_stratified_spec(spec_path)
     frames, source_partitions, manifest_sha256 = _load_pool_frames(spec)
+    exclusion_evidence: dict[str, Any] = {}
+    exclude_path_value = spec.get("_exclude_selected_cases_path")
+    if exclude_path_value:
+        exclude_path = Path(str(exclude_path_value))
+        excluded = pd.read_parquet(exclude_path, columns=["symbol"])
+        excluded_symbols = set(excluded["symbol"].astype(str))
+        frames = {
+            year: frame[~frame["symbol"].astype(str).isin(excluded_symbols)].copy()
+            for year, frame in frames.items()
+        }
+        exclusion_evidence = {
+            "path": str(exclude_path.resolve()),
+            "sha256": _sha256_file(exclude_path),
+            "excluded_symbol_count": len(excluded_symbols),
+            "selection_columns_read": ["symbol"],
+            "outcomes_read": False,
+        }
     suffix_statistics = _symbol_suffix_statistics(frames)
     observed_suffixes = {item["symbol_suffix"] for item in suffix_statistics}
     configured_suffixes = {
@@ -422,13 +457,14 @@ def build_sample_manifest(
         source_partitions=source_partitions,
         manifest_sha256=manifest_sha256,
         cases=cases,
+        exclusion_evidence=exclusion_evidence,
     )
     for case in cases:
         case["selection_fingerprint"] = fingerprint
     return {
         "schema": SCHEMA_VERSION,
         "status": "frozen_sample",
-        "study_id": STUDY_ID,
+        "study_id": str(spec["study_id"]),
         "parent_study_id": spec["parent_study_id"],
         "spec_path": str(Path(str(spec["_spec_path"])).resolve()),
         "spec_sha256": _sha256_file(str(spec["_spec_path"])),
@@ -443,6 +479,7 @@ def build_sample_manifest(
         "parser_outcomes_used_for_selection": False,
         "returns_used_for_selection": False,
         "source_partitions": list(source_partitions),
+        "exclusion_evidence": exclusion_evidence,
         "population_symbol_suffix_contract": sorted(configured_suffixes),
         "population_symbol_suffix_statistics": suffix_statistics,
         "strata_statistics": statistics,
@@ -512,7 +549,7 @@ def _materialized_audit_spec(
     sample_manifest_path: Path,
 ) -> dict[str, Any]:
     return {
-        "study_id": STUDY_ID,
+        "study_id": str(spec["study_id"]),
         "status": "frozen_materialized_sample",
         "parent_study_id": spec["parent_study_id"],
         "quality_pool_manifest": spec["quality_pool_manifest"],

@@ -1,0 +1,29 @@
+{
+  "study_id": "seq100_strict_chan_input_cache_v1",
+  "status": "frozen_cache_contract",
+  "purpose": "Materialize an immutable symbol-range bucket layout for repeated strict Chan panel reads without changing QDP source data.",
+  "period": {
+    "burn_in_start": "2010-01-01",
+    "formal_start": "2012-01-01",
+    "formal_end": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "domains": [
+    "market_intraday_5m",
+    "adjust_factor",
+    "market_daily_raw"
+  ],
+  "partitioning": {
+    "bucket_count": 256,
+    "symbol_order": "lexicographic ascending",
+    "assignment": "floor(symbol_position * bucket_count / symbol_count)",
+    "format": "Parquet ZSTD",
+    "row_group_size": 100000
+  },
+  "boundaries": {
+    "mutate_qdp": false,
+    "read_2026": false,
+    "outcome_columns": false,
+    "profit_claim": false
+  }
+}

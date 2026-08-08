@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from itertools import pairwise
 from pathlib import Path
@@ -992,14 +992,15 @@ def _merge_feature(
     )
 
 
-def _standard_feature_sequence(
+def _iter_standard_feature_sequence(
     strokes: Sequence[Stroke], *, start: int, direction: int, inclusion_mode: str
-) -> list[_FeatureElement]:
-    positions = _feature_input_positions(strokes, start, direction)
+) -> Iterator[_FeatureElement]:
     locked: list[_FeatureElement] = []
     current: _WorkingFeatureElement | None = None
-    for stroke_position in positions:
+    for stroke_position in range(start + 1, len(strokes)):
         stroke = strokes[stroke_position]
+        if stroke.direction != -direction:
+            continue
         if current is None:
             current = _WorkingFeatureElement(
                 low=stroke.low,
@@ -1063,23 +1064,23 @@ def _standard_feature_sequence(
                 (stroke.low + stroke.high) / 2.0,
             )
         position = len(locked)
-        locked.append(
-            _FeatureElement(
-                id=(
-                    f"feature:{start}:{direction}:"
-                    + ",".join(map(str, current.source_stroke_positions))
-                ),
-                position=position,
-                low=current.low,
-                high=current.high,
-                low_stroke_position=current.low_stroke_position,
-                high_stroke_position=current.high_stroke_position,
-                source_stroke_positions=current.source_stroke_positions,
-                confirmed_index=stroke.locked_index,
-                confirmed_time=stroke.locked_time,
-                direction=current_direction,
-            )
+        feature = _FeatureElement(
+            id=(
+                f"feature:{start}:{direction}:"
+                + ",".join(map(str, current.source_stroke_positions))
+            ),
+            position=position,
+            low=current.low,
+            high=current.high,
+            low_stroke_position=current.low_stroke_position,
+            high_stroke_position=current.high_stroke_position,
+            source_stroke_positions=current.source_stroke_positions,
+            confirmed_index=stroke.locked_index,
+            confirmed_time=stroke.locked_time,
+            direction=current_direction,
         )
+        locked.append(feature)
+        yield feature
         current = _WorkingFeatureElement(
             low=stroke.low,
             high=stroke.high,
@@ -1088,28 +1089,40 @@ def _standard_feature_sequence(
             source_stroke_positions=(stroke_position,),
             direction=current_direction,
         )
-    return locked
 
 
-def _feature_fractal_candidates(
+def _standard_feature_sequence(
+    strokes: Sequence[Stroke], *, start: int, direction: int, inclusion_mode: str
+) -> list[_FeatureElement]:
+    return list(
+        _iter_standard_feature_sequence(
+            strokes,
+            start=start,
+            direction=direction,
+            inclusion_mode=inclusion_mode,
+        )
+    )
+
+
+def _iter_feature_fractal_candidates(
     strokes: Sequence[Stroke],
     *,
     start: int,
     direction: int,
     inclusion_mode: str,
     equality_mode: str,
-) -> list[_FeatureFractalCandidate]:
-    features = _standard_feature_sequence(
+) -> Iterator[_FeatureFractalCandidate]:
+    features: list[_FeatureElement] = []
+    for feature in _iter_standard_feature_sequence(
         strokes,
         start=start,
         direction=direction,
         inclusion_mode=inclusion_mode,
-    )
-    candidates: list[_FeatureFractalCandidate] = []
-    for middle_position in range(1, len(features) - 1):
-        left = features[middle_position - 1]
-        middle = features[middle_position]
-        right = features[middle_position + 1]
+    ):
+        features.append(feature)
+        if len(features) < 3:
+            continue
+        left, middle, right = features[-3:]
         kind = _fractal_kind(left, middle, right, equality_mode=equality_mode)
         expected_kind = 1 if direction > 0 else -1
         if kind != expected_kind:
@@ -1120,27 +1133,39 @@ def _feature_fractal_candidates(
         if endpoint_stroke_position <= start:
             continue
         endpoint_stroke = strokes[endpoint_stroke_position]
-        endpoint_price = endpoint_stroke.start_price
-        event_index = endpoint_stroke.start_index
-        event_time = endpoint_stroke.start_time
         has_gap = not _overlap(left.low, left.high, middle.low, middle.high)
-        candidates.append(
-            _FeatureFractalCandidate(
-                id=(
-                    f"feature_fractal:{start}:{direction}:"
-                    f"{left.id}:{middle.id}:{right.id}"
-                ),
-                direction=direction,
-                endpoint_stroke_position=endpoint_stroke_position,
-                endpoint_price=float(endpoint_price),
-                event_index=event_index,
-                event_time=event_time,
-                detected_index=right.confirmed_index,
-                detected_time=right.confirmed_time,
-                break_case=2 if has_gap else 1,
-            )
+        yield _FeatureFractalCandidate(
+            id=(
+                f"feature_fractal:{start}:{direction}:{left.id}:{middle.id}:{right.id}"
+            ),
+            direction=direction,
+            endpoint_stroke_position=endpoint_stroke_position,
+            endpoint_price=float(endpoint_stroke.start_price),
+            event_index=endpoint_stroke.start_index,
+            event_time=endpoint_stroke.start_time,
+            detected_index=right.confirmed_index,
+            detected_time=right.confirmed_time,
+            break_case=2 if has_gap else 1,
         )
-    return sorted(candidates, key=lambda item: item.detected_index)
+
+
+def _feature_fractal_candidates(
+    strokes: Sequence[Stroke],
+    *,
+    start: int,
+    direction: int,
+    inclusion_mode: str,
+    equality_mode: str,
+) -> list[_FeatureFractalCandidate]:
+    return list(
+        _iter_feature_fractal_candidates(
+            strokes,
+            start=start,
+            direction=direction,
+            inclusion_mode=inclusion_mode,
+            equality_mode=equality_mode,
+        )
+    )
 
 
 def _three_stroke_overlap(strokes: Sequence[Stroke], start: int) -> bool:
@@ -1263,7 +1288,7 @@ def build_segments(
         if not _three_stroke_overlap(strokes, start):
             break
         direction = strokes[start].direction
-        candidates = _feature_fractal_candidates(
+        candidates = _iter_feature_fractal_candidates(
             strokes,
             start=start,
             direction=direction,
@@ -1300,19 +1325,20 @@ def build_segments(
                 confirmed_index=opened_at[0],
                 confirmed_time=opened_at[1],
             )
-            opposite = _feature_fractal_candidates(
-                strokes,
-                start=candidate.endpoint_stroke_position,
-                direction=-direction,
-                inclusion_mode=inclusion_mode,
-                equality_mode=equality_mode,
+            confirmation = next(
+                (
+                    item
+                    for item in _iter_feature_fractal_candidates(
+                        strokes,
+                        start=candidate.endpoint_stroke_position,
+                        direction=-direction,
+                        inclusion_mode=inclusion_mode,
+                        equality_mode=equality_mode,
+                    )
+                    if item.detected_index >= candidate.detected_index
+                ),
+                None,
             )
-            opposite = [
-                item
-                for item in opposite
-                if item.detected_index >= candidate.detected_index
-            ]
-            confirmation = opposite[0] if opposite else None
             confirmation_at = (
                 _latest_confirmation(
                     (confirmation.detected_index, confirmation.detected_time),

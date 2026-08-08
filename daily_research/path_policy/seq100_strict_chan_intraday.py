@@ -387,6 +387,7 @@ def _prepare_symbol_episodes(
     pinned: Mapping[str, str],
     manifests: Mapping[str, Any],
     runtime: Mapping[str, Any],
+    input_provenance: Mapping[str, Any] | None = None,
 ) -> IntradayEpisodes:
     """Apply the causal completeness, adjustment, and episode contract to one symbol."""
     if intraday.empty:
@@ -436,6 +437,7 @@ def _prepare_symbol_episodes(
         "pinned_datasets": pinned,
         "dataset_manifests": manifests,
         "runtime": runtime,
+        "input_provenance": dict(input_provenance or {"mode": "qdp_source"}),
         "raw_intraday_rows": len(intraday),
         "daily_rows": len(daily),
         "positive_daily_days": len(positive_dates),
@@ -470,6 +472,34 @@ def _validate_load_window(
         raise ValueError("strict_chan_intraday_forbidden_date")
 
 
+def _resolve_input_paths(
+    source_paths: Mapping[str, Sequence[Path]],
+    paths_override: Mapping[str, Sequence[str | Path]] | None,
+) -> dict[str, tuple[Path, ...]]:
+    if paths_override is None:
+        return {domain: tuple(paths) for domain, paths in source_paths.items()}
+    missing_domains = set(source_paths) - set(paths_override)
+    if missing_domains:
+        raise ValueError(
+            f"strict_chan_intraday_override_domains_missing:{sorted(missing_domains)}"
+        )
+    paths = {
+        domain: tuple(Path(path).resolve() for path in paths_override[domain])
+        for domain in source_paths
+    }
+    missing_paths = [
+        str(path)
+        for domain_paths in paths.values()
+        for path in domain_paths
+        if not path.is_file()
+    ]
+    if missing_paths:
+        raise ValueError(
+            f"strict_chan_intraday_override_paths_missing:{len(missing_paths)}"
+        )
+    return paths
+
+
 def load_symbols_episodes(
     symbols: Sequence[str],
     *,
@@ -478,6 +508,8 @@ def load_symbols_episodes(
     definition_path: str | Path = parser.DEFAULT_DEFINITION_PATH,
     temporary_root: str | Path | None = None,
     contiguous_symbol_range: bool = False,
+    paths_override: Mapping[str, Sequence[str | Path]] | None = None,
+    input_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, IntradayEpisodes]:
     """Load a batch of symbols using one pinned snapshot and one DuckDB connection."""
     requested = sorted({str(symbol) for symbol in symbols})
@@ -485,7 +517,8 @@ def load_symbols_episodes(
         return {}
     spec = parser.load_definition_spec(definition_path)
     _validate_load_window(spec, start_date=start_date, end_date=end_date)
-    _, pinned, paths, manifests = _snapshot(spec)
+    _, pinned, source_paths, manifests = _snapshot(spec)
+    paths = _resolve_input_paths(source_paths, paths_override)
     temporary = Path(temporary_root) if temporary_root else None
     connection, runtime = _connect(temporary)
     try:
@@ -526,6 +559,85 @@ def load_symbols_episodes(
             pinned=pinned,
             manifests=manifests,
             runtime=runtime,
+            input_provenance=input_provenance,
+        )
+    return loaded
+
+
+def load_symbol_windows_episodes(
+    windows: Mapping[str, tuple[str, str]],
+    *,
+    definition_path: str | Path = parser.DEFAULT_DEFINITION_PATH,
+    temporary_root: str | Path | None = None,
+    paths_override: Mapping[str, Sequence[str | Path]] | None = None,
+    input_provenance: Mapping[str, Any] | None = None,
+) -> dict[str, IntradayEpisodes]:
+    """Load unique symbols with individual windows through one shared source scan."""
+    requested = sorted({str(symbol) for symbol in windows})
+    if not requested:
+        return {}
+    normalized_windows: dict[str, tuple[str, str]] = {}
+    spec = parser.load_definition_spec(definition_path)
+    for symbol in requested:
+        start_date, end_date = map(str, windows[symbol])
+        if start_date > end_date:
+            raise ValueError(f"strict_chan_intraday_window_order_invalid:{symbol}")
+        _validate_load_window(spec, start_date=start_date, end_date=end_date)
+        normalized_windows[symbol] = (start_date, end_date)
+    global_start = min(value[0] for value in normalized_windows.values())
+    global_end = max(value[1] for value in normalized_windows.values())
+    _, pinned, source_paths, manifests = _snapshot(spec)
+    paths = _resolve_input_paths(source_paths, paths_override)
+    temporary = Path(temporary_root) if temporary_root else None
+    connection, runtime = _connect(temporary)
+    try:
+        intraday_frame, factor_frame, daily_frame = _query_symbols_inputs(
+            connection,
+            paths,
+            symbols=requested,
+            start_date=global_start,
+            end_date=global_end,
+        )
+    finally:
+        connection.close()
+
+    def groups(frame: pd.DataFrame) -> dict[str, pd.DataFrame]:
+        return {
+            str(symbol): group.copy()
+            for symbol, group in frame.groupby("symbol", sort=False)
+        }
+
+    intraday_by_symbol = groups(intraday_frame)
+    factors_by_symbol = groups(factor_frame)
+    daily_by_symbol = groups(daily_frame)
+    empty_intraday = intraday_frame.iloc[0:0].copy()
+    empty_factors = factor_frame.iloc[0:0].copy()
+    empty_daily = daily_frame.iloc[0:0].copy()
+
+    def windowed(frame: pd.DataFrame, start_date: str, end_date: str) -> pd.DataFrame:
+        if frame.empty:
+            return frame.copy()
+        dates = frame["trade_date"].astype(str)
+        return frame.loc[dates.between(start_date, end_date)].copy()
+
+    loaded: dict[str, IntradayEpisodes] = {}
+    for symbol in requested:
+        start_date, end_date = normalized_windows[symbol]
+        loaded[symbol] = _prepare_symbol_episodes(
+            symbol,
+            windowed(
+                intraday_by_symbol.get(symbol, empty_intraday), start_date, end_date
+            ),
+            windowed(
+                factors_by_symbol.get(symbol, empty_factors), start_date, end_date
+            ),
+            windowed(daily_by_symbol.get(symbol, empty_daily), start_date, end_date),
+            start_date=start_date,
+            end_date=end_date,
+            pinned=pinned,
+            manifests=manifests,
+            runtime=runtime,
+            input_provenance=input_provenance,
         )
     return loaded
 

@@ -13,6 +13,7 @@ from typing import Any
 
 import pandas as pd
 
+from daily_research.path_policy import seq100_strict_chan_cache as input_cache
 from daily_research.path_policy import seq100_strict_chan_intraday as intraday
 from daily_research.path_policy import seq100_strict_chan_parser as parser
 
@@ -249,6 +250,7 @@ def _config_fingerprint(
         "definition_sha256": definition_sha256,
         "implementation_sha256": implementation_sha256,
         "pinned_datasets": dict(source.get("pinned_datasets", {})),
+        "input_cache": source.get("input_cache"),
         "formal_start": "2012-01-01",
         "formal_end": "2025-12-31",
         "burn_in_start": "2010-01-01",
@@ -265,13 +267,37 @@ def build_panel_partition(
     maximum_symbols: int | None = None,
     resume: bool = True,
     dry_run: bool = False,
+    input_cache_root: str | Path = input_cache.DEFAULT_CACHE_ROOT,
+    use_input_cache: bool = True,
 ) -> dict[str, Any]:
     root = Path(output_root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     if bucket_id < 0 or bucket_id >= bucket_count:
         raise ValueError("strict_chan_panel_bucket_id_invalid")
     spec = _panel_spec()
-    symbols, source = _query_symbols(spec, output_root=root)
+    cache_view = (
+        input_cache.resolve_active_cache(
+            cache_root=input_cache_root,
+            definition_path=parser.DEFAULT_DEFINITION_PATH,
+            bucket_count=bucket_count,
+        )
+        if use_input_cache
+        else None
+    )
+    if cache_view is None:
+        symbols, source = _query_symbols(spec, output_root=root)
+    else:
+        _, pinned, _, manifests = intraday._snapshot(spec)
+        symbols = list(cache_view.symbols)
+        source = {
+            "pinned_datasets": pinned,
+            "dataset_manifests": manifests,
+            "input_cache": {
+                "mode": "strict_chan_bucket_cache",
+                "fingerprint": cache_view.fingerprint,
+                "generation_root": str(cache_view.generation_root),
+            },
+        }
     members = _bucket_members(
         symbols,
         bucket_id=bucket_id,
@@ -328,6 +354,14 @@ def build_panel_partition(
         definition_path=parser.DEFAULT_DEFINITION_PATH,
         temporary_root=bucket_root / "duckdb_tmp",
         contiguous_symbol_range=True,
+        paths_override=(
+            cache_view.paths_for_bucket(bucket_id) if cache_view is not None else None
+        ),
+        input_provenance=(
+            source.get("input_cache")
+            if cache_view is not None
+            else {"mode": "qdp_source"}
+        ),
     )
     events: list[dict[str, Any]] = []
     snapshots: list[dict[str, Any]] = []
@@ -397,6 +431,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--bucket-id", type=int, required=True)
     argument_parser.add_argument("--bucket-count", type=int, default=256)
     argument_parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
+    argument_parser.add_argument(
+        "--input-cache-root", default=str(input_cache.DEFAULT_CACHE_ROOT)
+    )
+    argument_parser.add_argument("--no-input-cache", action="store_true")
     argument_parser.add_argument("--max-symbols", type=int, default=None)
     argument_parser.add_argument("--no-resume", action="store_true")
     argument_parser.add_argument("--dry-run", action="store_true")
@@ -412,6 +450,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         maximum_symbols=args.max_symbols,
         resume=not args.no_resume,
         dry_run=args.dry_run,
+        input_cache_root=args.input_cache_root,
+        use_input_cache=not args.no_input_cache,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0

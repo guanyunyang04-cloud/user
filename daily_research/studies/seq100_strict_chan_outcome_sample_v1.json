@@ -1,0 +1,76 @@
+{
+  "study_id": "seq100_strict_chan_outcome_sample_v1",
+  "status": "frozen_outcome_blind_expanded_sample",
+  "parent_study_id": "seq100_strict_chan_definition_v1",
+  "purpose": "Freeze a larger outcome-blind sample for an efficient strict-Chan buy-point path screen after parser correctness has passed.",
+  "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+  "boundaries": {
+    "future_path_test_performed": false,
+    "return_test_performed": false,
+    "profit_claim_allowed": false,
+    "account_replay_allowed": false,
+    "model_training_allowed": false,
+    "selection_role": "Selection reads only PIT quality-pool symbol and trade_date. Outcomes are computed later by a separate frozen screen."
+  },
+  "selection": {
+    "algorithm": "sha256_lexicographic_row_rank",
+    "random_seed": 419083,
+    "population": "quality_liquidity_pit",
+    "population_symbol_suffix_contract": [".SH", ".SZ"],
+    "selection_columns": ["symbol", "trade_date"],
+    "forbidden_selection_inputs": [
+      "future_return",
+      "action_value",
+      "label",
+      "parser_event",
+      "parser_outcome",
+      "profit",
+      "trade_result"
+    ],
+    "globally_unique_symbols": true,
+    "focal_date_bounds": {
+      "earliest": "2012-10-01",
+      "latest": "2025-06-30"
+    },
+    "window": {
+      "parse_lookback_calendar_days": 270,
+      "parse_lookahead_calendar_days": 180,
+      "display_before_calendar_days": 30,
+      "display_after_calendar_days": 120
+    },
+    "strata": [
+      {"stratum_id": "2012_2013_sh", "years": [2012, 2013], "symbol_suffix": ".SH", "samples": 10},
+      {"stratum_id": "2012_2013_sz", "years": [2012, 2013], "symbol_suffix": ".SZ", "samples": 10},
+      {"stratum_id": "2014_2015_sh", "years": [2014, 2015], "symbol_suffix": ".SH", "samples": 10},
+      {"stratum_id": "2014_2015_sz", "years": [2014, 2015], "symbol_suffix": ".SZ", "samples": 10},
+      {"stratum_id": "2016_2017_sh", "years": [2016, 2017], "symbol_suffix": ".SH", "samples": 10},
+      {"stratum_id": "2016_2017_sz", "years": [2016, 2017], "symbol_suffix": ".SZ", "samples": 10},
+      {"stratum_id": "2018_2019_sh", "years": [2018, 2019], "symbol_suffix": ".SH", "samples": 10},
+      {"stratum_id": "2018_2019_sz", "years": [2018, 2019], "symbol_suffix": ".SZ", "samples": 10},
+      {"stratum_id": "2020_2021_sh", "years": [2020, 2021], "symbol_suffix": ".SH", "samples": 10},
+      {"stratum_id": "2020_2021_sz", "years": [2020, 2021], "symbol_suffix": ".SZ", "samples": 10},
+      {"stratum_id": "2022_2023_sh", "years": [2022, 2023], "symbol_suffix": ".SH", "samples": 10},
+      {"stratum_id": "2022_2023_sz", "years": [2022, 2023], "symbol_suffix": ".SZ", "samples": 10},
+      {"stratum_id": "2024_2025_sh", "years": [2024, 2025], "symbol_suffix": ".SH", "samples": 10},
+      {"stratum_id": "2024_2025_sz", "years": [2024, 2025], "symbol_suffix": ".SZ", "samples": 10}
+    ]
+  },
+  "profiles": {"primary": {}},
+  "prefix_validation": {
+    "profiles": "none_for_outcome_screen",
+    "cutoffs_per_episode": 0,
+    "maximum_episodes_per_case": 0,
+    "exact_discrete_event_match": true
+  },
+  "visualization": {
+    "show_adjusted_path": false,
+    "show_raw_vs_adjusted_normalized_path": false,
+    "show_fractals": false,
+    "show_strokes": false,
+    "show_segments": false,
+    "show_primary_centers": false,
+    "show_pending_state_events": false,
+    "show_trade_point_candidates": false,
+    "maximum_center_level": 0
+  }
+}

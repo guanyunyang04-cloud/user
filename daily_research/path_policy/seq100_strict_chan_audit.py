@@ -34,6 +34,8 @@ AUDIT_SCHEMA_VERSION = "seq100_strict_chan_audit/1"
 SUPPORTED_AUDIT_STUDY_IDS = {
     "seq100_strict_chan_audit_v1",
     "seq100_strict_chan_stratified_audit_v1",
+    "seq100_strict_chan_outcome_sample_v1",
+    "seq100_strict_chan_type1_confirmation_sample_v1",
 }
 SUPPORTED_ASSERTION_OPERATORS = {"<", "<=", "==", ">=", ">"}
 
