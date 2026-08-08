@@ -17,6 +17,11 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
+The immediate subtask is a primary-source reassessment of Chan theory before
+any further path-policy training. Its deterministic market grammar, causal
+confirmation rules, and empirical profit claims must be separated and tested
+independently.
+
 No production model, portfolio, stop, or trading policy has been selected.
 Multiple strictly causal transparent predictor, path-structure, and executable
 trade probes are complete; none passed the account-replay gate. There is no
@@ -295,6 +300,31 @@ last-30-minute return is relatively better in 10/13 years, but uncertainty
 still crosses zero after correction. Nested pullback and exhaustion states do
 not provide a cost-robust absolute edge.
 
+## Chan-theory source audit
+
+The current parser is not an orthodox Chan implementation and its negative
+experiments do not reject the complete theory. Primary-source cross-checking of
+the 108 lessons shows that the intended hierarchy is inclusion-normalized K
+lines to fractals, strokes, feature-sequence-confirmed segments, lowest-level
+centers, recursively higher-level centers and trend types, divergence, and the
+three buy/sell-point classes. Pending or "middle-yin" states and event-versus-
+confirmation time are part of the theory and cannot be silently backfilled.
+
+The formalizable part is a deterministic causal path parser. The profit claims
+are separate and unproved. In particular, the author never supplies a closed
+measure for exact trend strength/divergence, later permits different unique
+base constructions, admits legitimate recombination views, and in lesson 107
+explicitly distinguishes theoretical next-leg existence from enough executable
+profit to cover fees. Exact self-isomorphism, 100%-safe buy points, and stable
+profit after delay, gaps, T+1, and costs must therefore remain empirical
+hypotheses rather than mathematical consequences.
+
+The previously scraped FURLEADER corpus is not a clean 108-lesson body: many
+pages append unrelated article text. Use the archived lesson-by-lesson source
+and attributed replies in `stockServ/chzhshch-108-plus` as the primary public
+cross-check, with FURLEADER only as secondary corroboration. Direct scholarly
+search found no reliable peer-reviewed causal test of complete Chan theory.
+
 ## Absolute causal K-line strategy evidence
 
 The `seq100_causal_pattern_strategy_probe_v1` study separates literal trade
@@ -412,28 +442,46 @@ mechanical results reject simple fixed or hand-written exits. The ceiling shows
 large ex-post headroom but does not establish that either the entry shape or
 the exit day is prospectively identifiable.
 
-The next bounded work is:
+The user has temporarily prioritized a deeper Chan-theory reassessment before
+the stopping study. The next bounded work is:
 
-1. Build a same-date, same-risk, same-activity non-pattern control and compare
+1. Freeze a definition-dependency specification that distinguishes strict
+   definitions, chosen engineering conventions, confirmation delay, unresolved
+   ambiguity, and profit hypotheses. Do not treat a selected parser convention
+   as a discovered natural market law.
+2. Build a separate strict causal Chan parser from five-minute data upward,
+   without replacing the validated weak grammar. Implement feature sequences,
+   both segment-break cases, pending/middle-yin states, recursive centers,
+   center extension/expansion/new birth, same-level decomposition, and explicit
+   event and confirmation timestamps.
+3. Compare parser alternatives where the source leaves choices open, including
+   equality rules, initial direction, strict-stroke conventions, base-unit
+   construction, decomposition mode, and competing quantitative definitions of
+   strength/divergence. Require prefix invariance and report coverage,
+   confirmation lag, and disagreement before testing returns.
+4. Test whether the complete structures add future-path information beyond
+   volatility, activity, market regime, and the existing weak grammar. Only
+   then test executable first/second/third-point policies under both costs.
+5. Build a same-date, same-risk, same-activity non-pattern control and compare
    its legal stopping ceiling with each K-line entry type. This determines
    whether the large headroom belongs to the named pattern or merely to active
    volatile stocks and the 40-session maximum operator.
-2. Join the existing causal market, industry, cross-sectional, and five-minute
+6. Join the existing causal market, industry, cross-sectional, and five-minute
    coordinates to each open-position day, including same-day signal breadth and
    explicit missingness when a held stock leaves the current quality pool.
-3. Fit a transparent expanding-year fitted-Q baseline that separately predicts
+7. Fit a transparent expanding-year fitted-Q baseline that separately predicts
    the value of `request_sell` and `hold`, using only prior-year episodes. Each
    following year is simulated chronologically with daily re-evaluation and no
    fixed D target. Mechanical policies remain frozen controls.
-4. Determine whether peak giveback, exhaustion, market regime, signal breadth,
+8. Determine whether peak giveback, exhaustion, market regime, signal breadth,
    or intraday state predicts residual waiting value. If causal stopping still
    loses, reject exit-only rescue and return to regime-conditioned entry
    selection rather than escalating model complexity.
-5. Use financing balance, net financing flow, and financing/price divergence
+9. Use financing balance, net financing flow, and financing/price divergence
    only as residual covariates after exact publication alignment; do not use
    them as entry gates unless they improve the stopping/value model out of
    sample under both costs.
-6. Replay a legal account only after a frozen policy has positive absolute net
+10. Replay a legal account only after a frozen policy has positive absolute net
    value under base and double-slippage costs, a positive uncertainty lower
    bound, and majority-year stability. A raw/deep sequence model remains a
    later challenger if transparent state leaves reproducible residual value.
