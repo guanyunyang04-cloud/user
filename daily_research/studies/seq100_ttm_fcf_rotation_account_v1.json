@@ -1,0 +1,70 @@
+{
+  "study_id": "seq100_ttm_fcf_rotation_account_v1",
+  "status": "frozen_posthoc_exact_account_falsification",
+  "purpose": "Falsify the natural-phase monthly 12-of-48 TTM-FCF rotation using exact lots, raw execution prices, PIT total-return factors, minimum commissions, taxes, slippage, capacity, T+1 and a D60 sell request deferred until the first legal exit.",
+  "epistemic_contract": {
+    "candidate_and_rotation_were_designed_after_historical_inspection": true,
+    "natural_phase_zero_is_frozen_without_selecting_the_best_observed_phase": true,
+    "no_parameter_grid_is_allowed": true,
+    "account_success_cannot_create_an_untouched_alpha_claim": true,
+    "52_week_low_or_distance_from_low_reward_is_forbidden": true,
+    "forbidden_2026_data_remain_untouched": true
+  },
+  "source": {
+    "ttm_value_summary": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/summary.json",
+    "ttm_value_summary_sha256": "c6f449467d6ddfadca7c2b26c72d540a5c2d17e657ebb00ae6871729e128bbc8",
+    "variant_selections": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/variant_selections.parquet",
+    "variant_selections_sha256": "84c358878078462ba27d0a9083501d420c99a299be3a44d499bfa878d5ab484d",
+    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
+    "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
+    "maximum_account_mark_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "selection": {
+    "source_variant": "ttm_fcf_yield_only",
+    "source_rank_count": 48,
+    "monthly_order_count": 12,
+    "rank_partition_modulus": 4,
+    "natural_phase": 0,
+    "rule": "on chronological month ordinal m, use source ranks whose zero-based rank modulo four equals m modulo four",
+    "industry_cap_inherited_before_partition": 4,
+    "future_outcomes_used": false
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "position_slots": 48,
+    "entry": "next legal raw-price open",
+    "exit": "fixed D60 close request deferred until the first legal sellable close; unresolved positions receive the pack terminal recovery only at the frozen 2025-12-31 cutoff",
+    "bounded_d80_writeoff_sensitivity": "also report the original pack D80 terminal-recovery result as an intentionally severe pressure case",
+    "cost_scenario": "double_slippage",
+    "pyramiding": false,
+    "pyramiding_sensitivity": "report independent monthly lots of a repeated name, but do not use it for the primary decision",
+    "replace_duplicate_or_unavailable_ranked_names": true,
+    "lot_size": 100,
+    "maximum_signal_day_amount_fraction": 0.005,
+    "corporate_action_accounting": "raw execution prices and costs with pack-pinned back-adjust-factor ratio as total-return equivalent",
+    "confirmation_restart": "fresh 1000000 CNY at the first 2023 signal",
+    "round_lots_and_minimum_commission_modeled": true
+  },
+  "evaluation": {
+    "years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "full_history_diagnostic": {
+      "minimum_positive_years": 10,
+      "maximum_drawdown": 0.35
+    },
+    "confirmation_restart_diagnostic": {
+      "minimum_positive_years": 2,
+      "maximum_drawdown": 0.25
+    }
+  },
+  "decision_boundary": {
+    "account_optimization_performed": false,
+    "live_alpha_claim_allowed": false,
+    "production_strategy_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_ttm_fcf_rotation_account_v1"
+  }
+}

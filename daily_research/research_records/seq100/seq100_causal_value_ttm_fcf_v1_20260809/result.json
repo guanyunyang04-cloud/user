@@ -1,0 +1,61 @@
+{
+  "schema": "seq100_causal_value_ttm_fcf_research_record/1",
+  "status": "secondary_candidate_not_production",
+  "date": "2026-08-09",
+  "formal_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+  "forbidden_2026_read_count": 0,
+  "distance_from_52_week_low_reward_used": false,
+  "complete_value_quality_revision_price_policy_passed": false,
+  "analyst_revision_incremental_policy_passed": false,
+  "value_overlay_improved_margin_residual_policy": false,
+  "valuation_right_edge_exit_improved_d60": false,
+  "ttm_contract": {
+    "coverage_fraction": 0.9505,
+    "spearman_ttm_vs_latest_period_fcf": 0.51577,
+    "latest_period_fcf_accepted_as_ttm_evidence": false
+  },
+  "primary_exact_account": {
+    "policy": "ttm_fcf_top48_natural_rank_residue_monthly12_fixed_d60",
+    "starting_cash_cny": 1000000.0,
+    "liquidated_ending_equity_cny": 2737859.7262443937,
+    "liquidated_total_return": 1.7378597262443938,
+    "annualized_log_growth": 0.0768185461034819,
+    "signal_period_cagr_trading_days": 0.08151365442947318,
+    "maximum_drawdown": -0.36653349059901785,
+    "positive_years": 11,
+    "year_count": 14,
+    "closed_trade_count": 1537,
+    "winning_trade_rate": 0.505530253741054,
+    "mean_capital_utilization": 0.5686102789245947,
+    "maximum_position_count": 42,
+    "fees_and_slippage_cny": 234683.72257720563,
+    "gate_passed": false,
+    "failed_gate": "maximum_drawdown_above_35_percent_limit"
+  },
+  "fresh_2023_2025_restart": {
+    "starting_cash_cny": 1000000.0,
+    "liquidated_ending_equity_cny": 1265406.1651511756,
+    "annualized_log_growth": 0.09415725992619493,
+    "maximum_drawdown": -0.10514863677138175,
+    "positive_years": 3,
+    "year_count": 3,
+    "gate_passed": true,
+    "untouched_confirmation_claim_allowed": false
+  },
+  "bounded_d80_writeoff_sensitivity": {
+    "liquidated_ending_equity_cny": 2047006.6074965855,
+    "annualized_log_growth": 0.0546390407720406,
+    "maximum_drawdown": -0.47862383706504685,
+    "terminal_recovery_count": 15,
+    "gate_passed": false
+  },
+  "pyramiding_sensitivity": {
+    "liquidated_ending_equity_cny": 3721376.5302843605,
+    "annualized_log_growth": 0.10022748062504173,
+    "maximum_drawdown": -0.4005922726305504,
+    "positive_years": 10,
+    "gate_passed": false
+  },
+  "production_policy_selected": false,
+  "profit_guarantee_allowed": false
+}

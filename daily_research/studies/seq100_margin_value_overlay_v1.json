@@ -1,0 +1,78 @@
+{
+  "study_id": "seq100_margin_value_overlay_v1",
+  "status": "frozen_retrospective_overlay_contract",
+  "purpose": "Test whether a transparent PIT industry-relative value score adds robust D20 information to the strongest existing frozen margin-observed stock-residual policy.",
+  "epistemic_contract": {
+    "all_evaluation_years_are_already_retrospectively_consumed": true,
+    "the_frozen_stock_forecasts_are_reused_without_refit": true,
+    "the_existing_bad_tail_veto_and_margin_observation_gate_are_unchanged": true,
+    "52_week_low_or_distance_from_low_reward_is_forbidden": true,
+    "only_two_predeclared_value_overlays_are_tested": true,
+    "cash_is_used_for_unfilled_or_unselected_slots": true,
+    "forbidden_2026_data_remain_untouched": true
+  },
+  "source": {
+    "margin_study": "daily_research/studies/seq100_margin_residual_policy_v1.json",
+    "margin_study_sha256": "2be7ab5bc42df22ff0cc012b893e4f88be3c5971217348938aff0a82f2bdba3a",
+    "development_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+    "development_summary_sha256": "e91bb273686ef0cc17f94d020914ac2f2a03a45f0d176ae525a52d52ab647ff3",
+    "confirmation_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+    "confirmation_summary_sha256": "26242ecb01c89789b8af9b4fd15cdd3f6c955577ea74110b05506e3842897c0a",
+    "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "expected_row_count": 4191476,
+    "formal_start_year": 2014,
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "value": {
+    "components": [
+      "industry percentile of lower positive PE",
+      "industry percentile of lower positive PB",
+      "industry percentile of higher PIT free-cash-flow yield"
+    ],
+    "minimum_components": 2,
+    "positive_pe_and_pb_required": true,
+    "minimum_industry_rank_group_size": 10,
+    "explicitly_excluded": [
+      "52_week_low",
+      "distance_from_52_week_low",
+      "price_range_position_as_a_cheapness_reward"
+    ]
+  },
+  "policies": {
+    "primary_challenger": "residual_with_value_median_gate",
+    "variants": [
+      "frozen_residual_baseline",
+      "residual_with_value_median_gate",
+      "equal_rank_residual_value_blend"
+    ],
+    "value_median_gate": "value score >= 0.50 at the same signal close",
+    "equal_rank_blend": "equal mean of same-date residual percentile and PIT value score; no fitted weight",
+    "top_k": 48,
+    "maximum_names_per_pit_industry": 4,
+    "bad_tail_veto_fraction": 0.1
+  },
+  "target": {
+    "horizon": 20,
+    "entry": "next legal open after signal close",
+    "exit": "D20 close with legal-sale retry",
+    "round_trip_cost_proxy": 0.006
+  },
+  "evaluation": {
+    "periods": {
+      "expanded_development_already_consumed": [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022],
+      "retrospective_confirmation_already_consumed": [2023, 2024, 2025]
+    },
+    "inference": {
+      "hac_lag_open_days": 20,
+      "moving_block_length_open_days": 20,
+      "bootstrap_repetitions": 5000,
+      "seed": 20260808
+    }
+  },
+  "decision_boundary": {
+    "account_replay_performed": false,
+    "live_alpha_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_margin_value_overlay_v1"
+  }
+}

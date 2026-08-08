@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-08
+Updated: 2026-08-09
 
 ## Active objective
 
@@ -79,6 +79,39 @@ eligibility constraint, not a bullish balance-growth signal. Its mechanism may
 be liquidity, margin eligibility, institutional coverage, or data quality and
 is not identified.
 
+### Causal value and TTM free-cash-flow branch
+
+The supplemental `value + quality + fundamental improvement + analyst
+revision + price confirmation` hypothesis has been translated into PIT tests.
+Distance from the 52-week low is explicitly forbidden as a reward. The full
+composite, quality-only policy, analyst-revision variants, and value overlays
+on the frozen margin-residual model did not improve consistently across time.
+Valuation-median/right-edge exits underperformed holding the same entries to
+D60 because they clipped rare large winners. Do not use a calculated fair-value
+right boundary as an automatic take-profit on this evidence.
+
+The compact free-cash-flow field was not TTM: it mixed the latest Q1, H1, Q3,
+or annual cumulative period. A causal TTM bridge was implemented from statement
+versions available at each signal close. Coverage is about 95.1%, and its
+Spearman correlation with the old latest-period field is only about 0.516. The
+old field is not accepted as TTM evidence.
+
+The durable component is a broad industry-aware TTM-FCF-yield exposure, not
+precise Top10 stock picking. A natural, non-optimized monthly 12-of-Top48 rank
+rotation was replayed with raw prices, total-return factors, exact lots/minimum
+fees/taxes, double slippage, 0.5% amount capacity, no pyramiding, and D60 legal
+sale requests. Blocked positions now remain held until their first legal sale;
+the former D80 write-to-zero behavior is retained only as a pressure case.
+
+The exact 2012-2025 account grew CNY 1 million to about CNY 2.738 million after
+liquidation, with 7.68% annualized log growth, 11/14 positive years, and 36.65%
+maximum drawdown. A fresh 2023-2025 restart ended near CNY 1.265 million with
+10.51% maximum drawdown and all three years positive. The primary frozen gate
+still failed because drawdown exceeded its 35% limit. Pyramiding raised growth
+but worsened drawdown to about 40%; it also failed. This is a secondary
+interpretable historical candidate and does not displace the risk-budgeted
+margin-residual policy.
+
 ### Strongest current policy
 
 Frozen rule:
@@ -131,8 +164,9 @@ it does not turn historical evidence into guaranteed annual profit.
 
 The first serious strategy candidate and its risk-budgeted account are now
 implemented, corrected for corporate actions, capacity constrained, and
-historically validated through 2025. Further tuning on 2014-2025 would mostly
-spend already consumed evidence.
+historically validated through 2025. The causal-value/TTM-FCF branch is also
+complete and all 2012-2025 evidence it used is consumed. Further tuning of
+either branch on the same years would mostly spend already consumed evidence.
 
 Next legitimate actions, in order:
 
@@ -144,7 +178,8 @@ Next legitimate actions, in order:
 3. If a new historical hypothesis is pursued, give it a new development and
    confirmation contract. High-value candidates are richer non-price causal
    information or a genuinely new raw-sequence representation, not another
-   Chan point/exit parameter grid.
+   Chan point/exit parameter grid, TTM-FCF rank phase, breadth, or holding-day
+   search.
 4. Promote only after fresh forward evidence supports absolute net value and
    acceptable drawdown. Current status remains
    `strongest_candidate_not_production`.
@@ -153,6 +188,8 @@ Next legitimate actions, in order:
 
 - Durable result and interpretation:
   `daily_research/research_records/seq100/seq100_margin_residual_policy_v1_20260808/`
+- Causal-value/TTM-FCF result and interpretation:
+  `daily_research/research_records/seq100/seq100_causal_value_ttm_fcf_v1_20260809/`
 - Margin residual policy and outputs:
   `daily_research/studies/seq100_margin_residual_policy_v1.json` and
   `daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/`
@@ -164,6 +201,11 @@ Next legitimate actions, in order:
   `daily_research/path_policy/seq100_margin_residual_policy.py`,
   `daily_research/path_policy/seq100_margin_residual_account_feasibility.py`,
   and `daily_research/path_policy/seq100_finite_capital_backtest.py`.
+- Value/TTM contracts and implementations:
+  `daily_research/studies/seq100_causal_value_policy_v1.json`,
+  `daily_research/studies/seq100_ttm_value_account_v1.json`,
+  `daily_research/studies/seq100_ttm_fcf_rotation_account_v1.json`, and their
+  matching `daily_research/path_policy/seq100_*` modules.
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.

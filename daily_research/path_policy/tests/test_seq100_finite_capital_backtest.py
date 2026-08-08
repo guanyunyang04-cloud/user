@@ -339,6 +339,37 @@ def test_low_price_terminal_writeoff_never_overdraws_cash() -> None:
     assert metric["liquidated_ending_equity_cny"] >= 0.0
 
 
+def test_terminal_recovery_can_wait_for_a_later_legal_exit() -> None:
+    market = _market(symbol_count=1, date_count=100)
+    market.exit_sellable[:, 0] = False
+    market.exit_sellable[90, 0] = True
+    book = ForecastBook("extended_legal_exit", top_k=1)
+    book.add_day(
+        date_idx=0,
+        symbol_idx=np.asarray([0]),
+        score=np.asarray([1.0]),
+        planned_day=np.asarray([2]),
+    )
+
+    metric, _equity, trades, _annual = simulate_portfolio(
+        market=market,
+        book=book,
+        raw_top3_paths={},
+        policy=PolicySpec(name="fixed_d2", kind="fixed", fixed_day=2),
+        slots=1,
+        cost_scenario="base",
+        first_signal_date_idx=0,
+        last_signal_date_idx=0,
+        terminal_recovery_date_idx=90,
+    )
+
+    trade = trades.iloc[0]
+    assert trade["exit_reason"] == "deferred_sellable_close"
+    assert int(trade["exit_date_idx"]) == 90
+    assert metric["terminal_recovery_count"] == 0
+    assert metric["terminal_recovery_date_idx"] == 90
+
+
 def test_rolling_portfolio_uses_next_close_after_nonpositive_forecast() -> None:
     metric, _equity, trades, _annual = simulate_portfolio(
         market=_market(),

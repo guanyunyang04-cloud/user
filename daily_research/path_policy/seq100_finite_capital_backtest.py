@@ -1156,6 +1156,7 @@ def simulate_portfolio(
     maximum_signal_amount_fraction: float | None = None,
     exit_on_missing_forecast: bool = False,
     target_gross_fraction: float = 1.0,
+    terminal_recovery_date_idx: int | None = None,
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame, list[dict[str, Any]]]:
     policy.validate()
     if int(slots) <= 0:
@@ -1228,7 +1229,14 @@ def simulate_portfolio(
         if cost_scenario == "base"
         else float(market.costs.stress_slippage_multiplier)
     )
-    final_date_idx = int(last_signal_date_idx) + int(market.execution_days)
+    default_final_date_idx = int(last_signal_date_idx) + int(market.execution_days)
+    final_date_idx = default_final_date_idx
+    if terminal_recovery_date_idx is not None:
+        final_date_idx = int(terminal_recovery_date_idx)
+        if final_date_idx < default_final_date_idx:
+            raise ValueError(
+                "terminal_recovery_date_idx cannot precede the normal execution tail"
+            )
     if final_date_idx >= len(market.date_values):
         raise ValueError("execution tail is incomplete")
 
@@ -1373,8 +1381,11 @@ def simulate_portfolio(
                     requested_exit_date_idx=int(requested),
                     hard_cap_date_idx=int(order.signal_date_idx)
                     + int(market.forward_days),
-                    terminal_date_idx=int(order.signal_date_idx)
-                    + int(market.execution_days),
+                    terminal_date_idx=(
+                        int(order.signal_date_idx) + int(market.execution_days)
+                        if terminal_recovery_date_idx is None
+                        else int(terminal_recovery_date_idx)
+                    ),
                     last_mark_price=float(entry_price),
                     entry_adjust_factor=float(entry_adjust_factor),
                     last_adjust_factor=float(entry_adjust_factor),
@@ -1689,6 +1700,14 @@ def simulate_portfolio(
         calendar_years=calendar_years,
     )
     metric["corporate_action_adjusted_equivalent"] = bool(factor_panel is not None)
+    metric["terminal_recovery_date_idx"] = (
+        None if terminal_recovery_date_idx is None else int(terminal_recovery_date_idx)
+    )
+    metric["terminal_recovery_date"] = (
+        None
+        if terminal_recovery_date_idx is None
+        else str(market.date_values[int(terminal_recovery_date_idx)])
+    )
     return metric, equity_frame, trade_frame, annual
 
 
