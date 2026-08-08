@@ -17,10 +17,10 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
-No production model, portfolio, stop, or trading policy has been selected. Three
-strictly causal transparent predictor studies and one non-repainting
-path-structure diagnostic are complete; none passed the account-replay gate.
-There is no active training or execution process.
+No production model, portfolio, stop, or trading policy has been selected.
+Multiple strictly causal transparent predictor, path-structure, and executable
+trade probes are complete; none passed the account-replay gate. There is no
+active training or execution process.
 
 ## Formal research contract
 
@@ -295,6 +295,36 @@ last-30-minute return is relatively better in 10/13 years, but uncertainty
 still crosses zero after correction. Nested pullback and exhaustion states do
 not provide a cost-robust absolute edge.
 
+## Absolute causal K-line strategy evidence
+
+The `seq100_causal_pattern_strategy_probe_v1` study separates literal trade
+profit from the stricter oracle-relative action value. It evaluates retest,
+retest-plus-exhaustion, nested reacceleration, and breakout entries with causal
+state invalidation, small/medium reversal, or post-entry exhaustion exits. Each
+signal enters at the next open and exits only at the first later legal close;
+T+1, limits, suspension, 100-share lots, minimum commission, stamp tax, and
+base/double slippage are applied to a CNY 100,000 trade. No fixed holding day is
+used.
+
+The full 2012-2025 replay produces 306,755 nonoverlapping single-stock trades;
+all resolve before the terminal date. Independent validation exactly
+recomputes every entry, exit, and cost with zero numerical error and finds no
+2026 row or overlap. None of eight predeclared strategies passes. In the
+2013-2025 primary period, the relatively best entry is retest plus exhaustion
+followed by a small-scale reversal exit: date-equal gross return is about
+`+0.12%` (trade-weighted `+0.19%`), but date-equal net return is about `-0.17%`
+under base cost and `-0.31%` under double slippage; the HAC lower bounds are
+negative and only 5/13 years are positive. Other rules are worse.
+
+The important failure mode is realization rather than absence of path
+movement. For example, breakout entries experience roughly `+6.86%` mean
+maximum close-to-close excursion but finish near flat gross (date-equal about
+`-0.09%`, trade-weighted about `+0.07%`) under the tested invalidation exit.
+Median holding is only 3-5 sessions.
+The named states therefore expose volatile opportunity but the hand-written
+structural exits surrender gains or stop too early. A positive fixed-D view is
+not evidence that a causal dynamic exit can realize it.
+
 ## Current decisions and prohibitions
 
 - Do not train a fixed-D "good stock" classifier or imitate final-oracle action
@@ -312,35 +342,38 @@ not provide a cost-robust absolute edge.
 - Do not interpret a rising `rzye` or a financing/price divergence as proof of
   fund accumulation or a buy signal; distinguish balance, reported new flow,
   price scaling, eligibility, and publication timing.
+- Do not promote the exploratory D20 retest-plus-exhaustion mean. Its frozen
+  no-fixed-horizon follow-up is negative after exact costs.
 
 ## True pause point and next steps
 
-The non-repainting structure grammar and continuous retest-state study are
-complete and independently validated. Account replay remains prohibited. The
-broad named patterns and continuous retest coordinates mostly separate
-downside severity, not winner identity. The financing-balance result is only an
-exploratory causal probe and has not been independently frozen or validated.
+The non-repainting structure grammar, continuous retest-state study, and
+absolute causal K-line strategy probe are complete and independently
+validated. Account replay remains prohibited. Named entries create substantial
+intermediate movement, but the tested exits do not realize positive net value.
+The financing-balance result remains exploratory and has not provided a stable
+incremental entry signal.
 
 The next bounded work is:
 
-1. Freeze two distinct evaluation objects. Absolute executable net wealth
-   versus cash answers whether a causal strategy can make money; dynamic action
-   advantage versus the hindsight-oracle cash branch remains a stricter winner-
-   identification diagnostic. A negative oracle-relative value must not by
-   itself reject a positive executable strategy.
-2. Turn the financing probe into a preregistered study with exact publication
-   timing; separate balance, reported new financing minus repayment, and
-   balance relative to float market value. Match price reversal, size,
-   liquidity, industry, and market regime and evaluate strict expanding years.
-3. Test whether the retest drawdown-fraction clue and any financing/weak-price
-   interaction add residual information beyond the existing 66 coordinates.
-   Direct path distributions and causal dynamic exits are primary; fixed D
-   views are diagnostics rather than the definition of a good stock.
-4. Replay a legal account only after a frozen candidate has positive absolute
-   net value under base and double-slippage costs, a positive uncertainty lower
+1. Build a causal open-position episode panel for the frozen K-line entries.
+   Each daily row must include return since entry, peak-to-date expansion and
+   giveback, frozen boundary state, multi-scale path state, market regime, and
+   same-day five-minute coordinates.
+2. Treat exit as an optimal-stopping problem. Fit a transparent expanding-year
+   Longstaff-Schwartz or fitted-Q baseline for sell versus hold using absolute
+   legal wealth, and evaluate each following year without a fixed D target.
+3. Determine whether peak giveback, exhaustion, or other observable state can
+   predict the residual value of waiting before the gain disappears. The
+   hand-written exits and fixed-D views remain controls, not targets.
+4. Use financing balance, net financing flow, and financing/price divergence
+   only as residual covariates after exact publication alignment; do not use
+   them as entry gates unless they improve the stopping/value model out of
+   sample under both costs.
+5. Replay a legal account only after a frozen policy has positive absolute net
+   value under base and double-slippage costs, a positive uncertainty lower
    bound, and majority-year stability. A raw/deep sequence model remains a
-   later challenger only if transparent coordinates leave reproducible
-   residual information.
+   later challenger if transparent state leaves reproducible residual value.
 
 ## Current authoritative paths
 
@@ -363,6 +396,9 @@ The next bounded work is:
 - Causal path-structure study and validator:
   `daily_research/path_policy/seq100_causal_path_structure.py` and
   `daily_research/path_policy/seq100_causal_path_structure_validate.py`
+- Absolute causal K-line strategy probe and validator:
+  `daily_research/path_policy/seq100_causal_pattern_strategy_probe.py` and
+  `daily_research/path_policy/seq100_causal_pattern_strategy_probe_validate.py`
 - Study configurations:
   `daily_research/studies/seq100_dynamic_oracle_v1.json`,
   `daily_research/studies/seq100_dynamic_oracle_observable_audit_v1.json`,
@@ -370,7 +406,8 @@ The next bounded work is:
   `daily_research/studies/seq100_dynamic_oracle_causal_prefix_v1.json`,
   `daily_research/studies/seq100_dynamic_action_value_baselines_v1.json`,
   `daily_research/studies/seq100_dynamic_action_distribution_v1.json`,
-  `daily_research/studies/seq100_causal_path_structure_v1.json`
+  `daily_research/studies/seq100_causal_path_structure_v1.json`,
+  `daily_research/studies/seq100_causal_pattern_strategy_probe_v1.json`
 - Validated outputs:
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_observable_audit_v1/`,
@@ -378,6 +415,7 @@ The next bounded work is:
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/`,
-  `daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/`
+  `daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/`,
+  `daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/`
 - Durable prior evidence:
   `daily_research/research_records/seq100/`
