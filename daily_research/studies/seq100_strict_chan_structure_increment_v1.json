@@ -1,0 +1,118 @@
+{
+  "study_id": "seq100_strict_chan_structure_increment_v1",
+  "status": "frozen_structure_increment_and_matched_control_test",
+  "purpose": "Test whether causally confirmed strict-Chan structure attributes add complete-path information beyond transparent market coordinates, and whether strict points differ from same-date risk/activity-matched non-pattern states.",
+  "source": {
+    "sample_study": "daily_research/studies/seq100_strict_chan_structure_increment_sample_v1.json",
+    "coordinate_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+    "coordinate_validation": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+    "profile": "primary",
+    "side": "buy",
+    "point_types": [1, 2, 3],
+    "variant_priority": ["amount_per_bar", "duration_normalized_price_change", "macd_histogram_area", "center_core_return"],
+    "formal_start": "2012-01-01",
+    "formal_end": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "path": {
+    "entry": "first_available_session_after_confirmation_at_open",
+    "maximum_sessions": 40,
+    "require_complete_path": true,
+    "adjusted_prices_for_path": true,
+    "raw_prices_for_minimum_commission": true,
+    "costs": {
+      "lot_size": 100,
+      "commission_bps": 3.0,
+      "minimum_commission_cny": 5.0,
+      "transfer_fee_bps": 0.1,
+      "slippage_bps": 7.0,
+      "stress_slippage_multiplier": 2.0,
+      "stamp_tax_bps_before_2023_08_28": 10.0,
+      "stamp_tax_bps_from_2023_08_28": 5.0
+    }
+  },
+  "coordinates": {
+    "market_ret20_rank": "diagnostic",
+    "market_breadth_rank": "diagnostic",
+    "return_5d_rank": "diagnostic",
+    "return_20d_rank": "diagnostic",
+    "range_position_20d_rank": "diagnostic",
+    "volatility_5d_rank": "diagnostic",
+    "volatility_20d_rank": "diagnostic",
+    "downside_volatility_20d_rank": "diagnostic",
+    "intraday_range_rank": "diagnostic",
+    "relative_turnover_rank": "diagnostic",
+    "amount_rank": "diagnostic",
+    "price_amount_correlation_5d_rank": "diagnostic",
+    "minute_last_30m_return_rank": "diagnostic",
+    "minute_vwap_close_deviation_rank": "diagnostic",
+    "minute_realized_volatility_rank": "diagnostic",
+    "industry_relative_ret5_rank": "diagnostic"
+  },
+  "structure_features": [
+    "confirmation_delay_bars_log",
+    "signal_segment_span_log",
+    "signal_segment_abs_price_change",
+    "signal_segment_speed_log",
+    "signal_segment_macd_per_bar_price_log",
+    "signal_segment_amount_per_bar_log",
+    "comparison_span_ratio_log",
+    "comparison_price_change_ratio_log",
+    "comparison_macd_ratio_log",
+    "comparison_amount_ratio_log",
+    "divergence_strength_ratio",
+    "center_core_width_log",
+    "center_fluctuation_width_log",
+    "center_extension_count_log",
+    "center_point_location",
+    "active_pending_count_log",
+    "recent_pending_invalidation_fraction"
+  ],
+  "matching": {
+    "same_date": true,
+    "same_exchange_suffix": true,
+    "exclude_any_strict_buy_point_on_control_date": true,
+    "without_replacement_within_date": true,
+    "maximum_distance": 0.35,
+    "axes": [
+      "volatility_20d_rank",
+      "downside_volatility_20d_rank",
+      "intraday_range_rank",
+      "minute_realized_volatility_rank",
+      "relative_turnover_rank",
+      "amount_rank"
+    ]
+  },
+  "evaluation": {
+    "first_prediction_year": 2016,
+    "development_signal_years": [2016, 2017, 2018, 2019],
+    "validation_signal_years": [2020, 2021, 2022, 2023, 2024, 2025],
+    "neighbor_count": 40,
+    "minimum_historical_signals_per_point_type": 30,
+    "targets": [
+      "mean_close_return_40",
+      "terminal_close_return_40",
+      "mfe_close_40",
+      "mae_close_40"
+    ],
+    "primary_target": "mean_close_return_40",
+    "bootstrap_case_resamples": 2000,
+    "bootstrap_seed": 842119,
+    "minimum_cases_per_split": 40,
+    "minimum_positive_year_fraction": 0.6,
+    "strict_increment_gate": {
+      "combined_mae_better_than_coordinates": true,
+      "bootstrap_95pct_lower_mae_improvement_positive": true,
+      "combined_spearman_better_than_coordinates": true,
+      "both_development_and_validation_required": true
+    }
+  },
+  "boundaries": {
+    "selection_is_outcome_blind": true,
+    "complete_path_diagnostic_only": true,
+    "future_best_exit_is_not_a_policy": true,
+    "account_replay_allowed": false,
+    "stable_profit_claim_allowed": false,
+    "full_market_panel_requires_increment_gate": true
+  }
+}

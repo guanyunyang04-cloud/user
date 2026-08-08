@@ -17,15 +17,15 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
-The strict Chan definition, causal parser, curated and stratified prefix audits,
-expanded outcome screen, independent confirmation, and transparent-coordinate
-incremental screen are complete. The 14-chart parser review passed, but no
-strict buy-point family or frozen observable gate passed the cost-aware path
-gate. The immediate question is no longer whether a literal first/second/third
-point is a standalone rule; that has failed. The next bounded question is
-whether richer confirmed structure attributes add out-of-time path information
-beyond the existing transparent coordinates on a substantially larger frozen
-sample.
+The strict Chan definition, causal parser, prefix audits, literal-point outcome
+screens, independent confirmation, transparent-coordinate screen, and larger
+rich-structure increment study are complete. The 14-chart parser review and
+the 700-case output audit passed, but no strict buy-point family, observable
+gate, or richer structure representation passed its out-of-time path gate.
+The primary strict-Chan branch is therefore paused rather than scaled to the
+full market. The next bounded K-line question is whether raw daily/five-minute
+sequences contain reproducible residual path information outside the rejected
+named structure labels.
 
 No production model, portfolio, stop, or trading policy has been selected.
 Multiple strictly causal transparent predictor, path-structure, and executable
@@ -465,6 +465,34 @@ losses in one split, but absolute net return or uncertainty failed in the
 other. This rejects the tested transparent gates, not all possible information
 inside the raw sequence or richer structure state.
 
+The independent rich-structure study then froze 700 new PIT cases, 50 per
+two-year/exchange stratum, excluding all 420 symbols used by the two earlier
+screens. It produced 1,577 complete-path signals across 621 cases: 377 type 1,
+195 type 2, and 1,005 type 3. It also persisted 75,073 eligible 40-session path
+states and formed 1,346 one-to-one same-date, same-exchange, risk/activity-
+matched controls that had no strict buy point on that date. Output validation
+found no sample overlap, future date, duplicate, pattern-control, or unresolved
+historical-label violation.
+
+Chronological equal-capacity neighbors compare 16 transparent coordinates, 17
+confirmed structure attributes, and their block-balanced combination on 978
+signals. Structure alone is slightly worse than coordinates for the primary
+mean-path target in both splits. The combination's case-level MAE improvement
+is only about `+0.070` percentage point in 2016-2019 and `+0.013` in 2020-2025;
+both bootstrap intervals cross zero, and development rank correlation worsens.
+No complete-path target has a positive uncertainty lower bound in both splits,
+so the strict increment and full-panel gates fail.
+
+All strict points combined are not better than matched non-pattern paths: the
+mean 40-session path difference is about `-1.11` percentage points in
+development and `-0.75` in validation, with uncertainty crossing zero. Type 3
+is significantly adverse in development and remains negative in validation.
+Type 1 shows less matched downside in validation, but not in development; type
+2 is also split-unstable. Type-1/2 absolute H40 returns happen to be positive
+in 2020-2025, but their matched terminal increment is near zero and their
+2016-2019 cost-adjusted mean is negative. This is regime exposure, not a frozen
+Chan-specific profitable policy, and does not authorize account replay.
+
 ## Absolute causal K-line strategy evidence
 
 The `seq100_causal_pattern_strategy_probe_v1` study separates literal trade
@@ -582,27 +610,26 @@ mechanical results reject simple fixed or hand-written exits. The ceiling shows
 large ex-post headroom but does not establish that either the entry shape or
 the exit day is prospectively identifiable.
 
-Parser validity, outcome breadth, independent confirmation, and the first
-transparent-coordinate increment are now sufficient to reject literal strict
-buy points as standalone entries. Account replay and model promotion remain
-prohibited. The full panel is implemented, but running every symbol merely to
-repeat a failed unconditional rule is not the next best use of compute. The
-next bounded work is:
+The larger outcome-blind rich-structure and same-date control study is now
+complete and independently output-validated. It rejects scaling the current
+primary strict-Chan representation: literal points do not add stable matched
+path value, richer structure does not improve transparent coordinates with a
+positive uncertainty lower bound, and the full-panel gate is false.
 
-1. Freeze a larger result-blind sample and persist richer point-time structure
-   attributes: divergence strength ratio, segment duration/efficiency/MACD and
-   amount coordinates, center geometry, confirmation delay, and pending-state
-   history. Keep matched failures and all three point classes.
-2. Compare existing transparent coordinates, strict structure attributes, and
-   their combination on complete post-confirmation path distributions with an
-   expanding-time, matched-capacity baseline. The target is incremental path
-   information, not another grid of fixed holding rules.
-3. Build the same-date, same-risk, same-activity non-pattern control before
-   attributing large MFE or stopping headroom to a Chan label.
-4. Run the full cached panel only if the larger sample establishes reproducible
-   incremental value; otherwise move to raw-sequence residual tests rather than
-   scaling a rejected representation.
-5. Replay a legal account only after a frozen policy has positive absolute net
+The next bounded work is:
+
+1. Do not run the full strict-Chan panel or legal account replay for the current
+   representation. Reopen this branch only for a genuinely new, predeclared
+   definition or multilevel hypothesis, not another point/holding-day grid.
+2. Test raw daily and five-minute sequence residuals on frozen outcome-blind
+   cases. Compare coordinates, strict structure, raw sequence, and their
+   combination with only already-resolved historical paths available at each
+   signal. This is a broader K-line test, not an attempt to relabel a failed
+   Chan rule.
+3. If raw sequence adds no reproducible out-of-time path information, stop
+   scaling K-line-only representations and redirect research toward other
+   causal cross-sectional/event information and dynamic account action value.
+4. Replay a legal account only after a frozen policy has positive absolute net
    value under base and double-slippage costs, a positive uncertainty lower
    bound, and majority-period stability.
 
@@ -640,7 +667,10 @@ next bounded work is:
   `daily_research/path_policy/seq100_strict_chan_stratified_audit.py`; expanded
   outcome, independent-confirmation, and coordinate screens are
   `daily_research/path_policy/seq100_strict_chan_outcome_screen.py` and
-  `daily_research/path_policy/seq100_strict_chan_coordinate_screen.py`
+  `daily_research/path_policy/seq100_strict_chan_coordinate_screen.py`; the
+  larger structure increment and output validator are
+  `daily_research/path_policy/seq100_strict_chan_structure_increment.py` and
+  `daily_research/path_policy/seq100_strict_chan_structure_increment_validate.py`
 - Absolute causal K-line strategy probe and validator:
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe.py` and
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe_validate.py`
@@ -663,6 +693,8 @@ next bounded work is:
   `daily_research/studies/seq100_strict_chan_outcome_screen_v1.json`,
   `daily_research/studies/seq100_strict_chan_type1_confirmation_v1.json`,
   `daily_research/studies/seq100_strict_chan_coordinate_screen_v1.json`,
+  `daily_research/studies/seq100_strict_chan_structure_increment_sample_v1.json`,
+  `daily_research/studies/seq100_strict_chan_structure_increment_v1.json`,
   `daily_research/studies/seq100_causal_pattern_strategy_probe_v1.json`,
   `daily_research/studies/seq100_causal_exit_baselines_v1.json`,
   `daily_research/studies/seq100_exit_stopping_ceiling_v1.json`
@@ -682,6 +714,7 @@ next bounded work is:
   `daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/`,
   `daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1/`,
   `daily_research/output/path_policy/studies/seq100_strict_chan_coordinate_screen_v1/`,
+  `daily_research/output/path_policy/studies/seq100_strict_chan_structure_increment_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/`,
   `daily_research/output/path_policy/studies/seq100_exit_stopping_ceiling_v1/`
