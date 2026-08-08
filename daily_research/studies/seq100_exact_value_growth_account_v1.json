@@ -1,0 +1,76 @@
+{
+  "study_id": "seq100_exact_value_growth_account_v1",
+  "status": "frozen_posthoc_exact_account_validation",
+  "purpose": "Replay the information-gate-passing exact value-growth Top10 policy in one finite A-share account with legal fills, exact costs, capacity, corporate actions and a single development-only risk budget.",
+  "epistemic_contract": {
+    "source_information_gate_must_pass_before_account_reads": true,
+    "all_2012_2025_account_evidence_is_retrospectively_consumed": true,
+    "no_account_parameter_grid_is_allowed": true,
+    "risk_budget_uses_only_2012_2019_realized_account_volatility": true,
+    "account_success_cannot_create_an_untouched_alpha_claim": true,
+    "2026_data_are_forbidden": true
+  },
+  "source": {
+    "exact_policy_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+    "exact_policy_summary_sha256": "349005a7505ead306db2892061765423d390e065ac043e77b68e969d213e325d",
+    "candidate_features": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+    "candidate_features_sha256": "91956712b39db71eec6175cd25b5cf48c96a576f635789bb906b7c00f15b996b",
+    "selections": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+    "selections_sha256": "57db1504724912c874d19bd0a7cc24a1abf474b58e8bc69926a93c1b5c73b447",
+    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
+    "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
+    "maximum_account_mark_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "selection": {
+    "source_policy": "exact_full_top10",
+    "monthly_order_count": 10,
+    "candidate_scan_count": 30,
+    "maximum_names_per_pit_industry": 2,
+    "future_outcomes_used": false
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "position_slots": 30,
+    "entry": "next legal raw-price open",
+    "exit": "fixed D60 close request deferred until the first legal sellable close; unresolved positions receive terminal recovery only at the frozen 2025-12-31 cutoff",
+    "cost_scenario": "double_slippage",
+    "pyramiding": false,
+    "replace_duplicate_ranked_names": true,
+    "lot_size": 100,
+    "maximum_signal_day_amount_fraction": 0.005,
+    "corporate_action_accounting": "raw execution prices and costs with pack-pinned back-adjust-factor ratio as total-return equivalent",
+    "confirmation_restart": "fresh CNY 1000000 at the first 2023 signal",
+    "round_lots_and_minimum_commission_modeled": true
+  },
+  "risk_budget": {
+    "derivation_end_date": "2019-12-31",
+    "target_annualized_volatility": 0.15,
+    "minimum_gross_fraction": 0.25,
+    "maximum_gross_fraction": 1.0,
+    "parameter_grid_performed": false
+  },
+  "evaluation": {
+    "years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "full_history": {
+      "minimum_positive_years": 10,
+      "maximum_drawdown": 0.30,
+      "maximum_annualized_volatility_for_risk_account": 0.20
+    },
+    "confirmation_restart": {
+      "minimum_positive_years": 2,
+      "maximum_drawdown": 0.25,
+      "maximum_annualized_volatility_for_risk_account": 0.20
+    }
+  },
+  "decision_boundary": {
+    "account_optimization_performed": false,
+    "live_alpha_claim_allowed": false,
+    "production_strategy_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1"
+  }
+}

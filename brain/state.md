@@ -10,18 +10,22 @@ The objective is risk-constrained account wealth, not fidelity to Chan theory,
 financing-flow stories, a fixed classifier score, or a favorable hindsight
 chart.
 
-The strongest current candidate is a non-Chan D20 stock-residual policy gated
-by observed stock-level margin-detail coverage and a frozen risk budget. It is
-retained for forward shadow validation, but it is not a production strategy or
-a profit guarantee because its source alpha policy narrowly failed the strict
-absolute confirmation lower-bound gate.
+The strongest current candidate is now the exact quantifiable main-board
+30/30/25/10/5 value-growth policy with a frozen development-only risk budget.
+It passed its frozen historical information and account gates and is retained
+for forward shadow validation. It is not a production strategy or a profit
+guarantee because every 2012-2025 year is consumed, three account years lost
+money, and no independent forward sample has completed.
 
-There is no active training, live signal, order, or production process.
+There is no active training, real order, or production process. A separately
+isolated 2026-08-07 public-data Top10 shadow cohort is frozen with pending
+forward fills only.
 
 ## Formal research contract
 
 - Formal history is 2012-01-01 through 2025-12-31. Years 2010-2011 are burn-in
-  only. Do not read or use 2026 data without an explicit boundary change.
+  only. The user authorized an isolated append-only 2026 shadow boundary; no
+  2026 observation may flow back into historical selection, fitting, or claims.
 - The primary universe is signal-date `quality_liquidity_pit`.
 - Signal-close decisions may use only information causally available by that
   close. Selection never uses future entry, sellability, return, or parser
@@ -81,18 +85,15 @@ is not identified.
 
 ### Causal value and TTM free-cash-flow branch
 
-The quantifiable causal core of the supplemental `value + quality + fundamental
-improvement + analyst revision + price confirmation` hypothesis has been
-translated into PIT tests. This is not an exact test of the supplied 2026
-main-board Top10 workflow: exact 30/30/25/10/5 weights, forward-PE valuation,
-cycle-normalized bear/base/bull earnings, qualitative moat checks, governance
-vetoes, and manual Top5 review were not equivalently encoded. Distance from the
-52-week low is explicitly forbidden as a reward. The tested mechanical
-composite, quality-only policy, analyst-revision variants, and value overlays
-on the frozen margin-residual model did not improve consistently across time.
-Valuation-median/right-edge exits underperformed holding the same entries to
-D60 because they clipped rare large winners. Do not use that mechanical
-fair-value right boundary as an automatic take-profit on this evidence.
+The first causal value study tested only an approximate mechanical core; its
+composite and analyst-revision variants did not improve consistently. A later
+study then froze the exact quantifiable main-board 30/30/25/10/5 weights,
+forward consensus earnings yield, causal TTM FCF, cycle-normalized bear/base/
+bull earnings, price confirmation and observable governance proxies. It still
+does not fabricate historical qualitative moat, management judgment or manual
+Top5 review. Distance from the 52-week low is explicitly forbidden. Prior
+valuation-median/right-edge exits underperformed D60 holding by clipping rare
+large winners and remain rejected as automatic take-profits.
 
 The compact free-cash-flow field was not TTM: it mixed the latest Q1, H1, Q3,
 or annual cumulative period. A causal TTM bridge was implemented from statement
@@ -113,12 +114,37 @@ maximum drawdown. A fresh 2023-2025 restart ended near CNY 1.265 million with
 10.51% maximum drawdown and all three years positive. The primary frozen gate
 still failed because drawdown exceeded its 35% limit. Pyramiding raised growth
 but worsened drawdown to about 40%; it also failed. This is a secondary
-interpretable historical candidate and does not displace the risk-budgeted
-margin-residual policy.
+interpretable historical candidate and does not displace the exact
+30/30/25/10/5 policy.
 
-### Strongest current policy
+### Exact main-board 30/30/25/10/5 policy
 
-Frozen rule:
+The exact quantifiable Top10 policy passed its frozen full-history information
+gate. Across 164 evaluable monthly cohorts, mean D60 stress-net return was about
+4.31%, its HAC/block lower bounds were about 1.55%/1.50%, and the industry-
+residual lower bounds were about 0.21%/0.23%. Twelve of fourteen annual cohort
+means were positive and excluding the best year left a positive mean. The
+complete score beat forward-value-only and TTM-FCF-only controls in point mean
+in all three periods, but paired lower bounds were negative; added-component
+superiority is therefore not statistically decisive. Top20, no-cycle and
+no-governance controls remained positive. The governance proxy did not add
+historical return.
+
+The full-exposure exact account reached about CNY 4.305 million, but 40.95%
+maximum drawdown failed the 30% gate. A single 15% target-volatility budget,
+derived only from 2012-2019 realized account volatility, froze gross exposure
+at 68.61%. That account reached about CNY 2.863 million over 2012-2025, with
+8.02% annualized log growth, 13.89% volatility, 29.22% maximum drawdown, and
+11/14 positive years. A fresh 2023-2025 restart reached about CNY 1.271 million
+with 10.76% maximum drawdown, but lost 5.18% in 2023. Exact lots, minimum fees,
+taxes, double slippage, 0.5% amount capacity, legal-sale deferral and total-
+return factors are modeled. This is the strongest historical candidate, not a
+stable-profit guarantee.
+
+### Prior margin-residual benchmark
+
+The earlier strongest candidate remains a useful non-value benchmark. Its
+frozen rule is:
 
 1. Start from the full daily PIT quality/liquidity pool.
 2. Veto the highest predicted D20 bad-tail decile.
@@ -166,27 +192,27 @@ it does not turn historical evidence into guaranteed annual profit.
 
 ## True pause point and next step
 
-The first serious strategy candidate and its risk-budgeted account are now
-implemented, corrected for corporate actions, capacity constrained, and
-historically validated through 2025. The causal-value/TTM-FCF branch is also
-complete and all 2012-2025 evidence it used is consumed. Further tuning of
-either branch on the same years would mostly spend already consumed evidence.
+The exact quantifiable value-growth policy now has a frozen selector, causal
+information test, exact finite account, development-only risk budget and an
+isolated 2026 shadow cohort. All 2012-2025 evidence is consumed. Further
+historical weight, breadth, holding-day, exit or risk-budget tuning would spend
+known outcomes and must not be presented as confirmation.
 
 Next legitimate actions, in order:
 
-1. Freeze an operational daily signal generator and reproducible shadow-order
-   ledger for this exact policy; do not optimize it further on 2014-2025.
-2. Begin forward-only shadow validation when the research boundary permits
-   2026+ data. Track fills, unavailable fields, turnover, drawdown, and policy
-   drift before considering real capital.
-3. If a new historical hypothesis is pursued, give it a new development and
-   confirmation contract. High-value candidates are richer non-price causal
-   information or a genuinely new raw-sequence representation, not another
-   Chan point/exit parameter grid, TTM-FCF rank phase, breadth, or holding-day
-   search.
-4. Promote only after fresh forward evidence supports absolute net value and
-   acceptable drawdown. Current status remains
-   `strongest_candidate_not_production`.
+1. Build the operational mechanical signal generator for future month ends and
+   an append-only fill/mark/exit ledger. The supplied 2026 public-data Top10 is
+   already frozen separately and must not be silently relabeled as mechanical
+   output.
+2. From 2026-08-10 onward, append only actually observable shadow fills, field
+   availability, costs, legal exits, turnover, drawdown and policy drift. Never
+   feed these observations back into the 2012-2025 artifacts.
+3. Accumulate enough independent forward cohorts to test absolute net value and
+   risk. One favorable trade or month is not confirmation.
+4. If a new historical hypothesis is pursued, give it a new contract. Do not
+   reopen Chan-point, right-edge take-profit, financing-growth, TTM-FCF phase,
+   score-weight or breadth grids on the consumed history.
+5. Current status is `strongest_candidate_forward_shadow_not_production`.
 
 ## Authoritative paths
 
@@ -194,6 +220,8 @@ Next legitimate actions, in order:
   `daily_research/research_records/seq100/seq100_margin_residual_policy_v1_20260808/`
 - Causal-value/TTM-FCF result and interpretation:
   `daily_research/research_records/seq100/seq100_causal_value_ttm_fcf_v1_20260809/`
+- Exact value-growth result and interpretation:
+  `daily_research/research_records/seq100/seq100_exact_value_growth_policy_v1_20260809/`
 - Margin residual policy and outputs:
   `daily_research/studies/seq100_margin_residual_policy_v1.json` and
   `daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/`
@@ -210,6 +238,11 @@ Next legitimate actions, in order:
   `daily_research/studies/seq100_ttm_value_account_v1.json`,
   `daily_research/studies/seq100_ttm_fcf_rotation_account_v1.json`, and their
   matching `daily_research/path_policy/seq100_*` modules.
+- Exact value-growth historical, account and shadow contracts:
+  `daily_research/studies/seq100_exact_value_growth_policy_v1.json`,
+  `daily_research/studies/seq100_exact_value_growth_account_v1.json`, and
+  `daily_research/studies/seq100_exact_value_growth_2026_shadow_v1.json`, with
+  matching `daily_research/path_policy/seq100_exact_value_growth_*` modules.
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.

@@ -1,0 +1,59 @@
+{
+  "study_id": "seq100_exact_value_growth_2026_shadow_v1",
+  "status": "frozen_forward_shadow_boundary",
+  "purpose": "Freeze the user-supplied public-data 2026 main-board Top10 as a forward-only shadow cohort after the historical exact quantifiable policy and risk account were frozen.",
+  "epistemic_contract": {
+    "this_is_not_part_of_2012_2025_research": true,
+    "no_2026_outcome_was_used_to_select_or_weight_candidates": true,
+    "candidate_membership_and_rank_are_immutable_after_freeze": true,
+    "future_fills_marks_and_exits_may_only_be_appended": true,
+    "the_public_data_top10_is_not_claimed_to_equal_the_mechanical_historical_parser": true,
+    "profit_guarantee_allowed": false
+  },
+  "source": {
+    "candidate_attachment": "C:/Users/ASUS/.codex/attachments/d331dd8c-5211-4b41-ba78-3827fc958c5d/pasted-text.txt",
+    "candidate_attachment_sha256": "d451cd535675de3f30a4dc7e62a6fd9bc4cd82bba8a7c44146540bca100a6ba1",
+    "method_attachment": "C:/Users/ASUS/.codex/attachments/46b1987c-c9ff-4e96-afd2-27fb8e0cc761/pasted-text.txt",
+    "method_attachment_sha256": "c757ac9b80bfea05fe13ab0ba554e395f190b3cdd0128745c2f855a55ec62eab",
+    "historical_account_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+    "historical_account_summary_sha256": "98cfd971cf34116e2bdb0cb00c701eca3cff36a6a27c1b9a40355d29ef18ffb5"
+  },
+  "freeze": {
+    "frozen_at": "2026-08-09T00:00:00+08:00",
+    "source_information_as_of": "2026-08-07",
+    "signal_close_date": "2026-08-07",
+    "planned_next_open_date": "2026-08-10",
+    "observation_status": "pending_forward_fill",
+    "selection_method": "public-data main-board 30/30/25/10/5 ranking with qualitative review",
+    "candidate_count": 10
+  },
+  "risk": {
+    "shadow_starting_cash_cny": 1000000.0,
+    "position_slots": 30,
+    "frozen_target_gross_fraction": 0.6860894024612805,
+    "target_cash_per_order_cny": 22869.64674870935,
+    "first_cohort_target_gross_fraction": 0.2286964674870935,
+    "pyramiding": false,
+    "maximum_signal_day_amount_fraction": 0.005,
+    "planned_exit": "D60 close request with legal-sale deferral"
+  },
+  "candidates": [
+    {"rank": 1, "symbol": "600309.SH", "name": "万华化学", "reference_price": 75.72, "forward_pe": 12.8, "expected_net_profit_growth": 0.48, "source_grade": "A+"},
+    {"rank": 2, "symbol": "002128.SZ", "name": "电投能源", "reference_price": 27.64, "forward_pe": 8.6, "expected_net_profit_growth": 0.36, "source_grade": "A"},
+    {"rank": 3, "symbol": "002648.SZ", "name": "卫星化学", "reference_price": 25.26, "forward_pe": 9.0, "expected_net_profit_growth": 0.79, "source_grade": "A"},
+    {"rank": 4, "symbol": "600030.SH", "name": "中信证券", "reference_price": 27.95, "forward_pe": 11.6, "expected_net_profit_growth": 0.20, "source_grade": "A"},
+    {"rank": 5, "symbol": "605499.SH", "name": "东鹏饮料", "reference_price": 122.80, "forward_pe": 16.7, "expected_net_profit_growth": 0.22, "source_grade": "A-"},
+    {"rank": 6, "symbol": "000807.SZ", "name": "云铝股份", "reference_price": 26.70, "forward_pe": 7.5, "expected_net_profit_growth": 1.04, "source_grade": "B+ / 高周期"},
+    {"rank": 7, "symbol": "600989.SH", "name": "宝丰能源", "reference_price": 23.67, "forward_pe": 10.9, "expected_net_profit_growth": 0.41, "source_grade": "B+"},
+    {"rank": 8, "symbol": "600233.SH", "name": "圆通速递", "reference_price": 18.49, "forward_pe": 10.5, "expected_net_profit_growth": 0.39, "source_grade": "B+"},
+    {"rank": 9, "symbol": "601318.SH", "name": "中国平安", "reference_price": 53.40, "forward_pe": 6.5, "expected_net_profit_growth": 0.10, "source_grade": "B+ / 防守"},
+    {"rank": 10, "symbol": "002001.SZ", "name": "新和成", "reference_price": 30.59, "forward_pe": 10.8, "expected_net_profit_growth": 0.28, "source_grade": "B / 等半年报"}
+  ],
+  "decision_boundary": {
+    "historical_research_inputs_modified": false,
+    "realized_fill_count": 0,
+    "realized_exit_count": 0,
+    "performance_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1"
+  }
+}

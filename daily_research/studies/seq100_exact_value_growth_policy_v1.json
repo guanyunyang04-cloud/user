@@ -1,0 +1,177 @@
+{
+  "study_id": "seq100_exact_value_growth_policy_v1",
+  "status": "frozen_retrospective_exact_quantifiable_contract",
+  "purpose": "Test the exact quantifiable core of the main-board Quality x Value x Earnings Revision x Price Confirmation workflow with fixed 30/30/25/10/5 weights, causal forward estimates, cycle-normalized earnings and governance risk controls.",
+  "epistemic_contract": {
+    "all_2012_2025_periods_are_retrospectively_consumed": true,
+    "no_historical_period_is_untouched_confirmation": true,
+    "candidate_selection_precedes_outcome_reads": true,
+    "qualitative_moat_and_management_judgment_are_not_backfilled": true,
+    "2026_prospective_candidates_are_isolated_from_historical_inputs": true,
+    "52_week_low_or_distance_from_low_reward_is_forbidden": true,
+    "account_replay_requires_the_frozen_information_gate": true
+  },
+  "source": {
+    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
+    "candidate_features": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+    "candidate_features_sha256": "03651267b85ceff27e1cb3b525ac2ca910eb3dff291592f4833632979b4d629d",
+    "ttm_candidate_features": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/ttm_candidate_features.parquet",
+    "ttm_candidate_features_sha256": "34ff6ba1116966f0f0098515a944251b5f8d71db27804b763e7ce3b544b6626e",
+    "income_statement_quarterly": "quant_data_platform/data/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
+    "income_statement_quarterly_sha256": "5f863d3f3b37779414651bc8860e48b1f1a8bd767525d1c85b624303e5b9314c",
+    "balance_sheet_quarterly": "quant_data_platform/data/qdp_v2/datasets/balance_sheet_quarterly/balance_sheet_quarterly__b0126161d6d748babe789a48/shards/part-0000.parquet",
+    "balance_sheet_quarterly_sha256": "b0126161d6d748babe789a48614d32f51625df9bcfc7371324c38ac1636a3e07",
+    "research_report": "quant_data_platform/data/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet",
+    "research_report_sha256": "450fc61384a81476d25f0bd0d50449b7db2c9fdfea00fde5eddf835ca8d5bb7b",
+    "research_report_forecast": "quant_data_platform/data/qdp_v2/datasets/research_report_forecast/research_report_forecast__d1b0976bfcbdd7a2ef97083a/shards/part-0000.parquet",
+    "research_report_forecast_sha256": "d1b0976bfcbdd7a2ef97083a8f718a98783032ac99425e1b5d1c40191374ca55",
+    "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
+    "expected_row_count": 4191476,
+    "formal_start_date": "2012-01-01",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "universe": {
+    "name": "quality_liquidity_pit_main_board",
+    "allowed_prefixes": ["600", "601", "603", "605", "000", "001", "002", "003"],
+    "minimum_listing_open_days": 250,
+    "st_pit_suspension_limit_t1_and_liquidity_filters_inherited": true
+  },
+  "signals": {
+    "frequency": "last quality_liquidity_pit signal date in each calendar month",
+    "analyst_target_fiscal_year": "signal calendar year plus one",
+    "analyst_consensus_lookback_calendar_days": 180,
+    "analyst_revision_gap_calendar_days": [30, 90],
+    "minimum_institutions": 3,
+    "minimum_industry_rank_group_size": 10,
+    "primary_policy": "exact_full_top10",
+    "policies": [
+      "exact_full_top10",
+      "exact_full_top20",
+      "exact_no_cycle_top10",
+      "exact_no_governance_top10",
+      "forward_value_only_top10",
+      "ttm_fcf_only_top10"
+    ],
+    "breadth": {
+      "exact_full_top10": [10, 2],
+      "exact_full_top20": [20, 3],
+      "exact_no_cycle_top10": [10, 2],
+      "exact_no_governance_top10": [10, 2],
+      "forward_value_only_top10": [10, 2],
+      "ttm_fcf_only_top10": [10, 2]
+    }
+  },
+  "score_contract": {
+    "family_weights": {
+      "valuation": 0.30,
+      "earnings_and_revision": 0.30,
+      "quality": 0.25,
+      "price_confirmation": 0.10,
+      "governance": 0.05
+    },
+    "valuation": [
+      "industry percentile of positive next-fiscal-year consensus net-profit yield",
+      "industry percentile of lower positive current PE",
+      "industry percentile of lower positive current PB",
+      "industry percentile of causal TTM free-cash-flow yield",
+      "industry percentile of causal cycle-normalized earnings yield"
+    ],
+    "earnings_and_revision": {
+      "actual_weight": 0.5,
+      "revision_weight": 0.5,
+      "actual": [
+        "financial_net_profit_yoy",
+        "financial_revenue_yoy",
+        "performance_forecast_change_mid",
+        "cashflow_cfo_to_income"
+      ],
+      "revision": [
+        "30-calendar-day next-FY net-profit revision",
+        "30-calendar-day next-FY EPS revision",
+        "90-calendar-day next-FY net-profit revision",
+        "90-calendar-day next-FY EPS revision"
+      ]
+    },
+    "quality": [
+      "financial_roe_avg",
+      "financial_net_profit_margin",
+      "cashflow_cfo_to_income",
+      "cashflow_fcf_to_revenue",
+      "lower financial_debt_to_asset",
+      "lower balance_trade_receivables_to_total_assets",
+      "lower balance_inventory_ratio",
+      "lower balance_goodwill_ratio",
+      "lower balance_borrowing_ratio"
+    ],
+    "price_confirmation": [
+      "industry_relative_ret20",
+      "trend_slope_20d"
+    ],
+    "governance_quant_proxy": [
+      "recent penalty announcement count",
+      "recent litigation announcement count",
+      "recent delisting-risk announcement count",
+      "income balance and cash-flow source-conflict flags"
+    ],
+    "hard_conditions": [
+      "positive current PE and PB",
+      "positive next-FY consensus net profit with at least three institutions",
+      "both 30-day and 90-day revision coordinates covered",
+      "industry_relative_ret20 and trend_slope_20d are non-negative",
+      "no recent delisting-risk announcement",
+      "minimum listing age met"
+    ],
+    "cycle_normalization": {
+      "history_years": 5,
+      "general_company": "current causal TTM revenue times trailing known annual parent-net-margin median",
+      "financial_company": "current PIT parent equity times trailing known annual parent-ROE median",
+      "bear_base_bull": "trailing known annual 25th percentile, median and 75th percentile; only base enters score"
+    },
+    "ev_ebitda_excluded_reason": "three-institution coverage was only 46.5% among matched 2012-2019 candidates and would change the early universe materially",
+    "explicitly_excluded": [
+      "52_week_low",
+      "distance_from_52_week_low",
+      "qualitative moat backfill",
+      "historical discretionary management score",
+      "post-outcome manual overrides"
+    ]
+  },
+  "execution": {
+    "entry": "signal close decision and next exchange-open buy request",
+    "primary_horizon_open_days": 60,
+    "sell_retry_open_days": 20,
+    "round_trip_cost_proxy": 0.006,
+    "right_edge_valuation_exit_used": false
+  },
+  "evaluation": {
+    "periods": {
+      "exploratory_development": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+      "temporal_validation_already_consumed": [2020, 2021, 2022],
+      "retrospective_stability_already_consumed": [2023, 2024, 2025]
+    },
+    "inference": {
+      "hac_lag_months": 3,
+      "block_length_months": 3,
+      "bootstrap_repetitions": 5000,
+      "seed": 20260809
+    },
+    "information_gate": {
+      "all_three_period_primary_point_means_positive": true,
+      "full_history_stress_net_hac_and_block_lcb_positive": true,
+      "full_history_industry_residual_hac_and_block_lcb_positive": true,
+      "minimum_positive_years": 10,
+      "excluding_best_year_primary_mean_positive": true,
+      "paired_mean_beats_each_simple_value_control_in_at_least_two_periods": true
+    }
+  },
+  "decision_boundary": {
+    "historical_account_replay_performed": false,
+    "live_alpha_claim_allowed": false,
+    "qualitative_top5_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1"
+  }
+}
