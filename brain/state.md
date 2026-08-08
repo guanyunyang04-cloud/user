@@ -17,12 +17,13 @@ are candidate coordinates or diagnostic descriptions; they are not assumed to
 be natural market states. A model is introduced only when transparent analysis
 cannot adequately express a verified conditional dependency.
 
-The Chan primary-source reassessment, first strict-parser vertical slice, and a
-curated nine-path boundary audit are complete. The immediate subtask is to
-expand deterministic stratified validation, then build the resumable all-market
-five-minute structure panel. No return target or policy training is authorized
-until parser coverage, confirmation delay, disagreement, and visual correctness
-are established independently of profit.
+The Chan primary-source reassessment, first strict-parser vertical slice, the
+curated nine-path boundary audit, and the first outcome-blind stratified audit
+are complete. The immediate subtask is to review the new contact sheet and
+expand the frozen sample before building the resumable all-market five-minute
+structure panel. No return target or policy training is authorized until parser
+coverage, confirmation delay, disagreement, and visual correctness are
+established independently of profit.
 
 No production model, portfolio, stop, or trading policy has been selected.
 Multiple strictly causal transparent predictor, path-structure, and executable
@@ -392,6 +393,39 @@ confined to startup. These selected paths are parser boundary coverage, not a
 statistically sufficient all-market sample and not grounds for choosing a
 profitable or theoretically privileged variant.
 
+## Stratified strict-parser audit
+
+The frozen selection contract is
+`daily_research/studies/seq100_strict_chan_stratified_audit_v1.json`. It selects
+one globally unique symbol/date row from each of 14 deterministic strata: seven
+2012-2025 two-year periods crossed with `.SH` and `.SZ`. The rank is a SHA-256
+ordering of the study id, seed, stratum, symbol, and focal date. Only
+`quality_liquidity_pit` `symbol` and `trade_date` are read for selection;
+future-return, label, parser-event, and trade-result columns are not accepted by
+the selector. The current PIT pool contains only `.SH` and `.SZ` rows; `.BJ` is
+not silently treated as an empty exchange and is excluded by the explicit
+population suffix contract.
+
+The runner is
+`daily_research/path_policy/seq100_strict_chan_stratified_audit.py`. It freezes
+the sample and source fingerprints before materializing a generic audit spec,
+then reuses all seven parser profiles, causal prefix validation, pending-state
+aggregation, and chart generation. A changed input, spec, or runner fingerprint
+cannot replace an existing sample unless `--refresh-sample` is explicit.
+
+The first real run completed 14/14 cases across 152,928 five-minute bars and
+3,186 usable days, with no missing positive-volume day. Prefix recomputation
+compared 1,903,654 event records and 36,802,802 fields with zero future
+confirmation writeback; all case assertions passed. The primary profile emitted
+789 segments, 142 centers, and 139 point candidates. Its 470 pending candidates
+resolved as 226 confirmed, 239 invalidated, and 5 unresolved at episode end;
+median pending duration is 47 bars and P90 about 192 bars. These are parser
+coverage and causal-lag measurements, not market-performance results. The
+contact sheet is generated, but `visual_review_status` remains `unreviewed`
+until the 14 cases receive explicit human review. This stratified run is still a
+small deterministic audit sample, not statistically sufficient full-market
+validation.
+
 ## Absolute causal K-line strategy evidence
 
 The `seq100_causal_pattern_strategy_probe_v1` study separates literal trade
@@ -511,17 +545,17 @@ the exit day is prospectively identifiable.
 
 The source audit, frozen definition dependency table, independent parser,
 five-minute adjustment/missingness adapter, synthetic tests, one-symbol output,
-and curated nine-path prefix/variant/visual audit are complete. The curated set
-is deliberately selected for boundary coverage and is not statistically broad
-validation. The full 2010-2025 market panel and future-path comparison have not
+curated nine-path audit, and first 14-case stratified prefix/variant audit are
+complete. The stratified contact sheet is generated but awaits explicit visual
+review, and the sample is not statistically broad enough to support a market
+claim. The full 2010-2025 market panel and future-path comparison have not
 started. Account replay and model training remain prohibited. The next bounded
 work is:
 
-1. Expand prefix and variant validation to a deterministic stratified
-   symbol/date sample selected without future returns or parser outcomes. Report
-   coverage, confirmation-lag distributions, pending-state duration,
-   disagreement, episode breaks, and visual-review sampling before choosing any
-   primary research view.
+1. Review and ledger the 14 stratified charts, recording parser errors separately
+   from legitimate definition disagreement; then expand the deterministic
+   sample by liquidity, price, listing age, episode-break, and data-completeness
+   strata without using future outcomes or parser events.
 2. Implement a resumable, resource-adaptive partition builder for the complete
    2010-2025 five-minute store. Preserve per-symbol episode boundaries and emit
    daily close-time snapshots for later `quality_liquidity_pit` joins without
@@ -577,14 +611,17 @@ work is:
 - Causal path-structure study and validator:
   `daily_research/path_policy/seq100_causal_path_structure.py` and
   `daily_research/path_policy/seq100_causal_path_structure_validate.py`
-- Strict Chan definition, parser, QDP adapter, validator, and audit:
+- Strict Chan definition, parser, QDP adapter, validator, and audits:
   `daily_research/studies/seq100_strict_chan_definition_v1.json`,
   `daily_research/path_policy/seq100_strict_chan_parser.py`,
   `daily_research/path_policy/seq100_strict_chan_intraday.py`, and
   `daily_research/path_policy/seq100_strict_chan_validate.py`; frozen audit plan
   and runner are
   `daily_research/studies/seq100_strict_chan_audit_v1.json` and
-  `daily_research/path_policy/seq100_strict_chan_audit.py`
+  `daily_research/path_policy/seq100_strict_chan_audit.py`; the outcome-blind
+  stratified contract and runner are
+  `daily_research/studies/seq100_strict_chan_stratified_audit_v1.json` and
+  `daily_research/path_policy/seq100_strict_chan_stratified_audit.py`
 - Absolute causal K-line strategy probe and validator:
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe.py` and
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe_validate.py`
@@ -617,6 +654,9 @@ work is:
   `daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/`,
   `daily_research/output/path_policy/studies/seq100_strict_chan_definition_v1/`,
   `daily_research/output/path_policy/studies/seq100_strict_chan_audit_v1/`,
+  `daily_research/output/path_policy/studies/seq100_strict_chan_stratified_audit_v1/`
+  (sample manifest, frozen audit spec, case/event/pending/prefix aggregates, and
+  contact sheet),
   `daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/`,
   `daily_research/output/path_policy/studies/seq100_exit_stopping_ceiling_v1/`

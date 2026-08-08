@@ -31,6 +31,10 @@ DEFAULT_OUTPUT_ROOT = (
     / "seq100_strict_chan_audit_v1"
 )
 AUDIT_SCHEMA_VERSION = "seq100_strict_chan_audit/1"
+SUPPORTED_AUDIT_STUDY_IDS = {
+    "seq100_strict_chan_audit_v1",
+    "seq100_strict_chan_stratified_audit_v1",
+}
 SUPPORTED_ASSERTION_OPERATORS = {"<", "<=", "==", ">=", ">"}
 
 
@@ -62,7 +66,7 @@ def _sha256_file(path: Path) -> str:
 def load_audit_spec(path: str | Path = DEFAULT_AUDIT_PATH) -> dict[str, Any]:
     audit_path = Path(path).resolve()
     spec = json.loads(audit_path.read_text(encoding="utf-8"))
-    if spec.get("study_id") != "seq100_strict_chan_audit_v1":
+    if spec.get("study_id") not in SUPPORTED_AUDIT_STUDY_IDS:
         raise ValueError("strict_chan_audit_study_id_mismatch")
     if spec.get("parent_study_id") != parser.STUDY_ID:
         raise ValueError("strict_chan_audit_parent_study_mismatch")
