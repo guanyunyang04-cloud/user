@@ -325,6 +325,61 @@ The named states therefore expose volatile opportunity but the hand-written
 structural exits surrender gains or stop too early. A positive fixed-D view is
 not evidence that a causal dynamic exit can realize it.
 
+## Open-position episode and mechanical-exit evidence
+
+The `seq100_causal_exit_baselines_v1` study removes the old exit-policy
+selection from entry construction. It extracts every actually filled causal
+retest, nested-reacceleration, and breakout signal directly from the PIT
+quality pool, allows overlapping episodes only for independent trade research,
+and builds 10,444,952 close-time position states for 255,029 entries. State
+includes return since entry, peak expansion and giveback, MAE, entry-time
+20-session volatility, amount, and multi-scale structure. Market-regime,
+industry, and five-minute coordinates are not yet joined; this is the
+mechanical stopping baseline, not the final stopping panel.
+
+Ten predeclared exits cover H2/H5/H10/H20/H40 controls, two volatility-scaled
+stop/take-profit rules, a 3% trailing stop, a half-giveback rule, and the prior
+small-reversal structure exit. A close-time trigger is filled only at the next
+legal close. Exact finite cash, T+1, limits, suspension, board lots, minimum
+commission, stamp tax, and base/double slippage remain enforced. Independent
+validation exactly matches all entry keys and checks 10.44 million panel rows,
+2,550,290 policy results, 840 independently reconstructed request/exit paths,
+and costs with zero observed request-date or cash-return error; no 2026 data is
+used.
+
+No mechanical exit passes. The least negative candidate is a retest followed
+by an H2 exit: 2013-2025 date-equal net return is about `-0.14%` under base cost
+and `-0.28%` under double slippage, with only 2/13 and 1/13 positive years.
+Longer holding exposes large intermediate movement without realization: for
+retest H20, trade-weighted mean MFE is about `+8.49%` while mean gross exit
+return is about `-0.19%`; comparable breakout and nested results are also
+negative. Volatility stops, trailing stops, giveback exits, and structure exits
+do not fix this. Exit timing is a real problem, but the all-signal entries have
+too little unconditional gross edge to assume that exit learning alone can
+rescue them. Strong annual variation and date-versus-trade weighting differences
+make market regime and signal breadth necessary stopping/entry covariates.
+
+## Future-informed stopping-ceiling evidence
+
+The separately bounded `seq100_exit_stopping_ceiling_v1` diagnostic enumerates
+every close-time sale request through session 40 and resolves it at the first
+later legal close with exact finite costs. It is explicitly future-informed and
+cannot be a policy or an online label. Independent brute-force validation of
+1,000 entries and both costs finds zero request-date, exit-date, or net-return
+error.
+
+The ceiling is large but must not be confused with predictability. Across
+2013-2025, date-equal mean best legal net return is roughly `12.7%-13.5%` for
+all three entry types under both costs, about `84%-85%` of entries can be made
+positive by hindsight, and the median best sale occurs around holding session
+16-17. The request-time interquartile range is roughly sessions 4-31, with the
+90th percentile near session 38. This confirms substantial path headroom and
+the absence of one natural fixed exit day. However, breakout, retest, and
+nested-reacceleration ceilings are very similar; maximizing over 40 future
+sessions mechanically creates a large extreme even for volatile non-special
+paths. A same-date, same-risk, same-activity non-pattern control is required
+before attributing the headroom to the K-line entries.
+
 ## Current decisions and prohibitions
 
 - Do not train a fixed-D "good stock" classifier or imitate final-oracle action
@@ -344,33 +399,41 @@ not evidence that a causal dynamic exit can realize it.
   price scaling, eligibility, and publication timing.
 - Do not promote the exploratory D20 retest-plus-exhaustion mean. Its frozen
   no-fixed-horizon follow-up is negative after exact costs.
+- Do not keep tuning mechanical stop percentages or fixed holding days. The
+  predeclared family failed under both costs; further parameter search requires
+  a new causal hypothesis and correction for search multiplicity.
 
 ## True pause point and next steps
 
-The non-repainting structure grammar, continuous retest-state study, and
-absolute causal K-line strategy probe are complete and independently
-validated. Account replay remains prohibited. Named entries create substantial
-intermediate movement, but the tested exits do not realize positive net value.
-The financing-balance result remains exploratory and has not provided a stable
-incremental entry signal.
+The structure grammar, retest-state study, absolute K-line strategy probe,
+open-position panel, mechanical stops, and future-informed stopping ceiling are
+complete and independently validated. Account replay remains prohibited. The
+mechanical results reject simple fixed or hand-written exits. The ceiling shows
+large ex-post headroom but does not establish that either the entry shape or
+the exit day is prospectively identifiable.
 
 The next bounded work is:
 
-1. Build a causal open-position episode panel for the frozen K-line entries.
-   Each daily row must include return since entry, peak-to-date expansion and
-   giveback, frozen boundary state, multi-scale path state, market regime, and
-   same-day five-minute coordinates.
-2. Treat exit as an optimal-stopping problem. Fit a transparent expanding-year
-   Longstaff-Schwartz or fitted-Q baseline for sell versus hold using absolute
-   legal wealth, and evaluate each following year without a fixed D target.
-3. Determine whether peak giveback, exhaustion, or other observable state can
-   predict the residual value of waiting before the gain disappears. The
-   hand-written exits and fixed-D views remain controls, not targets.
-4. Use financing balance, net financing flow, and financing/price divergence
+1. Build a same-date, same-risk, same-activity non-pattern control and compare
+   its legal stopping ceiling with each K-line entry type. This determines
+   whether the large headroom belongs to the named pattern or merely to active
+   volatile stocks and the 40-session maximum operator.
+2. Join the existing causal market, industry, cross-sectional, and five-minute
+   coordinates to each open-position day, including same-day signal breadth and
+   explicit missingness when a held stock leaves the current quality pool.
+3. Fit a transparent expanding-year fitted-Q baseline that separately predicts
+   the value of `request_sell` and `hold`, using only prior-year episodes. Each
+   following year is simulated chronologically with daily re-evaluation and no
+   fixed D target. Mechanical policies remain frozen controls.
+4. Determine whether peak giveback, exhaustion, market regime, signal breadth,
+   or intraday state predicts residual waiting value. If causal stopping still
+   loses, reject exit-only rescue and return to regime-conditioned entry
+   selection rather than escalating model complexity.
+5. Use financing balance, net financing flow, and financing/price divergence
    only as residual covariates after exact publication alignment; do not use
    them as entry gates unless they improve the stopping/value model out of
    sample under both costs.
-5. Replay a legal account only after a frozen policy has positive absolute net
+6. Replay a legal account only after a frozen policy has positive absolute net
    value under base and double-slippage costs, a positive uncertainty lower
    bound, and majority-year stability. A raw/deep sequence model remains a
    later challenger if transparent state leaves reproducible residual value.
@@ -399,6 +462,12 @@ The next bounded work is:
 - Absolute causal K-line strategy probe and validator:
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe.py` and
   `daily_research/path_policy/seq100_causal_pattern_strategy_probe_validate.py`
+- Open-position episode/mechanical-exit study and validator:
+  `daily_research/path_policy/seq100_causal_exit_baselines.py` and
+  `daily_research/path_policy/seq100_causal_exit_baselines_validate.py`
+- Future-informed stopping ceiling and validator:
+  `daily_research/path_policy/seq100_exit_stopping_ceiling.py` and
+  `daily_research/path_policy/seq100_exit_stopping_ceiling_validate.py`
 - Study configurations:
   `daily_research/studies/seq100_dynamic_oracle_v1.json`,
   `daily_research/studies/seq100_dynamic_oracle_observable_audit_v1.json`,
@@ -407,7 +476,9 @@ The next bounded work is:
   `daily_research/studies/seq100_dynamic_action_value_baselines_v1.json`,
   `daily_research/studies/seq100_dynamic_action_distribution_v1.json`,
   `daily_research/studies/seq100_causal_path_structure_v1.json`,
-  `daily_research/studies/seq100_causal_pattern_strategy_probe_v1.json`
+  `daily_research/studies/seq100_causal_pattern_strategy_probe_v1.json`,
+  `daily_research/studies/seq100_causal_exit_baselines_v1.json`,
+  `daily_research/studies/seq100_exit_stopping_ceiling_v1.json`
 - Validated outputs:
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_oracle_observable_audit_v1/`,
@@ -416,6 +487,8 @@ The next bounded work is:
   `daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/`,
   `daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/`,
   `daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/`,
-  `daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/`
+  `daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/`,
+  `daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/`,
+  `daily_research/output/path_policy/studies/seq100_exit_stopping_ceiling_v1/`
 - Durable prior evidence:
   `daily_research/research_records/seq100/`
