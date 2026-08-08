@@ -81,14 +81,18 @@ is not identified.
 
 ### Causal value and TTM free-cash-flow branch
 
-The supplemental `value + quality + fundamental improvement + analyst
-revision + price confirmation` hypothesis has been translated into PIT tests.
-Distance from the 52-week low is explicitly forbidden as a reward. The full
+The quantifiable causal core of the supplemental `value + quality + fundamental
+improvement + analyst revision + price confirmation` hypothesis has been
+translated into PIT tests. This is not an exact test of the supplied 2026
+main-board Top10 workflow: exact 30/30/25/10/5 weights, forward-PE valuation,
+cycle-normalized bear/base/bull earnings, qualitative moat checks, governance
+vetoes, and manual Top5 review were not equivalently encoded. Distance from the
+52-week low is explicitly forbidden as a reward. The tested mechanical
 composite, quality-only policy, analyst-revision variants, and value overlays
 on the frozen margin-residual model did not improve consistently across time.
 Valuation-median/right-edge exits underperformed holding the same entries to
-D60 because they clipped rare large winners. Do not use a calculated fair-value
-right boundary as an automatic take-profit on this evidence.
+D60 because they clipped rare large winners. Do not use that mechanical
+fair-value right boundary as an automatic take-profit on this evidence.
 
 The compact free-cash-flow field was not TTM: it mixed the latest Q1, H1, Q3,
 or annual cumulative period. A causal TTM bridge was implemented from statement
