@@ -17,9 +17,15 @@ for forward shadow validation. It is not a production strategy or a profit
 guarantee because every 2012-2025 year is consumed, three account years lost
 money, and no independent forward sample has completed.
 
+A new post-selection diagnostic found that D120 historically dominated D60
+for this selector, including under the same finite-account constraints. D120
+is an adaptive retrospective challenger, not a replacement for the already
+frozen D60 forward arm and not independent confirmation.
+
 There is no active training, real order, or production process. A separately
 isolated 2026-08-07 public-data Top10 shadow cohort is frozen with pending
-forward fills only.
+forward fills only; its original D60 and parallel D120 paper arms both remain
+prefill and append-only.
 
 ## Formal research contract
 
@@ -141,6 +147,38 @@ taxes, double slippage, 0.5% amount capacity, legal-sale deferral and total-
 return factors are modeled. This is the strongest historical candidate, not a
 stable-profit guarantee.
 
+### Post-selection path, T, and D120 exit challenge
+
+Across 1,676 selected stocks, about 90.9% had at least one legal close above
+entry plus 0.6% by D60, but the fixed-D60 winning rate was only about 53.6%.
+Taking the first net break-even, +3%, +5%, or +10% close raised winning-exit
+rates to about 90.8%, 81.7%, 74.8%, and 65.8%, while reducing monthly net mean
+from about 4.34% to 0.71%, 1.51%, 1.74%, and 2.67%. A hindsight profitable
+opportunity is not a free causal exit rule; fixed targets clip rare large
+winners.
+
+Next-open entry remained better than D2/D3/D5 entry, waiting for -1%/-2%/-3%
+pullbacks, or avoiding >2% opening gaps. Among 34 screened causal fields, only
+lower signal-day VWAP stretch robustly separated D60 return in the consumed
+history (lower half ahead by about 2.48 percentage points); it is a prospective
+hypothesis, not a validated filter.
+
+Four simple five-minute T rules were tested on 77,783 complete stock holding
+days with next-bar execution, one 20% tranche, and 0.6% round-trip cost. Their
+gross triggered edge was between about -0.03% and +0.06%; all four had negative
+net means in every one of 14 years. Do not add these T rules to the account.
+
+D120 beat D60 at the cohort level by about 3.61 percentage points per common
+month, with positive HAC/block lower bounds. On the common 162 signal months,
+the unchanged 68.61% risk-budget account reached about CNY 3.140 million with
+D120 versus CNY 2.807 million with D60. Annualized log growth was 8.84% versus
+7.98%; maximum drawdown was 30.63% versus 29.22%; volatility was 15.07% versus
+13.94%; both had 11/14 positive years. D120 improved wealth by retaining the
+positive tail and reducing turnover, not by raising win rate. It was selected
+after reading 2012-2025. A separately named D120 arm was frozen before the
+2026-08-10 first fill with identical candidates, entry and sizing; the original
+D60 arm remains unchanged.
+
 ### Prior margin-residual benchmark
 
 The earlier strongest candidate remains a useful non-value benchmark. Its
@@ -193,17 +231,18 @@ it does not turn historical evidence into guaranteed annual profit.
 ## True pause point and next step
 
 The exact quantifiable value-growth policy now has a frozen selector, causal
-information test, exact finite account, development-only risk budget and an
-isolated 2026 shadow cohort. All 2012-2025 evidence is consumed. Further
-historical weight, breadth, holding-day, exit or risk-budget tuning would spend
-known outcomes and must not be presented as confirmation.
+information test, exact finite account, development-only risk budget, complete
+path/T diagnostic, adaptive D120 challenge, and an isolated 2026 shadow cohort.
+All 2012-2025 evidence is consumed. Further historical weight, breadth,
+holding-day, exit or risk-budget tuning would spend known outcomes and must not
+be presented as confirmation.
 
 Next legitimate actions, in order:
 
 1. Build the operational mechanical signal generator for future month ends and
-   an append-only fill/mark/exit ledger. The supplied 2026 public-data Top10 is
-   already frozen separately and must not be silently relabeled as mechanical
-   output.
+   an append-only fill/mark/exit ledger. Keep the original D60 and separately
+   frozen D120 arms unchanged. The supplied 2026 public-data Top10 is already
+   frozen separately and must not be silently relabeled as mechanical output.
 2. From 2026-08-10 onward, append only actually observable shadow fills, field
    availability, costs, legal exits, turnover, drawdown and policy drift. Never
    feed these observations back into the 2012-2025 artifacts.
@@ -243,6 +282,14 @@ Next legitimate actions, in order:
   `daily_research/studies/seq100_exact_value_growth_account_v1.json`, and
   `daily_research/studies/seq100_exact_value_growth_2026_shadow_v1.json`, with
   matching `daily_research/path_policy/seq100_exact_value_growth_*` modules.
+- Exact post-selection path/T record:
+  `daily_research/research_records/seq100/seq100_exact_value_growth_path_exit_v1_20260809/`,
+  with frozen path/T and adaptive exit-challenge contracts under
+  `daily_research/studies/seq100_exact_value_growth_path_exit_v1.json` and
+  `daily_research/studies/seq100_exact_value_growth_exit_challenge_v1.json`.
+- Parallel D120 forward contract:
+  `daily_research/studies/seq100_exact_value_growth_2026_d120_shadow_v1.json`,
+  with output under the matching study id.
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.

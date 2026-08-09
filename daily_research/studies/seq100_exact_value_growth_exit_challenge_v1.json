@@ -1,0 +1,66 @@
+{
+  "study_id": "seq100_exact_value_growth_exit_challenge_v1",
+  "status": "adaptive_retrospective_exit_challenge_after_frozen_path_diagnostic",
+  "purpose": "Quantify causal profit-target timeouts and replay the D120 challenger under the exact same finite-account constraints as D60.",
+  "epistemic_contract": {
+    "d120_was_selected_after_reading_the_path_diagnostic": true,
+    "all_2012_2025_outcomes_are_consumed": true,
+    "no_untouched_confirmation_claim": true,
+    "no_forward_shadow_rule_change": true,
+    "future_2026_rows_are_forbidden": true
+  },
+  "source": {
+    "path_diagnostic_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/summary.json",
+    "path_diagnostic_summary_sha256": "98645bc509451c2e00c044ab33d84009dc5e54c1c3047a842a8ce6596859cd77",
+    "selected_paths": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/selected_paths.parquet",
+    "selected_paths_sha256": "fd98abdfd4a6ac88fa3fd0a40286172622430010a794e713cd5b6dd5148fa419",
+    "exact_account_study": "daily_research/studies/seq100_exact_value_growth_account_v1.json",
+    "exact_account_study_sha256": "84f8820c550b6c77b7b11fbaba2bb7373e9f4d9ef09871b0e1d95367b5e27029",
+    "exact_account_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+    "exact_account_summary_sha256": "98cfd971cf34116e2bdb0cb00c701eca3cff36a6a27c1b9a40355d29ef18ffb5",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "target_timeout": {
+    "thresholds_net": [0.0, 0.03, 0.05, 0.10],
+    "first_eligible_day": 2,
+    "last_eligible_day": 60,
+    "fallback": "first legal sellable close at or after signal D60",
+    "round_trip_cost": 0.006,
+    "execution": "observe a legal sellable close, then execute at that close"
+  },
+  "account_challenge": {
+    "fixed_horizons": [60, 120],
+    "extended_forward_days": 120,
+    "extended_execution_days": 125,
+    "common_signal_boundary": "last signal index no later than maximum account mark index minus 125",
+    "exposures": {
+      "risk_budget": 0.6860894024612805,
+      "full": 1.0
+    },
+    "all_other_account_rules": "inherited unchanged from seq100_exact_value_growth_account_v1"
+  },
+  "evaluation": {
+    "periods": {
+      "development": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+      "middle": [2020, 2021, 2022],
+      "late": [2023, 2024, 2025]
+    },
+    "hac_lag_months": 3,
+    "block_length_months": 3,
+    "bootstrap_repetitions": 5000,
+    "seed": 20260809,
+    "adaptive_account_challenger_gate": {
+      "ending_equity_higher_than_d60": true,
+      "annualized_log_growth_higher_than_d60": true,
+      "positive_year_count_not_lower": true,
+      "risk_budget_maximum_drawdown_deterioration_limit": 0.03,
+      "risk_budget_annualized_volatility_limit": 0.155
+    }
+  },
+  "decision_boundary": {
+    "production_claim_allowed": false,
+    "forward_confirmation_required": true,
+    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1"
+  }
+}

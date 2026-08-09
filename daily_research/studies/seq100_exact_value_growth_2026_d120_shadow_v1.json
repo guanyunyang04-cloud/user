@@ -1,0 +1,47 @@
+{
+  "study_id": "seq100_exact_value_growth_2026_d120_shadow_v1",
+  "status": "frozen_parallel_forward_challenger_before_first_fill",
+  "purpose": "Clone the already frozen 2026-08-07 public-data Top10 into a separately named D120 paper arm without changing the original D60 shadow contract.",
+  "epistemic_contract": {
+    "candidate_membership_rank_entry_and_sizing_are_identical_to_original_d60_arm": true,
+    "d120_was_selected_using_2012_2025_only": true,
+    "no_2026_fill_mark_or_return_was_observed_before_freeze": true,
+    "original_d60_arm_is_unchanged": true,
+    "future_records_are_append_only": true,
+    "profit_guarantee_allowed": false
+  },
+  "source": {
+    "original_shadow_study": "daily_research/studies/seq100_exact_value_growth_2026_shadow_v1.json",
+    "original_shadow_study_sha256": "a48303b3503fcff2965766fa7d493888fbe3b516df3644a26b96b98c87d20b85",
+    "original_shadow_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/summary.json",
+    "original_shadow_summary_sha256": "6574d88792aba1d60f18190825f43db91787d54afc803bce73838a832256feb1",
+    "original_frozen_orders": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/frozen_orders.parquet",
+    "original_frozen_orders_sha256": "a8f2fc1f2aa7fb8256efd03104c644e8125126ea8ffea4079ab3323ca6a9da45",
+    "historical_exit_challenge_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1/summary.json",
+    "historical_exit_challenge_summary_sha256": "0aa2a90647f8fd42de18b58c1c859ad5b6089ed6d042b0d21341a3beb0deb049"
+  },
+  "freeze": {
+    "frozen_at": "2026-08-09T00:00:00+08:00",
+    "signal_close_date": "2026-08-07",
+    "planned_next_open_date": "2026-08-10",
+    "candidate_count": 10,
+    "planned_exit_open_days_from_signal": 120,
+    "planned_exit": "D120 close request with legal-sale deferral",
+    "observation_status": "pending_forward_fill"
+  },
+  "risk": {
+    "shadow_starting_cash_cny": 1000000.0,
+    "position_slots": 30,
+    "frozen_target_gross_fraction": 0.6860894024612805,
+    "target_cash_per_order_cny": 22869.64674870935,
+    "first_cohort_target_gross_fraction": 0.2286964674870935,
+    "pyramiding": false,
+    "maximum_signal_day_amount_fraction": 0.005
+  },
+  "decision_boundary": {
+    "realized_fill_count": 0,
+    "realized_exit_count": 0,
+    "performance_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_d120_shadow_v1"
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "study_id": "seq100_exact_value_growth_path_exit_v1",
+  "status": "frozen_retrospective_path_entry_exit_and_t_diagnostic",
+  "purpose": "Describe the complete post-selection path, test causal entry refinements, diagnose fixed and state-dependent exits, and determine whether simple chronological five-minute T rules add stable value during exact value-growth holdings.",
+  "epistemic_contract": {
+    "all_2012_2025_outcomes_are_already_consumed": true,
+    "no_result_is_an_untouched_confirmation": true,
+    "entry_exit_and_t_rules_are_frozen_before_this_study_reads_their_outcomes": true,
+    "path_oracle_is_diagnostic_only": true,
+    "future_2026_rows_are_forbidden": true,
+    "historical_success_cannot_modify_the_forward_shadow_rule": true
+  },
+  "source": {
+    "exact_policy_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+    "exact_policy_summary_sha256": "349005a7505ead306db2892061765423d390e065ac043e77b68e969d213e325d",
+    "candidate_features": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+    "candidate_features_sha256": "91956712b39db71eec6175cd25b5cf48c96a576f635789bb906b7c00f15b996b",
+    "selections": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+    "selections_sha256": "57db1504724912c874d19bd0a7cc24a1abf474b58e8bc69926a93c1b5c73b447",
+    "exact_account_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+    "exact_account_summary_sha256": "98cfd971cf34116e2bdb0cb00c701eca3cff36a6a27c1b9a40355d29ef18ffb5",
+    "risk_budget_trades": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/risk_budget_trades.parquet",
+    "risk_budget_trades_sha256": "d6ab2bcd80c7352af6e7016ef86ecd5a5a9473ada731fffe2f6e14235684d13c",
+    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "qdp_active_manifest_sha256": "f86fdc977d111439621638c4ac96801ef7e75d71bf07da2cc5354d90c0bbbd2a",
+    "intraday_manifest": "quant_data_platform/data/qdp_v2/datasets/market_intraday_5m/market_intraday_5m__2c071f88738b5cdea4695f16/dataset.json",
+    "intraday_manifest_sha256": "cde45e502a3aec4e0ce441ea614350eff267b491c506d86f879488af979f4fa3",
+    "intraday_dataset_id": "market_intraday_5m__2c071f88738b5cdea4695f16",
+    "formal_start_date": "2012-01-01",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "selection": {
+    "policy": "exact_full_top10",
+    "signal_frequency": "monthly",
+    "entry_baseline": "next legal open",
+    "round_trip_cost": 0.006
+  },
+  "path": {
+    "maximum_open_days": 120,
+    "fixed_checkpoints": [5, 10, 20, 40, 60, 80, 120],
+    "profit_thresholds_net": [0.0, 0.03, 0.05, 0.10],
+    "shape_contract": {
+      "early_spike_fade": "MFE20 >= 8% and D60 return <= 25% of MFE20",
+      "dip_then_recover": "MAE10 <= -5% and D60 return > 0",
+      "late_breakout": "D20 return <= 0 and D60 return >= 8%",
+      "persistent_trend": "D5 D20 and D60 returns are positive and peak day >= 40",
+      "persistent_loss": "D5 D20 and D60 returns are negative",
+      "mixed_range": "all remaining paths"
+    }
+  },
+  "entry_variants": {
+    "fixed_open_offsets_from_signal": [1, 2, 3, 5],
+    "pullback_close_thresholds": [-0.01, -0.02, -0.03],
+    "pullback_observation_days": 5,
+    "pullback_action": "after the first observed close at or below signal adjusted close times one plus threshold, request the next open; otherwise remain cash",
+    "overextension_rule": "if next-open gap exceeds 2%, wait through D5 for the first close no more than 1% above signal close and request the following open; otherwise remain cash",
+    "common_exit": "first legal sellable close at or after signal plus 60 open days"
+  },
+  "signal_feature_screen": {
+    "method": "within-signal-date upper-half minus lower-half paired outcome difference",
+    "false_discovery_rate": 0.10,
+    "minimum_date_coverage": 0.70,
+    "features": [
+      "exact_full_score",
+      "valuation_score",
+      "earnings_revision_score",
+      "quality_score_exact",
+      "price_confirmation_score_exact",
+      "forward_earnings_yield",
+      "ttm_fcf_yield",
+      "normalized_earnings_yield_base",
+      "industry_relative_ret20",
+      "trend_slope_20d",
+      "financial_net_profit_yoy",
+      "financial_revenue_yoy",
+      "cashflow_cfo_to_income",
+      "financial_roe_avg",
+      "financial_debt_to_asset",
+      "relative_turnover_20d",
+      "volatility_20d",
+      "atr_20d",
+      "efficiency_ratio_20d",
+      "price_range_position_20d",
+      "amount_ratio_20d",
+      "minute_close_location",
+      "minute_vwap_close_deviation",
+      "minute_last_30m_return",
+      "minute_realized_volatility",
+      "minute_trend_efficiency",
+      "minute_high_time_fraction",
+      "minute_mfe_from_open",
+      "minute_mae_from_open",
+      "technical_rsi_bfq_6",
+      "technical_macd_bfq",
+      "market_all__drawdown60_mean",
+      "market_all__ret1_dispersion",
+      "industry_ret1_dispersion"
+    ]
+  },
+  "exit": {
+    "fixed_legal_horizons": [10, 20, 40, 60, 80, 120],
+    "baseline_horizon": 60,
+    "continuation_state_day": 20,
+    "continuation_return_bins": [-1.0, -0.10, 0.0, 0.10, 1.0e9],
+    "recent_trend_window": 10,
+    "giveback_threshold": 0.50,
+    "robust_challenge_requires": "paired full-history HAC and block lower bounds above zero and positive mean in at least two of three periods"
+  },
+  "intraday_t": {
+    "holding_source": "actual risk-budget account trades",
+    "eligible_days": "strictly after entry date and strictly before exit date",
+    "complete_bar_count": 48,
+    "maximum_round_trips_per_holding_day": 1,
+    "t_tranche_fraction_of_position": 0.20,
+    "round_trip_cost": 0.006,
+    "execution": "a signal at a five-minute close fills at the next bar open; if the paired leg never triggers it fills at the final bar close",
+    "rules": [
+      {"name": "drop1_rebound1", "direction": "buy_then_sell_old_inventory", "trigger_from_day_open": 0.01, "paired_move": 0.01},
+      {"name": "drop2_rebound1", "direction": "buy_then_sell_old_inventory", "trigger_from_day_open": 0.02, "paired_move": 0.01},
+      {"name": "rise1_fade1", "direction": "sell_old_then_buy_back", "trigger_from_day_open": 0.01, "paired_move": 0.01},
+      {"name": "rise2_fade1", "direction": "sell_old_then_buy_back", "trigger_from_day_open": 0.02, "paired_move": 0.01}
+    ],
+    "oracle": "best chronological buy-sell or sell-buy bar-open spread minus the same cost; diagnostic only",
+    "stable_gate": "positive net HAC and block lower bounds in every period and at least ten positive years"
+  },
+  "evaluation": {
+    "periods": {
+      "development": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+      "middle": [2020, 2021, 2022],
+      "late": [2023, 2024, 2025]
+    },
+    "hac_lag_months": 3,
+    "block_length_months": 3,
+    "bootstrap_repetitions": 5000,
+    "seed": 20260809
+  },
+  "decision_boundary": {
+    "account_rule_modified": false,
+    "forward_shadow_rule_modified": false,
+    "production_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1"
+  }
+}
