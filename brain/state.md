@@ -422,3 +422,63 @@ Next legitimate actions, in order:
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.
+
+## Full-market short-path forecasting (2026-08-10)
+
+The active broad-market study is now
+`seq100_full_market_multitask_forecast_v1`. It uses the entire
+`quality_liquidity_pit` population rather than financing, Chan, KAMA, or another
+candidate gate. The target panel has 4,191,476 2012-2025 stock-days, 557 causal
+fields, D2/D3/D5/D10 legal path outcomes, and no 2026 outcome. Five forward
+development/validation folds cover 2020-2025. Each fold trains on all eligible
+earlier history with a 30-day purge; an earlier-only 291-day inner window selects
+tree count, so the outer fold is not used for early stopping.
+
+The implementation uses 16 CPU threads, reusable LightGBM binary caches, chunked
+row-major feature views, Windows working-set trimming, and exactly 1 GiB system
+reserve. The largest observed 364-field task used about 4.5 GiB process RSS and
+left about 2.6 GiB system memory available. Resource use remained above the
+frozen reserve.
+
+Repeatable predictive information exists, but it is not yet payoff aligned:
+
+- next-close AUC is roughly 0.536-0.559;
+- D2 legal MFE >=1% AUC is roughly 0.570-0.599 with daily Rank IC 0.10-0.15;
+- D2 exposure MAE >-3% AUC is roughly 0.672-0.748 with Rank IC 0.32-0.42;
+- D2 final legal profit >0.3% AUC is only roughly 0.507-0.546.
+
+The adaptive 557-field/127-leaf Top1 score combines the minimum within-date rank
+of upside probability and safety probability, gated by daily mean direction
+above 0.5. Its exact CNY 1 million D2 account returned +63.67% base and +29.63%
+under double slippage, with 16.21%/19.32% maximum drawdown. Base years were 6/6
+positive; stress had one approximately -0.03% year. This path is explicitly not
+accepted as a stable strategy: HAC lower bounds cross zero, removing the best 1%
+of dates makes mean return negative, and a +5% winner cap nearly eliminates base
+profit and makes stress negative.
+
+True retrained feature ablation and capacity checks reject a robust Top1 claim:
+
+- 364 fields: +74.18% base / +38.89% stress, but only 4/6 base years and 22.71%
+  drawdown;
+- 183 market+daily-price/volume+5m fields: -22.13% / -37.84%; rejected;
+- full 557 fields with depth-8/210 leaves: +3.81% / -17.33%; rejected;
+- 127/210 probability ensemble: +6.20% / -15.44%; rejected.
+
+The 127- and 210-leaf models choose the same Top1 on only about 10% of common
+gated dates. Top3/Top10/Top30 breadth does not survive double slippage in any
+robust way. The combined score has only about 0.007-0.010 daily Rank IC with final
+D2 legal return, and final return is not monotonic across score deciles. The
+models learn path opportunity and volatility safety much better than where the
+legal exit payoff finishes.
+
+Current status is
+`repeatable_path_information_but_no_robust_payoff_aligned_strategy`. Do not tune
+the current upside/safety Top1 rule further or send it to shadow production as a
+profit claim. The next substantive experiment is direct executable-net-return
+cross-sectional ranking/distribution learning at D2/D3/D5/D10, followed by
+monotonic decile and Top1/Top3/Top10 checks before account optimization. Start
+with all 557 fields and require feature/capacity/ensemble neighbors to preserve
+any result.
+
+Durable record:
+`daily_research/research_records/seq100/seq100_full_market_multitask_forecast_v1_20260810/research_record.md`.

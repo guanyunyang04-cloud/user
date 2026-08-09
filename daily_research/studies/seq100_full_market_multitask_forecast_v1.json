@@ -1,0 +1,131 @@
+{
+    "study_id": "seq100_full_market_multitask_forecast_v1",
+    "status": "adaptive_retrospective_full_market_research",
+    "purpose": "Learn full-market next-day direction and short legal-return paths before applying any financing, Chan, or hand-written candidate gate.",
+    "epistemic_contract": {
+        "all_2012_2025_outcomes_are_consumed_development_evidence": true,
+        "five_forward_folds_are_reusable_development_validation_not_pristine_confirmation": true,
+        "each_validation_prediction_uses_only_earlier_signal_dates": true,
+        "no_2026_outcome_may_be_read": true,
+        "stable_profit_claim_allowed": false
+    },
+    "sources": {
+        "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+        "research_start_date": "2012-01-01",
+        "maximum_outcome_date": "2025-12-31",
+        "forbidden_year": 2026
+    },
+    "population": {
+        "universe": "signal-date quality_liquidity_pit",
+        "candidate_gate": "none_beyond_the_frozen_pit_universe",
+        "financing_role": "optional_input_family_not_population_gate",
+        "chan_role": "optional_input_family_not_population_gate"
+    },
+    "targets": {
+        "horizons": [2, 3, 5, 10],
+        "entry": "signal close decision then next legal open fill",
+        "planned_exit": "D2/D3/D5/D10 close",
+        "blocked_exit": "first sellable open within 20 trading days",
+        "terminal_recovery_fraction": 0.0,
+        "path_auxiliaries": [
+            "legal_mfe",
+            "exposure_mae",
+            "signed_path_efficiency",
+            "market_excess_endpoint_return"
+        ],
+        "positive_after_cost_notional_cny": 100000.0
+    },
+    "validation": {
+        "training_start_date": "2012-01-01",
+        "validation_start_date": "2020-01-01",
+        "validation_end_date": "2025-12-31",
+        "forward_fold_count": 5,
+        "common_purge_trading_days": 30,
+        "inner_validation_trading_days": 291,
+        "same_date_stocks_never_split": true,
+        "future_fold_training_forbidden": true,
+        "primary_weighting": "equal signal date",
+        "seed": 20260809
+    },
+    "resources": {
+        "reserve_system_gib": 1.0,
+        "maximum_cpu_threads": 16,
+        "histogram_pool_cap_mb": 1536,
+        "sequence_batch_cap": 65536,
+        "single_heavy_task_at_a_time": true,
+        "gpu_mixed_precision": true,
+        "gpu_batch_auto_probe": true
+    },
+    "feature_variants": {
+        "all_causal_557": {
+            "source_group": "compact_core",
+            "feature_count": 557
+        },
+        "price_path_context_364": {
+            "source_group": "compact_core",
+            "feature_count": 364,
+            "analytic_families": [
+                "daily_cross_sectional_technical",
+                "daily_price_volume_technical",
+                "traditional_technical_indicators",
+                "market_state",
+                "same_day_5m"
+            ]
+        },
+        "price_path_core_183": {
+            "source_group": "compact_core",
+            "feature_count": 183,
+            "analytic_families": [
+                "daily_price_volume_technical",
+                "market_state",
+                "same_day_5m"
+            ]
+        }
+    },
+    "lightgbm": {
+        "primary_profile": "strong_127",
+        "profiles": {
+            "strong_127": {
+                "learning_rate": 0.03,
+                "num_leaves": 127,
+                "max_depth": 8,
+                "min_data_in_leaf": 2000,
+                "lambda_l1": 0.1,
+                "lambda_l2": 10.0,
+                "feature_fraction": 0.9,
+                "bagging_fraction": 1.0,
+                "bagging_freq": 0
+            },
+            "qlib_capacity_210": {
+                "learning_rate": 0.03,
+                "num_leaves": 210,
+                "max_depth": 8,
+                "min_data_in_leaf": 1000,
+                "lambda_l1": 0.1,
+                "lambda_l2": 10.0,
+                "feature_fraction": 0.9,
+                "bagging_fraction": 1.0,
+                "bagging_freq": 0
+            }
+        },
+        "max_bin": 127,
+        "num_boost_round": 1000,
+        "early_stopping_rounds": 75,
+        "binary_metric": "binary_logloss",
+        "regression_objective": "huber",
+        "huber_alpha": 0.9,
+        "cache_binned_dataset_per_fold": true,
+        "feature_pre_filter": false
+    },
+    "sequence_challengers": {
+        "daily_lookbacks": [8, 16, 32, 60],
+        "formal_primary_lookbacks": [8, 16, 32],
+        "intraday_bars_per_day": 48,
+        "encoder": "hierarchical_per_day_intraday_then_temporal",
+        "global_quadratic_stock_attention_forbidden": true
+    },
+    "outputs": {
+        "output_root": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+        "first_training_targets": ["next_close_up", "legal_exit_return_d2"]
+    }
+}
