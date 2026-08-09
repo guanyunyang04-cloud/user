@@ -1,0 +1,105 @@
+{
+  "study_id": "seq100_margin_top10_legal_hurdle_v1",
+  "status": "adaptive_retrospective_hurdle_challenger",
+  "purpose": "Challenge the weak financing-Top10 expected-net candidate with direct legal-win probability and lower-tail models before any account replay.",
+  "epistemic_contract": {
+    "all_2012_2025_outcomes_are_consumed_development_evidence": true,
+    "parent_two_stage_results_were_read_before_freezing_this_followup": true,
+    "five_forward_folds_are_reusable_development_validation_not_pristine_confirmation": true,
+    "no_2026_outcome_may_be_read": true,
+    "stable_profit_or_production_claim_allowed": false
+  },
+  "source": {
+    "parent_study": "daily_research/studies/seq100_margin_top10_two_stage_v1.json",
+    "parent_study_sha256": "c30460635a332b644553baf45204a3db107f3829bb26327668101462462cce9f",
+    "prepared_manifest": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/prepared/manifest.json",
+    "prepared_manifest_sha256": "c21498d71a6cfb410277d74f3ed1a3cca2f9478934e075f94f4b5d7e431a9c1a",
+    "parent_summary": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/summary.json",
+    "parent_summary_sha256": "379ce1e8b713389360a44f8a9958734d1a0fb180631e3303aa3aba93952f388e",
+    "candidate_oof_scores": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/candidate_oof_scores.parquet",
+    "candidate_oof_scores_sha256": "760fab393c23e89fd057dc0f39dc718d066118713b72b419925e2909a4a8dee3",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "population": {
+    "definition": "same-date financing balance increased for at least two observations and absolute increment ranked daily Top10 inside quality_liquidity_pit",
+    "entry": "next legal raw-price open",
+    "exit": "earliest legal D2 close request with blocked-sale deferral",
+    "cost_scenario": "exact lots, minimum commission, taxes, transfer fee, and double slippage"
+  },
+  "features": {
+    "variant": "direct compact_557 plus the frozen 39 financing features",
+    "feature_count": 596,
+    "missing_policy": "retain NaN for LightGBM",
+    "future_or_outcome_features_forbidden": true
+  },
+  "targets": {
+    "legal_net_positive": "exact candidate cash net return is greater than zero; an unfilled order is cash with zero return and therefore negative class",
+    "legal_net_q20": "conditional 20th percentile of exact cash net return, including unfilled orders as zero",
+    "parent_expected_net": "frozen m2_direct_557_margin regression prediction from the parent study"
+  },
+  "validation": {
+    "outer_folds": "identical frozen five expanding-window folds from the parent prepared manifest",
+    "common_purge_trading_days": 2,
+    "same_date_stocks_never_split": true,
+    "future_fold_training_forbidden": true,
+    "primary_weighting": "equal signal date",
+    "hac_lag_days": 20,
+    "block_length_days": 20,
+    "bootstrap_repetitions": 5000,
+    "seed": 20260809
+  },
+  "supplemental_history_extension": {
+    "purpose": "Use the otherwise training-only 2012-2019 history to test whether the frozen legal-win-probability rule also survives older market regimes.",
+    "burn_in_years": [2012, 2013],
+    "validation_years": [2014, 2015, 2016, 2017, 2018, 2019],
+    "fold_construction": "one calendar year per expanding-window fold with the same two-trading-day purge",
+    "tested_rule": "legal_win_probability greater than 0.5, select up to daily Top3",
+    "introduced_after_primary_2020_2025_result_was_read": true,
+    "independent_confirmation_claim_allowed": false
+  },
+  "model": {
+    "library": "lightgbm",
+    "learning_rate": 0.03,
+    "num_leaves": 7,
+    "max_depth": 3,
+    "min_data_in_leaf": 150,
+    "lambda_l2": 5.0,
+    "n_estimators": 180,
+    "feature_fraction": 0.8,
+    "num_threads": 8,
+    "quantile_alpha": 0.2,
+    "parameter_grid_performed": false
+  },
+  "selection": {
+    "scores": [
+      "parent_expected_net",
+      "legal_win_probability",
+      "legal_net_q20",
+      "equal_rank_composite"
+    ],
+    "daily_top_k": [1, 3],
+    "no_trade_rules": {
+      "parent_expected_net": "top score greater than zero",
+      "legal_win_probability": "top probability greater than 0.5",
+      "legal_net_q20": "top conditional 20th percentile greater than zero",
+      "equal_rank_composite": "selected candidate expected net greater than zero and win probability greater than 0.5"
+    }
+  },
+  "evaluation": {
+    "entry_gate": {
+      "minimum_positive_legal_net_folds": 4,
+      "minimum_positive_paired_delta_folds": 4,
+      "pooled_legal_net_hac_lower_bound_positive": true,
+      "pooled_paired_delta_hac_lower_bound_positive": true,
+      "minimum_positive_calendar_years": 5,
+      "remove_top_one_percent_mean_positive": true
+    },
+    "account_replay_only_if_entry_gate_passes": true
+  },
+  "decision_boundary": {
+    "historical_result_is_adaptive_not_independent_confirmation": true,
+    "account_replay_allowed_only_after_entry_gate": true,
+    "output_root": "daily_research/output/path_policy/studies/seq100_margin_top10_legal_hurdle_v1"
+  }
+}

@@ -249,6 +249,43 @@ or cost boundary. Detailed records:
 and
 `daily_research/research_records/seq100/seq100_margin_top10_current_cross_v1_20260809/`.
 
+### Full-market next-day model and financing Top10 reranking
+
+A new adaptive contract used the current 4,191,476-row, 557-field compact
+matrix and the corrected 33,877-candidate financing panel. Twenty expanding-
+window LightGBM tasks were run over five contiguous 2020-2025 validation
+blocks, with 2012 onward used for training, a two-trading-day purge, equal-date
+weighting, and no 2026 outcome. The 66 transparent coordinates learned
+repeatable next-close cross-sectional direction: fold Rank IC was about
+0.068-0.105. The 557-field version was not better (about 0.052-0.095). Legal
+next-open-to-D2-close return was much harder: its fold Rank IC was roughly
+-0.001 to +0.023.
+
+Inside the 14,530 validation financing candidates on 1,453 dates, the original
+absolute financing-increment Top1/Top3 lost about 0.441%/0.438% per equal-date
+selection after exact costs and double slippage. Direction models raised the
+next-close hit rate from about 46.4% to as high as 56.7%, but their legal net
+returns remained negative. The best expected-net gate selected Top1 only when
+its predicted net was positive: mean net was +0.140% over 673 dates and four of
+five folds were positive, but the HAC lower bound was -0.426%, only three of
+six years were positive, and the median/trimmed result was negative. Fixed
+D2 take-profit targets from 0.5%-5% did not repair it.
+
+A separately frozen hurdle follow-up directly predicted whether exact legal
+net return would be positive. During 2020-2025, taking up to Top3 only when the
+raw predicted probability exceeded 0.5 produced +0.452% mean net over 285
+trade dates; all five folds and all six years were positive, and removing the
+largest 1% winners left +0.265%. It still failed because the HAC and block
+lower bounds were -0.114% and -0.211%. A supplemental expanding-window
+2014-2019 extension was positive in only four of six years. Combined
+2014-2025 evidence was +0.169% over 969 trade dates, 10/12 positive years and
+9/11 positive folds, but absolute HAC/block lower bounds remained -0.204% and
+-0.259%. Its paired improvement over the raw financing Top10 was robust
+(+0.384%, HAC lower bound +0.195%), meaning the model reliably reduced a bad
+selection baseline without yet proving positive absolute value. No account
+replay was run. All of this is consumed adaptive history, not independent
+confirmation.
+
 ### Prior margin-residual benchmark
 
 The earlier strongest candidate remains a useful non-value benchmark. Its
@@ -376,6 +413,12 @@ Next legitimate actions, in order:
   `daily_research/research_records/seq100/seq100_margin_top10_current_cross_v1_20260809/`,
   `daily_research/studies/seq100_margin_top10_current_cross_v1.json`, and
   `daily_research/path_policy/seq100_margin_top10_current_cross.py`.
+- Full-market/two-stage financing reranker and legal hurdle challenger:
+  `daily_research/studies/seq100_margin_top10_two_stage_v1.json`,
+  `daily_research/path_policy/seq100_margin_top10_two_stage.py`,
+  `daily_research/studies/seq100_margin_top10_legal_hurdle_v1.json`, and
+  `daily_research/path_policy/seq100_margin_top10_legal_hurdle.py`, with
+  outputs under their matching study ids.
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.
