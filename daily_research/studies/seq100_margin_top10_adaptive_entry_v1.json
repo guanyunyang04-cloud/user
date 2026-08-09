@@ -1,0 +1,168 @@
+{
+  "study_id": "seq100_margin_top10_adaptive_entry_v1",
+  "status": "frozen_user_requested_adaptive_retrospective_study",
+  "purpose": "Test causal KAMA-style and down-day entries inside daily Top10 consecutive financing-balance increases, compare one-day legal and first-decrease exits, diagnose subsequent paths, and challenge the rules with a fixed time-split continuation model.",
+  "epistemic_contract": {
+    "prior_margin_growth_probe_was_read_before_this_study": true,
+    "user_formula_and_entry_rules_are_new_user_specified_hypotheses": true,
+    "all_2012_2025_results_are_adaptive_retrospective_evidence": true,
+    "development_calibration_and_late_period_are_sequential_checks_not_untouched_global_confirmation": true,
+    "no_2026_outcome_may_be_read": true,
+    "production_claim_allowed": false
+  },
+  "source": {
+    "quality_liquidity_pit_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+    "quality_liquidity_pit_manifest_sha256": "79f2886ffe053f9d3502f6dbc002702dcecc995dbda714ce135280bfc9298613",
+    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "model_input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "qdp_active_manifest_sha256": "f86fdc977d111439621638c4ac96801ef7e75d71bf07da2cc5354d90c0bbbd2a",
+    "margin_detail_manifest": "quant_data_platform/data/qdp_v2/datasets/margin_detail/margin_detail__2ed8aba21121548425f56b7c/dataset.json",
+    "margin_detail_manifest_sha256": "f25564f17c028ee176246b8f87fcb7a97f9b4486b1feb5ced9dc556e6a8fc0e6",
+    "market_daily_manifest": "quant_data_platform/data/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json",
+    "market_daily_manifest_sha256": "e6a8a7998512d5ea545c9bd59c728f8f8b6d54bc8aecd4fed1c7285989846982",
+    "adjust_factor_manifest": "quant_data_platform/data/qdp_v2/datasets/adjust_factor/adjust_factor__98fbecd479934dda685046f0/dataset.json",
+    "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
+    "prior_margin_probe_record": "daily_research/research_records/seq100/seq100_margin_balance_probe_20260808/research_record.md",
+    "prior_margin_probe_record_sha256": "957710c70afa81f0348b828ad684d4ef3828abe4fc6ddf53b16e1d5ab49f3ddd",
+    "research_start_date": "2012-01-01",
+    "maximum_outcome_date": "2025-12-31",
+    "burn_in_start_date": "2010-01-01",
+    "forbidden_year": 2026
+  },
+  "margin_selection": {
+    "balance_field": "rzye",
+    "fresh_observation_required_on_signal_date": true,
+    "increment_definition": "current reported rzye minus prior reported rzye for the same symbol",
+    "consecutive_source_trading_day_required": true,
+    "minimum_consecutive_increases": 3,
+    "ranking": "descending absolute CNY balance increment",
+    "daily_top_k": 10,
+    "tie_break": "symbol ascending",
+    "universe": "quality_liquidity_pit on the signal date",
+    "future_outcomes_used": false
+  },
+  "adaptive_line": {
+    "price_basis": "raw OHLC multiplied by the pack-pinned back-adjust factor",
+    "efficiency_lookback": 10,
+    "fast_n": 2,
+    "slow_n": 30,
+    "smooth_n": 2,
+    "dma_initialization": "first valid adjusted close; pre-lookback ER is zero",
+    "suspended_days": "not counted as bars"
+  },
+  "entry_signals": {
+    "cross_support": "previous valid bar close > previous ADP and the bar before close <= its ADP, while current adjusted low > current ADP",
+    "down_close": "current adjusted close < previous valid adjusted close",
+    "bearish_candle_sensitivity": "current adjusted close < current adjusted open",
+    "primary_user_union": "cross_support OR down_close",
+    "secondary_union": "cross_support OR bearish_candle_sensitivity",
+    "signal_information_time": "after the signal-date close",
+    "entry": "next legal raw-price open"
+  },
+  "exits": {
+    "legal_one_day": {
+      "request": "signal D2 close",
+      "reason": "entry is signal D1 open and A-share T+1 forbids sale on the entry date",
+      "blocked_sale": "defer to first legal sellable close"
+    },
+    "first_financing_decrease": {
+      "trigger": "first causally available fresh margin observation after entry whose rzye increment is negative",
+      "request": "the trading-session close after the decrease becomes available",
+      "minimum_request": "signal D2 close",
+      "maximum_request_day": 60,
+      "timeout": "signal D60 close",
+      "blocked_sale": "defer to first legal sellable close"
+    },
+    "candidate_trade_cash_cny": 100000.0,
+    "cost_scenario": "double_slippage",
+    "round_lots_minimum_commission_taxes_and_transfer_fee": true,
+    "corporate_action_accounting": "raw execution prices and costs with back-adjust-factor total-return equivalent"
+  },
+  "path_diagnostics": {
+    "close_horizons_from_signal": [1, 2, 3, 5, 10, 20, 60],
+    "mfe_mae_horizons_from_signal": [2, 5, 10, 20],
+    "illegal_entry_day_close_is_diagnostic_only": true,
+    "representative_best_and_worst_case_count_each": 6,
+    "adaptive_take_profit_sensitivity": {
+      "gross_return_thresholds": [0.005, 0.01, 0.02, 0.03, 0.05],
+      "order_activation": "signal D2 open, after T+1 shares become sellable",
+      "fill": "higher of D2 adjusted open return and the resting target when D2 adjusted high reaches target; otherwise use the legal one-day close/deferred exit",
+      "selection_time": "added after the primary close-exit result was observed; diagnostic only",
+      "production_selection_allowed": false
+    }
+  },
+  "evaluation": {
+    "periods": {
+      "development": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+      "calibration": [2020, 2021, 2022],
+      "late": [2023, 2024, 2025]
+    },
+    "full_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "hac_lag_days": 20,
+    "block_length_days": 20,
+    "bootstrap_repetitions": 5000,
+    "seed": 20260809,
+    "entry_gate": {
+      "full_history_hac_and_block_lower_bounds_positive": true,
+      "minimum_positive_years": 10,
+      "late_period_mean_positive": true,
+      "paired_increment_vs_unfiltered_top10_hac_lower_bound_positive": true
+    },
+    "account_replay_only_if_entry_gate_passes": true
+  },
+  "continuation_model": {
+    "purpose": "screen the margin Top10 for a high probability of at least one more up day and separately inspect executable D2 net value",
+    "targets": ["next_close_up", "legal_one_day_net_positive"],
+    "development_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+    "platt_calibration_years": [2020, 2021, 2022],
+    "test_years": [2023, 2024, 2025],
+    "daily_selections": [1, 3],
+    "lightgbm": {
+      "objective": "binary",
+      "n_estimators": 180,
+      "learning_rate": 0.03,
+      "num_leaves": 7,
+      "max_depth": 3,
+      "min_child_samples": 150,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 2.0,
+      "random_state": 20260809,
+      "deterministic": true,
+      "parameter_grid_performed": false
+    },
+    "compact_features": [
+      "return_2d", "return_5d", "return_10d", "return_20d",
+      "trend_slope_5d", "trend_slope_10d", "trend_slope_20d", "trend_r2_10d",
+      "efficiency_ratio_5d", "efficiency_ratio_10d", "efficiency_ratio_20d",
+      "volatility_5d", "volatility_10d", "volatility_20d", "downside_volatility_10d",
+      "intraday_range_1d", "body_to_range_1d", "upper_shadow_to_range_1d", "lower_shadow_to_range_1d",
+      "close_location_1d", "open_gap_1d", "price_range_position_5d", "price_range_position_20d",
+      "log_amount_1d", "amount_ratio_5d", "amount_ratio_20d", "relative_turnover_20d",
+      "market_all__ret1_mean", "market_all__ret5_mean", "market_all__vol20_mean",
+      "market_all__breadth_ret1_positive", "market_all__breadth_above_ma20",
+      "market_all__up_limit_rate", "market_all__down_limit_rate",
+      "industry_relative_ret5", "industry_relative_ret20",
+      "minute_vwap_close_deviation", "minute_last_30m_return", "minute_close_location",
+      "minute_realized_volatility", "minute_trend_efficiency"
+    ],
+    "study_features": [
+      "margin_rank", "margin_increase_streak", "margin_increment_signed_log",
+      "margin_increment_to_balance", "reported_net_financing_flow_to_balance",
+      "current_return_1d", "current_candle_return", "close_to_adp", "low_to_adp",
+      "adp_slope_1d", "adp_slope_3d", "cross_support", "down_close", "bearish_candle"
+    ],
+    "no_threshold_or_feature_grid_after_test_read": true
+  },
+  "decision_boundary": {
+    "account_optimization_allowed": false,
+    "production_claim_allowed": false,
+    "forward_confirmation_required": true,
+    "output_root": "daily_research/output/path_policy/studies/seq100_margin_top10_adaptive_entry_v1"
+  }
+}

@@ -208,6 +208,36 @@ so this is not a stable-profit guarantee. The study is adaptive on fully
 consumed 2012-2025 history and has no independent forward evidence. Detailed
 record: `daily_research/research_records/seq100/seq100_exact_value_growth_top3_portfolio_v1_20260809/`.
 
+### Financing Top10 adaptive/down-day challenger
+
+A new user-specified margin hypothesis received a separate causal contract. It
+requires at least three consecutive point-in-time `rzye` increases, ranks the
+daily absolute balance increment Top10 inside `quality_liquidity_pit`, and buys
+next legal open after either a just-crossed adaptive line whose current low
+holds above the line or a down-close day. Signal D2 close is the first legal
+one-day exit under T+1; a first-causally-available balance-decrease/D60 exit is
+the alternative.
+
+The 2012-2025 study contains 33,598 Top10 candidates and 18,003 primary-union
+signals. The union's legal-D2 exact net candidate mean was about -0.285%, its
+daily cash mean about -0.340% with a wholly negative HAC interval, and 0/14
+annual daily means were positive. The 2023-2025 candidate/daily means were
+about -0.281%/-0.353%, again with 0/3 positive years. Gross D2 return averaged
+about +0.170%, but exact double-slippage costs and a negative median consumed
+it. The first-balance-decrease exit also remained negative and the entry gate
+failed, so no account replay is authorized.
+
+A post-primary adaptive D2 take-profit sensitivity confirmed that a higher
+legal intraday price often exists but cannot be harvested by a fixed target:
+the union reached +0.5% and +1% on D2 in about 65.6% and 57.6% of cases, yet
+every 0.5%-5% target had negative full-history and late-period net means. Fixed
+targets clip rare right-tail winners while retaining full losses on misses.
+A fixed 2012-2019/2020-2022/2023-2025 continuation model had only 0.543 test
+AUC; its Top1/Top3 selections stayed net negative. The legal-net model reduced
+losses at Top3 but did not create positive absolute return. Do not promote or
+tune this literal financing rule. Detailed record:
+`daily_research/research_records/seq100/seq100_margin_top10_adaptive_entry_v1_20260809/`.
+
 ### Prior margin-residual benchmark
 
 The earlier strongest candidate remains a useful non-value benchmark. Its
@@ -327,6 +357,10 @@ Next legitimate actions, in order:
   with frozen contracts
   `daily_research/studies/seq100_exact_value_growth_top3_portfolio_v1.json` and
   `daily_research/studies/seq100_exact_value_growth_top3_risk_frontier_v1.json`.
+- Financing Top10 adaptive/down-day record and implementation:
+  `daily_research/research_records/seq100/seq100_margin_top10_adaptive_entry_v1_20260809/`,
+  `daily_research/studies/seq100_margin_top10_adaptive_entry_v1.json`, and
+  `daily_research/path_policy/seq100_margin_top10_adaptive_entry.py`.
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.
