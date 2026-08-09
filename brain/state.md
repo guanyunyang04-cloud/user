@@ -179,6 +179,35 @@ after reading 2012-2025. A separately named D120 arm was frozen before the
 2026-08-10 first fill with identical candidates, entry and sizing; the original
 D60 arm remains unchanged.
 
+### Literal Top3 concentration and risk frontier
+
+“Monthly Top3” and “at most three stocks” are not the same account. The literal
+account buys only exact-policy ranks 1-3, never replaces them with lower ranks,
+does not pyramid, and skips new monthly orders while its three slots are full.
+An overlapping monthly-Top3 D60 diagnostic passed strongly but required up to
+12 stocks; its stability is diversification evidence and does not answer the
+three-stock constraint.
+
+For the literal account, monthly replacement, D20, D60 and D120 were compared
+with exact execution/cost/capacity rules. D60 had the highest return but its
+development-derived 57.71% gross fraction produced 16.66% full-history
+volatility and failed the 15.5% gate. A separately frozen posthoc round-number
+risk frontier then tested only D60/D120 at 40%, 45%, 50% and 55% gross. Fixed
+D60 at 50% was the highest-growth passing point: CNY 1 million to about CNY
+3.427 million, about 9.99% annual compound return from log growth, 14.65%
+volatility, 22.89% maximum drawdown and 10/14 positive years. D60 at 45% had
+about 9.22% return, 13.30% volatility, 20.83% drawdown and 11/14 positive years.
+At 55%, D60 failed volatility; D120 passed only at 40% and had lower return and
+higher drawdown than D60 50%.
+
+The current historical range for a literal three-name challenger is therefore
+equal slots with a 45-50% gross ceiling and a D60 legal-close request. At 50%,
+each filled name receives at most one sixth of equity and unused slots remain
+cash. It still had four losing calendar years, including about -12.36% in 2018,
+so this is not a stable-profit guarantee. The study is adaptive on fully
+consumed 2012-2025 history and has no independent forward evidence. Detailed
+record: `daily_research/research_records/seq100/seq100_exact_value_growth_top3_portfolio_v1_20260809/`.
+
 ### Prior margin-residual benchmark
 
 The earlier strongest candidate remains a useful non-value benchmark. Its
@@ -251,7 +280,10 @@ Next legitimate actions, in order:
 4. If a new historical hypothesis is pursued, give it a new contract. Do not
    reopen Chan-point, right-edge take-profit, financing-growth, TTM-FCF phase,
    score-weight or breadth grids on the consumed history.
-5. Current status is `strongest_candidate_forward_shadow_not_production`.
+5. If the literal Top3 45-50% D60 challenger is taken forward, give it a new
+   append-only shadow contract. Do not alter or relabel the existing Top10 D60
+   and D120 shadows.
+6. Current status is `strongest_candidate_forward_shadow_not_production`.
 
 ## Authoritative paths
 
@@ -290,6 +322,11 @@ Next legitimate actions, in order:
 - Parallel D120 forward contract:
   `daily_research/studies/seq100_exact_value_growth_2026_d120_shadow_v1.json`,
   with output under the matching study id.
+- Literal Top3 portfolio/risk record:
+  `daily_research/research_records/seq100/seq100_exact_value_growth_top3_portfolio_v1_20260809/`,
+  with frozen contracts
+  `daily_research/studies/seq100_exact_value_growth_top3_portfolio_v1.json` and
+  `daily_research/studies/seq100_exact_value_growth_top3_risk_frontier_v1.json`.
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.

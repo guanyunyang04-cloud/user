@@ -1,0 +1,50 @@
+{
+  "study_id": "seq100_exact_value_growth_top3_risk_frontier_v1",
+  "status": "frozen_posthoc_risk_frontier_after_top3_portfolio_results",
+  "purpose": "Test simple round-number gross exposures for the two return-leading literal maximum-three-name holding policies, without changing selection, exits, costs, or the frozen 2026 shadows.",
+  "epistemic_contract": {
+    "d60_and_d120_were_selected_after_reading_top3_portfolio_results": true,
+    "gross_grid_was_frozen_before_reading_any_grid_result": true,
+    "all_2012_2025_results_are_adaptive_retrospective_evidence": true,
+    "no_untouched_confirmation_claim": true,
+    "no_2026_outcome_may_be_read": true,
+    "original_2026_shadow_arms_must_not_change": true
+  },
+  "source": {
+    "top3_study": "daily_research/studies/seq100_exact_value_growth_top3_portfolio_v1.json",
+    "top3_study_sha256": "04fa368687b9babb3644967983cfcc8c4640726f70b18f127838e98f2f190596",
+    "top3_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_top3_portfolio_v1/summary.json",
+    "top3_summary_sha256": "05a7a063ab4d37e045d32d7882d38382b577073158c87c215712c9e21cd325aa",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "policies": [
+    {"name": "fixed_d60_max3", "horizon": 60},
+    {"name": "fixed_d120_max3", "horizon": 120}
+  ],
+  "gross_fraction_grid": [0.4, 0.45, 0.5, 0.55],
+  "account_contract": {
+    "slots": 3,
+    "top_k": 3,
+    "rank4_or_lower_replacement": false,
+    "pyramiding": false,
+    "all_other_rules": "inherited unchanged from seq100_exact_value_growth_top3_portfolio_v1"
+  },
+  "evaluation": {
+    "risk_account_gate": {
+      "total_return_positive": true,
+      "maximum_annualized_volatility": 0.155,
+      "maximum_drawdown": 0.3,
+      "minimum_positive_years": 10,
+      "minimum_post_development_positive_years": 4,
+      "minimum_late_positive_years": 2
+    },
+    "choice_rule": "Among passing grid points, choose the highest annualized log growth. Prefer a lower round-number exposure when growth differs by less than 0.25 percentage points.",
+    "near_tie_annualized_log_growth_tolerance": 0.0025
+  },
+  "decision_boundary": {
+    "production_claim_allowed": false,
+    "forward_confirmation_required": true,
+    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_top3_risk_frontier_v1"
+  }
+}
