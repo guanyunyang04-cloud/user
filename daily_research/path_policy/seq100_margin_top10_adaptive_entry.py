@@ -79,7 +79,7 @@ def load_study(
     selection = dict(study["margin_selection"])
     if selection != {
         "balance_field": "rzye",
-        "fresh_observation_required_on_signal_date": True,
+        "source_observation_must_be_available_before_next_open": True,
         "increment_definition": (
             "current reported rzye minus prior reported rzye for the same symbol"
         ),
@@ -265,6 +265,7 @@ def _margin_top10(
                p.date_idx, p.symbol_idx, p.symbol,
                f.margin_source_date, f.feature_available_date,
                f.source_date_idx AS margin_source_date_idx,
+               f.available_date_idx AS margin_available_date_idx,
                f.margin_balance, f.prior_margin_balance, f.margin_increment,
                CAST(f.increase_streak AS INTEGER) AS margin_increase_streak,
                f.financing_buy, f.financing_repayment,
@@ -274,7 +275,9 @@ def _margin_top10(
                ) AS margin_rank
         FROM pool_source p
         JOIN fresh f
-          ON f.symbol = p.symbol AND f.available_date_idx = p.date_idx
+          ON f.symbol = p.symbol
+         AND f.source_date_idx = p.date_idx
+         AND f.available_date_idx = p.date_idx + 1
         WHERE f.margin_increment > 0
           AND f.increase_streak >= {minimum_streak}
           AND p.trade_date <= '{maximum_date}'
@@ -319,6 +322,20 @@ def _margin_top10(
         raise ValueError("margin_top10_empty")
     if bool(candidates["trade_date"].astype(str).str.startswith("2026-").any()):
         raise ValueError("forbidden_2026_candidate")
+    if not bool(
+        (
+            candidates["margin_source_date_idx"].to_numpy(dtype=np.int64)
+            == candidates["date_idx"].to_numpy(dtype=np.int64)
+        ).all()
+    ):
+        raise ValueError("margin_source_kline_alignment_failed")
+    if not bool(
+        (
+            candidates["margin_available_date_idx"].to_numpy(dtype=np.int64)
+            == candidates["date_idx"].to_numpy(dtype=np.int64) + 1
+        ).all()
+    ):
+        raise ValueError("margin_next_open_availability_failed")
     counts = candidates.groupby("date_idx").size()
     audit = {
         "candidate_count": len(candidates),
@@ -330,6 +347,8 @@ def _margin_top10(
         "daily_candidate_count_maximum": int(counts.max()),
         "margin_symbol_count": int(candidates["symbol"].nunique()),
         "minimum_streak_observed": int(candidates["margin_increase_streak"].min()),
+        "margin_source_equals_signal_date": True,
+        "margin_available_before_entry_open": True,
         "future_outcomes_used": False,
     }
     return candidates, timeline, audit
@@ -595,7 +614,7 @@ def _first_decrease_request(
             if not len(local):
                 continue
             detection_idx = int(available[start + int(local[0])])
-            request_idx = max(signal_idx + 2, detection_idx + 1)
+            request_idx = max(signal_idx + 2, detection_idx)
             requests[row_position] = min(
                 request_idx, signal_idx + int(maximum_request_day)
             )

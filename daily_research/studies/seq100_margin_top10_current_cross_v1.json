@@ -1,0 +1,67 @@
+{
+  "study_id": "seq100_margin_top10_current_cross_v1",
+  "status": "frozen_user_specified_adaptive_followup",
+  "purpose": "Test whether a same-day adjusted-close cross above the smoothed KAMA-style adaptive line improves next-day continuation and executable returns inside financing-balance Top10 candidates with at least two consecutive increases.",
+  "epistemic_contract": {
+    "hypothesis_was_specified_after_the_prior_margin_top10_result": true,
+    "all_2012_2025_results_are_adaptive_retrospective_evidence": true,
+    "no_2026_outcome_may_be_read": true,
+    "production_claim_allowed": false
+  },
+  "source": {
+    "base_study": "daily_research/studies/seq100_margin_top10_adaptive_entry_v1.json",
+    "base_study_sha256": "8f1677026dae158e08d056bd8a82aa828dbb2282eee8da3f00d6069a2769166e",
+    "base_implementation": "daily_research/path_policy/seq100_margin_top10_adaptive_entry.py",
+    "base_implementation_sha256": "883c8e8183c0b420085bd9862f2344dfb072798d9da7e4dd6c6d502b181cccec",
+    "prior_summary": "daily_research/output/path_policy/studies/seq100_margin_top10_adaptive_entry_v1/summary.json",
+    "prior_summary_sha256": "7be4532303c8b22d01aaaebff42947e45690e01078d7138eb569389524cf8d0c",
+    "research_start_date": "2012-01-01",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "selection": {
+    "margin_balance_field": "rzye",
+    "minimum_consecutive_increases": 2,
+    "consecutive_source_trading_days_required": true,
+    "daily_rank": "descending absolute CNY margin-balance increment",
+    "daily_top_k": 10,
+    "universe": "quality_liquidity_pit on the signal date",
+    "margin_and_kline_alignment": "same source trading date",
+    "availability_gate": "same-date margin data must have feature_available_date equal to the next trading session",
+    "signal_information_time": "after the exchange publishes signal-date margin data before the next session opens",
+    "entry": "next legal raw-price open on feature_available_date"
+  },
+  "signals": {
+    "primary_current_cross": "current adjusted close > current ADP and previous valid adjusted close <= previous valid ADP",
+    "rising_line_sensitivity": "primary current cross and current ADP > previous valid ADP",
+    "prior_cross_support_control": "previous valid close crossed above ADP and current adjusted low remains above current ADP",
+    "no_future_outcome_or_fill_used": true
+  },
+  "outcomes": {
+    "next_close_up": "signal D1 adjusted close > signal-date adjusted close",
+    "entry_day_gross_up": "signal D1 adjusted close > executable D1 adjusted open; diagnostic only because T+1 forbids sale",
+    "legal_one_day": "enter D1 open and request D2 close with legal-sale deferral and exact double-slippage costs",
+    "path_horizons_from_signal": [1, 2, 3, 5, 10, 20, 60]
+  },
+  "evaluation": {
+    "periods": {
+      "development": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+      "calibration": [2020, 2021, 2022],
+      "late": [2023, 2024, 2025]
+    },
+    "full_years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "hac_lag_days": 20,
+    "block_length_days": 20,
+    "bootstrap_repetitions": 5000,
+    "seed": 20260809,
+    "minimum_signal_count_per_period": 100,
+    "production_or_account_gate": false
+  },
+  "decision_boundary": {
+    "probability_improvement_does_not_imply_net_profit": true,
+    "account_replay_allowed": false,
+    "production_claim_allowed": false,
+    "forward_confirmation_required": true,
+    "output_root": "daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1"
+  }
+}

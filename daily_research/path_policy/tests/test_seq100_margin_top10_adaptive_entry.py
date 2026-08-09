@@ -89,7 +89,7 @@ def test_cross_support_matches_user_formula_timing() -> None:
     assert result.loc[0, "low_to_adp"] > 0.0
 
 
-def test_first_decrease_exit_uses_next_session_and_times_out() -> None:
+def test_first_decrease_exit_uses_availability_session_and_times_out() -> None:
     candidates = pd.DataFrame(
         {
             "symbol": ["000001.SZ", "600000.SH"],
@@ -109,7 +109,7 @@ def test_first_decrease_exit_uses_next_session_and_times_out() -> None:
         candidates, timeline, maximum_request_day=60
     )
 
-    assert requests.tolist() == [13, 80]
+    assert requests.tolist() == [12, 80]
     assert audit["decrease_detected_count"] == 1
     assert audit["timeout_count"] == 1
     assert audit["detection_offsets"].tolist() == [2, -1]

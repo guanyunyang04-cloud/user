@@ -36,7 +36,7 @@
   },
   "margin_selection": {
     "balance_field": "rzye",
-    "fresh_observation_required_on_signal_date": true,
+    "source_observation_must_be_available_before_next_open": true,
     "increment_definition": "current reported rzye minus prior reported rzye for the same symbol",
     "consecutive_source_trading_day_required": true,
     "minimum_consecutive_increases": 3,
@@ -61,8 +61,8 @@
     "bearish_candle_sensitivity": "current adjusted close < current adjusted open",
     "primary_user_union": "cross_support OR down_close",
     "secondary_union": "cross_support OR bearish_candle_sensitivity",
-    "signal_information_time": "after the signal-date close",
-    "entry": "next legal raw-price open"
+    "signal_information_time": "signal-date K-line is combined with same-date margin data after the exchange publishes that data before the next session opens",
+    "entry": "next legal raw-price open, which must equal the margin feature_available_date"
   },
   "exits": {
     "legal_one_day": {
@@ -72,7 +72,7 @@
     },
     "first_financing_decrease": {
       "trigger": "first causally available fresh margin observation after entry whose rzye increment is negative",
-      "request": "the trading-session close after the decrease becomes available",
+      "request": "the close of the session on which the decrease is available before open",
       "minimum_request": "signal D2 close",
       "maximum_request_day": 60,
       "timeout": "signal D60 close",

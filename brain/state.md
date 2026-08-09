@@ -208,35 +208,46 @@ so this is not a stable-profit guarantee. The study is adaptive on fully
 consumed 2012-2025 history and has no independent forward evidence. Detailed
 record: `daily_research/research_records/seq100/seq100_exact_value_growth_top3_portfolio_v1_20260809/`.
 
-### Financing Top10 adaptive/down-day challenger
+### Financing Top10 adaptive-line challengers
 
-A new user-specified margin hypothesis received a separate causal contract. It
-requires at least three consecutive point-in-time `rzye` increases, ranks the
-daily absolute balance increment Top10 inside `quality_liquidity_pit`, and buys
-next legal open after either a just-crossed adaptive line whose current low
-holds above the line or a down-close day. Signal D2 close is the first legal
-one-day exit under T+1; a first-causally-available balance-decrease/D60 exit is
-the alternative.
+The original financing study had a one-session alignment error: it combined a
+source-day financing observation with its next-session K-line and then entered
+one more day later. That result is withdrawn. The corrected convention matches
+exchange publication timing: source-day financing data and source-day K-line
+form the signal, the data is available before the next open, and entry is that
+next open. Runtime assertions require source date = signal date and available
+date = entry date.
 
-The 2012-2025 study contains 33,598 Top10 candidates and 18,003 primary-union
-signals. The union's legal-D2 exact net candidate mean was about -0.285%, its
-daily cash mean about -0.340% with a wholly negative HAC interval, and 0/14
-annual daily means were positive. The 2023-2025 candidate/daily means were
-about -0.281%/-0.353%, again with 0/3 positive years. Gross D2 return averaged
-about +0.170%, but exact double-slippage costs and a negative median consumed
-it. The first-balance-decrease exit also remained negative and the entry gate
-failed, so no account replay is authorized.
+Under the corrected convention, the at-least-three-increase study contains
+33,586 Top10 candidates and 16,174 requested union signals. The union's legal
+D2 exact-net candidate/equal-date means are about -0.262%/-0.281% over
+2012-2025 and -0.300%/-0.308% over 2023-2025; its HAC intervals are negative
+and only 2/14 and 0/3 years are positive. A first-causally-available financing
+decrease/D60 exit and D2 targets from 0.5%-5% remain negative. Account replay
+is still gated off.
 
-A post-primary adaptive D2 take-profit sensitivity confirmed that a higher
-legal intraday price often exists but cannot be harvested by a fixed target:
-the union reached +0.5% and +1% on D2 in about 65.6% and 57.6% of cases, yet
-every 0.5%-5% target had negative full-history and late-period net means. Fixed
-targets clip rare right-tail winners while retaining full losses on misses.
-A fixed 2012-2019/2020-2022/2023-2025 continuation model had only 0.543 test
-AUC; its Top1/Top3 selections stayed net negative. The legal-net model reduced
-losses at Top3 but did not create positive absolute return. Do not promote or
-tune this literal financing rule. Detailed record:
-`daily_research/research_records/seq100/seq100_margin_top10_adaptive_entry_v1_20260809/`.
+The correction changes the narrower prior-cross/current-low-support rule from
+clearly negative to weak and unconfirmed: full-history candidate/equal-date
+means are about -0.010%/-0.052%, and late means are +0.134%/+0.015%, but both
+confidence intervals cross zero, medians are negative, and only 1/3 late years
+is positive. The corrected legal-net model's late Top1 point estimate is
++0.028% per equal-date selection, but its HAC interval is roughly
+[-0.341%, +0.398%] and only 2/3 years are positive. Neither is stable-profit
+evidence.
+
+A separate adaptive challenger tests the user's literal `at least two balance
+increases + same-day adaptive-line cross + next-open entry`. Across 33,877
+Top10 candidates, next-close-up rates are 46.37% for all candidates, 45.82%
+for the 2,481 crosses, and 47.30% for the 1,505 rising-line crosses. Equal-date
+paired changes are -1.01 and -0.78 percentage point with intervals crossing
+zero. Legal-D2 equal-date net means are -0.375% and -0.357% over 2012-2025 and
+-0.275%/-0.271% over 2023-2025. Same-day crosses occur after an average
+signal-day rise of about 5%, so rare continuation lifts means while typical
+paths fade. KAMA is an adaptive past-price average, not an observed pressure
+or cost boundary. Detailed records:
+`daily_research/research_records/seq100/seq100_margin_top10_adaptive_entry_v1_20260809/`
+and
+`daily_research/research_records/seq100/seq100_margin_top10_current_cross_v1_20260809/`.
 
 ### Prior margin-residual benchmark
 
@@ -361,6 +372,10 @@ Next legitimate actions, in order:
   `daily_research/research_records/seq100/seq100_margin_top10_adaptive_entry_v1_20260809/`,
   `daily_research/studies/seq100_margin_top10_adaptive_entry_v1.json`, and
   `daily_research/path_policy/seq100_margin_top10_adaptive_entry.py`.
+- Financing Top10 same-day adaptive-line cross record and implementation:
+  `daily_research/research_records/seq100/seq100_margin_top10_current_cross_v1_20260809/`,
+  `daily_research/studies/seq100_margin_top10_current_cross_v1.json`, and
+  `daily_research/path_policy/seq100_margin_top10_current_cross.py`.
 - Strict-Chan implementation and evidence remain under
   `daily_research/path_policy/seq100_strict_chan_*`,
   `daily_research/studies/seq100_strict_chan_*`, and their study outputs.
