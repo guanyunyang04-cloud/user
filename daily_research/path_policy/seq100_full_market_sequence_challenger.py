@@ -60,6 +60,17 @@ DEFAULT_LEGACY_BASE_FEATURE_MANIFEST = (
     base.WORKSPACE_ROOT
     / "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json"
 )
+
+
+def _lookback_artifact_root(
+    output_root: Path, artifact_name: str, *, lookback: int
+) -> Path:
+    """Keep the established lookback-8 paths while isolating new challengers."""
+
+    root = output_root / artifact_name
+    if int(lookback) == DEFAULT_LOOKBACK:
+        return root
+    return root / f"lookback_{int(lookback)}"
 MEMORY_TRIM_THRESHOLD_BYTES = int(1.75 * (1 << 30))
 PRICE_PATH_SCALE = 0.10
 RELATIVE_TARGET_SCALE = 0.05
@@ -1787,7 +1798,9 @@ def evaluate_ensemble(
             "market_manifest_sha256": base._sha256(market_manifest_path),
         }
     )
-    evaluation_root = output_root / "sequence_ensemble_evaluation"
+    evaluation_root = _lookback_artifact_root(
+        output_root, "sequence_ensemble_evaluation", lookback=lookback
+    )
     manifest_path = evaluation_root / "manifest.json"
     if manifest_path.is_file():
         current = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2038,7 +2051,9 @@ def replay_ensemble_accounts(
             "no_leverage": True,
         }
     )
-    replay_root = output_root / "sequence_ensemble_account_replay"
+    replay_root = _lookback_artifact_root(
+        output_root, "sequence_ensemble_account_replay", lookback=lookback
+    )
     manifest_path = replay_root / "manifest.json"
     if manifest_path.is_file():
         current = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2184,7 +2199,10 @@ def replay_ensemble_accounts(
         },
         "sources": {
             "ensemble_evaluation": _file_record(
-                output_root / "sequence_ensemble_evaluation" / "manifest.json"
+                _lookback_artifact_root(
+                    output_root, "sequence_ensemble_evaluation", lookback=lookback
+                )
+                / "manifest.json"
             ),
             "selections": _file_record(selection_path),
         },
@@ -2264,7 +2282,9 @@ def replay_account_robustness(
             "cost_scenario": "stress_double_slippage",
         }
     )
-    output_dir = output_root / "sequence_ensemble_account_robustness"
+    output_dir = _lookback_artifact_root(
+        output_root, "sequence_ensemble_account_robustness", lookback=lookback
+    )
     manifest_path = output_dir / "manifest.json"
     if manifest_path.is_file():
         current = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2435,10 +2455,18 @@ def replay_account_robustness(
         },
         "sources": {
             "account_replay": _file_record(
-                output_root / "sequence_ensemble_account_replay" / "manifest.json"
+                _lookback_artifact_root(
+                    output_root,
+                    "sequence_ensemble_account_replay",
+                    lookback=lookback,
+                )
+                / "manifest.json"
             ),
             "ensemble_evaluation": _file_record(
-                output_root / "sequence_ensemble_evaluation" / "manifest.json"
+                _lookback_artifact_root(
+                    output_root, "sequence_ensemble_evaluation", lookback=lookback
+                )
+                / "manifest.json"
             ),
         },
     }
@@ -2565,7 +2593,9 @@ def replay_dual_gate_horizons(
             "starting_cash": float(starting_cash),
         }
     )
-    output_dir = output_root / "dual_market_horizon_challenge"
+    output_dir = _lookback_artifact_root(
+        output_root, "dual_market_horizon_challenge", lookback=lookback
+    )
     manifest_path = output_dir / "manifest.json"
     if manifest_path.is_file():
         current = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -2781,7 +2811,10 @@ def replay_dual_gate_horizons(
         },
         "sources": {
             "ensemble_evaluation": _file_record(
-                output_root / "sequence_ensemble_evaluation" / "manifest.json"
+                _lookback_artifact_root(
+                    output_root, "sequence_ensemble_evaluation", lookback=lookback
+                )
+                / "manifest.json"
             ),
             "tree_market": _file_record(tree_market_manifest),
             "selections": _file_record(selection_path),

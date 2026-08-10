@@ -100,6 +100,17 @@ def test_final_refit_uses_deterministic_middle_oof_setting() -> None:
         study.frozen_median([])
 
 
+def test_lookback_artifacts_preserve_baseline_and_isolate_challengers() -> None:
+    root = Path("output")
+
+    assert study._lookback_artifact_root(
+        root, "evaluation", lookback=8
+    ) == root / "evaluation"
+    assert study._lookback_artifact_root(
+        root, "evaluation", lookback=16
+    ) == root / "evaluation" / "lookback_16"
+
+
 def test_final_bundle_cli_is_explicit() -> None:
     args = study._build_parser().parse_args(["--freeze-final-bundle"])
     core = study._build_parser().parse_args(["--core-availability-stress"])
