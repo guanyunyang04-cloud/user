@@ -122,7 +122,13 @@
         "formal_primary_lookbacks": [8, 16, 32],
         "intraday_bars_per_day": 48,
         "encoder": "hierarchical_per_day_intraday_then_temporal",
-        "global_quadratic_stock_attention_forbidden": true
+        "global_quadratic_stock_attention_forbidden": true,
+        "default_training_mode": "outer_early_stop",
+        "maximum_epochs": 60,
+        "patience": 10,
+        "selection_metric": "smoothed_validation_daily_rank_ic_with_market_diagnostics",
+        "selection_smoothing_window": 3,
+        "legacy_training_mode": "causal_nested"
     },
     "outputs": {
         "output_root": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",

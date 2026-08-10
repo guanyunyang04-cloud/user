@@ -111,6 +111,95 @@ def test_lookback_artifacts_preserve_baseline_and_isolate_challengers() -> None:
     ) == root / "evaluation" / "lookback_16"
 
 
+def test_sequence_training_modes_use_isolated_task_roots() -> None:
+    root = Path("output")
+
+    nested = study._sequence_task_root(
+        root,
+        lookback=16,
+        fold=2,
+        training_mode="causal_nested",
+    )
+    outer = study._sequence_task_root(
+        root,
+        lookback=16,
+        fold=2,
+        training_mode="outer_early_stop",
+    )
+    seeded = study._sequence_task_root(
+        root,
+        lookback=16,
+        fold=2,
+        training_mode="outer_early_stop",
+        seed_offset=101,
+    )
+
+    assert nested == root / "sequence_challenger/lookback_16/fold_2"
+    assert outer == root / "sequence_challenger/outer_early_stop/lookback_16/fold_2"
+    assert seeded == (
+        root
+        / "sequence_challenger/outer_early_stop/lookback_16/seed_offset_101/fold_2"
+    )
+    assert nested != outer != seeded
+
+    horizon_10 = study._sequence_task_root(
+        root,
+        lookback=16,
+        fold=2,
+        training_mode="outer_early_stop",
+        horizon=10,
+    )
+    assert horizon_10 == (
+        root
+        / "sequence_challenger/horizon_10/outer_early_stop/lookback_16/fold_2"
+    )
+    assert horizon_10 != outer
+
+
+def test_ensemble_protocols_use_isolated_artifact_roots() -> None:
+    root = Path("output")
+
+    baseline = study._ensemble_protocol_root(
+        root,
+        "evaluation",
+        lookback=16,
+        training_mode="outer_early_stop",
+        tree_training_mode="outer_early_stop",
+        seed_offsets=(0,),
+    )
+    seeded = study._ensemble_protocol_root(
+        root,
+        "evaluation",
+        lookback=16,
+        training_mode="outer_early_stop",
+        tree_training_mode="outer_early_stop",
+        seed_offsets=(0, 101, 202),
+    )
+
+    assert baseline == (
+        root
+        / "evaluation/lookback_16/sequence_outer_early_stop__tree_outer_early_stop"
+    )
+    assert seeded == (
+        root
+        / "evaluation/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__seeds_0_101_202"
+    )
+    assert baseline != seeded
+
+
+def test_sequence_parser_defaults_to_direct_outer_early_stop() -> None:
+    args = study._build_parser().parse_args([])
+
+    assert args.training_mode == "outer_early_stop"
+    assert args.seed_offset == 0
+    assert args.maximum_epochs == study.DEFAULT_MAX_EPOCHS
+    assert args.patience == study.DEFAULT_PATIENCE
+    assert args.horizon == 5
+    assert (
+        study._build_parser().parse_args(["--horizon", "10"]).horizon == 10
+    )
+
+
 def test_final_bundle_cli_is_explicit() -> None:
     args = study._build_parser().parse_args(["--freeze-final-bundle"])
     core = study._build_parser().parse_args(["--core-availability-stress"])

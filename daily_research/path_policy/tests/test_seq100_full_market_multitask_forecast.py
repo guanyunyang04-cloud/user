@@ -455,6 +455,29 @@ def test_exact_net_training_targets_cover_rank_probability_and_quantile() -> Non
     assert params["alpha"] == pytest.approx(0.10)
 
 
+def test_payoff_account_target_and_specs_preserve_horizon_contract() -> None:
+    assert study._exact_net_target_horizon("exact_net_return_d10_rank") == 10
+    assert study._exact_net_target_horizon("exact_net_return_d2_positive") == 2
+    with pytest.raises(study.FullMarketForecastError):
+        study._exact_net_target_horizon("legal_exit_return_d10")
+
+    specs = study._payoff_account_specs(10)
+    ordinary = [
+        item for item in specs if "maximum_credited_gross_return" not in item
+    ]
+    capped = [
+        item for item in specs if "maximum_credited_gross_return" in item
+    ]
+    assert {int(item["top_k"]) for item in ordinary} == {1, 3, 10}
+    assert {str(item["cost_scenario"]) for item in ordinary} == {"base", "stress"}
+    assert all(item["planned_fill_day"] == 10 for item in specs)
+    assert all(item["cohort_equity_fraction"] == pytest.approx(0.1) for item in specs)
+    assert {item["maximum_credited_gross_return"] for item in capped} == {
+        0.05,
+        0.10,
+    }
+
+
 def test_newey_west_interval_is_finite_for_daily_returns() -> None:
     interval = study._newey_west_interval(
         np.asarray([0.01, -0.01, 0.02, 0.00, 0.01]), lag=2

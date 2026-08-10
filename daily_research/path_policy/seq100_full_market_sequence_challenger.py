@@ -53,9 +53,10 @@ FINAL_BUNDLE_SCHEMA = "seq100_full_market_forward_policy_bundle/1"
 DEFAULT_STUDY_PATH = base.DEFAULT_STUDY_PATH
 DEFAULT_OUTPUT_ROOT = base.DEFAULT_OUTPUT_ROOT
 DEFAULT_LOOKBACK = 8
-DEFAULT_MAX_EPOCHS = 8
-DEFAULT_PATIENCE = 2
+DEFAULT_MAX_EPOCHS = 60
+DEFAULT_PATIENCE = 10
 DEFAULT_DATE_BATCH_SIZE = 4
+SEQUENCE_TRAINING_MODES = ("outer_early_stop", "causal_nested")
 DEFAULT_LEGACY_BASE_FEATURE_MANIFEST = (
     base.WORKSPACE_ROOT
     / "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json"
@@ -71,6 +72,25 @@ def _lookback_artifact_root(
     if int(lookback) == DEFAULT_LOOKBACK:
         return root
     return root / f"lookback_{int(lookback)}"
+
+
+def _ensemble_protocol_root(
+    output_root: Path,
+    artifact_name: str,
+    *,
+    lookback: int,
+    training_mode: str,
+    tree_training_mode: str,
+    seed_offsets: Sequence[int],
+) -> Path:
+    root = _lookback_artifact_root(output_root, artifact_name, lookback=lookback)
+    protocol = f"sequence_{training_mode}__tree_{tree_training_mode}"
+    normalized_offsets = tuple(int(value) for value in seed_offsets)
+    if normalized_offsets != (0,):
+        protocol += "__seeds_" + "_".join(str(value) for value in normalized_offsets)
+    return root / protocol
+
+
 MEMORY_TRIM_THRESHOLD_BYTES = int(1.75 * (1 << 30))
 PRICE_PATH_SCALE = 0.10
 RELATIVE_TARGET_SCALE = 0.05
@@ -177,6 +197,7 @@ class SequenceSources:
     pack_feature_names: tuple[str, ...]
     target_manifest: dict[str, Any]
     path_manifest: dict[str, Any]
+    horizon: int
 
 
 @dataclass(frozen=True)
@@ -187,14 +208,18 @@ class StaticFeatureOverride:
     manifest: dict[str, Any]
 
 
-def _load_sources(study: Mapping[str, Any], *, output_root: Path) -> SequenceSources:
+def _load_sources(
+    study: Mapping[str, Any], *, output_root: Path, horizon: int = 5
+) -> SequenceSources:
+    if int(horizon) not in base.HORIZONS:
+        raise SequenceChallengerError(f"unsupported_horizon:{horizon}")
     context = base._source_context(study)
     target_manifest = base.prepare_exact_net_targets(
         study_path=DEFAULT_STUDY_PATH, output_root=output_root
     )
     target_columns = list(target_manifest["target_columns"])
-    base_column = target_columns.index("exact_net_return_d5_base")
-    stress_column = target_columns.index("exact_net_return_d5_stress")
+    base_column = target_columns.index(f"exact_net_return_d{int(horizon)}_base")
+    stress_column = target_columns.index(f"exact_net_return_d{int(horizon)}_stress")
     exact_values = _open_memmap(target_manifest["files"]["values"], np.float32)
     exact_valid = _open_memmap(target_manifest["files"]["valid"], np.uint8)
     path_manifest = json.loads(
@@ -203,9 +228,11 @@ def _load_sources(study: Mapping[str, Any], *, output_root: Path) -> SequenceSou
     path_values = _open_memmap(path_manifest["files"]["values"], np.float32)
     path_valid = _open_memmap(path_manifest["files"]["valid"], np.uint8)
     fill_days = _open_memmap(path_manifest["files"]["legal_fill_days"], np.int16)
-    gross_column = list(path_manifest["target_columns"]).index("legal_exit_return_d5")
+    gross_column = list(path_manifest["target_columns"]).index(
+        f"legal_exit_return_d{int(horizon)}"
+    )
     horizon_column = list(path_manifest["files"]["legal_fill_days"]["horizons"]).index(
-        5
+        int(horizon)
     )
     matrix = _open_memmap(context.model_manifest["storage"]["compact"], np.float32)
     channels = context.pack["feature_channels"]
@@ -261,6 +288,7 @@ def _load_sources(study: Mapping[str, Any], *, output_root: Path) -> SequenceSou
         pack_feature_names=tuple(pack_feature_names),
         target_manifest=target_manifest,
         path_manifest=path_manifest,
+        horizon=int(horizon),
     )
 
 
@@ -781,6 +809,8 @@ def _train_epoch(
         "relative_loss": 0.0,
         "market_regression_loss": 0.0,
         "market_binary_loss": 0.0,
+        "gradient_norm": 0.0,
+        "gradient_nonfinite_batches": 0.0,
     }
     batch_count = 0
     use_amp = assembler.device.type == "cuda"
@@ -809,10 +839,14 @@ def _train_epoch(
             )
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+        gradient_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         scaler.step(optimizer)
         scaler.update()
         totals["loss"] += float(loss.detach().cpu())
+        if bool(torch.isfinite(gradient_norm)):
+            totals["gradient_norm"] += float(gradient_norm.detach().cpu())
+        else:
+            totals["gradient_nonfinite_batches"] += 1.0
         for key, value in components.items():
             totals[key] += value
         batch_count += 1
@@ -1134,6 +1168,14 @@ def _new_model(seed: int) -> PayoffSequenceModel:
     return PayoffSequenceModel()
 
 
+def _model_parameter_norm(model: nn.Module) -> float:
+    total = 0.0
+    for parameter in model.parameters():
+        if parameter.requires_grad:
+            total += float(parameter.detach().float().square().sum().cpu())
+    return float(math.sqrt(total))
+
+
 def _fit_model(
     sources: SequenceSources,
     *,
@@ -1145,7 +1187,13 @@ def _fit_model(
     patience: int,
     date_batch_size: int,
     seed: int,
-) -> tuple[int, list[dict[str, Any]], dict[str, torch.Tensor]]:
+    training_mode: str = "causal_nested",
+    selection_smoothing_window: int = 1,
+) -> tuple[PayoffSequenceModel, Normalization, int, list[dict[str, Any]]]:
+    if training_mode not in SEQUENCE_TRAINING_MODES:
+        raise SequenceChallengerError(f"unknown_sequence_training_mode:{training_mode}")
+    if int(selection_smoothing_window) < 1:
+        raise SequenceChallengerError("selection_smoothing_window_invalid")
     normalization = _fit_normalization(sources, train_dates)
     assembler = BatchAssembler(
         sources, lookback=lookback, normalization=normalization, device=device
@@ -1157,6 +1205,7 @@ def _fit_model(
     best_epoch = 0
     best_state: dict[str, torch.Tensor] | None = None
     history: list[dict[str, Any]] = []
+    score_history: list[float] = []
     stale = 0
     for epoch in range(1, int(maximum_epochs) + 1):
         started = time.perf_counter()
@@ -1182,9 +1231,19 @@ def _fit_model(
             **{f"train_{key}": value for key, value in train_metrics.items()},
             **{f"validation_{key}": value for key, value in validation_metrics.items()},
         }
+        raw_score = float(validation_metrics["selection_score"])
+        score_history.append(raw_score)
+        smooth_count = min(int(selection_smoothing_window), len(score_history))
+        smoothed_score = float(np.mean(score_history[-smooth_count:]))
+        row["validation_selection_score_smoothed"] = smoothed_score
+        row["parameter_norm"] = _model_parameter_norm(model)
         history.append(row)
-        base._emit("sequence_inner_epoch_completed", **row)
-        score = float(validation_metrics["selection_score"])
+        base._emit(
+            "sequence_epoch_completed",
+            training_mode=training_mode,
+            **row,
+        )
+        score = smoothed_score
         if score > best_score + 1.0e-5:
             best_score = score
             best_epoch = epoch
@@ -1199,12 +1258,14 @@ def _fit_model(
                 break
     if best_state is None or best_epoch <= 0:
         raise SequenceChallengerError("inner_model_selection_failed")
-    del model, optimizer, scaler
+    model.load_state_dict(best_state)
+    model.eval()
+    del optimizer, scaler
     gc.collect()
     base._trim_working_set()
     if device.type == "cuda":
         torch.cuda.empty_cache()
-    return best_epoch, history, best_state
+    return model, normalization, best_epoch, history
 
 
 def _refit_model(
@@ -1246,6 +1307,30 @@ def _refit_model(
     return model, normalization, history
 
 
+def _sequence_task_root(
+    output_root: Path,
+    *,
+    lookback: int,
+    fold: int,
+    training_mode: str,
+    seed_offset: int = 0,
+    horizon: int = 5,
+) -> Path:
+    if training_mode not in SEQUENCE_TRAINING_MODES:
+        raise SequenceChallengerError(f"unknown_sequence_training_mode:{training_mode}")
+    if int(horizon) not in base.HORIZONS:
+        raise SequenceChallengerError(f"unsupported_horizon:{horizon}")
+    root = output_root / "sequence_challenger"
+    if int(horizon) != 5:
+        root /= f"horizon_{int(horizon)}"
+    if training_mode != "causal_nested":
+        root /= training_mode
+    root /= f"lookback_{int(lookback)}"
+    if int(seed_offset) != 0:
+        root /= f"seed_offset_{int(seed_offset)}"
+    return root / f"fold_{int(fold)}"
+
+
 def train_fold(
     *,
     study_path: Path = DEFAULT_STUDY_PATH,
@@ -1255,10 +1340,19 @@ def train_fold(
     maximum_epochs: int = DEFAULT_MAX_EPOCHS,
     patience: int = DEFAULT_PATIENCE,
     date_batch_size: int = DEFAULT_DATE_BATCH_SIZE,
+    training_mode: str = "outer_early_stop",
+    seed_offset: int = 0,
+    horizon: int = 5,
 ) -> dict[str, Any]:
     study = base.load_study(study_path)
+    if training_mode not in SEQUENCE_TRAINING_MODES:
+        raise SequenceChallengerError(f"unknown_sequence_training_mode:{training_mode}")
+    if int(maximum_epochs) < 1 or int(patience) < 1:
+        raise SequenceChallengerError("training_schedule_invalid")
     if int(lookback) not in tuple(study["sequence_challengers"]["daily_lookbacks"]):
         raise SequenceChallengerError(f"unsupported_lookback:{lookback}")
+    if int(horizon) not in base.HORIZONS:
+        raise SequenceChallengerError(f"unsupported_horizon:{horizon}")
     if not torch.cuda.is_available():
         raise SequenceChallengerError("cuda_is_required_for_formal_sequence_run")
     resource = base.resource_plan(
@@ -1268,7 +1362,7 @@ def train_fold(
         sequence_batch_cap=int(study["resources"]["sequence_batch_cap"]),
     )
     base._assert_resource_capacity(resource, 1 * (1 << 30))
-    sources = _load_sources(study, output_root=output_root)
+    sources = _load_sources(study, output_root=output_root, horizon=horizon)
     folds = base.build_forward_folds(
         date_idx=sources.context.row_index["date_idx"].to_numpy(dtype=np.int32),
         trade_date=sources.context.row_index["trade_date"].astype(str).to_numpy(),
@@ -1293,25 +1387,33 @@ def train_fold(
         <= date_idx
         <= int(fold["validation_end_date_idx"])
     )
-    expanded_train_dates = np.repeat(
-        np.asarray(outer_train_dates, dtype=np.int32),
-        [
-            sources.blocks[date_idx].stop - sources.blocks[date_idx].start
-            for date_idx in outer_train_dates
-        ],
-    )
-    inner_train_rows, inner_validation_rows, inner_metadata = base._nested_inner_rows(
-        expanded_train_dates,
-        validation_date_count=int(study["validation"]["inner_validation_trading_days"]),
-        purge_days=int(study["validation"]["common_purge_trading_days"]),
-    )
-    inner_train_dates = sorted(
-        np.unique(expanded_train_dates[inner_train_rows]).astype(int).tolist()
-    )
-    inner_validation_dates = sorted(
-        np.unique(expanded_train_dates[inner_validation_rows]).astype(int).tolist()
-    )
-    del expanded_train_dates, inner_train_rows, inner_validation_rows
+    inner_train_dates: list[int] = []
+    inner_validation_dates: list[int] = []
+    inner_metadata: dict[str, Any] = {}
+    if training_mode == "causal_nested":
+        expanded_train_dates = np.repeat(
+            np.asarray(outer_train_dates, dtype=np.int32),
+            [
+                sources.blocks[date_idx].stop - sources.blocks[date_idx].start
+                for date_idx in outer_train_dates
+            ],
+        )
+        inner_train_rows, inner_validation_rows, inner_metadata = (
+            base._nested_inner_rows(
+                expanded_train_dates,
+                validation_date_count=int(
+                    study["validation"]["inner_validation_trading_days"]
+                ),
+                purge_days=int(study["validation"]["common_purge_trading_days"]),
+            )
+        )
+        inner_train_dates = sorted(
+            np.unique(expanded_train_dates[inner_train_rows]).astype(int).tolist()
+        )
+        inner_validation_dates = sorted(
+            np.unique(expanded_train_dates[inner_validation_rows]).astype(int).tolist()
+        )
+        del expanded_train_dates, inner_train_rows, inner_validation_rows
     fingerprint = _stable_hash(
         {
             "schema": SCHEMA,
@@ -1321,6 +1423,9 @@ def train_fold(
             "input_fingerprint": sources.context.model_manifest["input_fingerprint"],
             "fold": fold,
             "lookback": int(lookback),
+            "horizon": int(horizon),
+            "training_mode": training_mode,
+            "seed_offset": int(seed_offset),
             "maximum_epochs": int(maximum_epochs),
             "patience": int(patience),
             "date_batch_size": int(date_batch_size),
@@ -1333,11 +1438,13 @@ def train_fold(
             },
         }
     )
-    task_root = (
-        output_root
-        / "sequence_challenger"
-        / f"lookback_{lookback}"
-        / f"fold_{fold_number}"
+    task_root = _sequence_task_root(
+        output_root,
+        lookback=lookback,
+        fold=fold_number,
+        training_mode=training_mode,
+        seed_offset=seed_offset,
+        horizon=horizon,
     )
     manifest_path = task_root / "task_result.json"
     if manifest_path.is_file():
@@ -1349,11 +1456,20 @@ def train_fold(
             return current
     task_root.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda")
-    seed = int(study["validation"]["seed"]) + int(fold_number) * 100 + int(lookback)
+    seed = (
+        int(study["validation"]["seed"])
+        + int(fold_number) * 100
+        + int(lookback)
+        + int(seed_offset)
+    )
     base._emit(
         "sequence_fold_started",
         fold=fold_number,
         lookback=lookback,
+        horizon=horizon,
+        training_mode=training_mode,
+        seed=seed,
+        seed_offset=int(seed_offset),
         inner_train_dates=len(inner_train_dates),
         inner_validation_dates=len(inner_validation_dates),
         outer_train_dates=len(outer_train_dates),
@@ -1361,26 +1477,44 @@ def train_fold(
         resource_plan=asdict(resource),
     )
     with base.ResourceMonitor() as monitor:
-        best_epoch, selection_history, _ = _fit_model(
-            sources,
-            train_dates=inner_train_dates,
-            validation_dates=inner_validation_dates,
-            lookback=lookback,
-            device=device,
-            maximum_epochs=maximum_epochs,
-            patience=patience,
-            date_batch_size=date_batch_size,
-            seed=seed,
-        )
-        model, normalization, refit_history = _refit_model(
-            sources,
-            train_dates=outer_train_dates,
-            lookback=lookback,
-            device=device,
-            epochs=best_epoch,
-            date_batch_size=date_batch_size,
-            seed=seed + 1,
-        )
+        if training_mode == "outer_early_stop":
+            model, normalization, best_epoch, selection_history = _fit_model(
+                sources,
+                train_dates=outer_train_dates,
+                validation_dates=outer_validation_dates,
+                lookback=lookback,
+                device=device,
+                maximum_epochs=maximum_epochs,
+                patience=patience,
+                date_batch_size=date_batch_size,
+                seed=seed,
+                training_mode=training_mode,
+                selection_smoothing_window=3,
+            )
+            refit_history: list[dict[str, float]] = []
+        else:
+            selected_model, _, best_epoch, selection_history = _fit_model(
+                sources,
+                train_dates=inner_train_dates,
+                validation_dates=inner_validation_dates,
+                lookback=lookback,
+                device=device,
+                maximum_epochs=maximum_epochs,
+                patience=patience,
+                date_batch_size=date_batch_size,
+                seed=seed,
+                training_mode=training_mode,
+            )
+            del selected_model
+            model, normalization, refit_history = _refit_model(
+                sources,
+                train_dates=outer_train_dates,
+                lookback=lookback,
+                device=device,
+                epochs=best_epoch,
+                date_batch_size=date_batch_size,
+                seed=seed + 1,
+            )
         validation_assembler = BatchAssembler(
             sources,
             lookback=lookback,
@@ -1449,6 +1583,9 @@ def train_fold(
             },
             "normalization": normalization.payload(),
             "lookback": int(lookback),
+            "horizon": int(horizon),
+            "training_mode": training_mode,
+            "seed": int(seed),
             "feature_names": sources.feature_names,
             "sequence_feature_names": sources.pack_feature_names,
         },
@@ -1458,7 +1595,12 @@ def train_fold(
     history_path = task_root / "training_history.json"
     _write_json(
         history_path,
-        {"selection": selection_history, "outer_refit": refit_history},
+        {
+            "training_mode": training_mode,
+            "seed": int(seed),
+            "selection": selection_history,
+            "outer_refit": refit_history,
+        },
     )
     result = {
         "schema": SCHEMA,
@@ -1468,10 +1610,16 @@ def train_fold(
         "study_id": base.STUDY_ID,
         "fold": fold,
         "lookback": int(lookback),
+        "horizon": int(horizon),
+        "training_mode": training_mode,
+        "seed": int(seed),
+        "seed_offset": int(seed_offset),
         "best_epoch": int(best_epoch),
         "nested_selection": {
             **inner_metadata,
-            "outer_validation_used_for_epoch_selection": False,
+            "outer_validation_used_for_epoch_selection": training_mode
+            == "outer_early_stop",
+            "direct_outer_checkpoint_deployed": training_mode == "outer_early_stop",
         },
         "model": {
             "static_feature_count": 557,
@@ -1508,6 +1656,8 @@ def train_fold(
         "sequence_fold_completed",
         fold=fold_number,
         lookback=lookback,
+        training_mode=training_mode,
+        seed=seed,
         best_epoch=best_epoch,
         rank_ic=payoff_summary["daily_rank_ic_mean"],
         consensus_top10_stress=gated["consensus_top10"]["stress"]["mean"],
@@ -1516,15 +1666,22 @@ def train_fold(
 
 
 def _completed_sequence_task(
-    output_root: Path, *, fold: int, lookback: int
+    output_root: Path,
+    *,
+    fold: int,
+    lookback: int,
+    training_mode: str = "causal_nested",
+    seed_offset: int = 0,
+    horizon: int = 5,
 ) -> tuple[dict[str, Any], Path]:
-    path = (
-        output_root
-        / "sequence_challenger"
-        / f"lookback_{int(lookback)}"
-        / f"fold_{int(fold)}"
-        / "task_result.json"
-    )
+    path = _sequence_task_root(
+        output_root,
+        lookback=lookback,
+        fold=fold,
+        training_mode=training_mode,
+        seed_offset=seed_offset,
+        horizon=horizon,
+    ) / "task_result.json"
     if not path.is_file():
         raise SequenceChallengerError(f"sequence_task_missing:{path}")
     task = json.loads(path.read_text(encoding="utf-8"))
@@ -1532,6 +1689,9 @@ def _completed_sequence_task(
         task.get("status") != "completed"
         or int(task.get("fold", {}).get("fold", -1)) != int(fold)
         or int(task.get("lookback", -1)) != int(lookback)
+        or int(task.get("horizon", 5)) != int(horizon)
+        or str(task.get("training_mode", "causal_nested")) != training_mode
+        or int(task.get("seed_offset", 0)) != int(seed_offset)
     ):
         raise SequenceChallengerError(f"sequence_task_invalid:{path}")
     return task, path
@@ -1544,13 +1704,21 @@ def expand_fold_predictions(
     fold_number: int,
     lookback: int = DEFAULT_LOOKBACK,
     date_batch_size: int = DEFAULT_DATE_BATCH_SIZE,
+    training_mode: str = "outer_early_stop",
+    seed_offset: int = 0,
+    horizon: int = 5,
 ) -> dict[str, Any]:
     """Score the complete signal-day universe without future fill filtering."""
 
     study = base.load_study(study_path)
-    sources = _load_sources(study, output_root=output_root)
+    sources = _load_sources(study, output_root=output_root, horizon=horizon)
     task, task_path = _completed_sequence_task(
-        output_root, fold=fold_number, lookback=lookback
+        output_root,
+        fold=fold_number,
+        lookback=lookback,
+        training_mode=training_mode,
+        seed_offset=seed_offset,
+        horizon=horizon,
     )
     folds = base.build_forward_folds(
         date_idx=sources.context.row_index["date_idx"].to_numpy(dtype=np.int32),
@@ -1573,6 +1741,9 @@ def expand_fold_predictions(
             "row_index_sha256": sources.context.model_manifest["row_index"]["sha256"],
             "fold": fold,
             "lookback": int(lookback),
+            "horizon": int(horizon),
+            "training_mode": training_mode,
+            "seed_offset": int(seed_offset),
             "entry_fill_or_outcome_used_for_ranking": False,
         }
     )
@@ -1587,8 +1758,11 @@ def expand_fold_predictions(
     ):
         return task
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    if checkpoint.get("schema") != SCHEMA or int(checkpoint["lookback"]) != int(
-        lookback
+    if (
+        checkpoint.get("schema") != SCHEMA
+        or int(checkpoint["lookback"]) != int(lookback)
+        or int(checkpoint.get("horizon", 5)) != int(horizon)
+        or str(checkpoint.get("training_mode", "causal_nested")) != training_mode
     ):
         raise SequenceChallengerError("sequence_checkpoint_contract_failed")
     normalization = Normalization.from_payload(checkpoint["normalization"])
@@ -1641,6 +1815,9 @@ def expand_fold_predictions(
         "fingerprint": expansion_fingerprint,
         "completed_at": _now(),
         "row_count": len(output),
+        "training_mode": training_mode,
+        "horizon": int(horizon),
+        "seed_offset": int(seed_offset),
         "entry_fill_or_outcome_used_for_ranking": False,
         "forbidden_2026_read_count": 0,
     }
@@ -1648,13 +1825,396 @@ def expand_fold_predictions(
     base._emit(
         "sequence_full_universe_prediction_completed",
         fold=fold_number,
+        training_mode=training_mode,
+        seed_offset=int(seed_offset),
         rows=len(output),
     )
     return task
 
 
-def _formal_market_predictions(output_root: Path) -> tuple[pd.DataFrame, Path]:
-    manifest_path = output_root / "market_regime_evaluation" / "manifest.json"
+def _sequence_payoff_root(
+    output_root: Path, *, lookback: int, horizon: int, training_mode: str
+) -> Path:
+    root = output_root / "sequence_payoff_evaluation"
+    if int(horizon) != 5:
+        root /= f"horizon_{int(horizon)}"
+    if int(lookback) != DEFAULT_LOOKBACK:
+        root /= f"lookback_{int(lookback)}"
+    root /= training_mode
+    return root
+
+
+def evaluate_sequence_payoff(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    lookback: int = DEFAULT_LOOKBACK,
+    horizon: int = 5,
+    training_mode: str = "outer_early_stop",
+) -> dict[str, Any]:
+    """Evaluate sequence OOF ranks against the matching executable payoff panel."""
+
+    study = base.load_study(study_path)
+    if int(horizon) not in base.HORIZONS:
+        raise SequenceChallengerError(f"unsupported_horizon:{horizon}")
+    if training_mode not in SEQUENCE_TRAINING_MODES:
+        raise SequenceChallengerError(f"unknown_sequence_training_mode:{training_mode}")
+    sources = _load_sources(study, output_root=output_root, horizon=horizon)
+    folds = base.build_forward_folds(
+        date_idx=sources.context.row_index["date_idx"].to_numpy(dtype=np.int32),
+        trade_date=sources.context.row_index["trade_date"].astype(str).to_numpy(),
+        validation_start_date=str(study["validation"]["validation_start_date"]),
+        validation_end_date=str(study["validation"]["validation_end_date"]),
+        fold_count=int(study["validation"]["forward_fold_count"]),
+        purge_days=int(study["validation"]["common_purge_trading_days"]),
+    )
+    task_records: list[tuple[dict[str, Any], Path]] = []
+    for fold in folds:
+        task = expand_fold_predictions(
+            study_path=study_path,
+            output_root=output_root,
+            fold_number=int(fold["fold"]),
+            lookback=lookback,
+            training_mode=training_mode,
+            horizon=horizon,
+        )
+        _, task_path = _completed_sequence_task(
+            output_root,
+            fold=int(fold["fold"]),
+            lookback=lookback,
+            training_mode=training_mode,
+            horizon=horizon,
+        )
+        task_records.append((task, task_path))
+    fingerprint = _stable_hash(
+        {
+            "schema": SCHEMA,
+            "role": "sequence_payoff_oof_evaluation",
+            "study_sha256": base._sha256(study_path),
+            "target_fingerprint": sources.target_manifest["fingerprint"],
+            "lookback": int(lookback),
+            "horizon": int(horizon),
+            "training_mode": training_mode,
+            "tasks": {str(path): base._sha256(path) for _, path in task_records},
+            "ranking": "full_prediction_rows_then_matching_exact_net_valid_rows",
+        }
+    )
+    evaluation_root = _sequence_payoff_root(
+        output_root, lookback=lookback, horizon=horizon, training_mode=training_mode
+    )
+    manifest_path = evaluation_root / "manifest.json"
+    if manifest_path.is_file():
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if current.get("status") == "completed" and current.get("fingerprint") == fingerprint:
+            return current
+    daily_parts: list[pd.DataFrame] = []
+    decile_parts: list[pd.DataFrame] = []
+    selection_parts: list[pd.DataFrame] = []
+    fold_summaries: list[dict[str, Any]] = []
+    for fold, (task, _) in zip(folds, task_records, strict=True):
+        fold_number = int(fold["fold"])
+        positions = base._fold_rows(sources.context.row_index, fold, "validation")
+        prediction_values = np.asarray(
+            np.load(
+                task["files"]["full_universe_prediction"]["path"],
+                mmap_mode="r",
+                allow_pickle=False,
+            ),
+            dtype=np.float32,
+        )
+        if len(prediction_values) != len(positions):
+            raise SequenceChallengerError("sequence_payoff_prediction_row_mismatch")
+        usable = (
+            np.asarray(
+                sources.exact_valid[positions, sources.base_column], dtype=bool
+            )
+            & np.asarray(
+                sources.exact_valid[positions, sources.stress_column], dtype=bool
+            )
+            & np.isfinite(prediction_values)
+        )
+        rows = positions[usable]
+        market_frame = pd.read_parquet(task["files"]["market_predictions"]["path"])
+        market_return = {
+            int(row.date_idx): float(row.predicted_return)
+            for row in market_frame.itertuples(index=False)
+        }
+        market_probability = {
+            int(row.date_idx): float(row.positive_probability)
+            for row in market_frame.itertuples(index=False)
+        }
+        prediction = PredictionOutput(
+            rows=rows,
+            stock_score=prediction_values[usable],
+            market_return=market_return,
+            market_probability=market_probability,
+        )
+        daily, deciles, selections, summary = _build_evaluation_frames(
+            sources, prediction, fold=fold_number
+        )
+        fold_summaries.append(summary | {"fold": fold_number})
+        daily_parts.append(daily)
+        decile_parts.append(deciles)
+        selection_parts.append(selections)
+        base._emit(
+            "sequence_payoff_fold_evaluated",
+            fold=fold_number,
+            horizon=horizon,
+            rank_ic=summary["daily_rank_ic_mean"],
+        )
+    daily = pd.concat(daily_parts, ignore_index=True).sort_values("date_idx")
+    deciles = pd.concat(decile_parts, ignore_index=True).sort_values(
+        ["date_idx", "decile"]
+    )
+    selections = pd.concat(selection_parts, ignore_index=True).sort_values(
+        ["date_idx", "selection_rank"]
+    )
+    combined = base._payoff_summary(daily, deciles)
+    evaluation_root.mkdir(parents=True, exist_ok=True)
+    daily_path = evaluation_root / "daily_metrics.parquet"
+    decile_path = evaluation_root / "decile_daily.parquet"
+    selection_path = evaluation_root / "top10_selections.parquet"
+    base._write_parquet(daily, daily_path)
+    base._write_parquet(deciles, decile_path)
+    base._write_parquet(selections, selection_path)
+    result = {
+        "schema": "seq100_full_market_sequence_payoff_evaluation/1",
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": base.STUDY_ID,
+        "fingerprint": fingerprint,
+        "lookback": int(lookback),
+        "horizon": int(horizon),
+        "training_mode": training_mode,
+        "fold_summaries": fold_summaries,
+        "combined": combined,
+        "ranking_contract": "same_prediction_universe_then_matching_exact_net_valid_outcomes",
+        "forbidden_2026_read_count": 0,
+        "files": {
+            "daily_metrics": _file_record(daily_path, row_count=len(daily)),
+            "decile_daily": _file_record(decile_path, row_count=len(deciles)),
+            "top10_selections": _file_record(
+                selection_path, row_count=len(selections)
+            ),
+        },
+        "sources": {
+            "sequence_tasks": [_file_record(path) for _, path in task_records],
+            "targets": _file_record(output_root / "targets" / "manifest.json"),
+        },
+    }
+    _write_json(manifest_path, result)
+    return result
+
+
+def replay_sequence_payoff_accounts(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    lookback: int = DEFAULT_LOOKBACK,
+    horizon: int = 5,
+    training_mode: str = "outer_early_stop",
+    starting_cash: float = 1_000_000.0,
+) -> dict[str, Any]:
+    """Replay sequence ranks with the exact same finite-account contract."""
+
+    evaluation = evaluate_sequence_payoff(
+        study_path=study_path,
+        output_root=output_root,
+        lookback=lookback,
+        horizon=horizon,
+        training_mode=training_mode,
+    )
+    study = base.load_study(study_path)
+    sources = _load_sources(study, output_root=output_root, horizon=horizon)
+    selection_path = Path(evaluation["files"]["top10_selections"]["path"])
+    selections = pd.read_parquet(selection_path)
+    rows = selections["model_row_position"].to_numpy(dtype=np.int64)
+    gross = np.asarray(sources.path_values[rows, sources.gross_column], dtype=np.float32)
+    gross_valid = np.asarray(sources.path_valid[rows, sources.gross_column], dtype=bool)
+    fill_days = np.asarray(sources.fill_days[rows, sources.horizon_column], dtype=np.int16)
+    usable = gross_valid & np.isfinite(gross) & (fill_days >= int(horizon))
+    selections = selections.loc[usable].copy()
+    if selections.empty:
+        raise SequenceChallengerError("sequence_payoff_account_schedule_empty")
+    selections["variant"] = "sequence_payoff"
+    selections["exit_policy"] = "planned_close"
+    selections["gate"] = "always"
+    selections["cost_scenario"] = "base"
+    selections["take_profit_hit"] = False
+    selections["legal_gross_return"] = gross[usable]
+    selections["fill_day"] = fill_days[usable]
+    schedule_parts: list[pd.DataFrame] = []
+    for top_k in (1, 3, 10):
+        part = selections.loc[selections["selection_rank"] <= int(top_k)].copy()
+        part["top_k"] = int(top_k)
+        schedule_parts.append(part)
+    schedule = pd.concat(schedule_parts, ignore_index=True)
+    specs = tuple(
+        {
+            "variant": "sequence_payoff",
+            "exit_policy": "planned_close",
+            "gate": "always",
+            "top_k": top_k,
+            "cost_scenario": scenario,
+            "slippage_multiplier": 1.0 if scenario == "base" else 2.0,
+            "cohort_equity_fraction": 1.0 / float(horizon),
+            "planned_fill_day": int(horizon),
+        }
+        for top_k in (1, 3, 10)
+        for scenario in ("base", "stress")
+    )
+    fingerprint = _stable_hash(
+        {
+            "schema": ACCOUNT_SCHEMA,
+            "role": "sequence_payoff_account_replay",
+            "evaluation_fingerprint": evaluation["fingerprint"],
+            "selection_sha256": evaluation["files"]["top10_selections"]["sha256"],
+            "lookback": int(lookback),
+            "horizon": int(horizon),
+            "training_mode": training_mode,
+            "starting_cash": float(starting_cash),
+            "specs": specs,
+        }
+    )
+    root = _sequence_payoff_root(
+        output_root, lookback=lookback, horizon=horizon, training_mode=training_mode
+    ) / "account_replay"
+    manifest_path = root / "manifest.json"
+    if manifest_path.is_file():
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if current.get("status") == "completed" and current.get("fingerprint") == fingerprint:
+            return current
+    daily_raw = base._open_array(
+        sources.context.pack["feature_channels"]["daily_raw"], dtype=np.float32
+    )
+    raw_open = base._open_array(
+        sources.context.pack["execution_arrays"]["entry_open_raw"], dtype=np.float32
+    )
+    entry_filled = base._open_array(
+        sources.context.pack["masks"]["entry_filled"], dtype=np.bool_
+    )
+    costs = base.parse_execution_costs(sources.context.pack)
+    root.mkdir(parents=True, exist_ok=True)
+    schedule_path = root / "selection_schedule.parquet"
+    base._write_parquet(schedule, schedule_path)
+    summaries: list[dict[str, Any]] = []
+    files: dict[str, Any] = {}
+    for spec in specs:
+        result, equity, trades = base._simulate_account_spec(
+            spec=spec,
+            selections=schedule,
+            context=sources.context,
+            daily_raw=daily_raw,
+            raw_open=raw_open,
+            entry_filled=entry_filled,
+            costs=costs,
+            starting_cash=float(starting_cash),
+        )
+        result = base._payoff_account_diagnostics(
+            result=result,
+            equity=equity,
+            trades=trades,
+            selections=schedule,
+        )
+        task_root = root / "tasks" / str(result["task_id"])
+        equity_path = task_root / "equity.parquet"
+        trades_path = task_root / "trades.parquet"
+        result_path = task_root / "task_result.json"
+        base._write_parquet(equity, equity_path)
+        base._write_parquet(trades, trades_path)
+        payload = {
+            "schema": "seq100_full_market_sequence_payoff_account_replay/1",
+            "status": "completed",
+            "completed_at": _now(),
+            "study_id": base.STUDY_ID,
+            "fingerprint": fingerprint,
+            **result,
+            "files": {
+                "equity": _file_record(equity_path, row_count=len(equity)),
+                "trades": _file_record(trades_path, row_count=len(trades)),
+            },
+        }
+        _write_json(result_path, payload)
+        files[str(result["task_id"])] = _file_record(result_path)
+        summaries.append(result)
+    summary = pd.DataFrame(
+        [
+            {
+                "top_k": int(item["spec"]["top_k"]),
+                "cost_scenario": item["spec"]["cost_scenario"],
+                "total_net_return": item["total_net_return"],
+                "ending_equity": item["ending_equity"],
+                "maximum_drawdown": item["maximum_drawdown"],
+                "positive_year_count": item["positive_year_count"],
+                "worst_year_return": item["worst_year_return"],
+                "daily_hac_lower": item["daily_hac20_net_return"]["lower"],
+            }
+            for item in summaries
+        ]
+    ).sort_values(["top_k", "cost_scenario"])
+    summary_path = root / "summary.parquet"
+    base._write_parquet(summary, summary_path)
+    primary = next(
+        item
+        for item in summaries
+        if int(item["spec"]["top_k"]) == 10
+        and item["spec"]["cost_scenario"] == "stress"
+    )
+    result = {
+        "schema": "seq100_full_market_sequence_payoff_account_replay/1",
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": base.STUDY_ID,
+        "fingerprint": fingerprint,
+        "lookback": int(lookback),
+        "horizon": int(horizon),
+        "training_mode": training_mode,
+        "starting_cash": float(starting_cash),
+        "summaries": summaries,
+        "primary_stress_top10": primary,
+        "decision_boundary": {
+            "same_finite_account_engine_as_tree_replay": True,
+            "next_open_entry": True,
+            "cohort_equity_fraction": 1.0 / float(horizon),
+            "no_leverage": True,
+            "unfilled_selected_order_is_cash_without_substitution": True,
+            "historical_result_is_adaptive_not_independent_confirmation": True,
+            "stable_profit_claim_allowed": False,
+            "forbidden_2026_read_count": 0,
+        },
+        "files": {
+            "summary": _file_record(summary_path, row_count=len(summary)),
+            "selection_schedule": _file_record(
+                schedule_path, row_count=len(schedule)
+            ),
+            "tasks": files,
+        },
+        "sources": {
+            "evaluation": _file_record(
+                Path(evaluation["files"]["top10_selections"]["path"]).parent
+                / "manifest.json"
+            ),
+            "targets": _file_record(output_root / "targets" / "manifest.json"),
+        },
+    }
+    _write_json(manifest_path, result)
+    base._emit(
+        "sequence_payoff_account_replay_completed",
+        lookback=lookback,
+        horizon=horizon,
+        total_return=primary["total_net_return"],
+        maximum_drawdown=primary["maximum_drawdown"],
+    )
+    return result
+
+
+def _formal_market_predictions(
+    output_root: Path, *, training_mode: str = "causal_nested"
+) -> tuple[pd.DataFrame, Path]:
+    manifest_root = output_root / "market_regime_evaluation"
+    if training_mode != "causal_nested":
+        manifest_root /= training_mode
+    manifest_path = manifest_root / "manifest.json"
     if not manifest_path.is_file():
         raise SequenceChallengerError("formal_market_regime_evaluation_missing")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -1745,10 +2305,20 @@ def evaluate_ensemble(
     study_path: Path = DEFAULT_STUDY_PATH,
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     lookback: int = DEFAULT_LOOKBACK,
+    training_mode: str = "outer_early_stop",
+    tree_training_mode: str = "outer_early_stop",
+    sequence_seed_offsets: Sequence[int] = (0,),
 ) -> dict[str, Any]:
-    """Evaluate the frozen equal-rank ensemble and pre-existing market gate."""
+    """Evaluate a same-protocol sequence/tree equal-rank ensemble."""
 
     study = base.load_study(study_path)
+    if training_mode not in SEQUENCE_TRAINING_MODES:
+        raise SequenceChallengerError(f"unknown_sequence_training_mode:{training_mode}")
+    if tree_training_mode not in base.TRAINING_MODES:
+        raise SequenceChallengerError(f"unknown_tree_training_mode:{tree_training_mode}")
+    seed_offsets = tuple(dict.fromkeys(int(value) for value in sequence_seed_offsets))
+    if not seed_offsets:
+        raise SequenceChallengerError("sequence_seed_offsets_empty")
     sources = _load_sources(study, output_root=output_root)
     folds = base.build_forward_folds(
         date_idx=sources.context.row_index["date_idx"].to_numpy(dtype=np.int32),
@@ -1758,16 +2328,30 @@ def evaluate_ensemble(
         fold_count=int(study["validation"]["forward_fold_count"]),
         purge_days=int(study["validation"]["common_purge_trading_days"]),
     )
-    market, market_manifest_path = _formal_market_predictions(output_root)
+    market, market_manifest_path = _formal_market_predictions(
+        output_root, training_mode=tree_training_mode
+    )
     for fold in folds:
-        expand_fold_predictions(
-            study_path=study_path,
-            output_root=output_root,
-            fold_number=int(fold["fold"]),
-            lookback=lookback,
-        )
-    sequence_tasks = [
-        _completed_sequence_task(output_root, fold=int(fold["fold"]), lookback=lookback)
+        for seed_offset in seed_offsets:
+            expand_fold_predictions(
+                study_path=study_path,
+                output_root=output_root,
+                fold_number=int(fold["fold"]),
+                lookback=lookback,
+                training_mode=training_mode,
+                seed_offset=seed_offset,
+            )
+    sequence_task_groups = [
+        [
+            _completed_sequence_task(
+                output_root,
+                fold=int(fold["fold"]),
+                lookback=lookback,
+                training_mode=training_mode,
+                seed_offset=seed_offset,
+            )
+            for seed_offset in seed_offsets
+        ]
         for fold in folds
     ]
     tree_tasks = [
@@ -1777,7 +2361,7 @@ def evaluate_ensemble(
             target="exact_net_return_d5_rank",
             profile=str(study["lightgbm"]["primary_profile"]),
             feature_variant=base.DEFAULT_FEATURE_VARIANT,
-            training_mode="causal_nested",
+            training_mode=tree_training_mode,
         )
         for fold in folds
     ]
@@ -1787,19 +2371,30 @@ def evaluate_ensemble(
             "study_sha256": base._sha256(study_path),
             "target_fingerprint": sources.target_manifest["fingerprint"],
             "lookback": int(lookback),
+            "training_mode": training_mode,
+            "tree_training_mode": tree_training_mode,
+            "market_training_mode": tree_training_mode,
+            "sequence_seed_offsets": list(seed_offsets),
             "stock_score": "equal_average_of_within_date_sequence_and_tree_percentile_ranks",
             "market_gate": "frozen_ridge_above_zero_and_logistic_probability_above_0p5",
             "execution_evaluation": "rank_full_signal_day_universe_then_unfilled_or_unaffordable_order_is_cash_without_substitution",
             "top_k": [1, 3, 10],
             "sequence_tasks": {
-                str(path): base._sha256(path) for _, path in sequence_tasks
+                str(path): base._sha256(path)
+                for group in sequence_task_groups
+                for _, path in group
             },
             "tree_tasks": {str(path): base._sha256(path) for _, path in tree_tasks},
             "market_manifest_sha256": base._sha256(market_manifest_path),
         }
     )
-    evaluation_root = _lookback_artifact_root(
-        output_root, "sequence_ensemble_evaluation", lookback=lookback
+    evaluation_root = _ensemble_protocol_root(
+        output_root,
+        "sequence_ensemble_evaluation",
+        lookback=lookback,
+        training_mode=training_mode,
+        tree_training_mode=tree_training_mode,
+        seed_offsets=seed_offsets,
     )
     manifest_path = evaluation_root / "manifest.json"
     if manifest_path.is_file():
@@ -1814,15 +2409,26 @@ def evaluate_ensemble(
     selection_parts: list[pd.DataFrame] = []
     component_parts: list[pd.DataFrame] = []
     fold_summaries: list[dict[str, Any]] = []
-    for fold, (sequence_task, _), (tree_task, _) in zip(
-        folds, sequence_tasks, tree_tasks, strict=True
+    for fold, sequence_task_group, (tree_task, _) in zip(
+        folds, sequence_task_groups, tree_tasks, strict=True
     ):
         fold_number = int(fold["fold"])
         positions = base._fold_rows(sources.context.row_index, fold, "validation")
-        sequence_prediction = np.load(
-            sequence_task["files"]["full_universe_prediction"]["path"],
-            mmap_mode="r",
-            allow_pickle=False,
+        sequence_predictions = [
+            np.asarray(
+                np.load(
+                    sequence_task["files"]["full_universe_prediction"]["path"],
+                    mmap_mode="r",
+                    allow_pickle=False,
+                ),
+                dtype=np.float32,
+            )
+            for sequence_task, _ in sequence_task_group
+        ]
+        sequence_prediction = (
+            sequence_predictions[0]
+            if len(sequence_predictions) == 1
+            else np.mean(np.stack(sequence_predictions), axis=0, dtype=np.float32)
         )
         tree_prediction = np.load(
             tree_task["files"]["prediction"]["path"],
@@ -1941,9 +2547,20 @@ def evaluate_ensemble(
         "study_id": base.STUDY_ID,
         "fingerprint": fingerprint,
         "lookback": int(lookback),
+        "training_mode": training_mode,
+        "tree_training_mode": tree_training_mode,
+        "market_training_mode": tree_training_mode,
+        "sequence_seed_offsets": list(seed_offsets),
         "frozen_definition": {
             "stock_score": "equal_average_of_within_date_sequence_and_tree_percentile_ranks",
-            "tree_model": "exact_net_return_d5_rank__strong_127__causal_nested",
+            "sequence_model": (
+                f"lookback_{int(lookback)}__{training_mode}__"
+                f"seed_offsets_{','.join(str(value) for value in seed_offsets)}"
+            ),
+            "tree_model": (
+                "exact_net_return_d5_rank__strong_127__"
+                f"{tree_training_mode}"
+            ),
             "market_gate": "existing_ridge_prediction_above_zero_and_existing_logistic_probability_above_0p5",
             "holding": "next_open_to_d5_legal_exit",
             "primary_top_k": 10,
@@ -1971,7 +2588,11 @@ def evaluate_ensemble(
         },
         "sources": {
             "market_regime": _file_record(market_manifest_path),
-            "sequence_tasks": [_file_record(path) for _, path in sequence_tasks],
+            "sequence_tasks": [
+                _file_record(path)
+                for group in sequence_task_groups
+                for _, path in group
+            ],
             "tree_tasks": [_file_record(path) for _, path in tree_tasks],
             "exact_net_targets": _file_record(
                 output_root / "exact_net_targets" / "manifest.json"
@@ -1996,11 +2617,19 @@ def replay_ensemble_accounts(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     lookback: int = DEFAULT_LOOKBACK,
     starting_cash: float = 1_000_000.0,
+    training_mode: str = "outer_early_stop",
+    tree_training_mode: str = "outer_early_stop",
+    sequence_seed_offsets: Sequence[int] = (0,),
 ) -> dict[str, Any]:
     """Replay the admitted D5 ensemble with real cash and overlapping holdings."""
 
     evaluation = evaluate_ensemble(
-        study_path=study_path, output_root=output_root, lookback=lookback
+        study_path=study_path,
+        output_root=output_root,
+        lookback=lookback,
+        training_mode=training_mode,
+        tree_training_mode=tree_training_mode,
+        sequence_seed_offsets=sequence_seed_offsets,
     )
     if not bool(evaluation["account_replay_gate"]["passed"]):
         raise SequenceChallengerError("ensemble_account_replay_gate_not_passed")
@@ -2051,8 +2680,14 @@ def replay_ensemble_accounts(
             "no_leverage": True,
         }
     )
-    replay_root = _lookback_artifact_root(
-        output_root, "sequence_ensemble_account_replay", lookback=lookback
+    seed_offsets = tuple(int(value) for value in evaluation["sequence_seed_offsets"])
+    replay_root = _ensemble_protocol_root(
+        output_root,
+        "sequence_ensemble_account_replay",
+        lookback=lookback,
+        training_mode=str(evaluation["training_mode"]),
+        tree_training_mode=str(evaluation["tree_training_mode"]),
+        seed_offsets=seed_offsets,
     )
     manifest_path = replay_root / "manifest.json"
     if manifest_path.is_file():
@@ -2177,6 +2812,9 @@ def replay_ensemble_accounts(
         "completed_at": _now(),
         "study_id": base.STUDY_ID,
         "fingerprint": fingerprint,
+        "training_mode": str(evaluation["training_mode"]),
+        "tree_training_mode": str(evaluation["tree_training_mode"]),
+        "sequence_seed_offsets": list(seed_offsets),
         "starting_cash": float(starting_cash),
         "capital_policy": {
             "cohort_equity_fraction": 0.20,
@@ -2199,8 +2837,13 @@ def replay_ensemble_accounts(
         },
         "sources": {
             "ensemble_evaluation": _file_record(
-                _lookback_artifact_root(
-                    output_root, "sequence_ensemble_evaluation", lookback=lookback
+                _ensemble_protocol_root(
+                    output_root,
+                    "sequence_ensemble_evaluation",
+                    lookback=lookback,
+                    training_mode=str(evaluation["training_mode"]),
+                    tree_training_mode=str(evaluation["tree_training_mode"]),
+                    seed_offsets=seed_offsets,
                 )
                 / "manifest.json"
             ),
@@ -2223,6 +2866,9 @@ def replay_account_robustness(
     output_root: Path = DEFAULT_OUTPUT_ROOT,
     lookback: int = DEFAULT_LOOKBACK,
     starting_cash: float = 1_000_000.0,
+    training_mode: str = "outer_early_stop",
+    tree_training_mode: str = "outer_early_stop",
+    sequence_seed_offsets: Sequence[int] = (0,),
 ) -> dict[str, Any]:
     """Stress tail dependence, risk scaling, and post-fold-1 persistence."""
 
@@ -2231,9 +2877,17 @@ def replay_account_robustness(
         output_root=output_root,
         lookback=lookback,
         starting_cash=starting_cash,
+        training_mode=training_mode,
+        tree_training_mode=tree_training_mode,
+        sequence_seed_offsets=sequence_seed_offsets,
     )
     evaluation = evaluate_ensemble(
-        study_path=study_path, output_root=output_root, lookback=lookback
+        study_path=study_path,
+        output_root=output_root,
+        lookback=lookback,
+        training_mode=training_mode,
+        tree_training_mode=tree_training_mode,
+        sequence_seed_offsets=sequence_seed_offsets,
     )
     study = base.load_study(study_path)
     context = base._source_context(study)
@@ -2282,8 +2936,14 @@ def replay_account_robustness(
             "cost_scenario": "stress_double_slippage",
         }
     )
-    output_dir = _lookback_artifact_root(
-        output_root, "sequence_ensemble_account_robustness", lookback=lookback
+    seed_offsets = tuple(int(value) for value in evaluation["sequence_seed_offsets"])
+    output_dir = _ensemble_protocol_root(
+        output_root,
+        "sequence_ensemble_account_robustness",
+        lookback=lookback,
+        training_mode=str(evaluation["training_mode"]),
+        tree_training_mode=str(evaluation["tree_training_mode"]),
+        seed_offsets=seed_offsets,
     )
     manifest_path = output_dir / "manifest.json"
     if manifest_path.is_file():
@@ -2439,6 +3099,9 @@ def replay_account_robustness(
         "completed_at": _now(),
         "study_id": base.STUDY_ID,
         "fingerprint": fingerprint,
+        "training_mode": str(evaluation["training_mode"]),
+        "tree_training_mode": str(evaluation["tree_training_mode"]),
+        "sequence_seed_offsets": list(seed_offsets),
         "variant_count": len(variants),
         "summaries": summaries,
         "robustness_gate": robustness_gate,
@@ -2455,16 +3118,24 @@ def replay_account_robustness(
         },
         "sources": {
             "account_replay": _file_record(
-                _lookback_artifact_root(
+                _ensemble_protocol_root(
                     output_root,
                     "sequence_ensemble_account_replay",
                     lookback=lookback,
+                    training_mode=str(evaluation["training_mode"]),
+                    tree_training_mode=str(evaluation["tree_training_mode"]),
+                    seed_offsets=seed_offsets,
                 )
                 / "manifest.json"
             ),
             "ensemble_evaluation": _file_record(
-                _lookback_artifact_root(
-                    output_root, "sequence_ensemble_evaluation", lookback=lookback
+                _ensemble_protocol_root(
+                    output_root,
+                    "sequence_ensemble_evaluation",
+                    lookback=lookback,
+                    training_mode=str(evaluation["training_mode"]),
+                    tree_training_mode=str(evaluation["tree_training_mode"]),
+                    seed_offsets=seed_offsets,
                 )
                 / "manifest.json"
             ),
@@ -4918,10 +5589,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--fold", type=int, default=1)
     parser.add_argument("--lookback", type=int, default=DEFAULT_LOOKBACK)
+    parser.add_argument("--horizon", type=int, choices=base.HORIZONS, default=5)
     parser.add_argument("--maximum-epochs", type=int, default=DEFAULT_MAX_EPOCHS)
     parser.add_argument("--patience", type=int, default=DEFAULT_PATIENCE)
     parser.add_argument("--date-batch-size", type=int, default=DEFAULT_DATE_BATCH_SIZE)
+    parser.add_argument(
+        "--training-mode",
+        choices=SEQUENCE_TRAINING_MODES,
+        default="outer_early_stop",
+    )
+    parser.add_argument(
+        "--tree-training-mode",
+        choices=base.TRAINING_MODES,
+        default="outer_early_stop",
+    )
+    parser.add_argument("--seed-offset", type=int, default=0)
     parser.add_argument("--evaluate-ensemble", action="store_true")
+    parser.add_argument("--evaluate-sequence-payoff", action="store_true")
+    parser.add_argument("--replay-sequence-payoff", action="store_true")
     parser.add_argument("--replay-accounts", action="store_true")
     parser.add_argument("--robustness", action="store_true")
     parser.add_argument("--dual-horizons", action="store_true")
@@ -4942,7 +5627,23 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    if args.rebuildable_core_robustness:
+    if args.replay_sequence_payoff:
+        result = replay_sequence_payoff_accounts(
+            study_path=args.study,
+            output_root=args.output_root,
+            lookback=args.lookback,
+            horizon=args.horizon,
+            training_mode=args.training_mode,
+        )
+    elif args.evaluate_sequence_payoff:
+        result = evaluate_sequence_payoff(
+            study_path=args.study,
+            output_root=args.output_root,
+            lookback=args.lookback,
+            horizon=args.horizon,
+            training_mode=args.training_mode,
+        )
+    elif args.rebuildable_core_robustness:
         result = replay_rebuildable_core_robustness(
             study_path=args.study,
             output_root=args.output_root,
@@ -5012,18 +5713,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             study_path=args.study,
             output_root=args.output_root,
             lookback=args.lookback,
+            training_mode=args.training_mode,
+            tree_training_mode=args.tree_training_mode,
+            sequence_seed_offsets=(args.seed_offset,),
         )
     elif args.replay_accounts:
         result = replay_ensemble_accounts(
             study_path=args.study,
             output_root=args.output_root,
             lookback=args.lookback,
+            training_mode=args.training_mode,
+            tree_training_mode=args.tree_training_mode,
+            sequence_seed_offsets=(args.seed_offset,),
         )
     elif args.evaluate_ensemble:
         result = evaluate_ensemble(
             study_path=args.study,
             output_root=args.output_root,
             lookback=args.lookback,
+            training_mode=args.training_mode,
+            tree_training_mode=args.tree_training_mode,
+            sequence_seed_offsets=(args.seed_offset,),
         )
     else:
         result = train_fold(
@@ -5034,6 +5744,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             maximum_epochs=args.maximum_epochs,
             patience=args.patience,
             date_batch_size=args.date_batch_size,
+            training_mode=args.training_mode,
+            seed_offset=args.seed_offset,
+            horizon=args.horizon,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0

@@ -106,6 +106,7 @@ TASK_SCHEMA = "seq100_full_market_multitask_task/1"
 EVALUATION_SCHEMA = "seq100_full_market_multitask_oof_evaluation/1"
 ACCOUNT_REPLAY_SCHEMA = "seq100_full_market_multitask_account_replay/1"
 PAYOFF_EVALUATION_SCHEMA = "seq100_full_market_payoff_oof_evaluation/1"
+PAYOFF_ACCOUNT_REPLAY_SCHEMA = "seq100_full_market_payoff_account_replay/1"
 MARKET_REGIME_SCHEMA = "seq100_full_market_market_regime_evaluation/1"
 
 DEFAULT_STUDY_PATH = (
@@ -1767,6 +1768,23 @@ def _target_definition(target: str) -> tuple[str, str, float, str]:
     return source, kind, binary_threshold, "path"
 
 
+def _exact_net_target_horizon(target: str) -> int:
+    source, _, _, panel = _target_definition(target)
+    if panel != "exact_net":
+        raise FullMarketForecastError("payoff_account_requires_exact_net_target")
+    prefix = "exact_net_return_d"
+    if not source.startswith(prefix) or not source.endswith("_base"):
+        raise FullMarketForecastError("payoff_account_target_horizon_missing")
+    horizon_text = source[len(prefix) : -len("_base")]
+    try:
+        horizon = int(horizon_text)
+    except ValueError as error:
+        raise FullMarketForecastError("payoff_account_target_horizon_invalid") from error
+    if horizon not in HORIZONS:
+        raise FullMarketForecastError("payoff_account_target_horizon_unsupported")
+    return horizon
+
+
 def _load_target_arrays(
     manifest: Mapping[str, Any], target: str
 ) -> tuple[np.memmap, np.memmap, int, str, float]:
@@ -2963,8 +2981,8 @@ def evaluate_market_regime_oof(
     if int(horizon) != 5 or ranking_target != "exact_net_return_d5_rank":
         raise FullMarketForecastError("market_regime_v1_is_frozen_to_d5")
     study = load_study(study_path)
-    if training_mode != "causal_nested":
-        raise FullMarketForecastError("market_regime_requires_causal_nested_ranking")
+    if training_mode not in TRAINING_MODES:
+        raise FullMarketForecastError(f"unknown_training_mode:{training_mode}")
     profile_name = str(profile or study["lightgbm"]["primary_profile"])
     context = _source_context(study)
     target_manifest = prepare_exact_net_targets(
@@ -3019,7 +3037,10 @@ def evaluate_market_regime_oof(
             "tasks": {str(path): _sha256(path) for _, path in task_records},
         }
     )
-    output_path = output_root / "market_regime_evaluation/manifest.json"
+    market_root = output_root / "market_regime_evaluation"
+    if training_mode != "causal_nested":
+        market_root /= training_mode
+    output_path = market_root / "manifest.json"
     if output_path.is_file():
         current = _read_json(output_path)
         if (
@@ -3106,10 +3127,23 @@ def evaluate_market_regime_oof(
             & (unique_dates <= int(fold["validation_end_date_idx"]))
             & np.isfinite(market_base)
         )
-        inner_train, inner_validation, inner_meta = _nested_inner_rows(
-            unique_dates[train_rows]
-        )
-        ridge_choices: list[tuple[float, float]] = []
+        if training_mode == "causal_nested":
+            inner_train, inner_validation, inner_meta = _nested_inner_rows(
+                unique_dates[train_rows]
+            )
+            selection_train_rows = train_rows[inner_train]
+            selection_validation_rows = train_rows[inner_validation]
+            selection_scope = "inner_validation_then_outer_refit"
+        else:
+            inner_meta = {
+                "outer_validation_used_for_regularization_selection": True,
+                "selection_training_row_count": len(train_rows),
+                "selection_validation_row_count": len(validation_rows),
+            }
+            selection_train_rows = train_rows
+            selection_validation_rows = validation_rows
+            selection_scope = "outer_validation_direct_checkpoint"
+        ridge_choices: list[tuple[float, float, Any, np.ndarray]] = []
         for alpha in ridge_alphas:
             model = make_pipeline(
                 SimpleImputer(strategy="median", add_indicator=True),
@@ -3117,20 +3151,24 @@ def evaluate_market_regime_oof(
                 Ridge(alpha=float(alpha)),
             )
             model.fit(
-                market_matrix[train_rows[inner_train]],
-                market_base[train_rows[inner_train]],
+                market_matrix[selection_train_rows],
+                market_base[selection_train_rows],
             )
-            prediction = model.predict(market_matrix[train_rows[inner_validation]])
+            prediction = model.predict(market_matrix[selection_validation_rows])
             ridge_choices.append(
                 (
                     mean_absolute_error(
-                        market_base[train_rows[inner_validation]], prediction
+                        market_base[selection_validation_rows], prediction
                     ),
                     float(alpha),
+                    model,
+                    np.asarray(prediction, dtype=np.float64),
                 )
             )
-        ridge_score, ridge_alpha = min(ridge_choices)
-        logistic_choices: list[tuple[float, float]] = []
+        ridge_score, ridge_alpha, selected_ridge_model, selected_ridge_prediction = min(
+            ridge_choices, key=lambda item: (item[0], item[1])
+        )
+        logistic_choices: list[tuple[float, float, Any, np.ndarray]] = []
         for regularization in logistic_cs:
             model = make_pipeline(
                 SimpleImputer(strategy="median", add_indicator=True),
@@ -3138,44 +3176,55 @@ def evaluate_market_regime_oof(
                 LogisticRegression(C=float(regularization), max_iter=2000),
             )
             model.fit(
-                market_matrix[train_rows[inner_train]],
-                (market_base[train_rows[inner_train]] > 0.0).astype(np.int8),
+                market_matrix[selection_train_rows],
+                (market_base[selection_train_rows] > 0.0).astype(np.int8),
             )
             probability = model.predict_proba(
-                market_matrix[train_rows[inner_validation]]
+                market_matrix[selection_validation_rows]
             )[:, 1]
             logistic_choices.append(
                 (
                     log_loss(
-                        (market_base[train_rows[inner_validation]] > 0.0).astype(
-                            np.int8
-                        ),
+                        (market_base[selection_validation_rows] > 0.0).astype(np.int8),
                         probability,
                         labels=[0, 1],
                     ),
                     float(regularization),
+                    model,
+                    np.asarray(probability, dtype=np.float64),
                 )
             )
-        logistic_score, logistic_c = min(logistic_choices)
-        ridge_model = make_pipeline(
-            SimpleImputer(strategy="median", add_indicator=True),
-            RobustScaler(),
-            Ridge(alpha=ridge_alpha),
-        )
-        logistic_model = make_pipeline(
-            SimpleImputer(strategy="median", add_indicator=True),
-            RobustScaler(),
-            LogisticRegression(C=logistic_c, max_iter=2000),
-        )
-        ridge_model.fit(market_matrix[train_rows], market_base[train_rows])
-        logistic_model.fit(
-            market_matrix[train_rows],
-            (market_base[train_rows] > 0.0).astype(np.int8),
-        )
-        ridge_prediction = ridge_model.predict(market_matrix[validation_rows])
-        positive_probability = logistic_model.predict_proba(
-            market_matrix[validation_rows]
-        )[:, 1]
+        (
+            logistic_score,
+            logistic_c,
+            selected_logistic_model,
+            selected_positive_probability,
+        ) = min(logistic_choices, key=lambda item: (item[0], item[1]))
+        if training_mode == "outer_early_stop":
+            ridge_model = selected_ridge_model
+            logistic_model = selected_logistic_model
+            ridge_prediction = selected_ridge_prediction
+            positive_probability = selected_positive_probability
+        else:
+            ridge_model = make_pipeline(
+                SimpleImputer(strategy="median", add_indicator=True),
+                RobustScaler(),
+                Ridge(alpha=ridge_alpha),
+            )
+            logistic_model = make_pipeline(
+                SimpleImputer(strategy="median", add_indicator=True),
+                RobustScaler(),
+                LogisticRegression(C=logistic_c, max_iter=2000),
+            )
+            ridge_model.fit(market_matrix[train_rows], market_base[train_rows])
+            logistic_model.fit(
+                market_matrix[train_rows],
+                (market_base[train_rows] > 0.0).astype(np.int8),
+            )
+            ridge_prediction = ridge_model.predict(market_matrix[validation_rows])
+            positive_probability = logistic_model.predict_proba(
+                market_matrix[validation_rows]
+            )[:, 1]
         prediction_parts.append(
             pd.DataFrame(
                 {
@@ -3213,9 +3262,16 @@ def evaluate_market_regime_oof(
             {
                 "fold": int(fold["fold"]),
                 "ridge_alpha": ridge_alpha,
-                "ridge_inner_mae": ridge_score,
+                "ridge_selection_mae": ridge_score,
+                "ridge_inner_mae": (
+                    ridge_score if training_mode == "causal_nested" else None
+                ),
                 "logistic_c": logistic_c,
-                "logistic_inner_log_loss": logistic_score,
+                "logistic_selection_log_loss": logistic_score,
+                "logistic_inner_log_loss": (
+                    logistic_score if training_mode == "causal_nested" else None
+                ),
+                "selection_scope": selection_scope,
                 "ridge_validation_correlation": float(
                     np.corrcoef(ridge_prediction, market_base[validation_rows])[0, 1]
                 ),
@@ -3354,6 +3410,9 @@ def evaluate_market_regime_oof(
         "profile": profile_name,
         "feature_variant": feature_variant,
         "training_mode": training_mode,
+        "outer_validation_used_for_regularization_selection": (
+            training_mode == "outer_early_stop"
+        ),
         "market_feature_count": len(market_features),
         "market_features": list(market_features),
         "fit_records": fit_records,
@@ -4548,6 +4607,417 @@ def replay_oof_accounts(
     return manifest
 
 
+def _payoff_account_specs(horizon: int) -> tuple[dict[str, Any], ...]:
+    """Return fixed breadth/cost diagnostics for one legal-return horizon."""
+
+    if int(horizon) not in HORIZONS:
+        raise FullMarketForecastError("payoff_account_horizon_invalid")
+    variant = f"exact_net_return_d{int(horizon)}_rank"
+    specs: list[dict[str, Any]] = []
+    for top_k in (1, 3, 10):
+        for cost_scenario, multiplier in EXACT_NET_SCENARIOS.items():
+            specs.append(
+                {
+                    "variant": variant,
+                    "exit_policy": "planned_close",
+                    "gate": "always",
+                    "top_k": int(top_k),
+                    "cost_scenario": str(cost_scenario),
+                    "slippage_multiplier": float(multiplier),
+                    "cohort_equity_fraction": 1.0 / float(horizon),
+                    "planned_fill_day": int(horizon),
+                }
+            )
+    # A winner-cap pressure test makes right-tail dependence visible without
+    # changing the selected ranks or the entry/exit contract.
+    for cap in (0.05, 0.10):
+        for cost_scenario, multiplier in EXACT_NET_SCENARIOS.items():
+            specs.append(
+                {
+                    "variant": variant,
+                    "exit_policy": "planned_close",
+                    "gate": "always",
+                    "top_k": 10,
+                    "cost_scenario": str(cost_scenario),
+                    "slippage_multiplier": float(multiplier),
+                    "cohort_equity_fraction": 1.0 / float(horizon),
+                    "planned_fill_day": int(horizon),
+                    "maximum_credited_gross_return": float(cap),
+                }
+            )
+    return tuple(specs)
+
+
+def _payoff_account_diagnostics(
+    *,
+    result: dict[str, Any],
+    equity: pd.DataFrame,
+    trades: pd.DataFrame,
+    selections: pd.DataFrame,
+) -> dict[str, Any]:
+    """Add uncertainty, fold, and winner-concentration diagnostics to a replay."""
+
+    daily_returns = equity["daily_net_return"].to_numpy(dtype=np.float64)
+    result["daily_hac20_net_return"] = _newey_west_interval(daily_returns, lag=20)
+    result["daily_positive_fraction"] = float(np.mean(daily_returns > 0.0))
+    result["daily_return_p01"] = float(np.quantile(daily_returns, 0.01))
+    result["daily_return_p05"] = float(np.quantile(daily_returns, 0.05))
+
+    date_folds = (
+        selections.groupby("date_idx", sort=False)["fold"].first().astype("Int64")
+    )
+    equity_with_fold = equity.copy()
+    equity_with_fold["fold"] = equity_with_fold["date_idx"].map(date_folds)
+    fold_rows: list[dict[str, Any]] = []
+    for fold, group in equity_with_fold.dropna(subset=["fold"]).groupby(
+        "fold", sort=True
+    ):
+        values = group["daily_net_return"].to_numpy(dtype=np.float64)
+        fold_rows.append(
+            {
+                "fold": int(fold),
+                "date_count": len(group),
+                "mean_daily_net_return": float(values.mean()),
+                "compound_net_return": float(np.prod(1.0 + values) - 1.0),
+                "hac20_net_return": _newey_west_interval(values, lag=20),
+            }
+        )
+    result["fold_account_metrics"] = fold_rows
+
+    if trades.empty:
+        result["fold_trade_metrics"] = []
+        result["winner_concentration"] = {
+            "trade_count": 0,
+            "positive_pnl_total": 0.0,
+            "top_1pct_positive_pnl_share": None,
+            "top_5pct_positive_pnl_share": None,
+        }
+        return result
+
+    trade_frame = trades.copy()
+    trade_frame["fold"] = trade_frame["signal_date_idx"].map(date_folds).astype("Int64")
+    trade_rows: list[dict[str, Any]] = []
+    for fold, group in trade_frame.dropna(subset=["fold"]).groupby("fold", sort=True):
+        pnl = group["pnl"].to_numpy(dtype=np.float64)
+        returns = group["trade_net_return"].to_numpy(dtype=np.float64)
+        trade_rows.append(
+            {
+                "fold": int(fold),
+                "trade_count": len(group),
+                "pnl": float(pnl.sum()),
+                "mean_trade_net_return": float(returns.mean()),
+                "positive_trade_fraction": float(np.mean(pnl > 0.0)),
+            }
+        )
+    result["fold_trade_metrics"] = trade_rows
+
+    positive = np.sort(
+        trade_frame.loc[trade_frame["pnl"] > 0.0, "pnl"].to_numpy(dtype=np.float64)
+    )[::-1]
+    positive_total = float(positive.sum())
+
+    def winner_share(fraction: float) -> float | None:
+        if positive_total <= 0.0 or not len(positive):
+            return None
+        count = max(1, math.ceil(len(positive) * float(fraction)))
+        return float(positive[:count].sum() / positive_total)
+
+    result["winner_concentration"] = {
+        "trade_count": len(trade_frame),
+        "positive_pnl_total": positive_total,
+        "top_1pct_positive_pnl_share": winner_share(0.01),
+        "top_5pct_positive_pnl_share": winner_share(0.05),
+        "largest_winner_trade_net_return": float(
+            trade_frame["trade_net_return"].max()
+        ),
+        "largest_loser_trade_net_return": float(
+            trade_frame["trade_net_return"].min()
+        ),
+    }
+    return result
+
+
+def replay_payoff_accounts(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    target: str = "exact_net_return_d10_rank",
+    profile: str | None = None,
+    feature_variant: str = DEFAULT_FEATURE_VARIANT,
+    training_mode: str = "outer_early_stop",
+) -> dict[str, Any]:
+    """Replay a payoff-ranked OOF signal with finite cash and legal exits."""
+
+    study = load_study(study_path)
+    horizon = _exact_net_target_horizon(target)
+    if not str(target).endswith("_rank"):
+        raise FullMarketForecastError("payoff_account_requires_rank_target")
+    if training_mode not in TRAINING_MODES:
+        raise FullMarketForecastError(f"unknown_training_mode:{training_mode}")
+    evaluation = evaluate_payoff_oof(
+        study_path=study_path,
+        output_root=output_root,
+        target=target,
+        profile=profile,
+        feature_variant=feature_variant,
+        training_mode=training_mode,
+    )
+    profile_name = str(evaluation["profile"])
+    selections_path = Path(evaluation["files"]["top10_selections"]["path"])
+    selections = pd.read_parquet(selections_path)
+    required_selection_columns = {
+        "candidate_id",
+        "date_idx",
+        "trade_date",
+        "symbol",
+        "symbol_idx",
+        "model_row_position",
+        "fold",
+        "selection_rank",
+    }
+    if not required_selection_columns.issubset(selections.columns):
+        missing = sorted(required_selection_columns - set(selections.columns))
+        raise FullMarketForecastError(f"payoff_selection_columns_missing:{missing}")
+    context = _source_context(study)
+    target_manifest = prepare_targets(study_path=study_path, output_root=output_root)
+    target_columns = list(target_manifest["target_columns"])
+    gross_source = f"legal_exit_return_d{horizon}"
+    if gross_source not in target_columns:
+        raise FullMarketForecastError(f"payoff_gross_target_missing:{gross_source}")
+    gross_column = target_columns.index(gross_source)
+    fill_horizons = tuple(int(item) for item in target_manifest["files"]["legal_fill_days"]["horizons"])
+    if horizon not in fill_horizons:
+        raise FullMarketForecastError("payoff_fill_horizon_missing")
+    fill_column = fill_horizons.index(horizon)
+    values = _open_array(target_manifest["files"]["values"], dtype=np.float32)
+    valid = _open_array(target_manifest["files"]["valid"], dtype=np.uint8)
+    legal_fill_days = _open_array(
+        target_manifest["files"]["legal_fill_days"], dtype=np.int16
+    )
+    positions = selections["model_row_position"].to_numpy(dtype=np.int64)
+    if (
+        len(positions) == 0
+        or int(positions.min()) < 0
+        or int(positions.max()) >= len(context.row_index)
+    ):
+        raise FullMarketForecastError("payoff_selection_row_position_invalid")
+    source_rows = context.row_index.iloc[positions]
+    if not np.array_equal(
+        source_rows["candidate_id"].to_numpy(dtype=np.int64),
+        selections["candidate_id"].to_numpy(dtype=np.int64),
+    ):
+        raise FullMarketForecastError("payoff_selection_candidate_alignment_failed")
+    if not np.array_equal(
+        source_rows["date_idx"].to_numpy(dtype=np.int32),
+        selections["date_idx"].to_numpy(dtype=np.int32),
+    ):
+        raise FullMarketForecastError("payoff_selection_date_alignment_failed")
+    gross = np.asarray(values[positions, gross_column], dtype=np.float32)
+    gross_valid = np.asarray(valid[positions, gross_column], dtype=bool)
+    fill_days = np.asarray(legal_fill_days[positions, fill_column], dtype=np.int16)
+    usable = gross_valid & np.isfinite(gross) & (fill_days >= int(horizon))
+    dropped_selection_count = int((~usable).sum())
+    if not usable.any():
+        raise FullMarketForecastError("payoff_account_schedule_empty_after_target_join")
+    selections = selections.loc[usable].copy()
+    selections["variant"] = str(target)
+    selections["exit_policy"] = "planned_close"
+    selections["gate"] = "always"
+    selections["cost_scenario"] = "base"
+    selections["take_profit_hit"] = False
+    selections["legal_gross_return"] = gross[usable]
+    selections["fill_day"] = fill_days[usable].astype(np.int16)
+    # The account engine receives an explicit schedule for each breadth.  A
+    # Top3 task therefore sees ranks 1-3 only, while Top10 keeps all ten;
+    # lower ranks are never substituted when an order is unfilled.
+    schedule_parts = []
+    for top_k in (1, 3, 10):
+        part = selections.loc[selections["selection_rank"] <= int(top_k)].copy()
+        part["top_k"] = int(top_k)
+        schedule_parts.append(part)
+    selections = pd.concat(schedule_parts, ignore_index=True).sort_values(
+        ["date_idx", "top_k", "selection_rank"], kind="stable"
+    )
+
+    daily_raw = _open_array(
+        context.pack["feature_channels"]["daily_raw"], dtype=np.float32
+    )
+    raw_open = _open_array(
+        context.pack["execution_arrays"]["entry_open_raw"], dtype=np.float32
+    )
+    entry_filled = _open_array(context.pack["masks"]["entry_filled"], dtype=np.bool_)
+    costs = parse_execution_costs(context.pack)
+    specs = _payoff_account_specs(horizon)
+    fingerprint = _stable_hash(
+        {
+            "schema": PAYOFF_ACCOUNT_REPLAY_SCHEMA,
+            "study_sha256": _sha256(study_path),
+            "evaluation_fingerprint": evaluation["fingerprint"],
+            "evaluation_selection_sha256": evaluation["files"]["top10_selections"][
+                "sha256"
+            ],
+            "target_manifest_fingerprint": target_manifest["fingerprint"],
+            "target": target,
+            "horizon": horizon,
+            "specs": specs,
+            "starting_cash": 1_000_000.0,
+            "training_mode": training_mode,
+            "feature_variant": feature_variant,
+            "unfilled_selected_order": "cash_no_rank_substitution",
+        }
+    )
+    replay_name = f"payoff_account_replay/{target}__{profile_name}"
+    if feature_variant != DEFAULT_FEATURE_VARIANT:
+        replay_name += f"__{feature_variant}"
+    if training_mode != "outer_early_stop":
+        replay_name += f"__{training_mode}"
+    replay_root = output_root / replay_name
+    manifest_path = replay_root / "manifest.json"
+    if manifest_path.is_file():
+        current = _read_json(manifest_path)
+        if current.get("status") == "completed" and current.get("fingerprint") == fingerprint:
+            return current
+
+    schedule_path = replay_root / "selection_schedule.parquet"
+    _write_parquet(selections, schedule_path)
+    summaries: list[dict[str, Any]] = []
+    files: dict[str, dict[str, Any]] = {}
+    for spec in specs:
+        result, equity, trades = _simulate_account_spec(
+            spec=spec,
+            selections=selections,
+            context=context,
+            daily_raw=daily_raw,
+            raw_open=raw_open,
+            entry_filled=entry_filled,
+            costs=costs,
+        )
+        result = _payoff_account_diagnostics(
+            result=result,
+            equity=equity,
+            trades=trades,
+            selections=selections,
+        )
+        task_id = str(result["task_id"])
+        task_root = replay_root / "tasks" / task_id
+        equity_path = task_root / "equity.parquet"
+        trades_path = task_root / "trades.parquet"
+        result_path = task_root / "task_result.json"
+        _write_parquet(equity, equity_path)
+        _write_parquet(trades, trades_path)
+        task_payload = {
+            "schema": PAYOFF_ACCOUNT_REPLAY_SCHEMA,
+            "status": "completed",
+            "completed_at": _now(),
+            "study_id": STUDY_ID,
+            "fingerprint": fingerprint,
+            **result,
+            "files": {
+                "equity": _file_record(equity_path, row_count=len(equity)),
+                "trades": _file_record(trades_path, row_count=len(trades)),
+            },
+        }
+        _write_json(result_path, task_payload)
+        files[task_id] = _file_record(result_path)
+        summaries.append(result)
+        _emit(
+            "payoff_account_task_completed",
+            target=target,
+            task_id=task_id,
+            total_net_return=result["total_net_return"],
+            maximum_drawdown=result["maximum_drawdown"],
+        )
+    summary_frame = pd.DataFrame(
+        [
+            {
+                key: value
+                for key, value in result.items()
+                if key
+                not in {
+                    "annual",
+                    "total_costs",
+                    "spec",
+                    "fold_account_metrics",
+                    "fold_trade_metrics",
+                    "winner_concentration",
+                    "daily_hac20_net_return",
+                }
+            }
+            | {
+                "variant": result["spec"]["variant"],
+                "exit_policy": result["spec"]["exit_policy"],
+                "gate": result["spec"]["gate"],
+                "top_k": result["spec"]["top_k"],
+                "cost_scenario": result["spec"]["cost_scenario"],
+                "maximum_credited_gross_return": result["spec"].get(
+                    "maximum_credited_gross_return"
+                ),
+                "daily_hac20_lower": result["daily_hac20_net_return"]["lower"],
+                "daily_hac20_upper": result["daily_hac20_net_return"]["upper"],
+            }
+            for result in summaries
+        ]
+    ).sort_values(
+        ["cost_scenario", "total_net_return", "maximum_drawdown"],
+        ascending=[True, False, False],
+    )
+    summary_path = replay_root / "summary.parquet"
+    _write_parquet(summary_frame, summary_path)
+    stress_summaries = [
+        item for item in summaries if str(item["spec"]["cost_scenario"]) == "stress"
+    ]
+    best_stress = max(stress_summaries, key=lambda item: item["total_net_return"])
+    manifest = {
+        "schema": PAYOFF_ACCOUNT_REPLAY_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": STUDY_ID,
+        "fingerprint": fingerprint,
+        "target": target,
+        "profile": profile_name,
+        "feature_variant": feature_variant,
+        "training_mode": training_mode,
+        "horizon": horizon,
+        "selection_row_count": len(selections),
+        "dropped_selection_count_after_gross_join": dropped_selection_count,
+        "task_count": len(summaries),
+        "best_stress_account": _json_safe(best_stress),
+        "decision_boundary": {
+            "historical_result_is_adaptive_not_independent_confirmation": True,
+            "outer_validation_used_for_iteration_selection": (
+                training_mode == "outer_early_stop"
+            ),
+            "stable_profit_claim_allowed": False,
+            "next_open_entry": True,
+            "planned_legal_exit_day": horizon,
+            "delayed_legal_sale_is_replayed": True,
+            "cohort_equity_fraction": 1.0 / float(horizon),
+            "no_leverage": True,
+            "entry_fill_checked_before_buy": True,
+            "unfilled_selected_order_is_cash_without_rank_substitution": True,
+            "costs_recomputed_from_gross_path": True,
+            "forbidden_2026_read_count": 0,
+        },
+        "sources": {
+            "study": _file_record(study_path),
+            "payoff_evaluation": _file_record(
+                Path(evaluation["files"]["top10_selections"]["path"]).parent
+                / "manifest.json"
+            ),
+            "target_panel": _file_record(output_root / "targets/manifest.json"),
+            "selection_schedule": _file_record(
+                schedule_path, row_count=len(selections)
+            ),
+        },
+        "files": {
+            "summary": _file_record(summary_path, row_count=len(summary_frame)),
+            **files,
+        },
+    }
+    _write_json(manifest_path, manifest)
+    return manifest
+
+
 def status(
     *,
     study_path: Path = DEFAULT_STUDY_PATH,
@@ -4642,6 +5112,7 @@ def _parser() -> argparse.ArgumentParser:
             "evaluate-market-regime",
             "evaluate-oof",
             "replay-account",
+            "replay-payoff-account",
         ),
     )
     parser.add_argument("--study", type=Path, default=DEFAULT_STUDY_PATH)
@@ -4744,6 +5215,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             ensemble_profiles=ensemble_profiles or None,
             feature_variant=args.feature_variant,
             candidate_only=args.candidate_only,
+            training_mode=args.training_mode,
+        )
+    elif args.command == "replay-payoff-account":
+        result = replay_payoff_accounts(
+            study_path=args.study,
+            output_root=args.output_root,
+            target=args.target,
+            profile=args.profile,
+            feature_variant=args.feature_variant,
             training_mode=args.training_mode,
         )
     else:
