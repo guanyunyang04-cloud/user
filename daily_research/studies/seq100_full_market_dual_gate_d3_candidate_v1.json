@@ -1,0 +1,97 @@
+{
+  "study_id": "seq100_full_market_dual_gate_d3_candidate_v1",
+  "status": "frozen_adaptive_historical_candidate",
+  "purpose": "Freeze the first payoff-aligned full-market short-horizon policy that passed the historical candidate gate, without promoting adaptive 2012-2025 evidence to a stable-profit claim.",
+  "epistemic_contract": {
+    "all_2012_2025_outcomes_are_consumed_development_evidence": true,
+    "dual_market_gate_was_proposed_after_observing_the_tree_gate_drawdown": true,
+    "d3_exit_was_selected_after_comparing_d2_d3_d5_d10": true,
+    "no_2026_outcome_was_read": true,
+    "stable_profit_claim_allowed": false,
+    "historical_rule_may_not_be_retuned_and_called_confirmation": true
+  },
+  "population": {
+    "universe": "signal-date quality_liquidity_pit",
+    "candidate_gate": "none",
+    "ranking_happens_before_future_fill_or_sellability_is_known": true,
+    "unfilled_or_unaffordable_order": "cash_without_rank_substitution"
+  },
+  "frozen_policy": {
+    "decision_time": "signal close",
+    "stock_score": "equal average of within-date percentile ranks from the lookback-8 payoff sequence model and the 557-field exact-net-D5 LambdaRank model",
+    "tree_stock_head": "exact_net_return_d5_rank__strong_127__causal_nested",
+    "sequence_stock_head": "lookback_8_payoff_sequence_challenger",
+    "market_gate": {
+      "tree": "Ridge predicted market mean D5 exact net return above zero AND logistic positive probability above 0.5",
+      "sequence": "neural market-return head above zero AND neural positive probability above 0.5",
+      "combined": "tree and sequence gates must both be true"
+    },
+    "selection": "Top10 by the frozen stock score on an active market-gate date",
+    "entry": "next open market order subject to legal fill constraints",
+    "exit": "D3 close request, otherwise first legally sellable open",
+    "sizing": "one third of previous account equity per signal cohort, divided equally across the ten requested names and capped by available cash",
+    "leverage": false,
+    "execution": "100-share lots, minimum commission, transfer fee, stamp tax, suspensions, price limits and double slippage"
+  },
+  "historical_evidence": {
+    "validation_period": "2020-01-02 through 2025-12-31",
+    "signal_date_count": 119,
+    "starting_cash_cny": 1000000.0,
+    "ending_equity_stress_cny": 1848777.4083546288,
+    "total_net_return_stress": 0.8487774083546289,
+    "annualized_net_return_stress": 0.11024591471438527,
+    "maximum_drawdown_stress": -0.1549869146875381,
+    "annualized_daily_sharpe_stress": 1.164442104253716,
+    "positive_year_count": 6,
+    "year_count": 6,
+    "daily_hac_lower": 0.00014000973992859113,
+    "folds_2_to_5_total_net_return_stress": 0.4313794136455069,
+    "folds_2_to_5_daily_hac_lower": 0.000014399500002033059,
+    "winner_cap_10pct_total_net_return_stress": 0.42364885429927335,
+    "winner_cap_10pct_daily_hac_lower": 0.000014449490468631729,
+    "winner_cap_5pct_total_net_return_stress": -0.020521693838815303,
+    "winner_cap_5pct_daily_hac_lower": -0.00020988384192964092,
+    "candidate_gate_passed": true,
+    "small_gain_robustness_passed": false
+  },
+  "rejected_followups": {
+    "direct_d3_rank": {
+      "reason": "D3 ranking was weaker than D5 ranking and its absolute stress Top1, Top3 and Top10 gates failed.",
+      "daily_rank_ic_mean": 0.03921496619593503,
+      "top10_stress_mean": -0.0008947658961833866
+    },
+    "d3_q10_bottom_decile_veto": {
+      "reason": "The fixed bottom-10-percent conditional-tail veto reduced return and improved drawdown only marginally, so it did not justify another live model.",
+      "annualized_net_return_stress": 0.10550273295255908,
+      "maximum_drawdown_stress": -0.14901790814914717
+    }
+  },
+  "authoritative_sources": {
+    "ensemble_evaluation": {
+      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/sequence_ensemble_evaluation/manifest.json",
+      "sha256": "1a451e207d2ff40a3dcf119943936dd0903539c5f822a4f496e1a9b98fba88ab"
+    },
+    "dual_horizon_challenge": {
+      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/dual_market_horizon_challenge/manifest.json",
+      "sha256": "a830734a171d2bc9106f40b4cb8f18f81db028f1d5147e7d42834ac0522f45ec"
+    },
+    "market_regime": {
+      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/market_regime_evaluation/manifest.json",
+      "sha256": "aea211e7ce329939efd953e4c63863c063acf56ca0c427a4881c251cbed0120e"
+    },
+    "direct_d3_rank": {
+      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_rank__strong_127__causal_nested/manifest.json",
+      "sha256": "81f971ce36a34935a757d5fec8c5c7ac750fecd489da1126dec9e1564c09933d"
+    },
+    "d3_q10": {
+      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_q10__strong_127__causal_nested/manifest.json",
+      "sha256": "2736041d611fa6d88b1f41871afee0d1f0c5fe9aa15eb5ea55c6b8a21b550c3e"
+    }
+  },
+  "next_boundary": {
+    "historical_threshold_or_horizon_tuning_allowed": false,
+    "next_required_artifact": "outcome-blind inference snapshot plus frozen final model bundle",
+    "next_required_evidence": "append-only post-freeze shadow signals and legal fills",
+    "production_or_real_order_authority": false
+  }
+}

@@ -8,11 +8,12 @@ signal dates with a 30-trading-day purge. An additional earlier-only inner
 validation window chooses the tree count; the outer fold is never used for
 early stopping. No 2026 outcome is read.
 
-The study found repeatable information about next-close direction, reachable
-upside, and short-horizon downside risk. It did **not** find a robust profitable
-stock-ranking strategy. One strong Top1 account path is rejected as insufficient
-evidence because nearby feature, capacity, ensemble, and breadth variants do not
-preserve it.
+The first upside/safety study found repeatable information about next-close
+direction, reachable upside, and short-horizon downside risk, but did **not**
+find a robust profitable stock-ranking strategy. A subsequent payoff-aligned
+extension changed the learning target, added a compact raw-path sequence model,
+and found the first executable historical candidate that passed its candidate
+gate. It remains adaptive development evidence, not a stable-profit result.
 
 ## Data and execution contract
 
@@ -121,22 +122,78 @@ downside state, but that ranking does not transfer monotonically to final legal
 profit. The exceptional 557/127 Top1 path is therefore dominated by extreme-rank
 and positive-tail luck.
 
-## Durable decision and next experiment
+## Payoff-aligned extension
 
-Do not promote the current Top1 path, fixed take-profit rule, Top3, Top10, or
-Top30 variant to shadow production as a claimed profitable strategy. Do not keep
-tuning the same upside/safety score on consumed outcomes.
+Exact CNY100,000-lot net-return targets were constructed for D2, D3, D5 and
+D10 with raw fill prices, total-return economics, minimum commission, taxes,
+base/double slippage, price limits, suspensions and legal-sale deferral. The D5
+LambdaRank head produced mean daily Rank IC about 0.0546 across the five folds;
+all folds were positive and the combined return deciles were monotonic.
 
-The next experiment should change the learning problem rather than the threshold:
+A lookback-8 sequence challenger reads all 557 current-day fields plus 32 daily
+raw/path coordinates and a 54-field market branch. It uses a GRU path encoder
+and joint stock-rank, market-return and market-direction losses. Its fold Rank
+IC values were approximately 0.0795, 0.0540, 0.0626, 0.0523 and 0.1124. The
+model is small enough for the RTX 2060, while still training on the full sample
+and feature surface.
 
-1. train direct cross-sectional rank and distributional heads for executable
-   legal net return at D2, D3, D5, and D10;
-2. evaluate monotonic deciles and Top1/Top3/Top10 before any account optimization;
-3. model opportunity, downside, and final payoff jointly, but choose stocks by
-   expected legal utility rather than by an ad-hoc minimum of two ranks;
-4. retain all 557 fields initially, then repeat frozen family ablation only after
-   a payoff-aligned head shows monotonic information;
-5. require neighboring capacities and simple ensembles to preserve the result.
+The frozen stock score is the equal average of the within-date percentile ranks
+from the D5 tree and sequence heads. Ranking is performed on the complete
+signal-day universe before future fill is known. An unfilled or economically
+unaffordable requested order stays cash; it cannot be replaced with the next
+ranked stock. This future-fill correction was applied before any final account
+conclusion.
+
+The first tree-only market gate left a real approximately 20%-21% drawdown in
+the January-February 2024 small-cap crash. A separately identified dual gate
+requires both the existing Ridge/logistic market consensus and the neural
+return/probability consensus. This gate was proposed after seeing that drawdown,
+so every result below is explicitly adaptive.
+
+## Frozen D3 Top10 historical candidate
+
+Fixed D2, D3, D5 and D10 legal exits were compared under the unchanged dual
+market gate and stock score. D3 Top10 was the strongest breadth/risk compromise.
+With CNY1 million, double slippage, no leverage and one third of previous equity
+per signal cohort, it produced:
+
+- CNY1.849 million ending equity and about 11.02% annualized net return;
+- 15.50% maximum drawdown and daily Sharpe about 1.16;
+- six of six positive calendar years;
+- a positive daily HAC lower bound;
+- 43.14% total return and a positive HAC lower bound when fold 1 was removed;
+- 42.36% total return and a slightly positive HAC lower bound when every winner
+  above 10% was credited as only 10%.
+
+It failed the small-gain robustness check. Crediting every winner above 5% as
+only 5%, while leaving every loss unchanged, produced about -2.05% total return
+and a negative HAC lower bound. The policy therefore depends on retaining a
+right tail of larger winners; it is not a stream of many smooth small gains.
+
+Two final bounded challengers were rejected. A direct D3 LambdaRank model had
+mean daily Rank IC about 0.0392 and double-slippage Top10 mean about -0.0895% per
+date, so “D5 selection, D3 realization” remains preferable. A D3 conditional
+10% tail model was informative only weakly: vetoing its bottom predicted decile
+reduced annualized return from about 11.02% to 10.55% and improved drawdown only
+from 15.50% to 14.90%. That marginal change does not justify another live head.
+
+## Durable decision and next boundary
+
+The original upside/safety Top1 rule, fixed take-profits and its breadth variants
+remain rejected. The payoff-aligned D3 Top10 dual-gate policy is now frozen as
+the first promising short-horizon historical candidate. It is not independently
+confirmed: the dual gate and D3 exit were chosen after inspecting 2020-2025,
+and all 2012-2025 outcomes are consumed.
+
+Do not continue threshold, holding-day, score-weight or risk-veto tuning on the
+same outcomes. The next legitimate work is operational and forward-only:
+
+1. build an outcome-blind inference snapshot with the identical 557 fields and
+   raw daily path contract;
+2. create a frozen final model bundle without using any 2026 outcome;
+3. append signal dates, requested Top10, fills, costs and D3 legal exits without
+   feeding them back into historical selection;
+4. require enough post-freeze cohorts before making any stable-profit claim.
 
 ## Authoritative artifacts
 
@@ -149,4 +206,9 @@ The next experiment should change the learning problem rather than the threshold
   `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/`
 - Cross-sectional diagnostic:
   `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/robustness_ablation/cross_sectional_monotonicity.json`
-
+- Frozen candidate contract:
+  `daily_research/studies/seq100_full_market_dual_gate_d3_candidate_v1.json`
+- Payoff sequence implementation:
+  `daily_research/path_policy/seq100_full_market_sequence_challenger.py`
+- Candidate and horizon evidence:
+  `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/dual_market_horizon_challenge/manifest.json`

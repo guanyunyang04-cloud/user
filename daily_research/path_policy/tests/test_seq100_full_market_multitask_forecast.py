@@ -5,6 +5,7 @@ from pathlib import Path
 
 import lightgbm as lgb
 import numpy as np
+import pandas as pd
 import pytest
 
 from daily_research.path_policy import (
@@ -366,6 +367,94 @@ def test_exact_unit_return_applies_lots_fees_tax_and_double_slippage() -> None:
     assert stress < base
 
 
+def test_vectorized_exact_net_matches_scalar_and_respects_formal_cutoff() -> None:
+    daily = np.full((5, 2, 13), np.nan, dtype=np.float32)
+    daily[1, :, 0] = np.asarray([10.0, 2.0], dtype=np.float32)
+    raw_open = np.full((5, 2), np.nan, dtype=np.float32)
+    raw_open[1, :] = np.asarray([10.0, 2.0], dtype=np.float32)
+    dates = np.asarray(
+        ["2024-01-02", "2024-01-03", "2024-01-04", "2025-12-31", "2026-01-02"]
+    )
+    costs = ExecutionCosts(
+        lot_size=100,
+        commission_bps=3.0,
+        minimum_commission_cny=5.0,
+        transfer_fee_bps=0.1,
+        slippage_bps=7.0,
+        stress_slippage_multiplier=2.0,
+        stamp_tax_schedule=(("1900-01-01", 10.0), ("2023-08-28", 5.0)),
+    )
+    entry_filled = np.ones((5, 2), dtype=bool)
+    entry_filled[0, 1] = False
+    signals = np.asarray([0, 0, 0, 3], dtype=np.int32)
+    symbols = np.asarray([0, 0, 1, 0], dtype=np.int32)
+    gross = np.asarray([0.10, -1.0, 0.10, 0.10], dtype=np.float32)
+    fill_days = np.asarray([2, 2, 2, 2], dtype=np.int16)
+
+    vector, vector_valid = study._vectorized_exact_net_returns(
+        signal_indices=signals,
+        symbol_indices=symbols,
+        legal_gross_returns=gross,
+        fill_days=fill_days,
+        daily_raw=daily,
+        raw_open=raw_open,
+        date_values=dates,
+        costs=costs,
+        notional_cny=100_000.0,
+        slippage_multiplier=2.0,
+        maximum_date_idx=3,
+        entry_filled=entry_filled,
+    )
+    scalar = [
+        study._exact_unit_net_return(
+            signal_idx=int(signals[index]),
+            symbol_idx=int(symbols[index]),
+            legal_gross_return=float(gross[index]),
+            fill_day=int(fill_days[index]),
+            daily_raw=daily,
+            raw_open=raw_open,
+            date_values=dates,
+            costs=costs,
+            notional_cny=100_000.0,
+            slippage_multiplier=2.0,
+            entry_filled=entry_filled,
+        )
+        for index in range(3)
+    ]
+
+    np.testing.assert_array_equal(vector_valid, np.asarray([True, True, False, False]))
+    np.testing.assert_allclose(
+        vector[:2], np.asarray([item[0] for item in scalar[:2]]), rtol=0.0, atol=1e-7
+    )
+    assert np.isnan(vector[2:]).all()
+
+
+def test_exact_net_training_targets_cover_rank_probability_and_quantile() -> None:
+    assert study._target_definition("exact_net_return_d5") == (
+        "exact_net_return_d5_base",
+        "regression",
+        0.0,
+        "exact_net",
+    )
+    assert study._target_definition("exact_net_return_d5_rank")[1] == "ranking"
+    assert study._target_definition("exact_net_return_d5_positive")[1] == "binary"
+    assert study._target_definition("exact_net_return_d5_q10")[1] == "quantile"
+    plan = study.resource_plan(
+        available_bytes=8 * (1 << 30),
+        total_bytes=16 * (1 << 30),
+        logical_cpus=4,
+        maximum_threads=4,
+        histogram_pool_cap_mb=256,
+        sequence_batch_cap=128,
+    )
+    params = study._model_parameters(
+        study.load_study(), kind="quantile", resource=plan, profile="strong_127"
+    )
+
+    assert params["objective"] == "quantile"
+    assert params["alpha"] == pytest.approx(0.10)
+
+
 def test_newey_west_interval_is_finite_for_daily_returns() -> None:
     interval = study._newey_west_interval(
         np.asarray([0.01, -0.01, 0.02, 0.00, 0.01]), lag=2
@@ -373,6 +462,27 @@ def test_newey_west_interval_is_finite_for_daily_returns() -> None:
 
     assert interval["count"] == 5
     assert interval["lower"] < interval["mean"] < interval["upper"]
+
+
+def test_market_gate_metrics_count_cash_dates_and_stability_groups() -> None:
+    daily = pd.DataFrame(
+        {
+            "trade_date": ["2020-01-02", "2020-01-03", "2021-01-04", "2021-01-05"],
+            "fold": [1, 1, 2, 2],
+            "base": [0.01, 0.0, 0.02, 0.0],
+            "stress": [0.008, 0.0, 0.015, 0.0],
+            "trade_count": [10, 0, 10, 0],
+        }
+    )
+
+    metrics = study._market_gate_metrics(daily)
+
+    assert metrics["date_count"] == 4
+    assert metrics["trade_date_count"] == 2
+    assert metrics["trade_date_fraction"] == pytest.approx(0.5)
+    assert metrics["trade_count"] == 20
+    assert metrics["positive_stress_year_count"] == 2
+    assert metrics["positive_stress_fold_count"] == 2
 
 
 def test_binary_metrics_apply_the_executable_take_profit_threshold() -> None:

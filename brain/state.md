@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-09
+Updated: 2026-08-10
 
 ## Active objective
 
@@ -10,12 +10,13 @@ The objective is risk-constrained account wealth, not fidelity to Chan theory,
 financing-flow stories, a fixed classifier score, or a favorable hindsight
 chart.
 
-The strongest current candidate is now the exact quantifiable main-board
-30/30/25/10/5 value-growth policy with a frozen development-only risk budget.
-It passed its frozen historical information and account gates and is retained
-for forward shadow validation. It is not a production strategy or a profit
-guarantee because every 2012-2025 year is consumed, three account years lost
-money, and no independent forward sample has completed.
+There are now two distinct historical candidates. The exact quantifiable
+main-board 30/30/25/10/5 value-growth policy remains the longest-history,
+interpretable forward-shadow candidate. A new full-market D3 Top10 dual-gate
+policy is the strongest short-horizon challenger: its 2020-2025 stress account
+passed the frozen candidate gate with about 11.0% annualized return and 15.5%
+maximum drawdown. Neither is a production strategy or a profit guarantee. All
+2012-2025 outcomes are consumed and no independent post-freeze sample exists.
 
 A new post-selection diagnostic found that D120 historically dominated D60
 for this selector, including under the same finite-account constraints. D120
@@ -23,9 +24,11 @@ is an adaptive retrospective challenger, not a replacement for the already
 frozen D60 forward arm and not independent confirmation.
 
 There is no active training, real order, or production process. A separately
-isolated 2026-08-07 public-data Top10 shadow cohort is frozen with pending
-forward fills only; its original D60 and parallel D120 paper arms both remain
-prefill and append-only.
+isolated 2026-08-07 public-data value-growth Top10 shadow cohort is frozen with
+pending forward fills only; its original D60 and parallel D120 paper arms both
+remain prefill and append-only. The new short-horizon candidate has a frozen
+historical contract but not yet an outcome-blind live feature snapshot or final
+model bundle.
 
 ## Formal research contract
 
@@ -337,31 +340,31 @@ it does not turn historical evidence into guaranteed annual profit.
 
 ## True pause point and next step
 
-The exact quantifiable value-growth policy now has a frozen selector, causal
-information test, exact finite account, development-only risk budget, complete
-path/T diagnostic, adaptive D120 challenge, and an isolated 2026 shadow cohort.
-All 2012-2025 evidence is consumed. Further historical weight, breadth,
-holding-day, exit or risk-budget tuning would spend known outcomes and must not
-be presented as confirmation.
+The value-growth policy has a frozen selector, exact finite account,
+development-only risk budget, complete path/T diagnostic, adaptive D120
+challenge, and an isolated 2026 shadow cohort. The short-horizon full-market
+policy now has a frozen D5 stock score, dual market gate, Top10 breadth, D3
+legal exit and exact finite-account evidence. All 2012-2025 evidence is
+consumed. Further historical weight, breadth, holding-day, exit, score or risk
+threshold tuning must not be presented as confirmation.
 
 Next legitimate actions, in order:
 
-1. Build the operational mechanical signal generator for future month ends and
-   an append-only fill/mark/exit ledger. Keep the original D60 and separately
-   frozen D120 arms unchanged. The supplied 2026 public-data Top10 is already
-   frozen separately and must not be silently relabeled as mechanical output.
-2. From 2026-08-10 onward, append only actually observable shadow fills, field
-   availability, costs, legal exits, turnover, drawdown and policy drift. Never
-   feed these observations back into the 2012-2025 artifacts.
-3. Accumulate enough independent forward cohorts to test absolute net value and
-   risk. One favorable trade or month is not confirmation.
-4. If a new historical hypothesis is pursued, give it a new contract. Do not
-   reopen Chan-point, right-edge take-profit, financing-growth, TTM-FCF phase,
-   score-weight or breadth grids on the consumed history.
-5. If the literal Top3 45-50% D60 challenger is taken forward, give it a new
-   append-only shadow contract. Do not alter or relabel the existing Top10 D60
-   and D120 shadows.
-6. Current status is `strongest_candidate_forward_shadow_not_production`.
+1. Build an outcome-blind daily inference snapshot with the identical 557
+   fields, 32 raw/path coordinates and 54 market fields. It may read current
+   features, but not post-signal returns or fill outcomes.
+2. Freeze the final tree, sequence and market model bundle using only data
+   through 2025, then begin an append-only D3 Top10 shadow ledger. A requested
+   unfilled or unaffordable order stays cash without rank substitution.
+3. Continue the existing value-growth D60/D120 shadow arms unchanged; do not
+   relabel the supplied public-data cohort as mechanical model output.
+4. Accumulate enough independent post-freeze cohorts to test absolute net
+   value, right-tail dependence and risk. One favorable trade or month is not
+   confirmation.
+5. If a new historical hypothesis is pursued, give it a new contract. Do not
+   reopen Chan, financing-growth, KAMA-cross, fixed take-profit, score-weight,
+   horizon or risk-veto grids on consumed outcomes.
+6. Current status is `two_historical_candidates_forward_evidence_required`.
 
 ## Authoritative paths
 
@@ -425,60 +428,42 @@ Next legitimate actions, in order:
 
 ## Full-market short-path forecasting (2026-08-10)
 
-The active broad-market study is now
-`seq100_full_market_multitask_forecast_v1`. It uses the entire
-`quality_liquidity_pit` population rather than financing, Chan, KAMA, or another
-candidate gate. The target panel has 4,191,476 2012-2025 stock-days, 557 causal
-fields, D2/D3/D5/D10 legal path outcomes, and no 2026 outcome. Five forward
-development/validation folds cover 2020-2025. Each fold trains on all eligible
-earlier history with a 30-day purge; an earlier-only 291-day inner window selects
-tree count, so the outer fold is not used for early stopping.
+`seq100_full_market_multitask_forecast_v1` uses the complete
+`quality_liquidity_pit` population: 4,191,476 stock-days, 557 causal fields,
+raw daily paths and exact D2/D3/D5/D10 legal net outcomes. Five causal folds
+cover 2020-2025; all earlier eligible history is used for training and no 2026
+outcome is read. Resource control uses 16 CPU threads, the RTX 2060, reusable
+caches, working-set trimming and a 1 GiB system-memory reserve.
 
-The implementation uses 16 CPU threads, reusable LightGBM binary caches, chunked
-row-major feature views, Windows working-set trimming, and exactly 1 GiB system
-reserve. The largest observed 364-field task used about 4.5 GiB process RSS and
-left about 2.6 GiB system memory available. Resource use remained above the
-frozen reserve.
+The original upside/safety Top1 path remains rejected. Direct payoff learning
+changed the result: the exact-net-D5 LambdaRank head had mean daily Rank IC about
+0.0546, and the lookback-8 557-field plus raw-path sequence challenger had fold
+Rank IC about 0.052-0.112. Their equal within-date rank ensemble had mean Rank
+IC about 0.074 and monotonic return deciles. Full-universe ranking now occurs
+before future fill; unfilled or unaffordable orders stay cash without
+substitution.
 
-Repeatable predictive information exists, but it is not yet payoff aligned:
+The first tree-only market gate suffered an approximately 20%-21% 2024 crash
+drawdown. Requiring both the existing Ridge/logistic market consensus and the
+neural return/probability consensus reduced active dates from 171 to 119. This
+dual gate was proposed after seeing the drawdown and is adaptive evidence.
 
-- next-close AUC is roughly 0.536-0.559;
-- D2 legal MFE >=1% AUC is roughly 0.570-0.599 with daily Rank IC 0.10-0.15;
-- D2 exposure MAE >-3% AUC is roughly 0.672-0.748 with Rank IC 0.32-0.42;
-- D2 final legal profit >0.3% AUC is only roughly 0.507-0.546.
+The frozen short-horizon candidate is D5 tree/sequence stock ranking, dual
+market gate, Top10, next-open entry and D3 legal exit. Under double slippage and
+one third of equity per cohort, its 2020-2025 account grew CNY1 million to about
+CNY1.849 million: about 11.0% annualized return, 15.5% maximum drawdown, six of
+six positive years and a positive daily HAC lower bound. Folds 2-5 and a 10%
+winner cap remained positive. A 5% winner cap failed, so the edge depends on
+retaining larger right-tail winners.
 
-The adaptive 557-field/127-leaf Top1 score combines the minimum within-date rank
-of upside probability and safety probability, gated by daily mean direction
-above 0.5. Its exact CNY 1 million D2 account returned +63.67% base and +29.63%
-under double slippage, with 16.21%/19.32% maximum drawdown. Base years were 6/6
-positive; stress had one approximately -0.03% year. This path is explicitly not
-accepted as a stable strategy: HAC lower bounds cross zero, removing the best 1%
-of dates makes mean return negative, and a +5% winner cap nearly eliminates base
-profit and makes stress negative.
-
-True retrained feature ablation and capacity checks reject a robust Top1 claim:
-
-- 364 fields: +74.18% base / +38.89% stress, but only 4/6 base years and 22.71%
-  drawdown;
-- 183 market+daily-price/volume+5m fields: -22.13% / -37.84%; rejected;
-- full 557 fields with depth-8/210 leaves: +3.81% / -17.33%; rejected;
-- 127/210 probability ensemble: +6.20% / -15.44%; rejected.
-
-The 127- and 210-leaf models choose the same Top1 on only about 10% of common
-gated dates. Top3/Top10/Top30 breadth does not survive double slippage in any
-robust way. The combined score has only about 0.007-0.010 daily Rank IC with final
-D2 legal return, and final return is not monotonic across score deciles. The
-models learn path opportunity and volatility safety much better than where the
-legal exit payoff finishes.
-
-Current status is
-`repeatable_path_information_but_no_robust_payoff_aligned_strategy`. Do not tune
-the current upside/safety Top1 rule further or send it to shadow production as a
-profit claim. The next substantive experiment is direct executable-net-return
-cross-sectional ranking/distribution learning at D2/D3/D5/D10, followed by
-monotonic decile and Top1/Top3/Top10 checks before account optimization. Start
-with all 557 fields and require feature/capacity/ensemble neighbors to preserve
-any result.
+Direct D3 ranking was weaker (mean Rank IC about 0.039 and negative stress
+Top10 mean). A conditional D3 10% tail veto reduced return and improved drawdown
+only marginally; neither challenger is adopted. Historical tuning is now
+closed. The candidate requires an outcome-blind live feature snapshot, frozen
+final bundle and append-only post-freeze evidence before any stronger claim.
 
 Durable record:
 `daily_research/research_records/seq100/seq100_full_market_multitask_forecast_v1_20260810/research_record.md`.
+
+Frozen candidate:
+`daily_research/studies/seq100_full_market_dual_gate_d3_candidate_v1.json`.

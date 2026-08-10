@@ -23,7 +23,11 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import psutil
-from sklearn.metrics import log_loss, roc_auc_score
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.metrics import log_loss, mean_absolute_error, roc_auc_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import RobustScaler
 
 from daily_research.path_policy import seq100_v4_economic_realizability as economic
 from daily_research.path_policy.seq100_candidate_execution import (
@@ -71,6 +75,8 @@ TAKE_PROFIT_EXIT_THRESHOLDS = {
     "take_profit_5pct_else_planned_close": 0.05,
 }
 PRIMARY_EXIT_POLICIES = ("planned_close",)
+EXACT_NET_SCENARIOS = {"base": 1.0, "stress": 2.0}
+LOWER_QUANTILE_ALPHA = 0.10
 
 TARGET_COLUMNS = (
     "next_close_return",
@@ -87,12 +93,20 @@ TARGET_COLUMNS = (
         )
     ),
 )
+EXACT_NET_TARGET_COLUMNS = tuple(
+    f"exact_net_return_d{horizon}_{scenario}"
+    for horizon in HORIZONS
+    for scenario in EXACT_NET_SCENARIOS
+)
 
 TARGET_SCHEMA = "seq100_full_market_multitask_targets/1"
+EXACT_NET_TARGET_SCHEMA = "seq100_full_market_exact_net_targets/1"
 CACHE_SCHEMA = "seq100_full_market_lightgbm_cache/1"
 TASK_SCHEMA = "seq100_full_market_multitask_task/1"
 EVALUATION_SCHEMA = "seq100_full_market_multitask_oof_evaluation/1"
 ACCOUNT_REPLAY_SCHEMA = "seq100_full_market_multitask_account_replay/1"
+PAYOFF_EVALUATION_SCHEMA = "seq100_full_market_payoff_oof_evaluation/1"
+MARKET_REGIME_SCHEMA = "seq100_full_market_market_regime_evaluation/1"
 
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT
@@ -842,6 +856,416 @@ def prepare_targets(
     return manifest
 
 
+def _vectorized_exact_net_returns(
+    *,
+    signal_indices: np.ndarray,
+    symbol_indices: np.ndarray,
+    legal_gross_returns: np.ndarray,
+    fill_days: np.ndarray,
+    daily_raw: np.ndarray,
+    raw_open: np.ndarray,
+    date_values: np.ndarray,
+    costs: ExecutionCosts,
+    notional_cny: float,
+    slippage_multiplier: float,
+    maximum_date_idx: int,
+    entry_filled: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply the exact lot/fee/tax cashflow contract to a row batch."""
+
+    signals = np.asarray(signal_indices, dtype=np.int64)
+    symbols = np.asarray(symbol_indices, dtype=np.int64)
+    gross_returns = np.asarray(legal_gross_returns, dtype=np.float64)
+    exits_after = np.asarray(fill_days, dtype=np.int64)
+    if not (
+        signals.ndim == symbols.ndim == gross_returns.ndim == exits_after.ndim == 1
+        and len(signals) == len(symbols) == len(gross_returns) == len(exits_after)
+    ):
+        raise FullMarketForecastError("exact_net_batch_shape_mismatch")
+    if (
+        not math.isfinite(float(notional_cny))
+        or float(notional_cny) <= 0.0
+        or not math.isfinite(float(slippage_multiplier))
+        or float(slippage_multiplier) < 0.0
+    ):
+        raise FullMarketForecastError("exact_net_cash_or_slippage_invalid")
+
+    count = len(signals)
+    output = np.full(count, np.nan, dtype=np.float32)
+    valid = np.zeros(count, dtype=bool)
+    if not count:
+        return output, valid
+    symbol_count = int(raw_open.shape[1])
+    entry_indices = signals + 1
+    exit_indices = signals + exits_after
+    index_ok = (
+        (signals >= 0)
+        & (symbols >= 0)
+        & (symbols < symbol_count)
+        & (entry_indices <= int(maximum_date_idx))
+        & (exit_indices <= int(maximum_date_idx))
+        & (exits_after >= 2)
+    )
+    safe_signals = np.clip(signals, 0, int(maximum_date_idx))
+    safe_entries = np.clip(entry_indices, 0, int(maximum_date_idx))
+    safe_exits = np.clip(exit_indices, 0, int(maximum_date_idx))
+    safe_symbols = np.clip(symbols, 0, max(symbol_count - 1, 0))
+    adjusted_entry = np.asarray(
+        daily_raw[safe_entries, safe_symbols, 0], dtype=np.float64
+    )
+    raw_entry = np.asarray(raw_open[safe_entries, safe_symbols], dtype=np.float64)
+    eligible = (
+        index_ok
+        & np.isfinite(gross_returns)
+        & np.isfinite(adjusted_entry)
+        & (adjusted_entry > 0.0)
+        & np.isfinite(raw_entry)
+        & (raw_entry > 0.0)
+    )
+    if entry_filled is not None:
+        eligible &= np.asarray(entry_filled[safe_signals, safe_symbols], dtype=bool)
+    if not eligible.any():
+        return output, valid
+
+    slippage_rate = float(costs.slippage_bps) * float(slippage_multiplier) / 10_000.0
+    fill_price = raw_entry * (1.0 + slippage_rate)
+    unit_fill_notional = fill_price * int(costs.lot_size)
+    maximum_lots = np.zeros(count, dtype=np.int64)
+    maximum_lots[eligible] = np.floor(
+        float(notional_cny) / unit_fill_notional[eligible]
+    ).astype(np.int64)
+
+    # Fees can make the naive price-only lot count unaffordable.  A vectorized
+    # binary search exactly matches the scalar execution engine without a
+    # multi-million-row Python loop.
+    lower = np.zeros(count, dtype=np.int64)
+    upper = maximum_lots.copy()
+    commission_rate = float(costs.commission_bps) / 10_000.0
+    transfer_rate = float(costs.transfer_fee_bps) / 10_000.0
+    while bool(np.any(lower < upper)):
+        active = lower < upper
+        middle = (lower + upper + 1) // 2
+        trial_fill = middle.astype(np.float64) * unit_fill_notional
+        trial_commission = np.maximum(
+            float(costs.minimum_commission_cny), trial_fill * commission_rate
+        )
+        trial_outflow = trial_fill + trial_commission + trial_fill * transfer_rate
+        affordable = trial_outflow <= float(notional_cny) + 1.0e-9
+        lower = np.where(active & affordable, middle, lower)
+        upper = np.where(active & ~affordable, middle - 1, upper)
+
+    lots = lower
+    shares = lots.astype(np.float64) * int(costs.lot_size)
+    position_ok = eligible & (lots > 0)
+    buy_fill_notional = shares * fill_price
+    buy_commission = np.maximum(
+        float(costs.minimum_commission_cny),
+        buy_fill_notional * commission_rate,
+    )
+    buy_transfer = buy_fill_notional * transfer_rate
+    buy_outflow = buy_fill_notional + buy_commission + buy_transfer
+    residual_cash = float(notional_cny) - buy_outflow
+    gross_entry_notional = shares * raw_entry
+
+    proceeds = np.zeros(count, dtype=np.float64)
+    ordinary_exit = position_ok & (gross_returns > -1.0)
+    if ordinary_exit.any():
+        gross_exit_value = gross_entry_notional[ordinary_exit] * (
+            1.0 + gross_returns[ordinary_exit]
+        )
+        sell_fill = gross_exit_value * max(0.0, 1.0 - slippage_rate)
+        sell_commission = np.maximum(
+            float(costs.minimum_commission_cny), sell_fill * commission_rate
+        )
+        sell_transfer = sell_fill * transfer_rate
+        exit_dates = np.asarray(date_values, dtype=str)[safe_exits[ordinary_exit]]
+        stamp_bps = np.zeros(len(exit_dates), dtype=np.float64)
+        for effective_date, rate in costs.stamp_tax_schedule:
+            stamp_bps[exit_dates >= str(effective_date)] = float(rate)
+        stamp_tax = sell_fill * stamp_bps / 10_000.0
+        proceeds[ordinary_exit] = (
+            sell_fill - sell_commission - sell_transfer - stamp_tax
+        )
+
+    valid = position_ok
+    output[valid] = (
+        (residual_cash[valid] + proceeds[valid]) / float(notional_cny) - 1.0
+    ).astype(np.float32)
+    return output, valid
+
+
+def _exact_net_target_fingerprint(
+    *,
+    study_path: Path,
+    context: SourceContext,
+    path_target_manifest: Mapping[str, Any],
+    costs: ExecutionCosts,
+    notional_cny: float,
+) -> str:
+    return _stable_hash(
+        {
+            "schema": EXACT_NET_TARGET_SCHEMA,
+            "study_sha256": _sha256(study_path),
+            "path_target_fingerprint": path_target_manifest["fingerprint"],
+            "model_input_fingerprint": context.model_manifest["input_fingerprint"],
+            "pack_sha256": _sha256(context.pack_path),
+            "target_columns": EXACT_NET_TARGET_COLUMNS,
+            "horizons": HORIZONS,
+            "notional_cny": float(notional_cny),
+            "costs": asdict(costs),
+            "scenarios": EXACT_NET_SCENARIOS,
+            "maximum_outcome_date": MAXIMUM_OUTCOME_DATE,
+            "forbidden_year": FORBIDDEN_YEAR,
+        }
+    )
+
+
+def _exact_net_target_manifest_valid(path: Path, fingerprint: str) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        manifest = _read_json(path)
+        if (
+            manifest.get("schema") != EXACT_NET_TARGET_SCHEMA
+            or manifest.get("status") != "completed"
+            or manifest.get("fingerprint") != fingerprint
+        ):
+            return False
+        for record in dict(manifest["files"]).values():
+            file_path = Path(record["path"])
+            if not file_path.is_file() or int(file_path.stat().st_size) != int(
+                record["size"]
+            ):
+                return False
+        return True
+    except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
+def prepare_exact_net_targets(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+) -> dict[str, Any]:
+    """Build fixed-notional executable returns from the legal path panel."""
+
+    study = load_study(study_path)
+    context = _source_context(study)
+    path_manifest = prepare_targets(study_path=study_path, output_root=output_root)
+    costs = parse_execution_costs(context.pack)
+    if not math.isclose(
+        float(EXACT_NET_SCENARIOS["stress"]),
+        float(costs.stress_slippage_multiplier),
+        rel_tol=0.0,
+        abs_tol=1.0e-12,
+    ):
+        raise FullMarketForecastError("stress_slippage_contract_mismatch")
+    notional = float(study["targets"]["positive_after_cost_notional_cny"])
+    fingerprint = _exact_net_target_fingerprint(
+        study_path=study_path,
+        context=context,
+        path_target_manifest=path_manifest,
+        costs=costs,
+        notional_cny=notional,
+    )
+    target_root = output_root / "exact_net_targets"
+    manifest_path = target_root / "manifest.json"
+    if _exact_net_target_manifest_valid(manifest_path, fingerprint):
+        return _read_json(manifest_path)
+
+    row_count = int(path_manifest["row_count"])
+    values_path = target_root / "values.float32.dat"
+    valid_path = target_root / "valid.uint8.dat"
+    target_root.mkdir(parents=True, exist_ok=True)
+    partial_values = Path(str(values_path) + ".partial")
+    partial_valid = Path(str(valid_path) + ".partial")
+    partial_values.unlink(missing_ok=True)
+    partial_valid.unlink(missing_ok=True)
+    output_values = np.memmap(
+        partial_values,
+        dtype=np.float32,
+        mode="w+",
+        shape=(row_count, len(EXACT_NET_TARGET_COLUMNS)),
+    )
+    output_valid = np.memmap(
+        partial_valid,
+        dtype=np.uint8,
+        mode="w+",
+        shape=(row_count, len(EXACT_NET_TARGET_COLUMNS)),
+    )
+    output_values[:] = np.nan
+    output_valid[:] = 0
+
+    path_values_record = path_manifest["files"]["values"]
+    path_valid_record = path_manifest["files"]["valid"]
+    fill_record = path_manifest["files"]["legal_fill_days"]
+    path_values = np.memmap(
+        Path(path_values_record["path"]),
+        dtype=np.float32,
+        mode="r",
+        shape=tuple(int(value) for value in path_values_record["shape"]),
+    )
+    path_valid = np.memmap(
+        Path(path_valid_record["path"]),
+        dtype=np.uint8,
+        mode="r",
+        shape=tuple(int(value) for value in path_valid_record["shape"]),
+    )
+    legal_fill_days = np.memmap(
+        Path(fill_record["path"]),
+        dtype=np.int16,
+        mode="r",
+        shape=tuple(int(value) for value in fill_record["shape"]),
+    )
+    daily_raw = _open_array(
+        context.pack["feature_channels"]["daily_raw"], dtype=np.float32
+    )
+    raw_open = _open_array(
+        context.pack["execution_arrays"]["entry_open_raw"], dtype=np.float32
+    )
+    entry_filled = _open_array(context.pack["masks"]["entry_filled"], dtype=np.bool_)
+    row_dates = context.row_index["date_idx"].to_numpy(dtype=np.int32)
+    row_symbols = context.row_index["symbol_idx"].to_numpy(dtype=np.int32)
+    plan = resource_plan(
+        reserve_gib=float(study["resources"]["reserve_system_gib"]),
+        maximum_threads=int(study["resources"]["maximum_cpu_threads"]),
+        histogram_pool_cap_mb=int(study["resources"]["histogram_pool_cap_mb"]),
+        sequence_batch_cap=int(study["resources"]["sequence_batch_cap"]),
+    )
+    _assert_resource_capacity(plan, 512 * (1 << 20))
+    chunk_size = max(65_536, int(plan.sequence_batch_size) * 4)
+    counts = np.zeros(len(EXACT_NET_TARGET_COLUMNS), dtype=np.int64)
+    sums = np.zeros(len(EXACT_NET_TARGET_COLUMNS), dtype=np.float64)
+    path_columns = list(path_manifest["target_columns"])
+    _emit(
+        "exact_net_target_preparation_started",
+        row_count=row_count,
+        column_count=len(EXACT_NET_TARGET_COLUMNS),
+        chunk_size=chunk_size,
+        resource_plan=asdict(plan),
+    )
+    with ResourceMonitor() as monitor:
+        for left in range(0, row_count, chunk_size):
+            right = min(left + chunk_size, row_count)
+            for horizon_position, horizon in enumerate(HORIZONS):
+                source_column = path_columns.index(f"legal_exit_return_d{horizon}")
+                source_valid = np.asarray(
+                    path_valid[left:right, source_column], dtype=bool
+                )
+                gross_return = np.asarray(
+                    path_values[left:right, source_column], dtype=np.float64
+                )
+                gross_return[~source_valid] = np.nan
+                current_fill = np.asarray(
+                    legal_fill_days[left:right, horizon_position], dtype=np.int16
+                )
+                for scenario_position, (scenario, multiplier) in enumerate(
+                    EXACT_NET_SCENARIOS.items()
+                ):
+                    column = (
+                        horizon_position * len(EXACT_NET_SCENARIOS) + scenario_position
+                    )
+                    current_values, current_valid = _vectorized_exact_net_returns(
+                        signal_indices=row_dates[left:right],
+                        symbol_indices=row_symbols[left:right],
+                        legal_gross_returns=gross_return,
+                        fill_days=current_fill,
+                        daily_raw=daily_raw,
+                        raw_open=raw_open,
+                        date_values=context.date_values,
+                        costs=costs,
+                        notional_cny=notional,
+                        slippage_multiplier=float(multiplier),
+                        maximum_date_idx=context.cutoff_idx,
+                        entry_filled=entry_filled,
+                    )
+                    output_values[left:right, column] = current_values
+                    output_valid[left:right, column] = current_valid.astype(np.uint8)
+                    counts[column] += int(current_valid.sum())
+                    if current_valid.any():
+                        sums[column] += float(
+                            np.asarray(
+                                current_values[current_valid], dtype=np.float64
+                            ).sum()
+                        )
+            if right % (chunk_size * 4) == 0 or right == row_count:
+                output_values.flush()
+                output_valid.flush()
+                _emit("exact_net_target_preparation_progress", rows_completed=right)
+        output_values.flush()
+        output_valid.flush()
+        monitor_metrics = monitor.metrics()
+    del output_values, output_valid
+    gc.collect()
+    os.replace(partial_values, values_path)
+    os.replace(partial_valid, valid_path)
+    files = {
+        "values": _file_record(
+            values_path,
+            dtype="float32",
+            shape=[row_count, len(EXACT_NET_TARGET_COLUMNS)],
+            columns=list(EXACT_NET_TARGET_COLUMNS),
+        ),
+        "valid": _file_record(
+            valid_path,
+            dtype="uint8",
+            shape=[row_count, len(EXACT_NET_TARGET_COLUMNS)],
+            columns=list(EXACT_NET_TARGET_COLUMNS),
+        ),
+    }
+    manifest = {
+        "schema": EXACT_NET_TARGET_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": STUDY_ID,
+        "fingerprint": fingerprint,
+        "row_count": row_count,
+        "target_columns": list(EXACT_NET_TARGET_COLUMNS),
+        "valid_counts": {
+            name: int(value)
+            for name, value in zip(EXACT_NET_TARGET_COLUMNS, counts, strict=True)
+        },
+        "target_means": {
+            name: float(sums[position] / counts[position])
+            for position, name in enumerate(EXACT_NET_TARGET_COLUMNS)
+            if counts[position] > 0
+        },
+        "contract": {
+            "horizons": list(HORIZONS),
+            "notional_cny": notional,
+            "costs": asdict(costs),
+            "slippage_multipliers": dict(EXACT_NET_SCENARIOS),
+            "entry_day": 1,
+            "earliest_legal_exit_day": 2,
+            "maximum_outcome_date": MAXIMUM_OUTCOME_DATE,
+            "maximum_source_date_idx_read": context.cutoff_idx,
+            "maximum_source_date_read": str(context.date_values[context.cutoff_idx]),
+            "forbidden_2026_read_count": 0,
+        },
+        "resource_plan": asdict(plan),
+        "resource_metrics": monitor_metrics,
+        "sources": {
+            "study": _file_record(study_path),
+            "path_targets": _file_record(
+                output_root / "targets/manifest.json",
+                target_fingerprint=path_manifest["fingerprint"],
+            ),
+            "model_inputs": _file_record(
+                context.model_manifest_path,
+                input_fingerprint=context.model_manifest["input_fingerprint"],
+            ),
+            "pack": _file_record(context.pack_path),
+        },
+        "files": files,
+    }
+    _write_json(manifest_path, manifest)
+    _emit(
+        "exact_net_target_preparation_completed",
+        elapsed_seconds=monitor_metrics["elapsed_seconds"],
+    )
+    return manifest
+
+
 def build_forward_folds(
     *,
     date_idx: np.ndarray,
@@ -1301,10 +1725,17 @@ def build_dataset_cache(
     return meta
 
 
-def _load_target_arrays(
-    manifest: Mapping[str, Any], target: str
-) -> tuple[np.memmap, np.memmap, int, str, float]:
-    columns = list(manifest["target_columns"])
+def _target_definition(target: str) -> tuple[str, str, float, str]:
+    for horizon in HORIZONS:
+        prefix = f"exact_net_return_d{horizon}"
+        if target == prefix:
+            return f"{prefix}_base", "regression", 0.0, "exact_net"
+        if target == f"{prefix}_rank":
+            return f"{prefix}_base", "ranking", 0.0, "exact_net"
+        if target == f"{prefix}_positive":
+            return f"{prefix}_base", "binary", 0.0, "exact_net"
+        if target == f"{prefix}_q10":
+            return f"{prefix}_base", "quantile", 0.0, "exact_net"
     if target == "next_close_up":
         source = "next_close_return"
         kind = "binary"
@@ -1333,6 +1764,16 @@ def _load_target_arrays(
         binary_threshold = 0.0
     else:
         raise FullMarketForecastError(f"unknown_training_target:{target}")
+    return source, kind, binary_threshold, "path"
+
+
+def _load_target_arrays(
+    manifest: Mapping[str, Any], target: str
+) -> tuple[np.memmap, np.memmap, int, str, float]:
+    columns = list(manifest["target_columns"])
+    source, kind, binary_threshold, _ = _target_definition(target)
+    if source not in columns:
+        raise FullMarketForecastError(f"training_target_source_missing:{source}")
     column = columns.index(source)
     values_record = manifest["files"]["values"]
     valid_record = manifest["files"]["valid"]
@@ -1516,6 +1957,14 @@ def _model_parameters(
                 "ndcg_eval_at": [10, 30, 100],
             }
         )
+    elif kind == "quantile":
+        params.update(
+            {
+                "objective": "quantile",
+                "alpha": LOWER_QUANTILE_ALPHA,
+                "metric": "quantile",
+            }
+        )
     else:
         params.update(
             {
@@ -1582,7 +2031,15 @@ def train_task(
     training_mode: str = "outer_early_stop",
 ) -> dict[str, Any]:
     study = load_study(study_path)
-    target_manifest = prepare_targets(study_path=study_path, output_root=output_root)
+    _, _, _, target_panel = _target_definition(target)
+    if target_panel == "exact_net":
+        target_manifest = prepare_exact_net_targets(
+            study_path=study_path, output_root=output_root
+        )
+    else:
+        target_manifest = prepare_targets(
+            study_path=study_path, output_root=output_root
+        )
     context = _source_context(study)
     folds = build_forward_folds(
         date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
@@ -1929,6 +2386,7 @@ def train_task(
         "task_id": task_id,
         "fingerprint": fingerprint,
         "target": target,
+        "target_panel": target_panel,
         "kind": kind,
         "binary_threshold": binary_threshold if kind == "binary" else None,
         "profile": profile_name,
@@ -2116,6 +2574,824 @@ def _load_ensemble_prediction(
     if len(predictions) == 1:
         return predictions[0]
     return np.mean(np.stack(predictions, axis=0), axis=0, dtype=np.float32)
+
+
+def _payoff_summary(daily: pd.DataFrame, decile_daily: pd.DataFrame) -> dict[str, Any]:
+    summary: dict[str, Any] = {
+        "date_count": int(daily["date_idx"].nunique()),
+        "daily_rank_ic_mean": float(daily["rank_ic"].mean()),
+        "daily_rank_ic_positive_fraction": float(daily["rank_ic"].gt(0.0).mean()),
+    }
+    years = daily["trade_date"].astype(str).str[:4]
+    for top_k in (1, 3, 10):
+        for scenario in EXACT_NET_SCENARIOS:
+            column = f"top{top_k}_{scenario}"
+            values = daily[column].to_numpy(dtype=np.float64)
+            interval = _newey_west_interval(values, lag=20)
+            annual = daily.assign(year=years).groupby("year")[column].mean()
+            summary[column] = {
+                **interval,
+                "positive_date_fraction": float(np.mean(values > 0.0)),
+                "positive_year_count": int(annual.gt(0.0).sum()),
+                "year_count": len(annual),
+                "worst_year_mean": float(annual.min()),
+            }
+        for scenario in EXACT_NET_SCENARIOS:
+            difference = (
+                daily[f"top{top_k}_{scenario}"] - daily[f"baseline_{scenario}"]
+            ).to_numpy(dtype=np.float64)
+            summary[f"top{top_k}_{scenario}_minus_baseline"] = _newey_west_interval(
+                difference, lag=20
+            )
+
+    deciles = (
+        decile_daily.groupby("decile", sort=True)[["base", "stress"]]
+        .mean()
+        .reset_index()
+    )
+    base_means = deciles["base"].to_numpy(dtype=np.float64)
+    stress_means = deciles["stress"].to_numpy(dtype=np.float64)
+    ordinal = deciles["decile"].to_numpy(dtype=np.float64)
+    summary["deciles"] = deciles.to_dict("records")
+    summary["decile_base_spearman"] = float(
+        pd.Series(ordinal).corr(pd.Series(base_means), method="spearman")
+    )
+    summary["decile_stress_spearman"] = float(
+        pd.Series(ordinal).corr(pd.Series(stress_means), method="spearman")
+    )
+    summary["decile_base_adjacent_increase_count"] = int(
+        np.sum(np.diff(base_means) > 0.0)
+    )
+    summary["decile_stress_adjacent_increase_count"] = int(
+        np.sum(np.diff(stress_means) > 0.0)
+    )
+    pivot = decile_daily.pivot(
+        index="date_idx", columns="decile", values=["base", "stress"]
+    )
+    for scenario in EXACT_NET_SCENARIOS:
+        difference = pivot[(scenario, 10)].to_numpy(dtype=np.float64) - pivot[
+            (scenario, 1)
+        ].to_numpy(dtype=np.float64)
+        summary[f"top_decile_minus_bottom_{scenario}"] = _newey_west_interval(
+            difference, lag=20
+        )
+    return summary
+
+
+def evaluate_payoff_oof(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    target: str = "exact_net_return_d5_rank",
+    profile: str | None = None,
+    feature_variant: str = DEFAULT_FEATURE_VARIANT,
+    training_mode: str = "causal_nested",
+) -> dict[str, Any]:
+    study = load_study(study_path)
+    source, _, _, panel = _target_definition(target)
+    if panel != "exact_net" or not source.endswith("_base"):
+        raise FullMarketForecastError("payoff_evaluation_requires_exact_net_target")
+    if training_mode not in TRAINING_MODES:
+        raise FullMarketForecastError(f"unknown_training_mode:{training_mode}")
+    profile_name = str(profile or study["lightgbm"]["primary_profile"])
+    context = _source_context(study)
+    target_manifest = prepare_exact_net_targets(
+        study_path=study_path, output_root=output_root
+    )
+    folds = build_forward_folds(
+        date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
+        trade_date=context.row_index["trade_date"].astype(str).to_numpy(),
+        validation_start_date=str(study["validation"]["validation_start_date"]),
+        validation_end_date=str(study["validation"]["validation_end_date"]),
+        fold_count=int(study["validation"]["forward_fold_count"]),
+        purge_days=int(study["validation"]["common_purge_trading_days"]),
+    )
+    task_records: list[tuple[dict[str, Any], Path]] = [
+        _oof_task_result(
+            output_root,
+            fold=int(fold["fold"]),
+            target=target,
+            profile=profile_name,
+            feature_variant=feature_variant,
+            training_mode=training_mode,
+        )
+        for fold in folds
+    ]
+    fingerprint = _stable_hash(
+        {
+            "schema": PAYOFF_EVALUATION_SCHEMA,
+            "study_sha256": _sha256(study_path),
+            "target_fingerprint": target_manifest["fingerprint"],
+            "target": target,
+            "profile": profile_name,
+            "feature_variant": feature_variant,
+            "training_mode": training_mode,
+            "tasks": {str(path): _sha256(path) for _, path in task_records},
+            "top_k": [1, 3, 10],
+            "deciles": 10,
+            "primary_weighting": "equal_signal_date",
+        }
+    )
+    evaluation_name = f"{target}__{profile_name}"
+    if feature_variant != DEFAULT_FEATURE_VARIANT:
+        evaluation_name += f"__{feature_variant}"
+    if training_mode != "outer_early_stop":
+        evaluation_name += f"__{training_mode}"
+    evaluation_root = output_root / "payoff_evaluation" / evaluation_name
+    manifest_path = evaluation_root / "manifest.json"
+    if manifest_path.is_file():
+        current = _read_json(manifest_path)
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+        ):
+            return current
+
+    columns = list(target_manifest["target_columns"])
+    base_column = columns.index(source)
+    stress_column = columns.index(source.removesuffix("_base") + "_stress")
+    values_record = target_manifest["files"]["values"]
+    valid_record = target_manifest["files"]["valid"]
+    values = np.memmap(
+        Path(values_record["path"]),
+        dtype=np.float32,
+        mode="r",
+        shape=tuple(int(value) for value in values_record["shape"]),
+    )
+    valid = np.memmap(
+        Path(valid_record["path"]),
+        dtype=np.uint8,
+        mode="r",
+        shape=tuple(int(value) for value in valid_record["shape"]),
+    )
+    daily_parts: list[pd.DataFrame] = []
+    decile_parts: list[pd.DataFrame] = []
+    selection_parts: list[pd.DataFrame] = []
+    fold_summaries: list[dict[str, Any]] = []
+    _emit("payoff_oof_evaluation_started", target=target, folds=len(folds))
+    for fold, (task, _) in zip(folds, task_records, strict=True):
+        fold_number = int(fold["fold"])
+        positions = _fold_rows(context.row_index, fold, "validation")
+        prediction = np.asarray(
+            np.load(
+                task["files"]["prediction"]["path"],
+                mmap_mode="r",
+                allow_pickle=False,
+            ),
+            dtype=np.float32,
+        )
+        if len(prediction) != len(positions):
+            raise FullMarketForecastError("payoff_prediction_row_count_mismatch")
+        usable = (
+            np.asarray(valid[positions, base_column], dtype=bool)
+            & np.asarray(valid[positions, stress_column], dtype=bool)
+            & np.isfinite(prediction)
+        )
+        current_positions = positions[usable]
+        frame = context.row_index.iloc[current_positions][
+            [
+                "candidate_id",
+                "date_idx",
+                "trade_date",
+                "symbol",
+                "symbol_idx",
+            ]
+        ].copy()
+        frame["model_row_position"] = current_positions
+        frame["fold"] = fold_number
+        frame["prediction"] = prediction[usable]
+        frame["base"] = np.asarray(
+            values[current_positions, base_column], dtype=np.float32
+        )
+        frame["stress"] = np.asarray(
+            values[current_positions, stress_column], dtype=np.float32
+        )
+        frame = frame.sort_values(
+            ["date_idx", "prediction", "candidate_id"], kind="stable"
+        ).reset_index(drop=True)
+        frame["score_position"] = frame.groupby("date_idx", sort=False).cumcount()
+        frame["date_size"] = frame.groupby("date_idx", sort=False)[
+            "candidate_id"
+        ].transform("size")
+        frame["decile"] = np.minimum(
+            10,
+            np.floor(
+                frame["score_position"].to_numpy(dtype=np.float64)
+                * 10.0
+                / frame["date_size"].to_numpy(dtype=np.float64)
+            ).astype(np.int8)
+            + 1,
+        )
+        frame["selection_rank"] = (frame["date_size"] - frame["score_position"]).astype(
+            np.int32
+        )
+        baseline = frame.groupby(["date_idx", "trade_date"], sort=False)[
+            ["base", "stress"]
+        ].mean()
+        baseline = baseline.rename(
+            columns={"base": "baseline_base", "stress": "baseline_stress"}
+        )
+        fold_daily = baseline.reset_index()
+        for top_k in (1, 3, 10):
+            selected = frame.loc[frame["selection_rank"] <= top_k]
+            means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean()
+            means = means.rename(
+                columns={
+                    "base": f"top{top_k}_base",
+                    "stress": f"top{top_k}_stress",
+                }
+            )
+            fold_daily = fold_daily.merge(
+                means.reset_index(), on="date_idx", how="left", validate="one_to_one"
+            )
+        task_daily = pd.read_parquet(task["files"]["daily_metrics"]["path"])[
+            ["date_idx", "rank_ic"]
+        ]
+        fold_daily = fold_daily.merge(
+            task_daily, on="date_idx", how="left", validate="one_to_one"
+        )
+        fold_daily["fold"] = fold_number
+        fold_deciles = (
+            frame.groupby(["date_idx", "trade_date", "decile"], sort=False)[
+                ["base", "stress"]
+            ]
+            .mean()
+            .reset_index()
+        )
+        fold_deciles["fold"] = fold_number
+        fold_selection = frame.loc[frame["selection_rank"] <= 10].copy()
+        fold_summary = _payoff_summary(fold_daily, fold_deciles)
+        fold_summary["fold"] = fold_number
+        fold_summaries.append(fold_summary)
+        daily_parts.append(fold_daily)
+        decile_parts.append(fold_deciles)
+        selection_parts.append(fold_selection)
+        _emit(
+            "payoff_oof_fold_completed",
+            fold=fold_number,
+            top1_base=fold_summary["top1_base"]["mean"],
+            top1_stress=fold_summary["top1_stress"]["mean"],
+            rank_ic=fold_summary["daily_rank_ic_mean"],
+        )
+        del frame
+        gc.collect()
+
+    daily = pd.concat(daily_parts, ignore_index=True).sort_values("date_idx")
+    decile_daily = pd.concat(decile_parts, ignore_index=True).sort_values(
+        ["date_idx", "decile"]
+    )
+    selections = pd.concat(selection_parts, ignore_index=True).sort_values(
+        ["date_idx", "selection_rank"]
+    )
+    combined = _payoff_summary(daily, decile_daily)
+    rank_positive_folds = sum(
+        float(item["daily_rank_ic_mean"]) > 0.0 for item in fold_summaries
+    )
+    top1_improvement_folds = sum(
+        float(item["top1_base_minus_baseline"]["mean"]) > 0.0 for item in fold_summaries
+    )
+    top_decile_improvement_folds = sum(
+        float(item["top_decile_minus_bottom_base"]["mean"]) > 0.0
+        for item in fold_summaries
+    )
+    monotonicity_gate = {
+        "rank_ic_positive_fold_count": int(rank_positive_folds),
+        "top1_above_baseline_fold_count": int(top1_improvement_folds),
+        "top_decile_above_bottom_fold_count": int(top_decile_improvement_folds),
+        "combined_base_decile_spearman": combined["decile_base_spearman"],
+        "passed": bool(
+            rank_positive_folds == len(folds)
+            and top1_improvement_folds >= 4
+            and top_decile_improvement_folds >= 4
+            and float(combined["decile_base_spearman"]) >= 0.80
+        ),
+    }
+    eligible_top_k = [
+        top_k
+        for top_k in (1, 3, 10)
+        if combined[f"top{top_k}_stress"]["lower"] is not None
+        and float(combined[f"top{top_k}_stress"]["lower"]) > 0.0
+        and int(combined[f"top{top_k}_stress"]["positive_year_count"]) >= 5
+    ]
+    account_replay_gate = {
+        "requires_positive_stress_hac_lower_bound": True,
+        "requires_at_least_five_of_six_positive_years": True,
+        "eligible_top_k": eligible_top_k,
+        "passed": bool(monotonicity_gate["passed"] and eligible_top_k),
+    }
+    daily_path = evaluation_root / "daily_metrics.parquet"
+    decile_path = evaluation_root / "decile_daily.parquet"
+    selections_path = evaluation_root / "top10_selections.parquet"
+    _write_parquet(daily, daily_path)
+    _write_parquet(decile_daily, decile_path)
+    _write_parquet(selections, selections_path)
+    manifest = {
+        "schema": PAYOFF_EVALUATION_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": STUDY_ID,
+        "fingerprint": fingerprint,
+        "target": target,
+        "profile": profile_name,
+        "feature_variant": feature_variant,
+        "training_mode": training_mode,
+        "fold_summaries": fold_summaries,
+        "combined": combined,
+        "monotonicity_gate": monotonicity_gate,
+        "account_replay_gate": account_replay_gate,
+        "forbidden_2026_read_count": 0,
+        "files": {
+            "daily_metrics": _file_record(daily_path, row_count=len(daily)),
+            "decile_daily": _file_record(decile_path, row_count=len(decile_daily)),
+            "top10_selections": _file_record(
+                selections_path, row_count=len(selections)
+            ),
+        },
+        "sources": {
+            "exact_net_targets": _file_record(
+                output_root / "exact_net_targets/manifest.json",
+                target_fingerprint=target_manifest["fingerprint"],
+            ),
+            "tasks": [_file_record(path) for _, path in task_records],
+        },
+    }
+    _write_json(manifest_path, manifest)
+    _emit(
+        "payoff_oof_evaluation_completed",
+        target=target,
+        monotonicity_passed=monotonicity_gate["passed"],
+        account_replay_passed=account_replay_gate["passed"],
+    )
+    return manifest
+
+
+def _market_gate_metrics(daily: pd.DataFrame) -> dict[str, Any]:
+    stress = daily["stress"].to_numpy(dtype=np.float64)
+    base = daily["base"].to_numpy(dtype=np.float64)
+    annual = (
+        daily.assign(year=daily["trade_date"].astype(str).str[:4])
+        .groupby("year")[["base", "stress"]]
+        .sum()
+    )
+    fold_means = daily.groupby("fold")[["base", "stress"]].mean()
+    return {
+        "date_count": len(daily),
+        "trade_date_count": int(daily["trade_count"].gt(0).sum()),
+        "trade_date_fraction": float(daily["trade_count"].gt(0).mean()),
+        "trade_count": int(daily["trade_count"].sum()),
+        "base": _newey_west_interval(base, lag=20),
+        "stress": _newey_west_interval(stress, lag=20),
+        "positive_stress_year_count": int(annual["stress"].gt(0.0).sum()),
+        "year_count": len(annual),
+        "positive_stress_fold_count": int(fold_means["stress"].gt(0.0).sum()),
+        "fold_count": len(fold_means),
+        "annual_sum": annual.reset_index().to_dict("records"),
+        "fold_means": fold_means.reset_index().to_dict("records"),
+    }
+
+
+def evaluate_market_regime_oof(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    horizon: int = 5,
+    ranking_target: str = "exact_net_return_d5_rank",
+    profile: str | None = None,
+    feature_variant: str = DEFAULT_FEATURE_VARIANT,
+    training_mode: str = "causal_nested",
+) -> dict[str, Any]:
+    if int(horizon) != 5 or ranking_target != "exact_net_return_d5_rank":
+        raise FullMarketForecastError("market_regime_v1_is_frozen_to_d5")
+    study = load_study(study_path)
+    if training_mode != "causal_nested":
+        raise FullMarketForecastError("market_regime_requires_causal_nested_ranking")
+    profile_name = str(profile or study["lightgbm"]["primary_profile"])
+    context = _source_context(study)
+    target_manifest = prepare_exact_net_targets(
+        study_path=study_path, output_root=output_root
+    )
+    folds = build_forward_folds(
+        date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
+        trade_date=context.row_index["trade_date"].astype(str).to_numpy(),
+        validation_start_date=str(study["validation"]["validation_start_date"]),
+        validation_end_date=str(study["validation"]["validation_end_date"]),
+        fold_count=int(study["validation"]["forward_fold_count"]),
+        purge_days=int(study["validation"]["common_purge_trading_days"]),
+    )
+    task_records = [
+        _oof_task_result(
+            output_root,
+            fold=int(fold["fold"]),
+            target=ranking_target,
+            profile=profile_name,
+            feature_variant=feature_variant,
+            training_mode=training_mode,
+        )
+        for fold in folds
+    ]
+    ridge_alphas = (0.1, 1.0, 10.0, 100.0, 1000.0)
+    logistic_cs = (0.001, 0.01, 0.1, 1.0)
+    market_features = tuple(
+        record["feature_name"]
+        for record in context.model_manifest["features"]
+        if record["analytic_family"] == "market_state"
+    )
+    if len(market_features) != 54:
+        raise FullMarketForecastError("market_state_feature_count_changed")
+    fingerprint = _stable_hash(
+        {
+            "schema": MARKET_REGIME_SCHEMA,
+            "study_sha256": _sha256(study_path),
+            "target_fingerprint": target_manifest["fingerprint"],
+            "ranking_target": ranking_target,
+            "profile": profile_name,
+            "feature_variant": feature_variant,
+            "training_mode": training_mode,
+            "market_features": market_features,
+            "ridge_alphas": ridge_alphas,
+            "logistic_cs": logistic_cs,
+            "gates": {
+                "ridge": "predicted_exact_net_return_above_zero",
+                "logistic": "predicted_positive_probability_above_0p5",
+                "consensus": "ridge_and_logistic",
+            },
+            "top_k": [1, 3, 10],
+            "tasks": {str(path): _sha256(path) for _, path in task_records},
+        }
+    )
+    output_path = output_root / "market_regime_evaluation/manifest.json"
+    if output_path.is_file():
+        current = _read_json(output_path)
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+        ):
+            return current
+
+    row_dates = context.row_index["date_idx"].to_numpy(dtype=np.int32)
+    boundaries = np.flatnonzero(np.r_[True, row_dates[1:] != row_dates[:-1], True])
+    first_rows = boundaries[:-1]
+    last_rows = boundaries[1:] - 1
+    unique_dates = row_dates[first_rows]
+    unique_trade_dates = (
+        context.row_index["trade_date"].astype(str).to_numpy()[first_rows]
+    )
+    feature_records = [
+        record
+        for record in context.model_manifest["features"]
+        if record["analytic_family"] == "market_state"
+    ]
+    feature_columns = np.asarray(
+        [int(record["column_index"]) for record in feature_records], dtype=np.int32
+    )
+    source_matrix = _open_array(
+        context.model_manifest["storage"]["compact"], dtype=np.float32
+    )
+    market_matrix = np.asarray(
+        source_matrix[np.ix_(first_rows, feature_columns)], dtype=np.float64
+    )
+    market_matrix_last = np.asarray(
+        source_matrix[np.ix_(last_rows, feature_columns)], dtype=np.float64
+    )
+    if not np.allclose(
+        market_matrix, market_matrix_last, rtol=0.0, atol=0.0, equal_nan=True
+    ):
+        raise FullMarketForecastError("market_features_are_not_date_invariant")
+
+    columns = list(target_manifest["target_columns"])
+    base_column = columns.index("exact_net_return_d5_base")
+    stress_column = columns.index("exact_net_return_d5_stress")
+    values_record = target_manifest["files"]["values"]
+    valid_record = target_manifest["files"]["valid"]
+    target_values = np.memmap(
+        Path(values_record["path"]),
+        dtype=np.float32,
+        mode="r",
+        shape=tuple(int(value) for value in values_record["shape"]),
+    )
+    target_valid = np.memmap(
+        Path(valid_record["path"]),
+        dtype=np.uint8,
+        mode="r",
+        shape=tuple(int(value) for value in valid_record["shape"]),
+    )
+    market_base = np.full(len(unique_dates), np.nan, dtype=np.float64)
+    market_stress = np.full(len(unique_dates), np.nan, dtype=np.float64)
+    for date_position, (left, right) in enumerate(pairwise(boundaries)):
+        usable = np.asarray(
+            target_valid[left:right, base_column], dtype=bool
+        ) & np.asarray(target_valid[left:right, stress_column], dtype=bool)
+        if usable.any():
+            market_base[date_position] = float(
+                np.asarray(target_values[left:right, base_column], dtype=np.float64)[
+                    usable
+                ].mean()
+            )
+            market_stress[date_position] = float(
+                np.asarray(target_values[left:right, stress_column], dtype=np.float64)[
+                    usable
+                ].mean()
+            )
+
+    prediction_parts: list[pd.DataFrame] = []
+    coefficient_parts: list[pd.DataFrame] = []
+    fit_records: list[dict[str, Any]] = []
+    for fold in folds:
+        train_rows = np.flatnonzero(
+            (unique_dates <= int(fold["training_maximum_date_idx"]))
+            & np.isfinite(market_base)
+        )
+        validation_rows = np.flatnonzero(
+            (unique_dates >= int(fold["validation_start_date_idx"]))
+            & (unique_dates <= int(fold["validation_end_date_idx"]))
+            & np.isfinite(market_base)
+        )
+        inner_train, inner_validation, inner_meta = _nested_inner_rows(
+            unique_dates[train_rows]
+        )
+        ridge_choices: list[tuple[float, float]] = []
+        for alpha in ridge_alphas:
+            model = make_pipeline(
+                SimpleImputer(strategy="median", add_indicator=True),
+                RobustScaler(),
+                Ridge(alpha=float(alpha)),
+            )
+            model.fit(
+                market_matrix[train_rows[inner_train]],
+                market_base[train_rows[inner_train]],
+            )
+            prediction = model.predict(market_matrix[train_rows[inner_validation]])
+            ridge_choices.append(
+                (
+                    mean_absolute_error(
+                        market_base[train_rows[inner_validation]], prediction
+                    ),
+                    float(alpha),
+                )
+            )
+        ridge_score, ridge_alpha = min(ridge_choices)
+        logistic_choices: list[tuple[float, float]] = []
+        for regularization in logistic_cs:
+            model = make_pipeline(
+                SimpleImputer(strategy="median", add_indicator=True),
+                RobustScaler(),
+                LogisticRegression(C=float(regularization), max_iter=2000),
+            )
+            model.fit(
+                market_matrix[train_rows[inner_train]],
+                (market_base[train_rows[inner_train]] > 0.0).astype(np.int8),
+            )
+            probability = model.predict_proba(
+                market_matrix[train_rows[inner_validation]]
+            )[:, 1]
+            logistic_choices.append(
+                (
+                    log_loss(
+                        (market_base[train_rows[inner_validation]] > 0.0).astype(
+                            np.int8
+                        ),
+                        probability,
+                        labels=[0, 1],
+                    ),
+                    float(regularization),
+                )
+            )
+        logistic_score, logistic_c = min(logistic_choices)
+        ridge_model = make_pipeline(
+            SimpleImputer(strategy="median", add_indicator=True),
+            RobustScaler(),
+            Ridge(alpha=ridge_alpha),
+        )
+        logistic_model = make_pipeline(
+            SimpleImputer(strategy="median", add_indicator=True),
+            RobustScaler(),
+            LogisticRegression(C=logistic_c, max_iter=2000),
+        )
+        ridge_model.fit(market_matrix[train_rows], market_base[train_rows])
+        logistic_model.fit(
+            market_matrix[train_rows],
+            (market_base[train_rows] > 0.0).astype(np.int8),
+        )
+        ridge_prediction = ridge_model.predict(market_matrix[validation_rows])
+        positive_probability = logistic_model.predict_proba(
+            market_matrix[validation_rows]
+        )[:, 1]
+        prediction_parts.append(
+            pd.DataFrame(
+                {
+                    "date_idx": unique_dates[validation_rows],
+                    "trade_date": unique_trade_dates[validation_rows],
+                    "fold": int(fold["fold"]),
+                    "actual_base": market_base[validation_rows],
+                    "actual_stress": market_stress[validation_rows],
+                    "ridge_prediction": ridge_prediction,
+                    "positive_probability": positive_probability,
+                    "ridge_gate": ridge_prediction > 0.0,
+                    "logistic_gate": positive_probability > 0.5,
+                    "consensus_gate": (ridge_prediction > 0.0)
+                    & (positive_probability > 0.5),
+                }
+            )
+        )
+        for model_name, model in (
+            ("ridge", ridge_model),
+            ("logistic", logistic_model),
+        ):
+            transformed_names = model[:-1].get_feature_names_out(market_features)
+            coefficients = np.asarray(model[-1].coef_, dtype=np.float64).reshape(-1)
+            coefficient_parts.append(
+                pd.DataFrame(
+                    {
+                        "fold": int(fold["fold"]),
+                        "model": model_name,
+                        "feature_name": transformed_names,
+                        "coefficient": coefficients,
+                    }
+                )
+            )
+        fit_records.append(
+            {
+                "fold": int(fold["fold"]),
+                "ridge_alpha": ridge_alpha,
+                "ridge_inner_mae": ridge_score,
+                "logistic_c": logistic_c,
+                "logistic_inner_log_loss": logistic_score,
+                "ridge_validation_correlation": float(
+                    np.corrcoef(ridge_prediction, market_base[validation_rows])[0, 1]
+                ),
+                "ridge_gate_fraction": float(np.mean(ridge_prediction > 0.0)),
+                "logistic_gate_fraction": float(np.mean(positive_probability > 0.5)),
+                "consensus_gate_fraction": float(
+                    np.mean((ridge_prediction > 0.0) & (positive_probability > 0.5))
+                ),
+                "inner_split": inner_meta,
+            }
+        )
+
+    market_predictions = pd.concat(prediction_parts, ignore_index=True).sort_values(
+        "date_idx"
+    )
+    coefficients = pd.concat(coefficient_parts, ignore_index=True)
+    selection_parts: list[pd.DataFrame] = []
+    for fold, (task, _) in zip(folds, task_records, strict=True):
+        positions = _fold_rows(context.row_index, fold, "validation")
+        prediction = np.asarray(
+            np.load(
+                task["files"]["prediction"]["path"],
+                mmap_mode="r",
+                allow_pickle=False,
+            ),
+            dtype=np.float32,
+        )
+        usable = (
+            np.asarray(target_valid[positions, base_column], dtype=bool)
+            & np.asarray(target_valid[positions, stress_column], dtype=bool)
+            & np.isfinite(prediction)
+        )
+        current_positions = positions[usable]
+        frame = context.row_index.iloc[current_positions][
+            ["candidate_id", "date_idx", "trade_date", "symbol", "symbol_idx"]
+        ].copy()
+        frame["model_row_position"] = current_positions
+        frame["fold"] = int(fold["fold"])
+        frame["ranking_score"] = prediction[usable]
+        frame["base"] = np.asarray(
+            target_values[current_positions, base_column], dtype=np.float32
+        )
+        frame["stress"] = np.asarray(
+            target_values[current_positions, stress_column], dtype=np.float32
+        )
+        frame = frame.sort_values(
+            ["date_idx", "ranking_score", "candidate_id"], kind="stable"
+        )
+        frame["selection_rank"] = (
+            frame.groupby("date_idx", sort=False).cumcount(ascending=False) + 1
+        )
+        selection_parts.append(frame.loc[frame["selection_rank"] <= 10])
+    selections = pd.concat(selection_parts, ignore_index=True).merge(
+        market_predictions[
+            [
+                "date_idx",
+                "ridge_prediction",
+                "positive_probability",
+                "ridge_gate",
+                "logistic_gate",
+                "consensus_gate",
+            ]
+        ],
+        on="date_idx",
+        how="left",
+        validate="many_to_one",
+    )
+    daily_parts: list[pd.DataFrame] = []
+    summaries: dict[str, Any] = {}
+    for gate_name in ("ridge", "logistic", "consensus"):
+        gate_column = f"{gate_name}_gate"
+        for top_k in (1, 3, 10):
+            selected = selections.loc[
+                selections[gate_column] & (selections["selection_rank"] <= int(top_k))
+            ]
+            aggregate = selected.groupby("date_idx", sort=False)[
+                ["base", "stress"]
+            ].agg(["sum", "size"])
+            daily = market_predictions[["date_idx", "trade_date", "fold"]].copy()
+            return_values = aggregate.loc[:, [("base", "sum"), ("stress", "sum")]]
+            return_values.columns = ["base", "stress"]
+            return_values /= float(top_k)
+            trade_count = aggregate[("base", "size")].rename("trade_count")
+            daily = daily.merge(
+                return_values.reset_index(), on="date_idx", how="left"
+            ).merge(trade_count.reset_index(), on="date_idx", how="left")
+            daily[["base", "stress", "trade_count"]] = daily[
+                ["base", "stress", "trade_count"]
+            ].fillna(0.0)
+            daily["trade_count"] = daily["trade_count"].astype(np.int32)
+            daily["gate"] = gate_name
+            daily["top_k"] = top_k
+            task_name = f"{gate_name}_top{top_k}"
+            summaries[task_name] = _market_gate_metrics(daily)
+            daily_parts.append(daily)
+    daily_results = pd.concat(daily_parts, ignore_index=True)
+    primary = summaries["consensus_top10"]
+    primary_lower = primary["stress"]["lower"]
+    gate = {
+        "primary": "consensus_top10",
+        "requires_all_folds_positive": True,
+        "requires_all_years_positive": True,
+        "requires_positive_stress_hac_lower_bound": True,
+        "all_folds_positive": (
+            int(primary["positive_stress_fold_count"]) == int(primary["fold_count"])
+        ),
+        "all_years_positive": (
+            int(primary["positive_stress_year_count"]) == int(primary["year_count"])
+        ),
+        "positive_stress_hac_lower_bound": bool(
+            primary_lower is not None and float(primary_lower) > 0.0
+        ),
+    }
+    gate["passed"] = bool(
+        gate["all_folds_positive"]
+        and gate["all_years_positive"]
+        and gate["positive_stress_hac_lower_bound"]
+    )
+    root = output_path.parent
+    predictions_path = root / "market_predictions.parquet"
+    coefficients_path = root / "coefficients.parquet"
+    selections_path = root / "top10_selections.parquet"
+    daily_path = root / "daily_gate_results.parquet"
+    _write_parquet(market_predictions, predictions_path)
+    _write_parquet(coefficients, coefficients_path)
+    _write_parquet(selections, selections_path)
+    _write_parquet(daily_results, daily_path)
+    manifest = {
+        "schema": MARKET_REGIME_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": STUDY_ID,
+        "fingerprint": fingerprint,
+        "horizon": horizon,
+        "ranking_target": ranking_target,
+        "profile": profile_name,
+        "feature_variant": feature_variant,
+        "training_mode": training_mode,
+        "market_feature_count": len(market_features),
+        "market_features": list(market_features),
+        "fit_records": fit_records,
+        "summaries": summaries,
+        "gate": gate,
+        "account_replay_performed": False,
+        "forbidden_2026_read_count": 0,
+        "files": {
+            "market_predictions": _file_record(
+                predictions_path, row_count=len(market_predictions)
+            ),
+            "coefficients": _file_record(
+                coefficients_path, row_count=len(coefficients)
+            ),
+            "top10_selections": _file_record(
+                selections_path, row_count=len(selections)
+            ),
+            "daily_gate_results": _file_record(
+                daily_path, row_count=len(daily_results)
+            ),
+        },
+        "sources": {
+            "model_inputs": _file_record(context.model_manifest_path),
+            "exact_net_targets": _file_record(
+                output_root / "exact_net_targets/manifest.json",
+                target_fingerprint=target_manifest["fingerprint"],
+            ),
+            "ranking_tasks": [_file_record(path) for _, path in task_records],
+        },
+    }
+    _write_json(output_path, manifest)
+    _emit(
+        "market_regime_evaluation_completed",
+        gate_passed=gate["passed"],
+        primary_stress_mean=primary["stress"]["mean"],
+        primary_stress_lower=primary_lower,
+    )
+    return manifest
 
 
 def evaluate_oof_selections(
@@ -2994,7 +4270,7 @@ def _simulate_account_spec(
                 ):
                     phase = "take_profit_limit"
                     close_exits.setdefault(exit_idx, []).append(trade_id)
-                elif fill_day == 2:
+                elif fill_day == int(spec.get("planned_fill_day", 2)):
                     phase = "planned_close"
                     close_exits.setdefault(exit_idx, []).append(trade_id)
                 else:
@@ -3280,6 +4556,7 @@ def status(
     study = load_study(study_path)
     context = _source_context(study)
     target_path = output_root / "targets/manifest.json"
+    exact_net_target_path = output_root / "exact_net_targets/manifest.json"
     target_ready = target_path.is_file()
     folds = build_forward_folds(
         date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
@@ -3289,6 +4566,7 @@ def status(
     return {
         "study_id": STUDY_ID,
         "target_panel_ready": target_ready,
+        "exact_net_target_panel_ready": exact_net_target_path.is_file(),
         "folds": folds,
         "completed_task_count": len(tasks),
         "resource_plan": asdict(resource_plan()),
@@ -3355,10 +4633,13 @@ def _parser() -> argparse.ArgumentParser:
         "command",
         choices=(
             "prepare-targets",
+            "prepare-exact-net-targets",
             "train-task",
             "status",
             "run-first",
             "run-baseline",
+            "evaluate-payoff",
+            "evaluate-market-regime",
             "evaluate-oof",
             "replay-account",
         ),
@@ -3392,6 +4673,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "prepare-targets":
         result = prepare_targets(study_path=args.study, output_root=args.output_root)
+    elif args.command == "prepare-exact-net-targets":
+        result = prepare_exact_net_targets(
+            study_path=args.study, output_root=args.output_root
+        )
     elif args.command == "train-task":
         result = train_task(
             study_path=args.study,
@@ -3418,6 +4703,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_root=args.output_root,
             folds=_parse_int_csv(args.folds),
             targets=_parse_text_csv(args.targets),
+            profile=args.profile,
+            feature_variant=args.feature_variant,
+            training_mode=args.training_mode,
+        )
+    elif args.command == "evaluate-payoff":
+        result = evaluate_payoff_oof(
+            study_path=args.study,
+            output_root=args.output_root,
+            target=args.target,
+            profile=args.profile,
+            feature_variant=args.feature_variant,
+            training_mode=args.training_mode,
+        )
+    elif args.command == "evaluate-market-regime":
+        result = evaluate_market_regime_oof(
+            study_path=args.study,
+            output_root=args.output_root,
             profile=args.profile,
             feature_variant=args.feature_variant,
             training_mode=args.training_mode,
