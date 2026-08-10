@@ -177,6 +177,47 @@ date, so “D5 selection, D3 realization” remains preferable. A D3 conditional
 reduced annualized return from about 11.02% to 10.55% and improved drawdown only
 from 15.50% to 14.90%. That marginal change does not justify another live head.
 
+## Rebuilt-source availability stress (2026-08-10)
+
+The earlier source-availability robustness replay had a scheduling defect: its
+D2 and D5 variants reused the source panel's D3 payoff and fill-day columns.
+That run is superseded. The corrected replay reloads the matching causal legal
+exit return and actual legal fill day for each horizon (schema
+`seq100_full_market_rebuildable_core_account_robustness/2`).
+
+This is a fixed robustness audit, not a new search. It masks 243 fields whose
+current source metadata says they are unavailable, while rebuilding the 105
+cross-sectional ranks and the industry/index market fields from active QDP
+snapshots. The retained model surface is 314 fields. Its Top10 selections
+overlap the original full-field selections by about 45% on the stress-active
+dates, so it is a source-outage challenger rather than a pointwise replacement
+of the original model.
+
+Under the same next-open, legal-sale and double-slippage account contract:
+
+| Fixed replay | Ending equity | Annualized | Max drawdown | Positive years | HAC lower |
+|---|---:|---:|---:|---:|---:|
+| D2 / Top10 | CNY1.450m | 6.53% | -19.82% | 4/6 | -0.0072% |
+| D3 / Top10 | CNY1.573m | 8.02% | -16.15% | 6/6 | +0.0036% |
+| D5 / Top10 | CNY1.756m | 10.05% | -14.26% | 6/6 | +0.0112% |
+| D3 / Top3 | CNY1.445m | 6.47% | -15.89% | 5/6 | -0.0047% |
+| D3 / Top1 | CNY1.382m | 5.66% | -20.45% | 5/6 | -0.0163% |
+| D3 / Top10, 3x slippage | CNY1.486m | 6.97% | -17.56% | 5/6 | +0.0001% |
+| D3 / Top10, 10% gross cap | CNY1.254m | 3.92% | -20.12% | 4/6 | -0.0087% |
+| D3 / Top10, 5% gross cap | CNY0.878m | -2.18% | -29.77% | 2/6 | -0.0314% |
+| D3 / Top10, folds 2-5 only | CNY1.297m | 6.17% | -16.01% | 4/5 | -0.0083% |
+
+The predeclared robustness gate passes because the primary D3 variant is
+positive in all six years with a positive HAC lower bound and every required
+neighbor has positive total wealth. This is a deliberately weaker condition
+than requiring every neighbor's HAC bound and every year to be positive. D2 is
+materially weaker, D5 is stronger in this source-stress sample, and the 5% cap
+turns negative. The audit supports further historical value in the signal but
+does not establish stable profitability or a uniquely correct D3 exit.
+
+Authoritative corrected output:
+`daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/rebuildable_core_account_robustness/manifest.json`.
+
 ## Durable decision and next boundary
 
 The original upside/safety Top1 rule, fixed take-profits and its breadth variants
@@ -185,15 +226,14 @@ the first promising short-horizon historical candidate. It is not independently
 confirmed: the dual gate and D3 exit were chosen after inspecting 2020-2025,
 and all 2012-2025 outcomes are consumed.
 
-Do not continue threshold, holding-day, score-weight or risk-veto tuning on the
-same outcomes. The next legitimate work is operational and forward-only:
-
-1. build an outcome-blind inference snapshot with the identical 557 fields and
-   raw daily path contract;
-2. create a frozen final model bundle without using any 2026 outcome;
-3. append signal dates, requested Top10, fills, costs and D3 legal exits without
-   feeding them back into historical selection;
-4. require enough post-freeze cohorts before making any stable-profit claim.
+Do not continue an unbounded threshold, holding-day, score-weight or risk-veto
+grid on the same outcomes. The current user priority is historical strategy
+research, so outcome-blind live scoring is deferred. The next historical work
+must keep a new, explicit adaptive-development contract: restore temporarily
+unavailable Tushare-compatible source families when the provider is available,
+rebuild their PIT features without changing the execution contract, and compare
+the full-source and 314-field variants without choosing a new winner from a
+large result grid. No 2012-2025 result can be relabeled independent confirmation.
 
 ## Authoritative artifacts
 

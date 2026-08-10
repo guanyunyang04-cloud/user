@@ -18,17 +18,22 @@ passed the frozen candidate gate with about 11.0% annualized return and 15.5%
 maximum drawdown. Neither is a production strategy or a profit guarantee. All
 2012-2025 outcomes are consumed and no independent post-freeze sample exists.
 
+A current-source stress retrained the short-horizon architecture with 243
+temporarily unavailable fields masked and 167 cross-sectional/market/industry
+fields rebuilt from active QDP snapshots. Its D3 Top10 account still passed the
+narrow historical gate at about 8.0% annualized return and 16.1% drawdown, but
+D2, concentration, higher-cost and winner-cap neighbors were mixed. This is
+evidence of a real but thin historical dependency, not stable-profit proof.
+
 A new post-selection diagnostic found that D120 historically dominated D60
 for this selector, including under the same finite-account constraints. D120
 is an adaptive retrospective challenger, not a replacement for the already
 frozen D60 forward arm and not independent confirmation.
 
-There is no active training, real order, or production process. A separately
-isolated 2026-08-07 public-data value-growth Top10 shadow cohort is frozen with
-pending forward fills only; its original D60 and parallel D120 paper arms both
-remain prefill and append-only. The new short-horizon candidate has a frozen
-historical contract but not yet an outcome-blind live feature snapshot or final
-model bundle.
+There is no active training, real order, or production process. The user has
+deferred new shadow scoring and wants historical strategy research to remain
+the priority. Existing isolated 2026 shadow artifacts remain untouched and may
+not feed historical fitting or claims.
 
 ## Formal research contract
 
@@ -348,23 +353,24 @@ legal exit and exact finite-account evidence. All 2012-2025 evidence is
 consumed. Further historical weight, breadth, holding-day, exit, score or risk
 threshold tuning must not be presented as confirmation.
 
-Next legitimate actions, in order:
+Current user priority is historical strategy reliability; new shadow scoring
+is deferred. Next actions, in order:
 
-1. Build an outcome-blind daily inference snapshot with the identical 557
-   fields, 32 raw/path coordinates and 54 market fields. It may read current
-   features, but not post-signal returns or fill outcomes.
-2. Freeze the final tree, sequence and market model bundle using only data
-   through 2025, then begin an append-only D3 Top10 shadow ledger. A requested
-   unfilled or unaffordable order stays cash without rank substitution.
-3. Continue the existing value-growth D60/D120 shadow arms unchanged; do not
-   relabel the supplied public-data cohort as mechanical model output.
-4. Accumulate enough independent post-freeze cohorts to test absolute net
-   value, right-tail dependence and risk. One favorable trade or month is not
-   confirmation.
-5. If a new historical hypothesis is pursued, give it a new contract. Do not
-   reopen Chan, financing-growth, KAMA-cross, fixed take-profit, score-weight,
-   horizon or risk-veto grids on consumed outcomes.
-6. Current status is `two_historical_candidates_forward_evidence_required`.
+1. Treat the expired Tushare-compatible proxy as a temporary provider outage,
+   not evidence that its financial, technical, announcement or money-flow
+   fields are useless. Existing historical fields remain valid inputs subject
+   to their original PIT audit.
+2. When that source is available, rebuild the temporarily masked families with
+   unchanged PIT semantics and rerun the frozen full-market architecture. Make
+   a direct full-source versus 314-field comparison without another broad
+   threshold, horizon or score grid.
+3. Continue bounded historical robustness work on existing candidates: exact
+   costs, source consistency, time-block stability, breadth, concentration and
+   right-tail dependence. Every result remains adaptive development because all
+   2012-2025 outcomes have been seen.
+4. Do not reopen Chan, financing-growth, KAMA-cross or fixed take-profit grids;
+   their tested forms are already rejected.
+5. Current status is `historical_candidates_exist_reliability_not_proven`.
 
 ## Authoritative paths
 
@@ -459,8 +465,23 @@ retaining larger right-tail winners.
 Direct D3 ranking was weaker (mean Rank IC about 0.039 and negative stress
 Top10 mean). A conditional D3 10% tail veto reduced return and improved drawdown
 only marginally; neither challenger is adopted. Historical tuning is now
-closed. The candidate requires an outcome-blind live feature snapshot, frozen
-final bundle and append-only post-freeze evidence before any stronger claim.
+closed for this candidate contract.
+
+The corrected current-source robustness replay uses 314 retained fields, of
+which 167 cross-sectional/market/industry fields are rebuilt from active QDP
+snapshots. Its D3 Top10 account ended near CNY1.573m (8.02% annualized, 16.15%
+drawdown, 6/6 positive years, positive but thin HAC lower bound). D5 improved
+to about 10.05% annualized and 14.26% drawdown, while D2 had only 4/6 positive
+years; Top1/Top3, three-times slippage, 10% winner cap and folds 2-5 were
+positive in total wealth but weaker statistically. A 5% winner cap lost about
+12.2%, confirming material right-tail dependence. The original D2/D5 replay
+was invalid because it reused D3 outcomes; schema version 2 reloads the correct
+horizon-specific legal returns and fill days.
+
+The unavailable families were masked because of current provider/source status;
+the user reports that the Tushare-compatible proxy expired. Do not interpret
+this temporary outage as a negative feature ablation. Shadow scoring remains
+deferred while historical reliability is investigated.
 
 Durable record:
 `daily_research/research_records/seq100/seq100_full_market_multitask_forecast_v1_20260810/research_record.md`.

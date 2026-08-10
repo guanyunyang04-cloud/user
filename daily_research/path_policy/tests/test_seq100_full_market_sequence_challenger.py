@@ -107,6 +107,13 @@ def test_final_bundle_cli_is_explicit() -> None:
     repaired = study._build_parser().parse_args(
         ["--repaired-rank-core-availability-stress"]
     )
+    corrected_full = study._build_parser().parse_args(
+        ["--corrected-rank-full-core-availability-stress"]
+    )
+    rebuildable = study._build_parser().parse_args(
+        ["--rebuildable-current-core-availability-stress"]
+    )
+    robustness = study._build_parser().parse_args(["--rebuildable-core-robustness"])
 
     assert args.freeze_final_bundle is True
     assert args.availability_stress is False
@@ -116,6 +123,9 @@ def test_final_bundle_cli_is_explicit() -> None:
     assert exact.core_availability_stress is False
     assert repaired.repaired_rank_core_availability_stress is True
     assert repaired.exact_core_availability_stress is False
+    assert corrected_full.corrected_rank_full_core_availability_stress is True
+    assert rebuildable.rebuildable_current_core_availability_stress is True
+    assert robustness.rebuildable_core_robustness is True
 
 
 def test_frozen_candidate_keeps_adaptive_boundary_and_no_2026_outcome() -> None:

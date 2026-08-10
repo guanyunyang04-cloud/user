@@ -50,6 +50,10 @@ DEFAULT_BUNDLE_MANIFEST = (
 DEFAULT_CORE_STRESS_MANIFEST = (
     base.DEFAULT_OUTPUT_ROOT / "core_source_availability_stress/manifest.json"
 )
+DEFAULT_CALENDAR_INPUT_MANIFEST = (
+    WORKSPACE_ROOT / "daily_research/output/path_policy/studies/"
+    "seq100_quality_liquidity_data_prep/inputs/calendar_inputs_manifest.json"
+)
 HISTORICAL_VALIDATION_DATE = "2025-12-31"
 FEATURE_WINDOWS = (5, 10, 20, 40, 60)
 FEATURE_RETURN_HORIZONS = (1, 2, 5, 10, 20, 40, 60)
@@ -548,7 +552,52 @@ def _load_quality_membership(
     frame["quality_liquidity_keep"] = (
         frame["quality_liquidity_keep"].fillna(False).astype(bool)
     )
+    frame["listed_open_days"] = _canonical_listing_open_days(
+        connection,
+        frame=frame,
+        signal_date=signal_date,
+        scans=scans,
+    )
     return frame
+
+
+def _canonical_listing_open_days(
+    connection: duckdb.DuckDBPyConnection,
+    *,
+    frame: pd.DataFrame,
+    signal_date: str,
+    scans: Mapping[str, str],
+) -> np.ndarray:
+    """Use the research calendar's pre-2010 open-day index, not a truncated count."""
+
+    calendar_path = (
+        DEFAULT_CALENDAR_INPUT_MANIFEST.parent / "calendar_positions.parquet"
+    )
+    listing_path = DEFAULT_CALENDAR_INPUT_MANIFEST.parent / "listing_positions.parquet"
+    if not calendar_path.is_file() or not listing_path.is_file():
+        raise LiveInferenceError("canonical_calendar_inputs_missing")
+    calendar = pd.read_parquet(calendar_path, columns=["trade_date", "open_index"])
+    calendar["trade_date"] = calendar["trade_date"].astype(str)
+    current = calendar.loc[calendar["trade_date"].eq(str(signal_date)), "open_index"]
+    if len(current):
+        current_open_index = int(current.iloc[0])
+    else:
+        last_date = str(calendar["trade_date"].max())
+        last_index = int(calendar["open_index"].max())
+        future_open_count = int(
+            connection.execute(
+                f"SELECT count(*) FROM {scans['trading_calendar']} "
+                f"WHERE is_open AND trade_date>'{last_date}' "
+                f"AND trade_date<='{signal_date!s}'"
+            ).fetchone()[0]
+        )
+        current_open_index = last_index + future_open_count
+    listing = pd.read_parquet(listing_path, columns=["symbol", "list_open_index"])
+    listed = (
+        frame["symbol"].astype(str).map(listing.set_index("symbol")["list_open_index"])
+    )
+    output = current_open_index - pd.to_numeric(listed, errors="coerce") + 1
+    return output.to_numpy(dtype=np.float32)
 
 
 def _load_index_and_industry(

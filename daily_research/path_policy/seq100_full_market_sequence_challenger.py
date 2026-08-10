@@ -27,6 +27,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import lightgbm as lgb
 import numpy as np
 import pandas as pd
@@ -45,6 +46,9 @@ ROBUSTNESS_SCHEMA = "seq100_full_market_sequence_ensemble_account_robustness/1"
 DUAL_HORIZON_SCHEMA = "seq100_full_market_dual_gate_horizon_challenge/1"
 AVAILABILITY_SCHEMA = "seq100_full_market_source_availability_stress/1"
 REPAIRED_RANK_SCHEMA = "seq100_full_market_repaired_cross_sectional_features/1"
+REBUILDABLE_ROBUSTNESS_SCHEMA = (
+    "seq100_full_market_rebuildable_core_account_robustness/2"
+)
 FINAL_BUNDLE_SCHEMA = "seq100_full_market_forward_policy_bundle/1"
 DEFAULT_STUDY_PATH = base.DEFAULT_STUDY_PATH
 DEFAULT_OUTPUT_ROOT = base.DEFAULT_OUTPUT_ROOT
@@ -3063,8 +3067,10 @@ def prepare_repaired_cross_sectional_features(
         formal_legacy = sources.context.row_index.iloc[block.start : block.stop][
             "legacy_candidate_row"
         ].to_numpy(dtype=np.int64)
-        if bool((legacy_rows[formal_positions] < 0).any()) or not np.array_equal(
-            legacy_rows[formal_positions], formal_legacy
+        formal_legacy_found = formal_legacy >= 0
+        if bool(formal_legacy_found.any()) and not np.array_equal(
+            legacy_rows[formal_positions][formal_legacy_found],
+            formal_legacy[formal_legacy_found],
         ):
             raise SequenceChallengerError(
                 f"repaired_rank_legacy_alignment_changed:{date_idx}"
@@ -3151,6 +3157,350 @@ def prepare_repaired_cross_sectional_features(
         values=values,
         columns=override_columns,
         feature_names=repaired_names,
+        manifest=result,
+    )
+
+
+def _build_rebuildable_membership_panels(
+    sources: SequenceSources,
+    *,
+    qdp_paths: Mapping[str, Sequence[Path]],
+) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+    """Load current date-specific industry and index snapshots into small panels."""
+
+    from daily_research.path_policy import seq100_quality_liquidity_data_prep as prep
+    from daily_research.path_policy import seq100_signal_quality as signal
+
+    date_values = tuple(str(value) for value in sources.context.pack["date_values"])
+    date_map = {value: index for index, value in enumerate(date_values)}
+    symbols = tuple(str(value) for value in sources.context.pack["symbol_values"])
+    symbol_map = {value: index for index, value in enumerate(symbols)}
+    date_count = len(date_values)
+    symbol_count = len(symbols)
+    industry_codes = np.zeros((date_count, symbol_count), dtype=np.int64)
+    industry_age = np.full((date_count, symbol_count), np.nan, dtype=np.float32)
+    index_membership = {
+        name: np.zeros((date_count, symbol_count), dtype=bool)
+        for name in ("csi300", "csi500", "sse50")
+    }
+    connection = duckdb.connect()
+    try:
+        connection.execute("SET threads=8")
+        required = {"industry_concept", "index_constituents"}
+        missing = sorted(required.difference(qdp_paths))
+        if missing:
+            raise SequenceChallengerError(
+                f"rebuildable_membership_sources_missing:{missing}"
+            )
+        industry_scan = prep._scan(qdp_paths["industry_concept"])
+        label_rows = connection.execute(
+            "SELECT DISTINCT coalesce(nullif(industry_name,''),"
+            "nullif(industry,''),nullif(original_industry,'')) AS label "
+            f"FROM {industry_scan} WHERE trade_date BETWEEN '2010-01-01' AND '2025-12-31'"
+        ).fetchdf()
+        label_codes = {
+            str(row.label): signal._stable_category_hash(row.label)
+            for row in label_rows.itertuples(index=False)
+            if str(row.label or "").strip()
+        }
+        connection.execute(
+            "SELECT trade_date,symbol,"
+            "coalesce(nullif(industry_name,''),nullif(industry,''),"
+            "nullif(original_industry,'')) AS label,industry_source_date "
+            f"FROM {industry_scan} "
+            "WHERE trade_date BETWEEN '2010-01-01' AND '2025-12-31'"
+        )
+        industry_reader = connection.to_arrow_reader(batch_size=400_000)
+        for batch in industry_reader:
+            frame = batch.to_pandas()
+            date_idx = frame["trade_date"].astype(str).map(date_map)
+            symbol_idx = frame["symbol"].astype(str).map(symbol_map)
+            label_idx = frame["label"].astype(str).map(label_codes)
+            usable = date_idx.notna() & symbol_idx.notna() & label_idx.notna()
+            if not bool(usable.any()):
+                continue
+            dates = date_idx.loc[usable].to_numpy(dtype=np.int32)
+            symbols_ = symbol_idx.loc[usable].to_numpy(dtype=np.int32)
+            labels = label_idx.loc[usable].to_numpy(dtype=np.int64)
+            industry_codes[dates, symbols_] = labels
+            source = pd.to_datetime(
+                frame.loc[usable, "industry_source_date"], errors="coerce"
+            )
+            trade = pd.to_datetime(frame.loc[usable, "trade_date"], errors="coerce")
+            ages = (trade - source).dt.days.to_numpy(dtype=np.float32)
+            industry_age[dates, symbols_] = ages
+
+        index_scan = prep._scan(qdp_paths["index_constituents"])
+        index_names = {
+            "000300.SH": "csi300",
+            "000905.SH": "csi500",
+            "000016.SH": "sse50",
+        }
+        connection.execute(
+            "SELECT trade_date,symbol,index_symbol,source_snapshot_date "
+            f"FROM {index_scan} "
+            "WHERE trade_date BETWEEN '2010-01-01' AND '2025-12-31' "
+            "AND index_symbol IN ('000300.SH','000905.SH','000016.SH')"
+        )
+        index_reader = connection.to_arrow_reader(batch_size=400_000)
+        for batch in index_reader:
+            frame = batch.to_pandas()
+            date_idx = frame["trade_date"].astype(str).map(date_map)
+            symbol_idx = frame["symbol"].astype(str).map(symbol_map)
+            index_label = frame["index_symbol"].astype(str).map(index_names)
+            usable = date_idx.notna() & symbol_idx.notna() & index_label.notna()
+            if not bool(usable.any()):
+                continue
+            source = pd.to_datetime(
+                frame.loc[usable, "source_snapshot_date"], errors="coerce"
+            )
+            trade = pd.to_datetime(frame.loc[usable, "trade_date"], errors="coerce")
+            if bool(((source.notna()) & (source > trade)).any()):
+                raise SequenceChallengerError("rebuildable_index_source_time_violation")
+            dates = date_idx.loc[usable].to_numpy(dtype=np.int32)
+            symbols_ = symbol_idx.loc[usable].to_numpy(dtype=np.int32)
+            names = index_label.loc[usable].astype(str).to_numpy()
+            for name, membership in index_membership.items():
+                selected = names == name
+                if bool(selected.any()):
+                    membership[dates[selected], symbols_[selected]] = True
+    finally:
+        connection.close()
+    return industry_codes, industry_age, index_membership
+
+
+def prepare_rebuildable_core_features(
+    sources: SequenceSources,
+    *,
+    output_root: Path,
+    qdp_paths: Mapping[str, Sequence[Path]],
+) -> StaticFeatureOverride:
+    """Rebuild F2, industry and index-aware market fields from active PIT sources."""
+
+    repaired_rank = prepare_repaired_cross_sectional_features(
+        sources, output_root=output_root
+    )
+    from daily_research.path_policy import (
+        seq100_full_market_live_inference as live,
+    )
+
+    feature_names = tuple(sources.feature_names)
+    f2_names = tuple(repaired_rank.feature_names)
+    market_names = tuple(
+        name
+        for name in feature_names
+        if str(
+            sources.context.model_manifest["features"][feature_names.index(name)][
+                "analytic_family"
+            ]
+        )
+        == "market_state"
+    )
+    industry_names = tuple(
+        name
+        for name in feature_names
+        if str(
+            sources.context.model_manifest["features"][feature_names.index(name)][
+                "analytic_family"
+            ]
+        )
+        == "industry_context"
+    )
+    expected_industry = tuple(live.INDUSTRY_FEATURES)
+    if industry_names != expected_industry or len(market_names) != 54:
+        raise SequenceChallengerError("rebuildable_core_feature_catalog_changed")
+    override_names = (*f2_names, *market_names, *industry_names)
+    override_columns = np.asarray(
+        [feature_names.index(name) for name in override_names], dtype=np.int32
+    )
+    fingerprint = _stable_hash(
+        {
+            "schema": "seq100_full_market_rebuildable_core_features/1",
+            "builder_version": 1,
+            "repaired_rank_fingerprint": repaired_rank.manifest["fingerprint"],
+            "active_source_boundaries": _active_source_boundaries(),
+            "feature_names": override_names,
+            "formal_row_count": len(sources.context.row_index),
+            "formal_maximum_date": str(
+                sources.context.row_index["trade_date"].astype(str).max()
+            ),
+        }
+    )
+    output_dir = output_root / "rebuildable_core_features"
+    manifest_path = output_dir / "manifest.json"
+    values_path = output_dir / "rebuildable_core.float32.dat"
+    expected_size = len(sources.context.row_index) * len(override_names) * 4
+    if manifest_path.is_file() and values_path.is_file():
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+            and int(values_path.stat().st_size) == expected_size
+        ):
+            return StaticFeatureOverride(
+                values=np.memmap(
+                    values_path,
+                    dtype=np.float32,
+                    mode="r",
+                    shape=(len(sources.context.row_index), len(override_names)),
+                ),
+                columns=override_columns,
+                feature_names=override_names,
+                manifest=current,
+            )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    partial_path = values_path.with_suffix(values_path.suffix + ".partial")
+    progress_path = output_dir / "progress.json"
+    date_blocks = [sources.blocks[key] for key in sorted(sources.blocks)]
+    if (
+        not date_blocks
+        or max(block.trade_date for block in date_blocks) >= "2026-01-01"
+    ):
+        raise SequenceChallengerError("rebuildable_core_formal_dates_include_2026")
+    start_position = 0
+    if partial_path.is_file() and progress_path.is_file():
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+        if (
+            progress.get("fingerprint") == fingerprint
+            and int(partial_path.stat().st_size) == expected_size
+        ):
+            start_position = int(progress.get("completed_date_count", 0))
+        else:
+            partial_path.unlink(missing_ok=True)
+            progress_path.unlink(missing_ok=True)
+    if not partial_path.is_file():
+        with partial_path.open("wb") as stream:
+            stream.truncate(expected_size)
+        initializing = np.memmap(
+            partial_path,
+            dtype=np.float32,
+            mode="r+",
+            shape=(len(sources.context.row_index), len(override_names)),
+        )
+        for left in range(0, len(initializing), 250_000):
+            initializing[left : left + 250_000] = np.nan
+        initializing.flush()
+        del initializing
+        _write_json(
+            progress_path,
+            {"fingerprint": fingerprint, "completed_date_count": 0},
+        )
+
+    industry_codes, industry_age, index_membership = (
+        _build_rebuildable_membership_panels(sources, qdp_paths=qdp_paths)
+    )
+    repaired = np.memmap(
+        partial_path,
+        dtype=np.float32,
+        mode="r+",
+        shape=(len(sources.context.row_index), len(override_names)),
+    )
+    pit_universe = base._open_array(
+        sources.context.pack["masks"]["pit_universe_has_bar"], dtype=np.bool_
+    )
+    status_st = base._open_array(sources.context.pack["masks"]["is_st"], dtype=np.bool_)
+    status_suspended = base._open_array(
+        sources.context.pack["masks"]["is_suspended"], dtype=np.bool_
+    )
+    f2_count = len(f2_names)
+    market_offset = f2_count
+    industry_offset = f2_count + len(market_names)
+    for position, block in enumerate(
+        date_blocks[start_position:], start=start_position
+    ):
+        date_idx = int(block.date_idx)
+        history = slice(date_idx - max(live.FEATURE_WINDOWS), date_idx + 1)
+        raw = np.asarray(sources.daily_raw[history], dtype=np.float32)
+        market_values = live._market_features(
+            raw=raw,
+            universe=np.asarray(pit_universe[date_idx], dtype=bool),
+            index_membership={
+                name: index_membership[name][date_idx] for name in index_membership
+            },
+            is_suspended=np.asarray(status_suspended[date_idx], dtype=bool),
+            is_st=np.asarray(status_st[date_idx], dtype=bool),
+        )
+        selected_symbols = sources.context.row_index.iloc[block.start : block.stop][
+            "symbol_idx"
+        ].to_numpy(dtype=np.int32)
+        industry_values = live._industry_features(
+            raw=raw,
+            universe=np.asarray(pit_universe[date_idx], dtype=bool),
+            industry=industry_codes[date_idx],
+            industry_source_age=industry_age[date_idx],
+            selected_symbols=selected_symbols,
+        )
+        values = np.full(
+            (block.stop - block.start, len(override_names)),
+            np.nan,
+            dtype=np.float32,
+        )
+        values[:, :f2_count] = np.asarray(
+            repaired_rank.values[block.start : block.stop], dtype=np.float32
+        )
+        for index, name in enumerate(market_names):
+            values[:, market_offset + index] = np.float32(market_values[name])
+        for index, name in enumerate(industry_names):
+            values[:, industry_offset + index] = industry_values[name]
+        repaired[block.start : block.stop] = values
+        completed = position + 1
+        if completed % 25 == 0 or completed == len(date_blocks):
+            repaired.flush()
+            _write_json(
+                progress_path,
+                {"fingerprint": fingerprint, "completed_date_count": completed},
+            )
+        if completed % 250 == 0:
+            base._emit(
+                "rebuildable_core_progress",
+                completed_date_count=completed,
+                total_date_count=len(date_blocks),
+            )
+    repaired.flush()
+    del repaired, industry_codes, industry_age, index_membership
+    gc.collect()
+    os.replace(partial_path, values_path)
+    progress_path.unlink(missing_ok=True)
+    values = np.memmap(
+        values_path,
+        dtype=np.float32,
+        mode="r",
+        shape=(len(sources.context.row_index), len(override_names)),
+    )
+    result = {
+        "schema": "seq100_full_market_rebuildable_core_features/1",
+        "status": "completed",
+        "completed_at": _now(),
+        "fingerprint": fingerprint,
+        "row_count": len(sources.context.row_index),
+        "feature_count": len(override_names),
+        "feature_names": list(override_names),
+        "model_columns": override_columns.tolist(),
+        "formal_minimum_date": date_blocks[0].trade_date,
+        "formal_maximum_date": date_blocks[-1].trade_date,
+        "causality": {
+            "industry_and_index_source": "active QDP date-specific snapshots",
+            "underlying_price_source": "causal daily pack",
+            "future_return_or_fill_read": False,
+            "forbidden_2026_row_count": 0,
+        },
+        "file": _file_record(
+            values_path,
+            dtype="float32",
+            shape=[len(sources.context.row_index), len(override_names)],
+        ),
+        "sources": {
+            "repaired_cross_sectional": _file_record(
+                output_root / "repaired_cross_sectional_features/manifest.json"
+            ),
+        },
+    }
+    _write_json(manifest_path, result)
+    return StaticFeatureOverride(
+        values=values,
+        columns=override_columns,
+        feature_names=override_names,
         manifest=result,
     )
 
@@ -3344,6 +3694,57 @@ def evaluate_source_availability_stress(
             sources, output_root=output_root
         )
         output_name = "corrected_rank_core_source_availability_stress"
+    elif availability_profile == "corrected_rank_rebuildable_market_path_core":
+        retained = frozenset(
+            {
+                "daily_price_volume_technical",
+                "daily_cross_sectional_technical",
+                "market_state",
+                "industry_context",
+                "size_liquidity_and_status",
+                "same_day_5m",
+            }
+        )
+        all_families = {
+            str(record["analytic_family"])
+            for record in sources.context.model_manifest["features"]
+        }
+        family_names = tuple(sorted(all_families.difference(retained)))
+        masked_records, masked_columns = _masked_feature_contract(
+            sources, families=family_names, expected_count=243
+        )
+        static_feature_override = prepare_repaired_cross_sectional_features(
+            sources, output_root=output_root
+        )
+        output_name = "corrected_rank_full_core_source_availability_stress"
+    elif availability_profile == "rebuildable_current_core":
+        retained = frozenset(
+            {
+                "daily_price_volume_technical",
+                "daily_cross_sectional_technical",
+                "market_state",
+                "industry_context",
+                "size_liquidity_and_status",
+                "same_day_5m",
+            }
+        )
+        all_families = {
+            str(record["analytic_family"])
+            for record in sources.context.model_manifest["features"]
+        }
+        family_names = tuple(sorted(all_families.difference(retained)))
+        masked_records, masked_columns = _masked_feature_contract(
+            sources, families=family_names, expected_count=243
+        )
+        from daily_research.path_policy import (
+            seq100_quality_liquidity_data_prep as prep,
+        )
+
+        _, qdp_paths = prep._qdp_snapshot(base.WORKSPACE_ROOT)
+        static_feature_override = prepare_rebuildable_core_features(
+            sources, output_root=output_root, qdp_paths=qdp_paths
+        )
+        output_name = "rebuildable_current_core_source_availability_stress"
     else:
         raise SequenceChallengerError(
             f"unknown_availability_profile:{availability_profile}"
@@ -3734,6 +4135,334 @@ def evaluate_source_availability_stress(
         maximum_drawdown=account["maximum_drawdown"],
         overlap=selection_overlap,
     )
+    return result
+
+
+def replay_rebuildable_core_robustness(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    starting_cash: float = 1_000_000.0,
+) -> dict[str, Any]:
+    """Stress the rebuilt-source candidate without searching a new policy."""
+
+    source_path = (
+        output_root
+        / "rebuildable_current_core_source_availability_stress/manifest.json"
+    )
+    if not source_path.is_file():
+        raise SequenceChallengerError("rebuildable_current_core_stress_missing")
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    if source.get("status") != "completed" or not bool(
+        source.get("availability_gate", {}).get("passed")
+    ):
+        raise SequenceChallengerError("rebuildable_current_core_stress_not_passed")
+    selection_path = Path(source["files"]["top10_selections"]["path"])
+    selections = pd.read_parquet(selection_path)
+    required = {
+        "selection_rank",
+        "fold",
+        "date_idx",
+        "candidate_id",
+        "model_row_position",
+        "market_entry_filled",
+        "symbol",
+        "variant",
+    }
+    if not required.issubset(selections.columns):
+        raise SequenceChallengerError("rebuildable_selection_contract_changed")
+    variants = [
+        {
+            "name": "primary_h3_top10_2x",
+            "horizon": 3,
+            "top_k": 10,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 1,
+        },
+        {
+            "name": "exit_h2_top10_2x",
+            "horizon": 2,
+            "top_k": 10,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 1,
+        },
+        {
+            "name": "exit_h5_top10_2x",
+            "horizon": 5,
+            "top_k": 10,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 1,
+        },
+        {
+            "name": "concentration_h3_top1_2x",
+            "horizon": 3,
+            "top_k": 1,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 1,
+        },
+        {
+            "name": "concentration_h3_top3_2x",
+            "horizon": 3,
+            "top_k": 3,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 1,
+        },
+        {
+            "name": "cost_h3_top10_3x",
+            "horizon": 3,
+            "top_k": 10,
+            "slippage_multiplier": 3.0,
+            "minimum_fold": 1,
+        },
+        {
+            "name": "tail_cap10_h3_top10_2x",
+            "horizon": 3,
+            "top_k": 10,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 1,
+            "maximum_credited_gross_return": 0.10,
+        },
+        {
+            "name": "tail_cap5_h3_top10_2x",
+            "horizon": 3,
+            "top_k": 10,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 1,
+            "maximum_credited_gross_return": 0.05,
+        },
+        {
+            "name": "confirmation_h3_top10_2x_folds2to5",
+            "horizon": 3,
+            "top_k": 10,
+            "slippage_multiplier": 2.0,
+            "minimum_fold": 2,
+        },
+    ]
+    fingerprint = _stable_hash(
+        {
+            "schema": REBUILDABLE_ROBUSTNESS_SCHEMA,
+            "source_sha256": base._sha256(source_path),
+            "selection_sha256": base._sha256(selection_path),
+            "study_sha256": base._sha256(study_path),
+            "path_target_manifest_sha256": base._sha256(
+                output_root / "targets" / "manifest.json"
+            ),
+            "starting_cash": float(starting_cash),
+            "variants": variants,
+            "no_variant_selection": True,
+        }
+    )
+    output_dir = output_root / "rebuildable_core_account_robustness"
+    manifest_path = output_dir / "manifest.json"
+    if manifest_path.is_file():
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+        ):
+            return current
+    study = base.load_study(study_path)
+    sources = _load_sources(study, output_root=output_root)
+    context = sources.context
+    daily_raw = sources.daily_raw
+    raw_open = base._open_array(
+        context.pack["execution_arrays"]["entry_open_raw"], dtype=np.float32
+    )
+    entry_filled = sources.entry_filled
+    costs = base.parse_execution_costs(context.pack)
+    target_columns = list(sources.path_manifest["target_columns"])
+    horizons = list(sources.path_manifest["files"]["legal_fill_days"]["horizons"])
+    source_variants = selections["variant"].drop_duplicates().astype(str).tolist()
+    if len(source_variants) != 1:
+        raise SequenceChallengerError(
+            f"rebuildable_selection_variant_changed:{source_variants}"
+        )
+    source_variant = source_variants[0]
+    summaries: list[dict[str, Any]] = []
+    task_files: dict[str, Any] = {}
+    for variant in variants:
+        horizon = int(variant["horizon"])
+        top_k = int(variant["top_k"])
+        current = selections.loc[
+            (selections["selection_rank"] <= top_k)
+            & (selections["fold"] >= int(variant["minimum_fold"]))
+        ].copy()
+        gross_column = target_columns.index(f"legal_exit_return_d{horizon}")
+        horizon_column = horizons.index(horizon)
+        rows = current["model_row_position"].to_numpy(dtype=np.int64)
+        known = ~current["market_entry_filled"].to_numpy(dtype=bool) | np.asarray(
+            sources.path_valid[rows, gross_column], dtype=bool
+        )
+        date_known = (
+            pd.Series(known, index=current.index).groupby(current["date_idx"]).all()
+        )
+        current = current.loc[
+            current["date_idx"].map(date_known).fillna(False)
+        ].copy()
+        rows = current["model_row_position"].to_numpy(dtype=np.int64)
+        current["legal_gross_return"] = np.asarray(
+            sources.path_values[rows, gross_column], dtype=np.float32
+        )
+        current["fill_day"] = np.asarray(
+            sources.fill_days[rows, horizon_column], dtype=np.int16
+        )
+        # Reuse the source selector's identity.  The account simulator applies
+        # the requested stress costs at replay time, but it intentionally
+        # matches selections on the source run's ``variant`` and ``base``
+        # selection cost label.  Replacing either label here makes the schedule
+        # empty even though the parquet contains valid selections.
+        current["variant"] = source_variant
+        current["exit_policy"] = "planned_close"
+        current["gate"] = "tree_and_neural_consensus"
+        current["top_k"] = top_k
+        current["cost_scenario"] = "base"
+        current["take_profit_hit"] = False
+        spec: dict[str, Any] = {
+            "variant": source_variant,
+            "exit_policy": "planned_close",
+            "gate": "tree_and_neural_consensus",
+            "top_k": top_k,
+            "cost_scenario": "stress",
+            "slippage_multiplier": float(variant["slippage_multiplier"]),
+            "cohort_equity_fraction": 1.0 / float(horizon),
+            "planned_fill_day": horizon,
+        }
+        if "maximum_credited_gross_return" in variant:
+            spec["maximum_credited_gross_return"] = float(
+                variant["maximum_credited_gross_return"]
+            )
+        result, equity, trades = base._simulate_account_spec(
+            spec=spec,
+            selections=current,
+            context=context,
+            daily_raw=daily_raw,
+            raw_open=raw_open,
+            entry_filled=entry_filled,
+            costs=costs,
+            starting_cash=float(starting_cash),
+        )
+        result["variant_name"] = str(variant["name"])
+        result["minimum_fold"] = int(variant["minimum_fold"])
+        result["annualized_net_return"] = float(
+            (result["ending_equity"] / float(starting_cash))
+            ** (242.0 / max(len(equity), 1))
+            - 1.0
+        )
+        result["daily_return_hac"] = base._newey_west_interval(
+            equity["daily_net_return"].to_numpy(dtype=np.float64), lag=20
+        )
+        result["mean_invested_fraction"] = float(
+            np.mean(
+                1.0
+                - equity["cash"].to_numpy(dtype=np.float64)
+                / equity["equity"].to_numpy(dtype=np.float64)
+            )
+        )
+        total_pnl = float(trades["pnl"].sum()) if len(trades) else 0.0
+        result["largest_10_trade_pnl_share"] = (
+            float(trades.nlargest(10, "pnl")["pnl"].sum() / total_pnl)
+            if total_pnl > 0.0
+            else math.nan
+        )
+        task_dir = output_dir / "tasks" / str(variant["name"])
+        equity_path = task_dir / "equity.parquet"
+        trades_path = task_dir / "trades.parquet"
+        task_path = task_dir / "task_result.json"
+        base._write_parquet(equity, equity_path)
+        base._write_parquet(trades, trades_path)
+        payload = {
+            "schema": REBUILDABLE_ROBUSTNESS_SCHEMA,
+            "status": "completed",
+            "completed_at": _now(),
+            "fingerprint": fingerprint,
+            **result,
+            "files": {
+                "equity": _file_record(equity_path, row_count=len(equity)),
+                "trades": _file_record(trades_path, row_count=len(trades)),
+            },
+        }
+        _write_json(task_path, payload)
+        task_files[str(variant["name"])] = _file_record(task_path)
+        summaries.append(result)
+    indexed = {str(item["variant_name"]): item for item in summaries}
+    required_positive = (
+        "primary_h3_top10_2x",
+        "exit_h2_top10_2x",
+        "exit_h5_top10_2x",
+        "concentration_h3_top3_2x",
+        "cost_h3_top10_3x",
+        "tail_cap10_h3_top10_2x",
+        "confirmation_h3_top10_2x_folds2to5",
+    )
+    primary = indexed["primary_h3_top10_2x"]
+    robustness_gate = {
+        "required_positive_variants": list(required_positive),
+        "cap5_is_diagnostic_not_a_required_trading_rule": True,
+        "requires_primary_positive_hac_lower": True,
+        "requires_primary_six_positive_years": True,
+        "requires_primary_drawdown_above_minus_20pct": True,
+        "passed": bool(
+            all(
+                float(indexed[name]["total_net_return"]) > 0.0
+                for name in required_positive
+            )
+            and primary["daily_return_hac"]["lower"] is not None
+            and float(primary["daily_return_hac"]["lower"]) > 0.0
+            and int(primary["positive_year_count"]) == 6
+            and float(primary["maximum_drawdown"]) > -0.20
+        ),
+    }
+    summary_frame = pd.DataFrame(
+        [
+            {
+                "variant": item["variant_name"],
+                "horizon": item["spec"]["planned_fill_day"],
+                "top_k": item["spec"]["top_k"],
+                "slippage_multiplier": item["spec"]["slippage_multiplier"],
+                "maximum_credited_gross_return": item["spec"].get(
+                    "maximum_credited_gross_return"
+                ),
+                "minimum_fold": item["minimum_fold"],
+                "total_net_return": item["total_net_return"],
+                "annualized_net_return": item["annualized_net_return"],
+                "maximum_drawdown": item["maximum_drawdown"],
+                "positive_year_count": item["positive_year_count"],
+                "worst_year_return": item["worst_year_return"],
+                "daily_hac_lower": item["daily_return_hac"]["lower"],
+                "largest_10_trade_pnl_share": item["largest_10_trade_pnl_share"],
+                "trade_count": item["trade_count"],
+            }
+            for item in summaries
+        ]
+    )
+    summary_path = output_dir / "summary.parquet"
+    base._write_parquet(summary_frame, summary_path)
+    result = {
+        "schema": REBUILDABLE_ROBUSTNESS_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": base.STUDY_ID,
+        "fingerprint": fingerprint,
+        "variant_count": len(variants),
+        "summaries": summaries,
+        "robustness_gate": robustness_gate,
+        "decision_boundary": {
+            "candidate_and_market_gate_frozen_before_this_test": True,
+            "variants_are_diagnostics_not_a_new_policy_search": True,
+            "historical_result_is_adaptive_development_evidence": True,
+            "stable_profit_claim_allowed": False,
+            "forbidden_2026_outcome_read_count": 0,
+        },
+        "files": {
+            "summary": _file_record(summary_path, row_count=len(summary_frame)),
+            "tasks": task_files,
+        },
+        "sources": {
+            "rebuildable_current_core_stress": _file_record(source_path),
+            "selections": _file_record(selection_path),
+        },
+    }
+    _write_json(manifest_path, result)
     return result
 
 
@@ -4167,18 +4896,46 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--core-availability-stress", action="store_true")
     parser.add_argument("--exact-core-availability-stress", action="store_true")
     parser.add_argument("--repaired-rank-core-availability-stress", action="store_true")
+    parser.add_argument(
+        "--corrected-rank-full-core-availability-stress", action="store_true"
+    )
+    parser.add_argument(
+        "--rebuildable-current-core-availability-stress", action="store_true"
+    )
+    parser.add_argument("--rebuildable-core-robustness", action="store_true")
     parser.add_argument("--freeze-final-bundle", action="store_true")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    if args.freeze_final_bundle:
+    if args.rebuildable_core_robustness:
+        result = replay_rebuildable_core_robustness(
+            study_path=args.study,
+            output_root=args.output_root,
+        )
+    elif args.freeze_final_bundle:
         result = freeze_final_policy_bundle(
             study_path=args.study,
             output_root=args.output_root,
             lookback=args.lookback,
             date_batch_size=args.date_batch_size,
+        )
+    elif args.rebuildable_current_core_availability_stress:
+        result = evaluate_source_availability_stress(
+            study_path=args.study,
+            output_root=args.output_root,
+            lookback=args.lookback,
+            date_batch_size=args.date_batch_size,
+            availability_profile="rebuildable_current_core",
+        )
+    elif args.corrected_rank_full_core_availability_stress:
+        result = evaluate_source_availability_stress(
+            study_path=args.study,
+            output_root=args.output_root,
+            lookback=args.lookback,
+            date_batch_size=args.date_batch_size,
+            availability_profile="corrected_rank_rebuildable_market_path_core",
         )
     elif args.repaired_rank_core_availability_stress:
         result = evaluate_source_availability_stress(
