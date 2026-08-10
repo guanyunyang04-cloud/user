@@ -12,34 +12,37 @@ chart.
 
 There are now two distinct historical candidates. The exact quantifiable
 main-board 30/30/25/10/5 value-growth policy remains the longest-history,
-interpretable forward-shadow candidate. A new full-market D3 Top10 dual-gate
-policy is the strongest short-horizon challenger: its 2020-2025 stress account
-passed the frozen candidate gate with about 11.0% annualized return and 15.5%
-maximum drawdown. Neither is a production strategy or a profit guarantee. All
-2012-2025 outcomes are consumed and no independent post-freeze sample exists.
+interpretable candidate. A full-market D3 Top10 dual-gate policy is the
+strongest short-horizon challenger: its 2020-2025 validation account produced
+about 11.0% annualized return and 15.5% maximum drawdown. For this personal
+project, good causal validation-fold and exact-account performance is the
+operational acceptance standard; an untouched forward shadow is not required
+before continuing development or treating a strategy as usable historical
+evidence. This convention is pragmatic and does not make profit guaranteed.
 
-A current-source stress retrained the short-horizon architecture with 243
-temporarily unavailable fields masked and 167 cross-sectional/market/industry
-fields rebuilt from active QDP snapshots. Its D3 Top10 account still passed the
-narrow historical gate at about 8.0% annualized return and 16.1% drawdown, but
-D2, concentration, higher-cost and winner-cap neighbors were mixed. This is
-evidence of a real but thin historical dependency, not stable-profit proof.
+A source-outage stress retrained the short-horizon architecture with 243 fields
+masked and 167 cross-sectional/market/industry fields rebuilt. It is retained
+only as a diagnostic. Tushare is normally available, so the complete 557-field
+PIT matrix is the default model input; source-backed fields are removed only in
+an explicit feature ablation.
 
 A new post-selection diagnostic found that D120 historically dominated D60
 for this selector, including under the same finite-account constraints. D120
 is an adaptive retrospective challenger, not a replacement for the already
 frozen D60 forward arm and not independent confirmation.
 
-There is no active training, real order, or production process. The user has
-deferred new shadow scoring and wants historical strategy research to remain
-the priority. Existing isolated 2026 shadow artifacts remain untouched and may
-not feed historical fitting or claims.
+There is no active training, real order, or production process. New shadow
+scoring is deferred. Existing isolated 2026 shadow artifacts remain untouched;
+the current priority is continued 2012-2025 historical model competition.
 
 ## Formal research contract
 
 - Formal history is 2012-01-01 through 2025-12-31. Years 2010-2011 are burn-in
-  only. The user authorized an isolated append-only 2026 shadow boundary; no
-  2026 observation may flow back into historical selection, fitting, or claims.
+  only. Five forward validation folds cover 2020-2025 and use only earlier
+  eligible history for fitting, with the configured purge at each boundary.
+- Tushare-backed PIT fields are normally available. Use the complete 557-field
+  matrix by default and mask a source or feature family only for a deliberate
+  ablation or robustness test.
 - The primary universe is signal-date `quality_liquidity_pit`.
 - Signal-close decisions may use only information causally available by that
   close. Selection never uses future entry, sellability, return, or parser
@@ -49,10 +52,14 @@ not feed historical fitting or claims.
   slippage, capacity, concurrent holdings, cash, and terminal liquidation.
 - Formal performance uses adjusted total-return economics while costs and
   executable prices remain raw exchange prices.
-- Development, confirmation, and account layers have separate gates. A strong
-  account curve cannot override a failed source-alpha confirmation gate.
-- 2023-2025 have now been consumed for the current candidate. Do not retune it
-  on those years and call the result independent confirmation.
+- Model selection may reuse the fixed causal validation folds for iterative
+  development. Compare variants on validation Rank IC, exact finite-account
+  return, drawdown, year/fold consistency and tail dependence; do not optimize
+  a single lucky account endpoint in isolation.
+- Under the user's project convention, a variant that performs well on these
+  validation folds is treated as likely useful in practice. Describe it as
+  historical validation evidence, not as a guaranteed return or an independent
+  untouched confirmation.
 
 ## Authoritative data state
 
@@ -345,32 +352,34 @@ it does not turn historical evidence into guaranteed annual profit.
 
 ## True pause point and next step
 
-The value-growth policy has a frozen selector, exact finite account,
-development-only risk budget, complete path/T diagnostic, adaptive D120
-challenge, and an isolated 2026 shadow cohort. The short-horizon full-market
-policy now has a frozen D5 stock score, dual market gate, Top10 breadth, D3
-legal exit and exact finite-account evidence. All 2012-2025 evidence is
-consumed. Further historical weight, breadth, holding-day, exit, score or risk
-threshold tuning must not be presented as confirmation.
+The value-growth policy has an exact finite account and extensive path/exit
+diagnostics. The short-horizon full-market policy has a D5 tree/sequence stock
+score, dual market gate, Top10 breadth, D3 legal exit and exact finite-account
+evidence. These are useful baselines, but the full-market model search is not
+close to exhausted: only the planned lookback-8 compact GRU has been trained,
+and only two closely related LightGBM capacity profiles have been compared.
 
-Current user priority is historical strategy reliability; new shadow scoring
-is deferred. Next actions, in order:
+Current user priority is improving strategies on the existing 2012-2025 data;
+new shadow scoring is deferred. Next actions, in order:
 
-1. Treat the expired Tushare-compatible proxy as a temporary provider outage,
-   not evidence that its financial, technical, announcement or money-flow
-   fields are useless. Existing historical fields remain valid inputs subject
-   to their original PIT audit.
-2. When that source is available, rebuild the temporarily masked families with
-   unchanged PIT semantics and rerun the frozen full-market architecture. Make
-   a direct full-source versus 314-field comparison without another broad
-   threshold, horizon or score grid.
-3. Continue bounded historical robustness work on existing candidates: exact
-   costs, source consistency, time-block stability, breadth, concentration and
-   right-tail dependence. Every result remains adaptive development because all
-   2012-2025 outcomes have been seen.
-4. Do not reopen Chan, financing-growth, KAMA-cross or fixed take-profit grids;
-   their tested forms are already rejected.
-5. Current status is `historical_candidates_exist_reliability_not_proven`.
+1. Use all 557 causal fields and the same five forward validation folds. Train
+   the existing sequence challenger at lookbacks 16 and 32; run 60 only if the
+   shorter comparison suggests useful long-memory increment.
+2. Add a StockMixer-style lightweight temporal/indicator/cross-stock model,
+   then a bounded MASTER-style market-guided model. Add industry/concept shared
+   information (HIST-style) and regime-specialist routing (TRA/mixture style)
+   where they fit the available PIT data.
+3. Compare XGBoost histogram trees, modest multi-seed/profile LightGBM diversity
+   and OOF rank stacking across tree, GRU and mixer/attention families.
+4. Improve the learning problem with joint D2/D3/D5/D10 legal-return, downside,
+   right-tail, market-relative and industry-relative heads. Learn stock ranking
+   and trade/no-trade state together, then replay Top1/Top3/Top5/Top10 exactly.
+5. Start from the full input surface and run feature-family ablation only after
+   comparable full-input baselines exist. Financing sequences, full five-minute
+   paths and strict-Chan attributes are auxiliary families, not candidate gates.
+6. Do not reopen small Chan, financing-growth, KAMA-cross or fixed take-profit
+   rule grids; their tested literal forms are already rejected.
+7. Current status is `historical_candidate_exists_model_search_incomplete`.
 
 ## Authoritative paths
 
@@ -464,8 +473,9 @@ retaining larger right-tail winners.
 
 Direct D3 ranking was weaker (mean Rank IC about 0.039 and negative stress
 Top10 mean). A conditional D3 10% tail veto reduced return and improved drawdown
-only marginally; neither challenger is adopted. Historical tuning is now
-closed for this candidate contract.
+only marginally; neither challenger is adopted. The current candidate remains
+a fixed comparison baseline, while architecture, sequence length, target and
+heterogeneous-ensemble research stays open under the same causal folds.
 
 The corrected current-source robustness replay uses 314 retained fields, of
 which 167 cross-sectional/market/industry fields are rebuilt from active QDP
@@ -478,10 +488,10 @@ positive in total wealth but weaker statistically. A 5% winner cap lost about
 was invalid because it reused D3 outcomes; schema version 2 reloads the correct
 horizon-specific legal returns and fill days.
 
-The unavailable families were masked because of current provider/source status;
-the user reports that the Tushare-compatible proxy expired. Do not interpret
-this temporary outage as a negative feature ablation. Shadow scoring remains
-deferred while historical reliability is investigated.
+The source-availability replay is diagnostic only. Tushare is assumed normally
+available, and the original full 557-field PIT surface remains the default for
+all new research. Shadow scoring remains deferred while historical model
+competition continues.
 
 Durable record:
 `daily_research/research_records/seq100/seq100_full_market_multitask_forecast_v1_20260810/research_record.md`.
