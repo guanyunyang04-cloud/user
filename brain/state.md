@@ -47,6 +47,16 @@ net-return distributions and action value rather than deterministic direction.
   positive-trend hard screen, the extra price-confirmation subscore has
   negative D120 Rank IC and should not be rewarded more aggressively without
   a new independently specified test.
+- A single frozen Framework 2.0 risk-overlay challenger kept the old policy's
+  exact industry-capped Top30 scan universe and reranked it with expanding
+  revision-reversal, multiple-compression and early-spike/fade heads. The
+  heads genuinely predict their events (full-history OOF AUC 0.613/0.607/0.587),
+  but risk-only reranking is rejected: paired D120 return falls 1.42 percentage
+  points with a negative HAC upper bound, while the matched account falls from
+  CNY2.863m to CNY2.647m. Drawdown improves only about 0.50 points and winner
+  concentration worsens. Do not tune risk weights, thresholds, band width or
+  a manual core/risk blend on this consumed result. Retain the heads only as
+  diagnostics or auxiliary targets for a separately frozen action-value model.
 
 ## Existing interpretable candidates
 
@@ -196,6 +206,12 @@ the result is adaptive retrospective research, not independent confirmation.
   and the sibling files in that study root.
 - Seven-family framework durable research record:
   `daily_research/research_records/seq100/seq100_qver_confirmation_effect_v1_20260811/research_record.md`.
+- Frozen QVER risk-overlay validation:
+  `daily_research/studies/seq100_qver_risk_overlay_validation_v1.json`.
+- Risk-overlay authoritative summary and record:
+  `daily_research/output/path_policy/studies/seq100_qver_risk_overlay_validation_v1/summary.json`
+  and
+  `daily_research/research_records/seq100/seq100_qver_risk_overlay_validation_v1_20260811/research_record.md`.
 
 ## Code and verification
 
@@ -209,6 +225,9 @@ the result is adaptive retrospective research, not independent confirmation.
 - `daily_research/path_policy/seq100_qver_confirmation_effect.py` implements
   the frozen attachment audit, post-selection outcome reads, forecast
   realization, scenario decomposition and matched legal account replay.
+- `daily_research/path_policy/seq100_qver_risk_overlay_validation.py` implements
+  the frozen old-Top30 expanding three-head risk rerank, strict D120 label
+  availability, paired cohort inference and exactly matched account replay.
 - Focused and full joint tests pass: 40 tests. Ruff, `py_compile` and
   `git diff --check` pass. All new target-variant manifests plus the refreshed
   sequence and three-model mean account manifests explicitly report zero
@@ -216,6 +235,10 @@ the result is adaptive retrospective research, not independent confirmation.
 - The seven-family audit's five focused tests pass; its summary schema, file
   hashes, score reconstruction, selection uniqueness, industry cap, account
   endpoint and zero forbidden 2026 reads were independently rechecked.
+- The risk-overlay module's six tests and the five base QVER tests pass. Its
+  4,982 pre-outcome band identities, industry cap, probability bounds, strict
+  training-label timing, exact old-account endpoint, artifact hashes and zero
+  forbidden 2026 reads were independently rechecked.
 
 ## Next step
 
@@ -223,9 +246,10 @@ Do not label the current challenger as stable or deploy it. Preserve the
 three-model mean as the current short-horizon historical benchmark and the old
 30/30/25/10/5 score as the stronger interpretable D60 baseline. Use the new
 seven-family framework as a candidate-pool and scenario-audit lens, especially
-for revision reversal, multiple compression and early-spike fade risk. When
-research continues, choose one pre-specified architecture competition (for
-example a lightweight StockMixer/MASTER-style sequence model or a
-return/downside multitask head) using the same five folds and exact account
-contract. Avoid another ad hoc fusion, weight adjustment or small rule grid
-until a new model supplies genuinely independent OOF information.
+for revision reversal, multiple compression and early-spike fade risk. The
+equal-risk Top30 rerank has now been rejected even though its individual heads
+work. When research continues, prefer one pre-specified return/downside
+multi-task action-value competition that learns the return-risk trade-off using
+the same five folds and exact account contract. Avoid another ad hoc fusion,
+weight adjustment, risk threshold or small rule grid until a new model supplies
+genuinely independent OOF information.

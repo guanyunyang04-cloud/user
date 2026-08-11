@@ -1,0 +1,160 @@
+{
+  "study_id": "seq100_qver_risk_overlay_validation_v1",
+  "status": "frozen_retrospective_single_challenger_validation",
+  "purpose": "Test one minimal-change Framework 2.0 challenger: preserve the frozen 30/30/25/10/5 core Top30 scan universe and legal account contract, then rerank only that candidate band using three expanding, point-in-time risk heads.",
+  "epistemic_contract": {
+    "all_2012_2025_outcomes_are_retrospectively_consumed": true,
+    "no_historical_period_is_untouched_confirmation": true,
+    "candidate_band_is_frozen_before_outcome_reads": true,
+    "risk_predictions_use_only_labels_available_before_each_signal": true,
+    "single_challenger_only": true,
+    "parameter_weight_and_threshold_grid_forbidden": true,
+    "2026_inputs_and_outcomes_are_forbidden": true,
+    "historical_success_cannot_create_a_live_profit_claim": true
+  },
+  "source": {
+    "qver_study": "daily_research/studies/seq100_qver_confirmation_effect_v1.json",
+    "qver_study_sha256": "d8adf0fc4f05ab3be330bbefeb1722ed8c2bb1dbdf954d4bbfecb887e6c5d6bc",
+    "qver_summary": "daily_research/output/path_policy/studies/seq100_qver_confirmation_effect_v1/summary.json",
+    "qver_summary_sha256": "24a67a326259e1c82b9a646d617e509cec9b1a39ec86093f3296010e13525af9",
+    "exact_account_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+    "exact_account_summary_sha256": "98cfd971cf34116e2bdb0cb00c701eca3cff36a6a27c1b9a40355d29ef18ffb5",
+    "formal_start_date": "2012-01-01",
+    "maximum_outcome_date": "2025-12-31",
+    "maximum_account_mark_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "candidate_band": {
+    "source_score": "exact_full_score",
+    "source_eligibility": "eligible__exact_full_top10",
+    "scan_count": 30,
+    "maximum_names_per_pit_industry": 2,
+    "selection_count": 10,
+    "definition": "the exact frozen old-account Top30 industry-capped scan list, formed before any outcome read"
+  },
+  "risk_heads": {
+    "revision_reversal": {
+      "label": "mean future 90-day net-profit and EPS revision is negative at the latest PIT snapshot on or before the legal D120 exit",
+      "features": [
+        "revision_np_30",
+        "revision_eps_30",
+        "revision_np_90",
+        "revision_eps_90",
+        "current_np_n",
+        "current_eps_n",
+        "analyst_net_profit_revision_log",
+        "analyst_eps_revision_log",
+        "earnings_revision_score"
+      ]
+    },
+    "multiple_compression": {
+      "label": "implied valuation-multiple change at the legal D120 snapshot is below -5%",
+      "features": [
+        "signed_log_pe",
+        "signed_log_pb",
+        "forward_earnings_yield",
+        "ttm_fcf_yield",
+        "normalized_earnings_yield_base",
+        "valuation_score",
+        "industry_relative_ret20",
+        "financial_net_profit_yoy",
+        "revision_np_90",
+        "log_total_market_value"
+      ]
+    },
+    "early_spike_fade": {
+      "label": "frozen path-shape class equals early_spike_fade",
+      "features": [
+        "industry_relative_ret20",
+        "trend_slope_20d",
+        "price_confirmation_score_exact",
+        "quarter_gap_target_ratio",
+        "peer_median_target_ratio",
+        "peer_right_edge_target_ratio",
+        "current_pe",
+        "log_total_market_value",
+        "revision_np_30",
+        "cashflow_cfo_to_income"
+      ]
+    }
+  },
+  "model": {
+    "family": "logistic_regression",
+    "preprocessing": "training-median imputation with missing indicators, then robust scaling using the training 10th and 90th percentiles",
+    "solver": "liblinear",
+    "penalty": "l2",
+    "c": 1.0,
+    "class_weight": null,
+    "maximum_iterations": 1000,
+    "seed": 20260811,
+    "training_window": "expanding",
+    "minimum_training_rows": 360,
+    "minimum_class_count": 30,
+    "label_availability": "legal D120 exit date index must be strictly earlier than the current signal date index",
+    "all_three_heads_required_for_reordering": true,
+    "pretraining_behavior": "neutral risk for all heads and exact preservation of old core order"
+  },
+  "reranking": {
+    "within_date_head_transform": "ascending percentile rank of predicted event probability; higher percentile means higher risk",
+    "head_weights": {
+      "revision_reversal": 0.3333333333333333,
+      "multiple_compression": 0.3333333333333333,
+      "early_spike_fade": 0.3333333333333333
+    },
+    "candidate_band_order": "ascending mean risk percentile, then old core band rank, then candidate_id",
+    "core_score_blending": false,
+    "hard_risk_threshold": null,
+    "parameter_grid_performed": false
+  },
+  "outcomes": {
+    "return_horizons_open_days": [20, 60, 120],
+    "primary_horizon_open_days": 120,
+    "account_exit_open_days": 60,
+    "sell_retry_open_days": 20,
+    "round_trip_cost_proxy": 0.006
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "position_slots": 30,
+    "monthly_order_count": 10,
+    "candidate_scan_count": 30,
+    "entry": "next legal raw-price open",
+    "exit": "fixed D60 close request deferred until the first legal sellable close",
+    "cost_scenario": "double_slippage",
+    "pyramiding": false,
+    "replace_duplicate_ranked_names": true,
+    "maximum_signal_day_amount_fraction": 0.005,
+    "matched_frozen_gross_fraction": 0.6860894024612805,
+    "matched_gross_source": "seq100_exact_value_growth_account_v1 development-only frozen risk budget",
+    "full_exposure_diagnostic": true
+  },
+  "evaluation": {
+    "years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "periods": {
+      "development_already_consumed": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+      "middle_already_consumed": [2020, 2021, 2022],
+      "late_already_consumed": [2023, 2024, 2025]
+    },
+    "inference": {
+      "hac_lag_months": 3,
+      "block_length_months": 3,
+      "bootstrap_repetitions": 5000,
+      "seed": 20260811
+    },
+    "frozen_acceptance_gates": {
+      "all_three_risk_head_full_history_auc_above_half": true,
+      "d120_challenger_minus_baseline_hac_lcb_nonnegative": true,
+      "matched_account_annualized_log_growth_not_lower": true,
+      "matched_account_maximum_drawdown_not_worse": true,
+      "selected_early_spike_fade_fraction_not_higher": true,
+      "account_top10_positive_pnl_share_not_higher": true
+    }
+  },
+  "decision_boundary": {
+    "retrospective_validation_only": true,
+    "live_alpha_claim_allowed": false,
+    "stable_profit_claim_allowed": false,
+    "production_strategy_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_qver_risk_overlay_validation_v1"
+  }
+}
