@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -187,16 +188,184 @@ def test_ensemble_protocols_use_isolated_artifact_roots() -> None:
     assert baseline != seeded
 
 
+def test_payoff_ensemble_artifacts_are_horizon_isolated() -> None:
+    root = Path("output")
+
+    d5 = study._payoff_ensemble_root(
+        root,
+        "payoff_ensemble_evaluation",
+        lookback=16,
+        horizon=5,
+        training_mode="outer_early_stop",
+        tree_training_mode="outer_early_stop",
+        seed_offsets=(0,),
+    )
+    d10 = study._payoff_ensemble_root(
+        root,
+        "payoff_ensemble_evaluation",
+        lookback=16,
+        horizon=10,
+        training_mode="outer_early_stop",
+        tree_training_mode="outer_early_stop",
+        seed_offsets=(0,),
+    )
+    conservative = study._payoff_ensemble_root(
+        root,
+        "payoff_ensemble_evaluation",
+        lookback=16,
+        horizon=10,
+        training_mode="outer_early_stop",
+        tree_training_mode="outer_early_stop",
+        seed_offsets=(0,),
+        fusion_method="minimum",
+    )
+    multi_tree = study._payoff_ensemble_root(
+        root,
+        "payoff_ensemble_evaluation",
+        lookback=16,
+        horizon=10,
+        training_mode="outer_early_stop",
+        tree_training_mode="outer_early_stop",
+        seed_offsets=(0,),
+        tree_profiles=("strong_127", "qlib_capacity_210"),
+    )
+
+    assert d5 == (
+        root
+        / "payoff_ensemble_evaluation/horizon_5/lookback_16"
+        / "sequence_outer_early_stop__tree_outer_early_stop"
+    )
+    assert d10 == (
+        root
+        / "payoff_ensemble_evaluation/horizon_10/lookback_16"
+        / "sequence_outer_early_stop__tree_outer_early_stop"
+    )
+    assert conservative == (
+        root
+        / "payoff_ensemble_evaluation/horizon_10/lookback_16"
+        / "sequence_outer_early_stop__tree_outer_early_stop__fusion_minimum"
+    )
+    assert multi_tree == (
+        root
+        / "payoff_ensemble_evaluation/horizon_10/lookback_16"
+        / "sequence_outer_early_stop__tree_outer_early_stop"
+        "__tree_profiles_strong_127_qlib_capacity_210"
+    )
+    assert d5 != d10
+    assert conservative != d10
+    assert multi_tree != d10
+
+
+def test_audited_manifest_cache_requires_explicit_zero_forbidden_reads() -> None:
+    manifest = {"status": "completed", "fingerprint": "expected"}
+
+    assert not study._audited_manifest_is_current(manifest, "expected")
+    manifest["forbidden_2026_read_count"] = 1
+    assert not study._audited_manifest_is_current(manifest, "expected")
+    manifest["forbidden_2026_read_count"] = 0
+    assert study._audited_manifest_is_current(manifest, "expected")
+    assert not study._audited_manifest_is_current(manifest, "different")
+
+
+def test_exact_payoff_account_specs_match_tree_stress_contract() -> None:
+    specs = study._exact_payoff_account_specs(
+        variant="sequence_payoff", horizon=10
+    )
+
+    assert len(specs) == 12
+    assert {item["variant"] for item in specs} == {"sequence_payoff"}
+    assert {item["cohort_equity_fraction"] for item in specs} == {0.1}
+    assert {item["planned_fill_day"] for item in specs} == {10}
+    assert {
+        int(item["top_k"])
+        for item in specs
+        if item.get("maximum_credited_gross_return") is None
+    } == {1, 3, 5, 10}
+    assert sum(
+        item.get("maximum_credited_gross_return") is None for item in specs
+    ) == 8
+    assert {
+        item.get("maximum_credited_gross_return")
+        for item in specs
+        if item.get("maximum_credited_gross_return") is not None
+    } == {0.05, 0.10}
+
+
+def test_payoff_ensemble_prediction_uses_date_local_component_ranks() -> None:
+    row_index = pd.DataFrame(
+        {
+            "candidate_id": [1, 2, 3, 4],
+            "date_idx": [10, 10, 11, 11],
+        }
+    )
+    sources = SimpleNamespace(
+        context=SimpleNamespace(row_index=row_index),
+        exact_valid=np.ones((4, 2), dtype=np.uint8),
+        base_column=0,
+        stress_column=1,
+    )
+
+    prediction, components = study._payoff_ensemble_prediction(
+        sources=sources,
+        validation_positions=np.arange(4, dtype=np.int64),
+        sequence_prediction=np.asarray([1.0, 2.0, 100.0, 200.0]),
+        tree_prediction=np.asarray([2.0, 1.0, 100.0, 200.0]),
+    )
+
+    np.testing.assert_allclose(prediction.stock_score, [0.75, 0.75, 0.5, 1.0])
+    np.testing.assert_allclose(
+        components["sequence_rank"].to_numpy(), [0.5, 1.0, 0.5, 1.0]
+    )
+    assert prediction.market_return == {10: 0.0, 11: 0.0}
+    assert prediction.market_probability == {10: 0.5, 11: 0.5}
+
+    conservative, _ = study._payoff_ensemble_prediction(
+        sources=sources,
+        validation_positions=np.arange(4, dtype=np.int64),
+        sequence_prediction=np.asarray([1.0, 2.0, 100.0, 200.0]),
+        tree_prediction=np.asarray([2.0, 1.0, 100.0, 200.0]),
+        fusion_method="minimum",
+    )
+    np.testing.assert_allclose(conservative.stock_score, [0.5, 0.5, 0.5, 1.0])
+
+    multi_tree, components = study._payoff_ensemble_prediction(
+        sources=sources,
+        validation_positions=np.arange(4, dtype=np.int64),
+        sequence_prediction=np.asarray([1.0, 2.0, 100.0, 200.0]),
+        tree_prediction=np.asarray([2.0, 1.0, 100.0, 200.0]),
+        additional_tree_predictions={
+            "qlib_capacity_210": np.asarray([1.0, 2.0, 200.0, 100.0])
+        },
+    )
+    np.testing.assert_allclose(
+        multi_tree.stock_score,
+        [2.0 / 3.0, 5.0 / 6.0, 2.0 / 3.0, 5.0 / 6.0],
+    )
+    assert "tree_rank__qlib_capacity_210" in components
+
+
 def test_sequence_parser_defaults_to_direct_outer_early_stop() -> None:
     args = study._build_parser().parse_args([])
+    multi_tree = study._build_parser().parse_args(
+        ["--payoff-tree-profiles", "strong_127,qlib_capacity_210"]
+    )
 
     assert args.training_mode == "outer_early_stop"
     assert args.seed_offset == 0
     assert args.maximum_epochs == study.DEFAULT_MAX_EPOCHS
     assert args.patience == study.DEFAULT_PATIENCE
     assert args.horizon == 5
+    assert args.payoff_fusion_method == "mean"
+    assert args.payoff_tree_profiles == ""
+    assert multi_tree.payoff_tree_profiles == "strong_127,qlib_capacity_210"
     assert (
         study._build_parser().parse_args(["--horizon", "10"]).horizon == 10
+    )
+    assert (
+        study._build_parser()
+        .parse_args(["--payoff-fusion-method", "minimum"])
+        .payoff_fusion_method
+        == "minimum"
     )
 
 
@@ -214,6 +383,12 @@ def test_final_bundle_cli_is_explicit() -> None:
         ["--rebuildable-current-core-availability-stress"]
     )
     robustness = study._build_parser().parse_args(["--rebuildable-core-robustness"])
+    payoff_evaluation = study._build_parser().parse_args(
+        ["--evaluate-payoff-ensemble", "--horizon", "10"]
+    )
+    payoff_replay = study._build_parser().parse_args(
+        ["--replay-payoff-ensemble", "--horizon", "10"]
+    )
 
     assert args.freeze_final_bundle is True
     assert args.availability_stress is False
@@ -226,6 +401,10 @@ def test_final_bundle_cli_is_explicit() -> None:
     assert corrected_full.corrected_rank_full_core_availability_stress is True
     assert rebuildable.rebuildable_current_core_availability_stress is True
     assert robustness.rebuildable_core_robustness is True
+    assert payoff_evaluation.evaluate_payoff_ensemble is True
+    assert payoff_evaluation.horizon == 10
+    assert payoff_replay.replay_payoff_ensemble is True
+    assert payoff_replay.horizon == 10
 
 
 def test_frozen_candidate_keeps_adaptive_boundary_and_no_2026_outcome() -> None:

@@ -437,6 +437,12 @@ def test_exact_net_training_targets_cover_rank_probability_and_quantile() -> Non
         "exact_net",
     )
     assert study._target_definition("exact_net_return_d5_rank")[1] == "ranking"
+    assert study._target_definition("market_excess_endpoint_return_d10_rank") == (
+        "market_excess_endpoint_return_d10",
+        "ranking",
+        0.0,
+        "path",
+    )
     assert study._target_definition("exact_net_return_d5_positive")[1] == "binary"
     assert study._target_definition("exact_net_return_d5_q10")[1] == "quantile"
     plan = study.resource_plan(
@@ -458,17 +464,36 @@ def test_exact_net_training_targets_cover_rank_probability_and_quantile() -> Non
 def test_payoff_account_target_and_specs_preserve_horizon_contract() -> None:
     assert study._exact_net_target_horizon("exact_net_return_d10_rank") == 10
     assert study._exact_net_target_horizon("exact_net_return_d2_positive") == 2
+    assert study._payoff_ranking_target_horizon("exact_net_return_d10_rank") == 10
+    assert study._payoff_scoring_target_horizon("exact_net_return_d10_q10") == 10
+    assert (
+        study._payoff_ranking_target_horizon(
+            "market_excess_endpoint_return_d10_rank"
+        )
+        == 10
+    )
     with pytest.raises(study.FullMarketForecastError):
         study._exact_net_target_horizon("legal_exit_return_d10")
+    with pytest.raises(study.FullMarketForecastError):
+        study._payoff_ranking_target_horizon("legal_exit_return_d10")
+    with pytest.raises(study.FullMarketForecastError):
+        study._payoff_scoring_target_horizon("exact_net_return_d10_positive")
 
     specs = study._payoff_account_specs(10)
+    relative_specs = study._payoff_account_specs(
+        10, variant="market_excess_endpoint_return_d10_rank"
+    )
+    assert {
+        item["variant"] for item in relative_specs
+    } == {"market_excess_endpoint_return_d10_rank"}
     ordinary = [
         item for item in specs if "maximum_credited_gross_return" not in item
     ]
     capped = [
         item for item in specs if "maximum_credited_gross_return" in item
     ]
-    assert {int(item["top_k"]) for item in ordinary} == {1, 3, 10}
+    assert study.PAYOFF_TOP_KS == (1, 3, 5, 10)
+    assert {int(item["top_k"]) for item in ordinary} == {1, 3, 5, 10}
     assert {str(item["cost_scenario"]) for item in ordinary} == {"base", "stress"}
     assert all(item["planned_fill_day"] == 10 for item in specs)
     assert all(item["cohort_equity_fraction"] == pytest.approx(0.1) for item in specs)
@@ -476,6 +501,23 @@ def test_payoff_account_target_and_specs_preserve_horizon_contract() -> None:
         0.05,
         0.10,
     }
+
+
+def test_downside_fusion_definition_is_frozen_and_cli_is_explicit() -> None:
+    assert study.PAYOFF_DOWNSIDE_FUSION_TARGETS == (
+        "exact_net_return_d10_rank",
+        "exact_net_return_d10_q10",
+    )
+    assert study.PAYOFF_DOWNSIDE_FUSION_VARIANT.startswith(
+        "exact_net_return_d10_rank__"
+    )
+    parser = study._parser()
+    assert parser.parse_args(["evaluate-payoff-downside-fusion"]).command == (
+        "evaluate-payoff-downside-fusion"
+    )
+    assert parser.parse_args(
+        ["replay-payoff-downside-fusion-account"]
+    ).command == "replay-payoff-downside-fusion-account"
 
 
 def test_newey_west_interval_is_finite_for_daily_returns() -> None:

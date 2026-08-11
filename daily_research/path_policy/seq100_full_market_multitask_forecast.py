@@ -76,6 +76,7 @@ TAKE_PROFIT_EXIT_THRESHOLDS = {
 }
 PRIMARY_EXIT_POLICIES = ("planned_close",)
 EXACT_NET_SCENARIOS = {"base": 1.0, "stress": 2.0}
+PAYOFF_TOP_KS = (1, 3, 5, 10)
 LOWER_QUANTILE_ALPHA = 0.10
 
 TARGET_COLUMNS = (
@@ -107,6 +108,10 @@ EVALUATION_SCHEMA = "seq100_full_market_multitask_oof_evaluation/1"
 ACCOUNT_REPLAY_SCHEMA = "seq100_full_market_multitask_account_replay/1"
 PAYOFF_EVALUATION_SCHEMA = "seq100_full_market_payoff_oof_evaluation/1"
 PAYOFF_ACCOUNT_REPLAY_SCHEMA = "seq100_full_market_payoff_account_replay/1"
+PAYOFF_SCORE_FUSION_SCHEMA = "seq100_full_market_payoff_score_fusion_evaluation/1"
+PAYOFF_SCORE_FUSION_ACCOUNT_SCHEMA = (
+    "seq100_full_market_payoff_score_fusion_account_replay/1"
+)
 MARKET_REGIME_SCHEMA = "seq100_full_market_market_regime_evaluation/1"
 
 DEFAULT_STUDY_PATH = (
@@ -122,6 +127,15 @@ DEFAULT_OUTPUT_ROOT = (
 
 class FullMarketForecastError(RuntimeError):
     pass
+
+
+PAYOFF_DOWNSIDE_FUSION_TARGETS = (
+    "exact_net_return_d10_rank",
+    "exact_net_return_d10_q10",
+)
+PAYOFF_DOWNSIDE_FUSION_VARIANT = (
+    "exact_net_return_d10_rank__exact_net_return_d10_q10_rank_fusion"
+)
 
 
 def _now() -> str:
@@ -1785,6 +1799,38 @@ def _exact_net_target_horizon(target: str) -> int:
     return horizon
 
 
+def _payoff_scoring_target_horizon(target: str) -> int:
+    """Return the executable payoff horizon for a supported scoring target.
+
+    Exact-net ranks are the primary target.  The exact-net lower-quantile head
+    and market-relative endpoint ranks are explicit challengers, but all their
+    predictions are scored against the matching executable net-return panel.
+    """
+
+    source, kind, _, panel = _target_definition(target)
+    if panel == "exact_net":
+        if kind not in {"ranking", "quantile"}:
+            raise FullMarketForecastError("unsupported_payoff_scoring_target")
+        return _exact_net_target_horizon(target)
+    prefix = "market_excess_endpoint_return_d"
+    if panel != "path" or kind != "ranking" or not source.startswith(prefix):
+        raise FullMarketForecastError("unsupported_payoff_scoring_target")
+    horizon_text = source[len(prefix) :]
+    try:
+        horizon = int(horizon_text)
+    except ValueError as error:
+        raise FullMarketForecastError("payoff_account_target_horizon_invalid") from error
+    if horizon not in HORIZONS:
+        raise FullMarketForecastError("payoff_account_target_horizon_unsupported")
+    return horizon
+
+
+def _payoff_ranking_target_horizon(target: str) -> int:
+    """Backward-compatible alias for the original rank-only helper."""
+
+    return _payoff_scoring_target_horizon(target)
+
+
 def _load_target_arrays(
     manifest: Mapping[str, Any], target: str
 ) -> tuple[np.memmap, np.memmap, int, str, float]:
@@ -2601,7 +2647,7 @@ def _payoff_summary(daily: pd.DataFrame, decile_daily: pd.DataFrame) -> dict[str
         "daily_rank_ic_positive_fraction": float(daily["rank_ic"].gt(0.0).mean()),
     }
     years = daily["trade_date"].astype(str).str[:4]
-    for top_k in (1, 3, 10):
+    for top_k in PAYOFF_TOP_KS:
         for scenario in EXACT_NET_SCENARIOS:
             column = f"top{top_k}_{scenario}"
             values = daily[column].to_numpy(dtype=np.float64)
@@ -2666,15 +2712,19 @@ def evaluate_payoff_oof(
     training_mode: str = "causal_nested",
 ) -> dict[str, Any]:
     study = load_study(study_path)
-    source, _, _, panel = _target_definition(target)
-    if panel != "exact_net" or not source.endswith("_base"):
-        raise FullMarketForecastError("payoff_evaluation_requires_exact_net_target")
+    ranking_source, ranking_kind, _, ranking_panel = _target_definition(target)
+    payoff_horizon = _payoff_scoring_target_horizon(target)
     if training_mode not in TRAINING_MODES:
         raise FullMarketForecastError(f"unknown_training_mode:{training_mode}")
     profile_name = str(profile or study["lightgbm"]["primary_profile"])
     context = _source_context(study)
-    target_manifest = prepare_exact_net_targets(
+    payoff_manifest = prepare_exact_net_targets(
         study_path=study_path, output_root=output_root
+    )
+    ranking_manifest = (
+        payoff_manifest
+        if ranking_panel == "exact_net"
+        else prepare_targets(study_path=study_path, output_root=output_root)
     )
     folds = build_forward_folds(
         date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
@@ -2699,13 +2749,17 @@ def evaluate_payoff_oof(
         {
             "schema": PAYOFF_EVALUATION_SCHEMA,
             "study_sha256": _sha256(study_path),
-            "target_fingerprint": target_manifest["fingerprint"],
+            "payoff_target_fingerprint": payoff_manifest["fingerprint"],
+            "ranking_target_fingerprint": ranking_manifest["fingerprint"],
             "target": target,
+            "ranking_source": ranking_source,
+            "ranking_panel": ranking_panel,
+            "payoff_horizon": int(payoff_horizon),
             "profile": profile_name,
             "feature_variant": feature_variant,
             "training_mode": training_mode,
             "tasks": {str(path): _sha256(path) for _, path in task_records},
-            "top_k": [1, 3, 10],
+            "top_k": list(PAYOFF_TOP_KS),
             "deciles": 10,
             "primary_weighting": "equal_signal_date",
         }
@@ -2725,22 +2779,23 @@ def evaluate_payoff_oof(
         ):
             return current
 
-    columns = list(target_manifest["target_columns"])
-    base_column = columns.index(source)
-    stress_column = columns.index(source.removesuffix("_base") + "_stress")
-    values_record = target_manifest["files"]["values"]
-    valid_record = target_manifest["files"]["valid"]
-    values = np.memmap(
-        Path(values_record["path"]),
-        dtype=np.float32,
-        mode="r",
-        shape=tuple(int(value) for value in values_record["shape"]),
+    payoff_columns = list(payoff_manifest["target_columns"])
+    payoff_base_column = payoff_columns.index(
+        f"exact_net_return_d{int(payoff_horizon)}_base"
     )
-    valid = np.memmap(
-        Path(valid_record["path"]),
-        dtype=np.uint8,
-        mode="r",
-        shape=tuple(int(value) for value in valid_record["shape"]),
+    payoff_stress_column = payoff_columns.index(
+        f"exact_net_return_d{int(payoff_horizon)}_stress"
+    )
+    payoff_values = _open_array(payoff_manifest["files"]["values"], dtype=np.float32)
+    payoff_valid = _open_array(payoff_manifest["files"]["valid"], dtype=np.uint8)
+    ranking_columns = list(ranking_manifest["target_columns"])
+    if ranking_source not in ranking_columns:
+        raise FullMarketForecastError(
+            f"payoff_ranking_target_source_missing:{ranking_source}"
+        )
+    ranking_column = ranking_columns.index(ranking_source)
+    ranking_valid = _open_array(
+        ranking_manifest["files"]["valid"], dtype=np.uint8
     )
     daily_parts: list[pd.DataFrame] = []
     decile_parts: list[pd.DataFrame] = []
@@ -2761,8 +2816,9 @@ def evaluate_payoff_oof(
         if len(prediction) != len(positions):
             raise FullMarketForecastError("payoff_prediction_row_count_mismatch")
         usable = (
-            np.asarray(valid[positions, base_column], dtype=bool)
-            & np.asarray(valid[positions, stress_column], dtype=bool)
+            np.asarray(ranking_valid[positions, ranking_column], dtype=bool)
+            & np.asarray(payoff_valid[positions, payoff_base_column], dtype=bool)
+            & np.asarray(payoff_valid[positions, payoff_stress_column], dtype=bool)
             & np.isfinite(prediction)
         )
         current_positions = positions[usable]
@@ -2779,10 +2835,10 @@ def evaluate_payoff_oof(
         frame["fold"] = fold_number
         frame["prediction"] = prediction[usable]
         frame["base"] = np.asarray(
-            values[current_positions, base_column], dtype=np.float32
+            payoff_values[current_positions, payoff_base_column], dtype=np.float32
         )
         frame["stress"] = np.asarray(
-            values[current_positions, stress_column], dtype=np.float32
+            payoff_values[current_positions, payoff_stress_column], dtype=np.float32
         )
         frame = frame.sort_values(
             ["date_idx", "prediction", "candidate_id"], kind="stable"
@@ -2810,7 +2866,7 @@ def evaluate_payoff_oof(
             columns={"base": "baseline_base", "stress": "baseline_stress"}
         )
         fold_daily = baseline.reset_index()
-        for top_k in (1, 3, 10):
+        for top_k in PAYOFF_TOP_KS:
             selected = frame.loc[frame["selection_rank"] <= top_k]
             means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean()
             means = means.rename(
@@ -2824,8 +2880,21 @@ def evaluate_payoff_oof(
             )
         task_daily = pd.read_parquet(task["files"]["daily_metrics"]["path"])[
             ["date_idx", "rank_ic"]
-        ]
+        ].rename(columns={"rank_ic": "training_target_rank_ic"})
+        payoff_rank_ic = (
+            frame.groupby("date_idx", sort=False)
+            .apply(
+                lambda current: current["prediction"].corr(
+                    current["base"], method="spearman"
+                ),
+                include_groups=False,
+            )
+            .rename("rank_ic")
+            .reset_index()
+        )
         fold_daily = fold_daily.merge(
+            payoff_rank_ic, on="date_idx", how="left", validate="one_to_one"
+        ).merge(
             task_daily, on="date_idx", how="left", validate="one_to_one"
         )
         fold_daily["fold"] = fold_number
@@ -2886,7 +2955,7 @@ def evaluate_payoff_oof(
     }
     eligible_top_k = [
         top_k
-        for top_k in (1, 3, 10)
+        for top_k in PAYOFF_TOP_KS
         if combined[f"top{top_k}_stress"]["lower"] is not None
         and float(combined[f"top{top_k}_stress"]["lower"]) > 0.0
         and int(combined[f"top{top_k}_stress"]["positive_year_count"]) >= 5
@@ -2910,6 +2979,11 @@ def evaluate_payoff_oof(
         "study_id": STUDY_ID,
         "fingerprint": fingerprint,
         "target": target,
+        "ranking_source": ranking_source,
+        "scoring_target_kind": ranking_kind,
+        "ranking_panel": ranking_panel,
+        "payoff_horizon": int(payoff_horizon),
+        "rank_ic_contract": "prediction_vs_matching_exact_net_return_base",
         "profile": profile_name,
         "feature_variant": feature_variant,
         "training_mode": training_mode,
@@ -2928,7 +3002,13 @@ def evaluate_payoff_oof(
         "sources": {
             "exact_net_targets": _file_record(
                 output_root / "exact_net_targets/manifest.json",
-                target_fingerprint=target_manifest["fingerprint"],
+                target_fingerprint=payoff_manifest["fingerprint"],
+            ),
+            "ranking_targets": _file_record(
+                output_root
+                / ("exact_net_targets" if ranking_panel == "exact_net" else "targets")
+                / "manifest.json",
+                target_fingerprint=ranking_manifest["fingerprint"],
             ),
             "tasks": [_file_record(path) for _, path in task_records],
         },
@@ -2941,6 +3021,191 @@ def evaluate_payoff_oof(
         account_replay_passed=account_replay_gate["passed"],
     )
     return manifest
+
+
+def evaluate_payoff_downside_fusion(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    profile: str | None = None,
+    feature_variant: str = DEFAULT_FEATURE_VARIANT,
+    training_mode: str = "outer_early_stop",
+) -> dict[str, Any]:
+    """Evaluate the pre-specified 50/50 rank fusion of return and q10 heads."""
+
+    study = load_study(study_path)
+    if training_mode not in TRAINING_MODES:
+        raise FullMarketForecastError(f"unknown_training_mode:{training_mode}")
+    profile_name = str(profile or study["lightgbm"]["primary_profile"])
+    if profile_name not in study["lightgbm"]["profiles"]:
+        raise FullMarketForecastError(f"unknown_model_profile:{profile_name}")
+    context = _source_context(study)
+    payoff_manifest = prepare_exact_net_targets(
+        study_path=study_path, output_root=output_root
+    )
+    folds = build_forward_folds(
+        date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
+        trade_date=context.row_index["trade_date"].astype(str).to_numpy(),
+        validation_start_date=str(study["validation"]["validation_start_date"]),
+        validation_end_date=str(study["validation"]["validation_end_date"]),
+        fold_count=int(study["validation"]["forward_fold_count"]),
+        purge_days=int(study["validation"]["common_purge_trading_days"]),
+    )
+    task_records = {
+        f"{int(fold['fold'])}:{target}": _oof_task_result(
+            output_root,
+            fold=int(fold["fold"]),
+            target=target,
+            profile=profile_name,
+            feature_variant=feature_variant,
+            training_mode=training_mode,
+        )
+        for fold in folds
+        for target in PAYOFF_DOWNSIDE_FUSION_TARGETS
+    }
+    fingerprint = _stable_hash(
+        {
+            "schema": PAYOFF_SCORE_FUSION_SCHEMA,
+            "study_sha256": _sha256(study_path),
+            "target_fingerprint": payoff_manifest["fingerprint"],
+            "targets": list(PAYOFF_DOWNSIDE_FUSION_TARGETS),
+            "profile": profile_name,
+            "feature_variant": feature_variant,
+            "training_mode": training_mode,
+            "fusion": "equal_average_of_within_date_percentile_ranks",
+            "tasks": {
+                str(path): _sha256(path)
+                for _, path in task_records.values()
+            },
+            "top_k": list(PAYOFF_TOP_KS),
+        }
+    )
+    root = (
+        output_root
+        / "payoff_score_fusion_evaluation"
+        / "horizon_10"
+        / f"{profile_name}__{training_mode}"
+    )
+    manifest_path = root / "manifest.json"
+    if manifest_path.is_file():
+        current = _read_json(manifest_path)
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+            and current.get("forbidden_2026_read_count") == 0
+        ):
+            return current
+    target_columns = list(payoff_manifest["target_columns"])
+    base_column = target_columns.index("exact_net_return_d10_base")
+    stress_column = target_columns.index("exact_net_return_d10_stress")
+    values = _open_array(payoff_manifest["files"]["values"], dtype=np.float32)
+    valid = _open_array(payoff_manifest["files"]["valid"], dtype=np.uint8)
+    daily_parts: list[pd.DataFrame] = []
+    decile_parts: list[pd.DataFrame] = []
+    selection_parts: list[pd.DataFrame] = []
+    component_parts: list[pd.DataFrame] = []
+    fold_summaries: list[dict[str, Any]] = []
+    for fold in folds:
+        fold_number = int(fold["fold"])
+        positions = _fold_rows(context.row_index, fold, "validation")
+        predictions = []
+        for target in PAYOFF_DOWNSIDE_FUSION_TARGETS:
+            record, _ = task_records[f"{fold_number}:{target}"]
+            prediction = np.asarray(
+                np.load(
+                    record["files"]["prediction"]["path"],
+                    mmap_mode="r",
+                    allow_pickle=False,
+                ),
+                dtype=np.float32,
+            )
+            if len(prediction) != len(positions):
+                raise FullMarketForecastError("payoff_score_fusion_prediction_mismatch")
+            predictions.append(prediction)
+        usable = (
+            np.asarray(valid[positions, base_column], dtype=bool)
+            & np.asarray(valid[positions, stress_column], dtype=bool)
+            & np.isfinite(predictions[0])
+            & np.isfinite(predictions[1])
+        )
+        current_positions = positions[usable]
+        frame = context.row_index.iloc[current_positions][
+            ["candidate_id", "date_idx", "trade_date", "symbol", "symbol_idx"]
+        ].copy()
+        frame["model_row_position"] = current_positions
+        frame["fold"] = fold_number
+        frame["return_prediction"] = predictions[0][usable]
+        frame["q10_prediction"] = predictions[1][usable]
+        frame["return_rank"] = frame.groupby("date_idx", sort=False)[
+            "return_prediction"
+        ].rank(pct=True)
+        frame["q10_rank"] = frame.groupby("date_idx", sort=False)[
+            "q10_prediction"
+        ].rank(pct=True)
+        frame["prediction"] = (frame["return_rank"] + frame["q10_rank"]) / 2.0
+        frame["base"] = np.asarray(values[current_positions, base_column], dtype=np.float32)
+        frame["stress"] = np.asarray(values[current_positions, stress_column], dtype=np.float32)
+        frame = frame.sort_values(["date_idx", "prediction", "candidate_id"], kind="stable").reset_index(drop=True)
+        frame["score_position"] = frame.groupby("date_idx", sort=False).cumcount()
+        frame["date_size"] = frame.groupby("date_idx", sort=False)["candidate_id"].transform("size")
+        frame["decile"] = np.minimum(
+            10,
+            np.floor(frame["score_position"].to_numpy(dtype=np.float64) * 10.0 / frame["date_size"].to_numpy(dtype=np.float64)).astype(np.int8) + 1,
+        )
+        frame["selection_rank"] = (frame["date_size"] - frame["score_position"]).astype(np.int32)
+        baseline = frame.groupby(["date_idx", "trade_date"], sort=False)[["base", "stress"]].mean().rename(columns={"base": "baseline_base", "stress": "baseline_stress"}).reset_index()
+        fold_daily = baseline
+        for top_k in PAYOFF_TOP_KS:
+            selected = frame.loc[frame["selection_rank"] <= top_k]
+            means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean().rename(columns={"base": f"top{top_k}_base", "stress": f"top{top_k}_stress"}).reset_index()
+            fold_daily = fold_daily.merge(means, on="date_idx", how="left", validate="one_to_one")
+        rank_ic = frame.groupby("date_idx", sort=False).apply(lambda current: current["prediction"].corr(current["base"], method="spearman"), include_groups=False).rename("rank_ic").reset_index()
+        fold_daily = fold_daily.merge(rank_ic, on="date_idx", validate="one_to_one")
+        fold_daily["fold"] = fold_number
+        fold_deciles = frame.groupby(["date_idx", "trade_date", "decile"], sort=False)[["base", "stress"]].mean().reset_index()
+        fold_deciles["fold"] = fold_number
+        fold_summaries.append(_payoff_summary(fold_daily, fold_deciles) | {"fold": fold_number})
+        daily_parts.append(fold_daily)
+        decile_parts.append(fold_deciles)
+        selection_parts.append(frame.loc[frame["selection_rank"] <= 10].copy())
+        component_parts.append(frame[["candidate_id", "date_idx", "model_row_position", "return_prediction", "q10_prediction", "return_rank", "q10_rank", "prediction"]].copy())
+    daily = pd.concat(daily_parts, ignore_index=True).sort_values("date_idx")
+    deciles = pd.concat(decile_parts, ignore_index=True).sort_values(["date_idx", "decile"])
+    selections = pd.concat(selection_parts, ignore_index=True).sort_values(["date_idx", "selection_rank"])
+    components = pd.concat(component_parts, ignore_index=True).sort_values(["date_idx", "candidate_id"])
+    combined = _payoff_summary(daily, deciles)
+    root.mkdir(parents=True, exist_ok=True)
+    daily_path, decile_path, selection_path, component_path = (root / name for name in ("daily_metrics.parquet", "decile_daily.parquet", "top10_selections.parquet", "component_predictions.parquet"))
+    _write_parquet(daily, daily_path)
+    _write_parquet(deciles, decile_path)
+    _write_parquet(selections, selection_path)
+    _write_parquet(components, component_path)
+    result = {
+        "schema": PAYOFF_SCORE_FUSION_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": STUDY_ID,
+        "fingerprint": fingerprint,
+        "targets": list(PAYOFF_DOWNSIDE_FUSION_TARGETS),
+        "profile": profile_name,
+        "feature_variant": feature_variant,
+        "training_mode": training_mode,
+        "horizon": 10,
+        "fusion": "equal_average_of_within_date_percentile_ranks",
+        "fold_summaries": fold_summaries,
+        "combined": combined,
+        "forbidden_2026_read_count": 0,
+        "decision_boundary": {"stable_profit_claim_allowed": False, "market_gate": "always", "same_exact_net_account_contract": True},
+        "files": {"daily_metrics": _file_record(daily_path, row_count=len(daily)), "decile_daily": _file_record(decile_path, row_count=len(deciles)), "top10_selections": _file_record(selection_path, row_count=len(selections)), "component_predictions": _file_record(component_path, row_count=len(components))},
+        "sources": {
+            "exact_net_targets": _file_record(
+                output_root / "exact_net_targets/manifest.json"
+            ),
+            "tasks": [_file_record(path) for _, path in task_records.values()],
+        },
+    }
+    _write_json(manifest_path, result)
+    return result
 
 
 def _market_gate_metrics(daily: pd.DataFrame) -> dict[str, Any]:
@@ -4607,18 +4872,22 @@ def replay_oof_accounts(
     return manifest
 
 
-def _payoff_account_specs(horizon: int) -> tuple[dict[str, Any], ...]:
+def _payoff_account_specs(
+    horizon: int, *, variant: str | None = None
+) -> tuple[dict[str, Any], ...]:
     """Return fixed breadth/cost diagnostics for one legal-return horizon."""
 
     if int(horizon) not in HORIZONS:
         raise FullMarketForecastError("payoff_account_horizon_invalid")
-    variant = f"exact_net_return_d{int(horizon)}_rank"
+    resolved_variant = str(
+        variant or f"exact_net_return_d{int(horizon)}_rank"
+    )
     specs: list[dict[str, Any]] = []
-    for top_k in (1, 3, 10):
+    for top_k in PAYOFF_TOP_KS:
         for cost_scenario, multiplier in EXACT_NET_SCENARIOS.items():
             specs.append(
                 {
-                    "variant": variant,
+                    "variant": resolved_variant,
                     "exit_policy": "planned_close",
                     "gate": "always",
                     "top_k": int(top_k),
@@ -4634,7 +4903,7 @@ def _payoff_account_specs(horizon: int) -> tuple[dict[str, Any], ...]:
         for cost_scenario, multiplier in EXACT_NET_SCENARIOS.items():
             specs.append(
                 {
-                    "variant": variant,
+                    "variant": resolved_variant,
                     "exit_policy": "planned_close",
                     "gate": "always",
                     "top_k": 10,
@@ -4737,6 +5006,27 @@ def _payoff_account_diagnostics(
     return result
 
 
+def _payoff_account_result(
+    summaries: Sequence[Mapping[str, Any]],
+    *,
+    top_k: int,
+    cost_scenario: str,
+    cap: float | None = None,
+) -> Mapping[str, Any]:
+    matches = [
+        item
+        for item in summaries
+        if int(item["spec"]["top_k"]) == int(top_k)
+        and str(item["spec"]["cost_scenario"]) == str(cost_scenario)
+        and item["spec"].get("maximum_credited_gross_return") == cap
+    ]
+    if len(matches) != 1:
+        raise FullMarketForecastError(
+            f"payoff_account_result_not_unique:{top_k}:{cost_scenario}:{cap}"
+        )
+    return matches[0]
+
+
 def replay_payoff_accounts(
     *,
     study_path: Path = DEFAULT_STUDY_PATH,
@@ -4749,9 +5039,7 @@ def replay_payoff_accounts(
     """Replay a payoff-ranked OOF signal with finite cash and legal exits."""
 
     study = load_study(study_path)
-    horizon = _exact_net_target_horizon(target)
-    if not str(target).endswith("_rank"):
-        raise FullMarketForecastError("payoff_account_requires_rank_target")
+    horizon = _payoff_scoring_target_horizon(target)
     if training_mode not in TRAINING_MODES:
         raise FullMarketForecastError(f"unknown_training_mode:{training_mode}")
     evaluation = evaluate_payoff_oof(
@@ -4827,11 +5115,10 @@ def replay_payoff_accounts(
     selections["take_profit_hit"] = False
     selections["legal_gross_return"] = gross[usable]
     selections["fill_day"] = fill_days[usable].astype(np.int16)
-    # The account engine receives an explicit schedule for each breadth.  A
-    # Top3 task therefore sees ranks 1-3 only, while Top10 keeps all ten;
-    # lower ranks are never substituted when an order is unfilled.
+    # The account engine receives an explicit schedule for each breadth; lower
+    # ranks are never substituted when an order is unfilled.
     schedule_parts = []
-    for top_k in (1, 3, 10):
+    for top_k in PAYOFF_TOP_KS:
         part = selections.loc[selections["selection_rank"] <= int(top_k)].copy()
         part["top_k"] = int(top_k)
         schedule_parts.append(part)
@@ -4847,7 +5134,7 @@ def replay_payoff_accounts(
     )
     entry_filled = _open_array(context.pack["masks"]["entry_filled"], dtype=np.bool_)
     costs = parse_execution_costs(context.pack)
-    specs = _payoff_account_specs(horizon)
+    specs = _payoff_account_specs(horizon, variant=target)
     fingerprint = _stable_hash(
         {
             "schema": PAYOFF_ACCOUNT_REPLAY_SCHEMA,
@@ -4875,7 +5162,11 @@ def replay_payoff_accounts(
     manifest_path = replay_root / "manifest.json"
     if manifest_path.is_file():
         current = _read_json(manifest_path)
-        if current.get("status") == "completed" and current.get("fingerprint") == fingerprint:
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+            and current.get("forbidden_2026_read_count") == 0
+        ):
             return current
 
     schedule_path = replay_root / "selection_schedule.parquet"
@@ -4978,6 +5269,7 @@ def replay_payoff_accounts(
         "feature_variant": feature_variant,
         "training_mode": training_mode,
         "horizon": horizon,
+        "forbidden_2026_read_count": 0,
         "selection_row_count": len(selections),
         "dropped_selection_count_after_gross_join": dropped_selection_count,
         "task_count": len(summaries),
@@ -5013,6 +5305,185 @@ def replay_payoff_accounts(
             "summary": _file_record(summary_path, row_count=len(summary_frame)),
             **files,
         },
+    }
+    _write_json(manifest_path, manifest)
+    return manifest
+
+
+def replay_payoff_downside_fusion_accounts(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    profile: str | None = None,
+    feature_variant: str = DEFAULT_FEATURE_VARIANT,
+    training_mode: str = "outer_early_stop",
+) -> dict[str, Any]:
+    """Replay the frozen return/q10 rank fusion under the same account engine."""
+
+    evaluation = evaluate_payoff_downside_fusion(
+        study_path=study_path,
+        output_root=output_root,
+        profile=profile,
+        feature_variant=feature_variant,
+        training_mode=training_mode,
+    )
+    study = load_study(study_path)
+    context = _source_context(study)
+    target_manifest = prepare_targets(study_path=study_path, output_root=output_root)
+    target_columns = list(target_manifest["target_columns"])
+    gross_column = target_columns.index("legal_exit_return_d10")
+    fill_horizons = tuple(
+        int(item) for item in target_manifest["files"]["legal_fill_days"]["horizons"]
+    )
+    fill_column = fill_horizons.index(10)
+    values = _open_array(target_manifest["files"]["values"], dtype=np.float32)
+    valid = _open_array(target_manifest["files"]["valid"], dtype=np.uint8)
+    legal_fill_days = _open_array(
+        target_manifest["files"]["legal_fill_days"], dtype=np.int16
+    )
+    selections = pd.read_parquet(Path(evaluation["files"]["top10_selections"]["path"]))
+    positions = selections["model_row_position"].to_numpy(dtype=np.int64)
+    gross = np.asarray(values[positions, gross_column], dtype=np.float32)
+    usable = np.asarray(valid[positions, gross_column], dtype=bool) & np.isfinite(gross)
+    fill_days = np.asarray(legal_fill_days[positions, fill_column], dtype=np.int16)
+    usable &= fill_days >= 10
+    dropped = int((~usable).sum())
+    if not usable.any():
+        raise FullMarketForecastError("payoff_downside_fusion_schedule_empty")
+    selections = selections.loc[usable].copy()
+    selections["variant"] = PAYOFF_DOWNSIDE_FUSION_VARIANT
+    selections["exit_policy"] = "planned_close"
+    selections["gate"] = "always"
+    selections["cost_scenario"] = "base"
+    selections["take_profit_hit"] = False
+    selections["legal_gross_return"] = gross[usable]
+    selections["fill_day"] = fill_days[usable]
+    schedule_parts = []
+    for top_k in PAYOFF_TOP_KS:
+        part = selections.loc[selections["selection_rank"] <= int(top_k)].copy()
+        part["top_k"] = int(top_k)
+        schedule_parts.append(part)
+    schedule = pd.concat(schedule_parts, ignore_index=True).sort_values(
+        ["date_idx", "top_k", "selection_rank"], kind="stable"
+    )
+    specs = _payoff_account_specs(
+        10, variant=PAYOFF_DOWNSIDE_FUSION_VARIANT
+    )
+    fingerprint = _stable_hash(
+        {
+            "schema": PAYOFF_SCORE_FUSION_ACCOUNT_SCHEMA,
+            "evaluation_fingerprint": evaluation["fingerprint"],
+            "target_manifest_fingerprint": target_manifest["fingerprint"],
+            "specs": specs,
+            "starting_cash": 1_000_000.0,
+        }
+    )
+    root = output_root / "payoff_score_fusion_account_replay" / "horizon_10" / (
+        f"{evaluation['profile']}__{training_mode}"
+    )
+    manifest_path = root / "manifest.json"
+    if manifest_path.is_file():
+        current = _read_json(manifest_path)
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+            and current.get("forbidden_2026_read_count") == 0
+        ):
+            return current
+    daily_raw = _open_array(context.pack["feature_channels"]["daily_raw"], dtype=np.float32)
+    raw_open = _open_array(context.pack["execution_arrays"]["entry_open_raw"], dtype=np.float32)
+    entry_filled = _open_array(context.pack["masks"]["entry_filled"], dtype=np.bool_)
+    costs = parse_execution_costs(context.pack)
+    root.mkdir(parents=True, exist_ok=True)
+    schedule_path = root / "selection_schedule.parquet"
+    _write_parquet(schedule, schedule_path)
+    summaries: list[dict[str, Any]] = []
+    files: dict[str, Any] = {}
+    for spec in specs:
+        result, equity, trades = _simulate_account_spec(
+            spec=spec,
+            selections=schedule,
+            context=context,
+            daily_raw=daily_raw,
+            raw_open=raw_open,
+            entry_filled=entry_filled,
+            costs=costs,
+        )
+        result = _payoff_account_diagnostics(
+            result=result, equity=equity, trades=trades, selections=schedule
+        )
+        task_root = root / "tasks" / str(result["task_id"])
+        equity_path, trades_path, result_path = (
+            task_root / name for name in ("equity.parquet", "trades.parquet", "task_result.json")
+        )
+        _write_parquet(equity, equity_path)
+        _write_parquet(trades, trades_path)
+        _write_json(
+            result_path,
+            {
+                "schema": PAYOFF_SCORE_FUSION_ACCOUNT_SCHEMA,
+                "status": "completed",
+                "completed_at": _now(),
+                "study_id": STUDY_ID,
+                "fingerprint": fingerprint,
+                **result,
+                "files": {
+                    "equity": _file_record(equity_path, row_count=len(equity)),
+                    "trades": _file_record(trades_path, row_count=len(trades)),
+                },
+            },
+        )
+        files[str(result["task_id"])] = _file_record(result_path)
+        summaries.append(result)
+    summary = pd.DataFrame(
+        [
+            {
+                "top_k": int(item["spec"]["top_k"]),
+                "cost_scenario": item["spec"]["cost_scenario"],
+                "maximum_credited_gross_return": item["spec"].get(
+                    "maximum_credited_gross_return"
+                ),
+                "total_net_return": item["total_net_return"],
+                "ending_equity": item["ending_equity"],
+                "maximum_drawdown": item["maximum_drawdown"],
+                "positive_year_count": item["positive_year_count"],
+                "worst_year_return": item["worst_year_return"],
+                "daily_hac_lower": item["daily_hac20_net_return"]["lower"],
+            }
+            for item in summaries
+        ]
+    ).sort_values(["top_k", "cost_scenario", "maximum_credited_gross_return"], na_position="first")
+    summary_path = root / "summary.parquet"
+    _write_parquet(summary, summary_path)
+    primary = _payoff_account_result(summaries, top_k=10, cost_scenario="stress")
+    cap5 = _payoff_account_result(
+        summaries, top_k=10, cost_scenario="stress", cap=0.05
+    )
+    cap10 = _payoff_account_result(
+        summaries, top_k=10, cost_scenario="stress", cap=0.10
+    )
+    manifest = {
+        "schema": PAYOFF_SCORE_FUSION_ACCOUNT_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": STUDY_ID,
+        "fingerprint": fingerprint,
+        "targets": list(PAYOFF_DOWNSIDE_FUSION_TARGETS),
+        "fusion": "equal_average_of_within_date_percentile_ranks",
+        "profile": evaluation["profile"],
+        "training_mode": training_mode,
+        "horizon": 10,
+        "forbidden_2026_read_count": 0,
+        "starting_cash": 1_000_000.0,
+        "selection_row_count": len(schedule),
+        "dropped_selection_count_after_gross_join": dropped,
+        "summaries": summaries,
+        "primary_stress_top10": primary,
+        "stress_top10_cap5": cap5,
+        "stress_top10_cap10": cap10,
+        "decision_boundary": {"stable_profit_claim_allowed": False, "same_finite_account_engine_as_payoff_replay": True, "forbidden_2026_read_count": 0},
+        "sources": {"evaluation": _file_record(Path(evaluation["files"]["top10_selections"]["path"]).parent / "manifest.json"), "target_panel": _file_record(output_root / "targets/manifest.json"), "selection_schedule": _file_record(schedule_path, row_count=len(schedule))},
+        "files": {"summary": _file_record(summary_path, row_count=len(summary)), **files},
     }
     _write_json(manifest_path, manifest)
     return manifest
@@ -5109,10 +5580,12 @@ def _parser() -> argparse.ArgumentParser:
             "run-first",
             "run-baseline",
             "evaluate-payoff",
+            "evaluate-payoff-downside-fusion",
             "evaluate-market-regime",
             "evaluate-oof",
             "replay-account",
             "replay-payoff-account",
+            "replay-payoff-downside-fusion-account",
         ),
     )
     parser.add_argument("--study", type=Path, default=DEFAULT_STUDY_PATH)
@@ -5187,6 +5660,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             feature_variant=args.feature_variant,
             training_mode=args.training_mode,
         )
+    elif args.command == "evaluate-payoff-downside-fusion":
+        result = evaluate_payoff_downside_fusion(
+            study_path=args.study,
+            output_root=args.output_root,
+            profile=args.profile,
+            feature_variant=args.feature_variant,
+            training_mode=args.training_mode,
+        )
     elif args.command == "evaluate-market-regime":
         result = evaluate_market_regime_oof(
             study_path=args.study,
@@ -5222,6 +5703,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             study_path=args.study,
             output_root=args.output_root,
             target=args.target,
+            profile=args.profile,
+            feature_variant=args.feature_variant,
+            training_mode=args.training_mode,
+        )
+    elif args.command == "replay-payoff-downside-fusion-account":
+        result = replay_payoff_downside_fusion_accounts(
+            study_path=args.study,
+            output_root=args.output_root,
             profile=args.profile,
             feature_variant=args.feature_variant,
             training_mode=args.training_mode,

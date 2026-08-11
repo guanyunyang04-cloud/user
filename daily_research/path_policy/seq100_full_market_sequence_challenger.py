@@ -23,7 +23,7 @@ import random
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
-from itertools import pairwise
+from itertools import combinations, pairwise
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +42,13 @@ from daily_research.path_policy import seq100_full_market_multitask_forecast as 
 SCHEMA = "seq100_full_market_sequence_challenger/1"
 ENSEMBLE_SCHEMA = "seq100_full_market_sequence_ensemble_evaluation/1"
 ACCOUNT_SCHEMA = "seq100_full_market_sequence_ensemble_account_replay/1"
+PAYOFF_ENSEMBLE_SCHEMA = "seq100_full_market_payoff_ensemble_evaluation/1"
+PAYOFF_ENSEMBLE_ACCOUNT_SCHEMA = (
+    "seq100_full_market_payoff_ensemble_account_replay/1"
+)
+SEQUENCE_PAYOFF_ACCOUNT_SCHEMA = (
+    "seq100_full_market_sequence_payoff_account_replay/1"
+)
 ROBUSTNESS_SCHEMA = "seq100_full_market_sequence_ensemble_account_robustness/1"
 DUAL_HORIZON_SCHEMA = "seq100_full_market_dual_gate_horizon_challenge/1"
 AVAILABILITY_SCHEMA = "seq100_full_market_source_availability_stress/1"
@@ -57,6 +64,7 @@ DEFAULT_MAX_EPOCHS = 60
 DEFAULT_PATIENCE = 10
 DEFAULT_DATE_BATCH_SIZE = 4
 SEQUENCE_TRAINING_MODES = ("outer_early_stop", "causal_nested")
+PAYOFF_FUSION_METHODS = ("mean", "minimum")
 DEFAULT_LEGACY_BASE_FEATURE_MANIFEST = (
     base.WORKSPACE_ROOT
     / "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json"
@@ -91,6 +99,36 @@ def _ensemble_protocol_root(
     return root / protocol
 
 
+def _payoff_ensemble_root(
+    output_root: Path,
+    artifact_name: str,
+    *,
+    lookback: int,
+    horizon: int,
+    training_mode: str,
+    tree_training_mode: str,
+    seed_offsets: Sequence[int],
+    fusion_method: str = "mean",
+    tree_profiles: Sequence[str] = (),
+) -> Path:
+    """Isolate exact-payoff ensembles from the established D5 gate study."""
+
+    root = output_root / artifact_name / f"horizon_{int(horizon)}"
+    root /= f"lookback_{int(lookback)}"
+    protocol = f"sequence_{training_mode}__tree_{tree_training_mode}"
+    normalized_offsets = tuple(int(value) for value in seed_offsets)
+    if normalized_offsets != (0,):
+        protocol += "__seeds_" + "_".join(
+            str(value) for value in normalized_offsets
+        )
+    if str(fusion_method) != "mean":
+        protocol += f"__fusion_{fusion_method!s}"
+    normalized_profiles = tuple(str(value) for value in tree_profiles)
+    if normalized_profiles:
+        protocol += "__tree_profiles_" + "_".join(normalized_profiles)
+    return root / protocol
+
+
 MEMORY_TRIM_THRESHOLD_BYTES = int(1.75 * (1 << 30))
 PRICE_PATH_SCALE = 0.10
 RELATIVE_TARGET_SCALE = 0.05
@@ -122,6 +160,16 @@ def _stable_hash(payload: Mapping[str, Any]) -> str:
             "utf-8"
         )
     ).hexdigest()
+
+
+def _audited_manifest_is_current(
+    manifest: Mapping[str, Any], fingerprint: str
+) -> bool:
+    return (
+        manifest.get("status") == "completed"
+        and manifest.get("fingerprint") == fingerprint
+        and manifest.get("forbidden_2026_read_count") == 0
+    )
 
 
 def _file_record(path: Path, **extra: Any) -> dict[str, Any]:
@@ -1100,7 +1148,7 @@ def _build_evaluation_frames(
         .reset_index()
     )
     daily = daily.merge(rank_ic, on="date_idx", validate="one_to_one")
-    for top_k in (1, 3, 10):
+    for top_k in base.PAYOFF_TOP_KS:
         selected = frame.loc[frame["selection_rank"] <= top_k]
         means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean()
         daily = daily.merge(
@@ -1844,6 +1892,175 @@ def _sequence_payoff_root(
     return root
 
 
+def _exact_payoff_account_specs(
+    *, variant: str, horizon: int
+) -> tuple[dict[str, Any], ...]:
+    """Use the tree replay's fixed breadth, cost, and winner-cap grid."""
+
+    return tuple(
+        {**spec, "variant": str(variant)}
+        for spec in base._payoff_account_specs(int(horizon))
+    )
+
+
+def _prepare_exact_payoff_schedule(
+    *,
+    selections: pd.DataFrame,
+    sources: SequenceSources,
+    horizon: int,
+    variant: str,
+) -> tuple[pd.DataFrame, int]:
+    rows = selections["model_row_position"].to_numpy(dtype=np.int64)
+    gross = np.asarray(
+        sources.path_values[rows, sources.gross_column], dtype=np.float32
+    )
+    gross_valid = np.asarray(
+        sources.path_valid[rows, sources.gross_column], dtype=bool
+    )
+    fill_days = np.asarray(
+        sources.fill_days[rows, sources.horizon_column], dtype=np.int16
+    )
+    usable = gross_valid & np.isfinite(gross) & (fill_days >= int(horizon))
+    dropped = int((~usable).sum())
+    current = selections.loc[usable].copy()
+    if current.empty:
+        raise SequenceChallengerError("exact_payoff_account_schedule_empty")
+    current["variant"] = str(variant)
+    current["exit_policy"] = "planned_close"
+    current["gate"] = "always"
+    current["cost_scenario"] = "base"
+    current["take_profit_hit"] = False
+    current["legal_gross_return"] = gross[usable]
+    current["fill_day"] = fill_days[usable]
+    schedule_parts: list[pd.DataFrame] = []
+    for top_k in base.PAYOFF_TOP_KS:
+        part = current.loc[current["selection_rank"] <= int(top_k)].copy()
+        part["top_k"] = int(top_k)
+        schedule_parts.append(part)
+    schedule = pd.concat(schedule_parts, ignore_index=True).sort_values(
+        ["date_idx", "top_k", "selection_rank"], kind="stable"
+    )
+    return schedule, dropped
+
+
+def _run_exact_payoff_account_tasks(
+    *,
+    root: Path,
+    schema: str,
+    fingerprint: str,
+    schedule: pd.DataFrame,
+    sources: SequenceSources,
+    specs: Sequence[Mapping[str, Any]],
+    starting_cash: float,
+) -> dict[str, Any]:
+    daily_raw = base._open_array(
+        sources.context.pack["feature_channels"]["daily_raw"], dtype=np.float32
+    )
+    raw_open = base._open_array(
+        sources.context.pack["execution_arrays"]["entry_open_raw"],
+        dtype=np.float32,
+    )
+    entry_filled = base._open_array(
+        sources.context.pack["masks"]["entry_filled"], dtype=np.bool_
+    )
+    costs = base.parse_execution_costs(sources.context.pack)
+    root.mkdir(parents=True, exist_ok=True)
+    schedule_path = root / "selection_schedule.parquet"
+    base._write_parquet(schedule, schedule_path)
+    summaries: list[dict[str, Any]] = []
+    files: dict[str, Any] = {}
+    for spec in specs:
+        result, equity, trades = base._simulate_account_spec(
+            spec=spec,
+            selections=schedule,
+            context=sources.context,
+            daily_raw=daily_raw,
+            raw_open=raw_open,
+            entry_filled=entry_filled,
+            costs=costs,
+            starting_cash=float(starting_cash),
+        )
+        result = base._payoff_account_diagnostics(
+            result=result,
+            equity=equity,
+            trades=trades,
+            selections=schedule,
+        )
+        task_root = root / "tasks" / str(result["task_id"])
+        equity_path = task_root / "equity.parquet"
+        trades_path = task_root / "trades.parquet"
+        result_path = task_root / "task_result.json"
+        base._write_parquet(equity, equity_path)
+        base._write_parquet(trades, trades_path)
+        payload = {
+            "schema": str(schema),
+            "status": "completed",
+            "completed_at": _now(),
+            "study_id": base.STUDY_ID,
+            "fingerprint": fingerprint,
+            **result,
+            "files": {
+                "equity": _file_record(equity_path, row_count=len(equity)),
+                "trades": _file_record(trades_path, row_count=len(trades)),
+            },
+        }
+        _write_json(result_path, payload)
+        files[str(result["task_id"])] = _file_record(result_path)
+        summaries.append(result)
+    summary = pd.DataFrame(
+        [
+            {
+                "top_k": int(item["spec"]["top_k"]),
+                "cost_scenario": item["spec"]["cost_scenario"],
+                "maximum_credited_gross_return": item["spec"].get(
+                    "maximum_credited_gross_return"
+                ),
+                "total_net_return": item["total_net_return"],
+                "ending_equity": item["ending_equity"],
+                "maximum_drawdown": item["maximum_drawdown"],
+                "positive_year_count": item["positive_year_count"],
+                "worst_year_return": item["worst_year_return"],
+                "daily_hac_lower": item["daily_hac20_net_return"]["lower"],
+            }
+            for item in summaries
+        ]
+    ).sort_values(
+        ["top_k", "cost_scenario", "maximum_credited_gross_return"],
+        na_position="first",
+    )
+    summary_path = root / "summary.parquet"
+    base._write_parquet(summary, summary_path)
+    return {
+        "summaries": summaries,
+        "summary": _file_record(summary_path, row_count=len(summary)),
+        "selection_schedule": _file_record(
+            schedule_path, row_count=len(schedule)
+        ),
+        "tasks": files,
+    }
+
+
+def _account_result(
+    summaries: Sequence[Mapping[str, Any]],
+    *,
+    top_k: int,
+    cost_scenario: str,
+    cap: float | None = None,
+) -> Mapping[str, Any]:
+    matches = [
+        item
+        for item in summaries
+        if int(item["spec"]["top_k"]) == int(top_k)
+        and str(item["spec"]["cost_scenario"]) == str(cost_scenario)
+        and item["spec"].get("maximum_credited_gross_return") == cap
+    ]
+    if len(matches) != 1:
+        raise SequenceChallengerError(
+            f"exact_payoff_account_result_not_unique:{top_k}:{cost_scenario}:{cap}"
+        )
+    return matches[0]
+
+
 def evaluate_sequence_payoff(
     *,
     study_path: Path = DEFAULT_STUDY_PATH,
@@ -1897,6 +2114,7 @@ def evaluate_sequence_payoff(
             "training_mode": training_mode,
             "tasks": {str(path): base._sha256(path) for _, path in task_records},
             "ranking": "full_prediction_rows_then_matching_exact_net_valid_rows",
+            "top_k": list(base.PAYOFF_TOP_KS),
         }
     )
     evaluation_root = _sequence_payoff_root(
@@ -1905,7 +2123,11 @@ def evaluate_sequence_payoff(
     manifest_path = evaluation_root / "manifest.json"
     if manifest_path.is_file():
         current = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if current.get("status") == "completed" and current.get("fingerprint") == fingerprint:
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+            and current.get("forbidden_2026_read_count") == 0
+        ):
             return current
     daily_parts: list[pd.DataFrame] = []
     decile_parts: list[pd.DataFrame] = []
@@ -2028,44 +2250,18 @@ def replay_sequence_payoff_accounts(
     sources = _load_sources(study, output_root=output_root, horizon=horizon)
     selection_path = Path(evaluation["files"]["top10_selections"]["path"])
     selections = pd.read_parquet(selection_path)
-    rows = selections["model_row_position"].to_numpy(dtype=np.int64)
-    gross = np.asarray(sources.path_values[rows, sources.gross_column], dtype=np.float32)
-    gross_valid = np.asarray(sources.path_valid[rows, sources.gross_column], dtype=bool)
-    fill_days = np.asarray(sources.fill_days[rows, sources.horizon_column], dtype=np.int16)
-    usable = gross_valid & np.isfinite(gross) & (fill_days >= int(horizon))
-    selections = selections.loc[usable].copy()
-    if selections.empty:
-        raise SequenceChallengerError("sequence_payoff_account_schedule_empty")
-    selections["variant"] = "sequence_payoff"
-    selections["exit_policy"] = "planned_close"
-    selections["gate"] = "always"
-    selections["cost_scenario"] = "base"
-    selections["take_profit_hit"] = False
-    selections["legal_gross_return"] = gross[usable]
-    selections["fill_day"] = fill_days[usable]
-    schedule_parts: list[pd.DataFrame] = []
-    for top_k in (1, 3, 10):
-        part = selections.loc[selections["selection_rank"] <= int(top_k)].copy()
-        part["top_k"] = int(top_k)
-        schedule_parts.append(part)
-    schedule = pd.concat(schedule_parts, ignore_index=True)
-    specs = tuple(
-        {
-            "variant": "sequence_payoff",
-            "exit_policy": "planned_close",
-            "gate": "always",
-            "top_k": top_k,
-            "cost_scenario": scenario,
-            "slippage_multiplier": 1.0 if scenario == "base" else 2.0,
-            "cohort_equity_fraction": 1.0 / float(horizon),
-            "planned_fill_day": int(horizon),
-        }
-        for top_k in (1, 3, 10)
-        for scenario in ("base", "stress")
+    schedule, dropped = _prepare_exact_payoff_schedule(
+        selections=selections,
+        sources=sources,
+        horizon=horizon,
+        variant="sequence_payoff",
+    )
+    specs = _exact_payoff_account_specs(
+        variant="sequence_payoff", horizon=horizon
     )
     fingerprint = _stable_hash(
         {
-            "schema": ACCOUNT_SCHEMA,
+            "schema": SEQUENCE_PAYOFF_ACCOUNT_SCHEMA,
             "role": "sequence_payoff_account_replay",
             "evaluation_fingerprint": evaluation["fingerprint"],
             "selection_sha256": evaluation["files"]["top10_selections"]["sha256"],
@@ -2082,86 +2278,29 @@ def replay_sequence_payoff_accounts(
     manifest_path = root / "manifest.json"
     if manifest_path.is_file():
         current = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if current.get("status") == "completed" and current.get("fingerprint") == fingerprint:
+        if _audited_manifest_is_current(current, fingerprint):
             return current
-    daily_raw = base._open_array(
-        sources.context.pack["feature_channels"]["daily_raw"], dtype=np.float32
+    tasks = _run_exact_payoff_account_tasks(
+        root=root,
+        schema=SEQUENCE_PAYOFF_ACCOUNT_SCHEMA,
+        fingerprint=fingerprint,
+        schedule=schedule,
+        sources=sources,
+        specs=specs,
+        starting_cash=starting_cash,
     )
-    raw_open = base._open_array(
-        sources.context.pack["execution_arrays"]["entry_open_raw"], dtype=np.float32
+    summaries = tasks["summaries"]
+    primary = _account_result(
+        summaries, top_k=10, cost_scenario="stress"
     )
-    entry_filled = base._open_array(
-        sources.context.pack["masks"]["entry_filled"], dtype=np.bool_
+    cap5 = _account_result(
+        summaries, top_k=10, cost_scenario="stress", cap=0.05
     )
-    costs = base.parse_execution_costs(sources.context.pack)
-    root.mkdir(parents=True, exist_ok=True)
-    schedule_path = root / "selection_schedule.parquet"
-    base._write_parquet(schedule, schedule_path)
-    summaries: list[dict[str, Any]] = []
-    files: dict[str, Any] = {}
-    for spec in specs:
-        result, equity, trades = base._simulate_account_spec(
-            spec=spec,
-            selections=schedule,
-            context=sources.context,
-            daily_raw=daily_raw,
-            raw_open=raw_open,
-            entry_filled=entry_filled,
-            costs=costs,
-            starting_cash=float(starting_cash),
-        )
-        result = base._payoff_account_diagnostics(
-            result=result,
-            equity=equity,
-            trades=trades,
-            selections=schedule,
-        )
-        task_root = root / "tasks" / str(result["task_id"])
-        equity_path = task_root / "equity.parquet"
-        trades_path = task_root / "trades.parquet"
-        result_path = task_root / "task_result.json"
-        base._write_parquet(equity, equity_path)
-        base._write_parquet(trades, trades_path)
-        payload = {
-            "schema": "seq100_full_market_sequence_payoff_account_replay/1",
-            "status": "completed",
-            "completed_at": _now(),
-            "study_id": base.STUDY_ID,
-            "fingerprint": fingerprint,
-            **result,
-            "files": {
-                "equity": _file_record(equity_path, row_count=len(equity)),
-                "trades": _file_record(trades_path, row_count=len(trades)),
-            },
-        }
-        _write_json(result_path, payload)
-        files[str(result["task_id"])] = _file_record(result_path)
-        summaries.append(result)
-    summary = pd.DataFrame(
-        [
-            {
-                "top_k": int(item["spec"]["top_k"]),
-                "cost_scenario": item["spec"]["cost_scenario"],
-                "total_net_return": item["total_net_return"],
-                "ending_equity": item["ending_equity"],
-                "maximum_drawdown": item["maximum_drawdown"],
-                "positive_year_count": item["positive_year_count"],
-                "worst_year_return": item["worst_year_return"],
-                "daily_hac_lower": item["daily_hac20_net_return"]["lower"],
-            }
-            for item in summaries
-        ]
-    ).sort_values(["top_k", "cost_scenario"])
-    summary_path = root / "summary.parquet"
-    base._write_parquet(summary, summary_path)
-    primary = next(
-        item
-        for item in summaries
-        if int(item["spec"]["top_k"]) == 10
-        and item["spec"]["cost_scenario"] == "stress"
+    cap10 = _account_result(
+        summaries, top_k=10, cost_scenario="stress", cap=0.10
     )
     result = {
-        "schema": "seq100_full_market_sequence_payoff_account_replay/1",
+        "schema": SEQUENCE_PAYOFF_ACCOUNT_SCHEMA,
         "status": "completed",
         "completed_at": _now(),
         "study_id": base.STUDY_ID,
@@ -2169,9 +2308,13 @@ def replay_sequence_payoff_accounts(
         "lookback": int(lookback),
         "horizon": int(horizon),
         "training_mode": training_mode,
+        "forbidden_2026_read_count": 0,
         "starting_cash": float(starting_cash),
         "summaries": summaries,
         "primary_stress_top10": primary,
+        "stress_top10_cap5": cap5,
+        "stress_top10_cap10": cap10,
+        "dropped_selection_count_after_gross_join": int(dropped),
         "decision_boundary": {
             "same_finite_account_engine_as_tree_replay": True,
             "next_open_entry": True,
@@ -2183,11 +2326,9 @@ def replay_sequence_payoff_accounts(
             "forbidden_2026_read_count": 0,
         },
         "files": {
-            "summary": _file_record(summary_path, row_count=len(summary)),
-            "selection_schedule": _file_record(
-                schedule_path, row_count=len(schedule)
-            ),
-            "tasks": files,
+            "summary": tasks["summary"],
+            "selection_schedule": tasks["selection_schedule"],
+            "tasks": tasks["tasks"],
         },
         "sources": {
             "evaluation": _file_record(
@@ -2298,6 +2439,614 @@ def _evaluation_prediction(
         },
     )
     return prediction, components
+
+
+def _payoff_ensemble_prediction(
+    *,
+    sources: SequenceSources,
+    validation_positions: np.ndarray,
+    sequence_prediction: np.ndarray,
+    tree_prediction: np.ndarray,
+    additional_tree_predictions: Mapping[str, np.ndarray] | None = None,
+    fusion_method: str = "mean",
+) -> tuple[PredictionOutput, pd.DataFrame]:
+    if fusion_method not in PAYOFF_FUSION_METHODS:
+        raise SequenceChallengerError(
+            f"unknown_payoff_fusion_method:{fusion_method}"
+        )
+    extra_predictions = dict(additional_tree_predictions or {})
+    all_predictions = [sequence_prediction, tree_prediction, *extra_predictions.values()]
+    if any(len(prediction) != len(validation_positions) for prediction in all_predictions):
+        raise SequenceChallengerError("payoff_ensemble_prediction_row_count_mismatch")
+    valid = (
+        np.asarray(
+            sources.exact_valid[validation_positions, sources.base_column],
+            dtype=bool,
+        )
+        & np.asarray(
+            sources.exact_valid[validation_positions, sources.stress_column],
+            dtype=bool,
+        )
+        & np.isfinite(sequence_prediction)
+        & np.isfinite(tree_prediction)
+    )
+    for prediction in extra_predictions.values():
+        valid &= np.isfinite(prediction)
+    rows = validation_positions[valid]
+    if not len(rows):
+        raise SequenceChallengerError("payoff_ensemble_prediction_empty")
+    components = sources.context.row_index.iloc[rows][
+        ["candidate_id", "date_idx"]
+    ].copy()
+    components["model_row_position"] = rows
+    components["sequence_prediction"] = np.asarray(
+        sequence_prediction[valid], dtype=np.float32
+    )
+    components["tree_prediction"] = np.asarray(
+        tree_prediction[valid], dtype=np.float32
+    )
+    components["sequence_rank"] = components.groupby("date_idx", sort=False)[
+        "sequence_prediction"
+    ].rank(pct=True)
+    components["tree_rank"] = components.groupby("date_idx", sort=False)[
+        "tree_prediction"
+    ].rank(pct=True)
+    rank_columns = ["sequence_rank", "tree_rank"]
+    for profile, values in extra_predictions.items():
+        prediction_column = f"tree_prediction__{profile}"
+        rank_column = f"tree_rank__{profile}"
+        components[prediction_column] = np.asarray(values[valid], dtype=np.float32)
+        components[rank_column] = components.groupby("date_idx", sort=False)[
+            prediction_column
+        ].rank(pct=True)
+        rank_columns.append(rank_column)
+    if fusion_method == "mean":
+        components["ensemble_score"] = components[rank_columns].mean(axis=1)
+    else:
+        components["ensemble_score"] = components[rank_columns].min(axis=1)
+    dates = components["date_idx"].astype(int).unique().tolist()
+    prediction = PredictionOutput(
+        rows=rows,
+        stock_score=components["ensemble_score"].to_numpy(dtype=np.float32),
+        market_return={date_idx: 0.0 for date_idx in dates},
+        market_probability={date_idx: 0.5 for date_idx in dates},
+    )
+    return prediction, components
+
+
+def evaluate_payoff_ensemble(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    lookback: int = DEFAULT_LOOKBACK,
+    horizon: int = 10,
+    training_mode: str = "outer_early_stop",
+    tree_training_mode: str = "outer_early_stop",
+    sequence_seed_offsets: Sequence[int] = (0,),
+    fusion_method: str = "mean",
+    tree_profiles: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Evaluate an always-on tree/sequence rank fusion at one exact horizon."""
+
+    if int(horizon) not in base.HORIZONS:
+        raise SequenceChallengerError(f"unsupported_horizon:{horizon}")
+    if training_mode not in SEQUENCE_TRAINING_MODES:
+        raise SequenceChallengerError(
+            f"unknown_sequence_training_mode:{training_mode}"
+        )
+    if tree_training_mode not in base.TRAINING_MODES:
+        raise SequenceChallengerError(
+            f"unknown_tree_training_mode:{tree_training_mode}"
+        )
+    if fusion_method not in PAYOFF_FUSION_METHODS:
+        raise SequenceChallengerError(
+            f"unknown_payoff_fusion_method:{fusion_method}"
+        )
+    seed_offsets = tuple(
+        dict.fromkeys(int(value) for value in sequence_seed_offsets)
+    )
+    if not seed_offsets:
+        raise SequenceChallengerError("sequence_seed_offsets_empty")
+    study = base.load_study(study_path)
+    primary_profile = str(study["lightgbm"]["primary_profile"])
+    profiles = (
+        tuple(dict.fromkeys(str(value) for value in tree_profiles))
+        if tree_profiles
+        else (primary_profile,)
+    )
+    unknown_profiles = set(profiles) - set(study["lightgbm"]["profiles"])
+    if unknown_profiles:
+        raise SequenceChallengerError(
+            f"unknown_tree_profiles:{sorted(unknown_profiles)}"
+        )
+    profile = (
+        primary_profile
+        if profiles == (primary_profile,)
+        else "ensemble_" + "_".join(profiles)
+    )
+    profile_path_suffix = profiles if profiles != (primary_profile,) else ()
+    sources = _load_sources(study, output_root=output_root, horizon=horizon)
+    folds = base.build_forward_folds(
+        date_idx=sources.context.row_index["date_idx"].to_numpy(dtype=np.int32),
+        trade_date=sources.context.row_index["trade_date"].astype(str).to_numpy(),
+        validation_start_date=str(
+            study["validation"]["validation_start_date"]
+        ),
+        validation_end_date=str(study["validation"]["validation_end_date"]),
+        fold_count=int(study["validation"]["forward_fold_count"]),
+        purge_days=int(study["validation"]["common_purge_trading_days"]),
+    )
+    for fold in folds:
+        for seed_offset in seed_offsets:
+            expand_fold_predictions(
+                study_path=study_path,
+                output_root=output_root,
+                fold_number=int(fold["fold"]),
+                lookback=lookback,
+                training_mode=training_mode,
+                seed_offset=seed_offset,
+                horizon=horizon,
+            )
+    sequence_task_groups = [
+        [
+            _completed_sequence_task(
+                output_root,
+                fold=int(fold["fold"]),
+                lookback=lookback,
+                training_mode=training_mode,
+                seed_offset=seed_offset,
+                horizon=horizon,
+            )
+            for seed_offset in seed_offsets
+        ]
+        for fold in folds
+    ]
+    target = f"exact_net_return_d{int(horizon)}_rank"
+    tree_task_groups = [
+        [
+            base._oof_task_result(
+                output_root,
+                fold=int(fold["fold"]),
+                target=target,
+                profile=tree_profile,
+                feature_variant=base.DEFAULT_FEATURE_VARIANT,
+                training_mode=tree_training_mode,
+            )
+            for tree_profile in profiles
+        ]
+        for fold in folds
+    ]
+    fingerprint_payload = {
+        "schema": PAYOFF_ENSEMBLE_SCHEMA,
+        "study_sha256": base._sha256(study_path),
+        "target_fingerprint": sources.target_manifest["fingerprint"],
+        "target": target,
+        "profile": profile,
+        "lookback": int(lookback),
+        "horizon": int(horizon),
+        "training_mode": training_mode,
+        "tree_training_mode": tree_training_mode,
+        "sequence_seed_offsets": list(seed_offsets),
+        "fusion_method": str(fusion_method),
+        "market_gate": "always",
+        "ranking_universe": "matching_exact_net_valid_rows",
+        "top_k": list(base.PAYOFF_TOP_KS),
+        "sequence_tasks": {
+            str(path): base._sha256(path)
+            for group in sequence_task_groups
+            for _, path in group
+        },
+        "tree_tasks": {
+            str(path): base._sha256(path)
+            for group in tree_task_groups
+            for _, path in group
+        },
+    }
+    if profile_path_suffix:
+        fingerprint_payload["tree_profiles"] = list(profiles)
+    fingerprint = _stable_hash(fingerprint_payload)
+    evaluation_root = _payoff_ensemble_root(
+        output_root,
+        "payoff_ensemble_evaluation",
+        lookback=lookback,
+        horizon=horizon,
+        training_mode=training_mode,
+        tree_training_mode=tree_training_mode,
+        seed_offsets=seed_offsets,
+        fusion_method=fusion_method,
+        tree_profiles=profile_path_suffix,
+    )
+    manifest_path = evaluation_root / "manifest.json"
+    if manifest_path.is_file():
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            current.get("status") == "completed"
+            and current.get("fingerprint") == fingerprint
+            and current.get("forbidden_2026_read_count") == 0
+        ):
+            return current
+    daily_parts: list[pd.DataFrame] = []
+    decile_parts: list[pd.DataFrame] = []
+    selection_parts: list[pd.DataFrame] = []
+    component_parts: list[pd.DataFrame] = []
+    fold_summaries: list[dict[str, Any]] = []
+    for fold, sequence_task_group, tree_task_group in zip(
+        folds, sequence_task_groups, tree_task_groups, strict=True
+    ):
+        fold_number = int(fold["fold"])
+        positions = base._fold_rows(
+            sources.context.row_index, fold, "validation"
+        )
+        sequence_predictions = [
+            np.asarray(
+                np.load(
+                    sequence_task["files"]["full_universe_prediction"]["path"],
+                    mmap_mode="r",
+                    allow_pickle=False,
+                ),
+                dtype=np.float32,
+            )
+            for sequence_task, _ in sequence_task_group
+        ]
+        if any(
+            len(prediction) != len(positions)
+            for prediction in sequence_predictions
+        ):
+            raise SequenceChallengerError(
+                "payoff_ensemble_sequence_prediction_row_count_mismatch"
+            )
+        sequence_prediction = (
+            sequence_predictions[0]
+            if len(sequence_predictions) == 1
+            else np.mean(
+                np.stack(sequence_predictions),
+                axis=0,
+                dtype=np.float32,
+            )
+        )
+        tree_predictions = [
+            np.asarray(
+                np.load(
+                    tree_task["files"]["prediction"]["path"],
+                    mmap_mode="r",
+                    allow_pickle=False,
+                ),
+                dtype=np.float32,
+            )
+            for tree_task, _ in tree_task_group
+        ]
+        prediction, components = _payoff_ensemble_prediction(
+            sources=sources,
+            validation_positions=positions,
+            sequence_prediction=sequence_prediction,
+            tree_prediction=tree_predictions[0],
+            additional_tree_predictions={
+                tree_profile: tree_prediction
+                for tree_profile, tree_prediction in zip(
+                    profiles[1:], tree_predictions[1:], strict=True
+                )
+            },
+            fusion_method=fusion_method,
+        )
+        daily, deciles, selections, summary = _build_evaluation_frames(
+            sources, prediction, fold=fold_number
+        )
+        component_values = components.drop(columns=["candidate_id", "date_idx"])
+        selections = selections.merge(
+            component_values,
+            on="model_row_position",
+            how="left",
+            validate="one_to_one",
+        )
+        summary["fold"] = fold_number
+        fold_summaries.append(summary)
+        daily_parts.append(daily)
+        decile_parts.append(deciles)
+        selection_parts.append(selections)
+        component_parts.append(components)
+        base._emit(
+            "payoff_ensemble_fold_evaluated",
+            fold=fold_number,
+            horizon=horizon,
+            rank_ic=summary["daily_rank_ic_mean"],
+            top10_stress=summary["top10_stress"]["mean"],
+        )
+    daily = pd.concat(daily_parts, ignore_index=True).sort_values("date_idx")
+    deciles = pd.concat(decile_parts, ignore_index=True).sort_values(
+        ["date_idx", "decile"]
+    )
+    selections = pd.concat(selection_parts, ignore_index=True).sort_values(
+        ["date_idx", "selection_rank"]
+    )
+    components = pd.concat(component_parts, ignore_index=True).sort_values(
+        ["date_idx", "candidate_id"]
+    )
+    combined = base._payoff_summary(daily, deciles)
+    rank_columns = [
+        "sequence_rank",
+        "tree_rank",
+        *(f"tree_rank__{tree_profile}" for tree_profile in profiles[1:]),
+    ]
+    component_correlations: dict[str, float | None] = {}
+    for left, right in combinations(rank_columns, 2):
+        values = (
+            components.groupby("date_idx", sort=False)
+            .apply(
+                lambda current, left=left, right=right: current[left].corr(
+                    current[right], method="spearman"
+                ),
+                include_groups=False,
+            )
+            .dropna()
+        )
+        component_correlations[f"{left}__{right}"] = (
+            float(values.mean()) if len(values) else None
+        )
+    evaluation_root.mkdir(parents=True, exist_ok=True)
+    daily_path = evaluation_root / "daily_metrics.parquet"
+    decile_path = evaluation_root / "decile_daily.parquet"
+    selections_path = evaluation_root / "top10_selections.parquet"
+    components_path = evaluation_root / "component_predictions.parquet"
+    base._write_parquet(daily, daily_path)
+    base._write_parquet(deciles, decile_path)
+    base._write_parquet(selections, selections_path)
+    base._write_parquet(components, components_path)
+    result = {
+        "schema": PAYOFF_ENSEMBLE_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": base.STUDY_ID,
+        "fingerprint": fingerprint,
+        "target": target,
+        "profile": profile,
+        "tree_profiles": list(profiles),
+        "lookback": int(lookback),
+        "horizon": int(horizon),
+        "training_mode": training_mode,
+        "tree_training_mode": tree_training_mode,
+        "sequence_seed_offsets": list(seed_offsets),
+        "fusion_method": str(fusion_method),
+        "frozen_definition": {
+            "stock_score": (
+                "equal_average_of_within_date_model_percentile_ranks"
+                if fusion_method == "mean"
+                else "minimum_of_within_date_model_percentile_ranks"
+            ),
+            "model_components": ["sequence", *profiles],
+            "market_gate": "always",
+            "holding": f"next_open_to_d{int(horizon)}_legal_exit",
+            "weights_or_thresholds_tuned_after_oof": False,
+            "component_set_selected_after_oof": bool(profile_path_suffix),
+        },
+        "fold_summaries": fold_summaries,
+        "combined": combined,
+        "component_daily_rank_correlation_mean": component_correlations.get(
+            "sequence_rank__tree_rank"
+        ),
+        "component_daily_rank_correlations": component_correlations,
+        "positive_rank_fold_count": int(
+            sum(
+                float(item["daily_rank_ic_mean"]) > 0.0
+                for item in fold_summaries
+            )
+        ),
+        "ranking_contract": (
+            "same_exact_net_valid_universe_then_"
+            f"{fusion_method!s}_within_date_rank_fusion"
+        ),
+        "account_replay_performed": False,
+        "forbidden_2026_read_count": 0,
+        "files": {
+            "daily_metrics": _file_record(daily_path, row_count=len(daily)),
+            "decile_daily": _file_record(decile_path, row_count=len(deciles)),
+            "top10_selections": _file_record(
+                selections_path, row_count=len(selections)
+            ),
+            "component_predictions": _file_record(
+                components_path, row_count=len(components)
+            ),
+        },
+        "sources": {
+            "sequence_tasks": [
+                _file_record(path)
+                for group in sequence_task_groups
+                for _, path in group
+            ],
+            "tree_tasks": [
+                _file_record(path)
+                for group in tree_task_groups
+                for _, path in group
+            ],
+            "exact_net_targets": _file_record(
+                output_root / "exact_net_targets" / "manifest.json"
+            ),
+        },
+    }
+    _write_json(manifest_path, result)
+    base._emit(
+        "payoff_ensemble_evaluation_completed",
+        horizon=horizon,
+        fusion_method=fusion_method,
+        rank_ic=combined["daily_rank_ic_mean"],
+        top10_stress=combined["top10_stress"]["mean"],
+    )
+    return result
+
+
+def replay_payoff_ensemble_accounts(
+    *,
+    study_path: Path = DEFAULT_STUDY_PATH,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    lookback: int = DEFAULT_LOOKBACK,
+    horizon: int = 10,
+    starting_cash: float = 1_000_000.0,
+    training_mode: str = "outer_early_stop",
+    tree_training_mode: str = "outer_early_stop",
+    sequence_seed_offsets: Sequence[int] = (0,),
+    fusion_method: str = "mean",
+    tree_profiles: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Replay the exact-payoff fusion with the same finite-account engine."""
+
+    evaluation = evaluate_payoff_ensemble(
+        study_path=study_path,
+        output_root=output_root,
+        lookback=lookback,
+        horizon=horizon,
+        training_mode=training_mode,
+        tree_training_mode=tree_training_mode,
+        sequence_seed_offsets=sequence_seed_offsets,
+        fusion_method=fusion_method,
+        tree_profiles=tree_profiles,
+    )
+    study = base.load_study(study_path)
+    profiles = tuple(
+        str(value)
+        for value in evaluation.get("tree_profiles", [evaluation["profile"]])
+    )
+    primary_profile = str(study["lightgbm"]["primary_profile"])
+    profile_path_suffix = profiles if profiles != (primary_profile,) else ()
+    sources = _load_sources(study, output_root=output_root, horizon=horizon)
+    selection_path = Path(evaluation["files"]["top10_selections"]["path"])
+    selections = pd.read_parquet(selection_path)
+    variant = (
+        f"payoff_tree_sequence_{evaluation['fusion_method']!s}_rank"
+        f"_d{int(horizon)}"
+    )
+    schedule, dropped = _prepare_exact_payoff_schedule(
+        selections=selections,
+        sources=sources,
+        horizon=horizon,
+        variant=variant,
+    )
+    specs = _exact_payoff_account_specs(
+        variant=variant, horizon=horizon
+    )
+    seed_offsets = tuple(
+        int(value) for value in evaluation["sequence_seed_offsets"]
+    )
+    fingerprint_payload = {
+        "schema": PAYOFF_ENSEMBLE_ACCOUNT_SCHEMA,
+        "evaluation_fingerprint": evaluation["fingerprint"],
+        "selection_sha256": evaluation["files"]["top10_selections"]["sha256"],
+        "lookback": int(lookback),
+        "horizon": int(horizon),
+        "training_mode": str(evaluation["training_mode"]),
+        "tree_training_mode": str(evaluation["tree_training_mode"]),
+        "sequence_seed_offsets": list(seed_offsets),
+        "fusion_method": str(evaluation["fusion_method"]),
+        "starting_cash": float(starting_cash),
+        "specs": specs,
+        "unfilled_selected_order": "cash_no_rank_substitution",
+    }
+    if profile_path_suffix:
+        fingerprint_payload["tree_profiles"] = list(profiles)
+    fingerprint = _stable_hash(fingerprint_payload)
+    root = _payoff_ensemble_root(
+        output_root,
+        "payoff_ensemble_account_replay",
+        lookback=lookback,
+        horizon=horizon,
+        training_mode=str(evaluation["training_mode"]),
+        tree_training_mode=str(evaluation["tree_training_mode"]),
+        seed_offsets=seed_offsets,
+        fusion_method=str(evaluation["fusion_method"]),
+        tree_profiles=profile_path_suffix,
+    )
+    manifest_path = root / "manifest.json"
+    if manifest_path.is_file():
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if _audited_manifest_is_current(current, fingerprint):
+            return current
+    tasks = _run_exact_payoff_account_tasks(
+        root=root,
+        schema=PAYOFF_ENSEMBLE_ACCOUNT_SCHEMA,
+        fingerprint=fingerprint,
+        schedule=schedule,
+        sources=sources,
+        specs=specs,
+        starting_cash=starting_cash,
+    )
+    summaries = tasks["summaries"]
+    primary = _account_result(
+        summaries, top_k=10, cost_scenario="stress"
+    )
+    cap5 = _account_result(
+        summaries, top_k=10, cost_scenario="stress", cap=0.05
+    )
+    cap10 = _account_result(
+        summaries, top_k=10, cost_scenario="stress", cap=0.10
+    )
+    result = {
+        "schema": PAYOFF_ENSEMBLE_ACCOUNT_SCHEMA,
+        "status": "completed",
+        "completed_at": _now(),
+        "study_id": base.STUDY_ID,
+        "fingerprint": fingerprint,
+        "target": evaluation["target"],
+        "profile": evaluation["profile"],
+        "tree_profiles": list(profiles),
+        "lookback": int(lookback),
+        "horizon": int(horizon),
+        "training_mode": str(evaluation["training_mode"]),
+        "tree_training_mode": str(evaluation["tree_training_mode"]),
+        "sequence_seed_offsets": list(seed_offsets),
+        "fusion_method": str(evaluation["fusion_method"]),
+        "starting_cash": float(starting_cash),
+        "forbidden_2026_read_count": 0,
+        "selection_row_count": len(schedule),
+        "dropped_selection_count_after_gross_join": int(dropped),
+        "summaries": summaries,
+        "primary_stress_top10": primary,
+        "stress_top10_cap5": cap5,
+        "stress_top10_cap10": cap10,
+        "decision_boundary": {
+            "same_finite_account_engine_as_tree_and_sequence_replays": True,
+            "historical_result_is_adaptive_not_independent_confirmation": True,
+            "stable_profit_claim_allowed": False,
+            "next_open_entry": True,
+            "planned_legal_exit_day": int(horizon),
+            "delayed_legal_sale_is_replayed": True,
+            "cohort_equity_fraction": 1.0 / float(horizon),
+            "no_leverage": True,
+            "entry_fill_checked_before_buy": True,
+            "unfilled_selected_order_is_cash_without_rank_substitution": True,
+            "costs_recomputed_from_gross_path": True,
+            "forbidden_2026_read_count": 0,
+        },
+        "files": {
+            "summary": tasks["summary"],
+            "selection_schedule": tasks["selection_schedule"],
+            "tasks": tasks["tasks"],
+        },
+        "sources": {
+            "evaluation": _file_record(
+                _payoff_ensemble_root(
+                    output_root,
+                    "payoff_ensemble_evaluation",
+                    lookback=lookback,
+                    horizon=horizon,
+                    training_mode=str(evaluation["training_mode"]),
+                    tree_training_mode=str(evaluation["tree_training_mode"]),
+                    seed_offsets=seed_offsets,
+                    fusion_method=str(evaluation["fusion_method"]),
+                    tree_profiles=profile_path_suffix,
+                )
+                / "manifest.json"
+            ),
+            "targets": _file_record(output_root / "targets" / "manifest.json"),
+        },
+    }
+    _write_json(manifest_path, result)
+    base._emit(
+        "payoff_ensemble_account_replay_completed",
+        horizon=horizon,
+        fusion_method=evaluation["fusion_method"],
+        total_return=primary["total_net_return"],
+        maximum_drawdown=primary["maximum_drawdown"],
+        cap10_total_return=cap10["total_net_return"],
+    )
+    return result
 
 
 def evaluate_ensemble(
@@ -5604,8 +6353,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default="outer_early_stop",
     )
     parser.add_argument("--seed-offset", type=int, default=0)
+    parser.add_argument(
+        "--payoff-fusion-method",
+        choices=PAYOFF_FUSION_METHODS,
+        default="mean",
+    )
+    parser.add_argument(
+        "--payoff-tree-profiles",
+        default="",
+        help="Comma-separated LightGBM profiles for equal-rank payoff fusion.",
+    )
     parser.add_argument("--evaluate-ensemble", action="store_true")
+    parser.add_argument("--evaluate-payoff-ensemble", action="store_true")
     parser.add_argument("--evaluate-sequence-payoff", action="store_true")
+    parser.add_argument("--replay-payoff-ensemble", action="store_true")
     parser.add_argument("--replay-sequence-payoff", action="store_true")
     parser.add_argument("--replay-accounts", action="store_true")
     parser.add_argument("--robustness", action="store_true")
@@ -5627,7 +6388,36 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    if args.replay_sequence_payoff:
+    payoff_tree_profiles = tuple(
+        item.strip()
+        for item in str(args.payoff_tree_profiles).split(",")
+        if item.strip()
+    )
+    if args.replay_payoff_ensemble:
+        result = replay_payoff_ensemble_accounts(
+            study_path=args.study,
+            output_root=args.output_root,
+            lookback=args.lookback,
+            horizon=args.horizon,
+            training_mode=args.training_mode,
+            tree_training_mode=args.tree_training_mode,
+            sequence_seed_offsets=(args.seed_offset,),
+            fusion_method=args.payoff_fusion_method,
+            tree_profiles=payoff_tree_profiles or None,
+        )
+    elif args.evaluate_payoff_ensemble:
+        result = evaluate_payoff_ensemble(
+            study_path=args.study,
+            output_root=args.output_root,
+            lookback=args.lookback,
+            horizon=args.horizon,
+            training_mode=args.training_mode,
+            tree_training_mode=args.tree_training_mode,
+            sequence_seed_offsets=(args.seed_offset,),
+            fusion_method=args.payoff_fusion_method,
+            tree_profiles=payoff_tree_profiles or None,
+        )
+    elif args.replay_sequence_payoff:
         result = replay_sequence_payoff_accounts(
             study_path=args.study,
             output_root=args.output_root,
