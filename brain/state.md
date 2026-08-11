@@ -39,6 +39,14 @@ net-return distributions and action value rather than deterministic direction.
   0.12585 versus 0.12601 for lookback-16 and Top10 stress mean was about
   1.189% versus about 1.317%; the roughly 17-minute fold showed no clear gain.
   Do not spend four more folds on lookback-32 without a new reason.
+- The attachment's literal seven-family 25/20/15/20/10/5/5 main-board
+  Quality x Value x Earnings Revision x Confirmation score was frozen and
+  audited. It underperforms the existing 30/30/25/10/5 value-growth score on
+  D20/D60/D120 cohort economics and on the matched risk-budget account. Do not
+  tune its weights or rating thresholds around this consumed history. After a
+  positive-trend hard screen, the extra price-confirmation subscore has
+  negative D120 Rank IC and should not be rewarded more aggressively without
+  a new independently specified test.
 
 ## Existing interpretable candidates
 
@@ -49,6 +57,41 @@ net-return distributions and action value rather than deterministic direction.
 - The literal D60 Top3 concentrated version at 50% gross grew about CNY1m to
   CNY3.427m, with about 9.99% compound growth, 22.89% drawdown and 10/14
   positive years. Both are historical candidates, not stable-profit claims.
+
+## Seven-family framework audit
+
+The supplied main-board framework was implemented with PIT proxies for
+normalized valuation, actual earnings improvement, forecast revision, company
+quality, earnings quality/cash flow, price confirmation and governance risk.
+It selects monthly Top10 names with at most two per industry. The score is a
+retrospective quantification of the attachment, not a replacement for its
+unavailable qualitative analyst judgements.
+
+- The audit covers 168 month ends and 1,676 selections from 33,468 eligible
+  observations. Selected medians are PE 16.40x, market cap CNY21.63bn, net
+  profit growth 52.40%, revenue growth 26.34%, ROE 9.96%, CFO/net profit 1.17x,
+  debt/assets 39.76% and 90-day net-profit forecast revision +4.39%.
+- Full-history D20/D60/D120 Rank IC is 0.04728/0.06602/0.07576, with positive
+  HAC lower bounds. Top10 D120 net return averages 6.77%, but excess over the
+  eligible pool is only 1.88 percentage points and its HAC lower bound is
+  slightly negative. The 2020-2022 D120 eligible-pool excess is -2.37%.
+- The score mainly avoids the weakest tail: D120 quintile means rise from
+  2.75% in Q1 to 5.80% in Q4, then plateau at 5.71% in Q5. The rating buckets
+  are not calibrated and are not monotonic in return.
+- Next-fiscal-year selected net-profit forecasts have median error -12.44%,
+  median absolute error 26.64%, only 41.23% within 20%, 64.69% overforecast
+  and 58.75% growth-direction accuracy. EPS realization is weaker.
+- The most common D120 fundamental outcome is earnings delivery with multiple
+  compression (37.71%, mean -2.77%). Revision reversal occurs in 39.32% of
+  selections; delayed D60-loss/D120-gain realization occurs in 12.65%.
+- New and old Top10 selections overlap 67.60%. Framework-only selections favor
+  current growth and quality but have weaker valuation/cash quality and D120
+  mean 5.13%; old-only selections have D120 mean 8.59%.
+- The matched frozen risk-budget account grows CNY1m to CNY2.717m, with 7.62%
+  annualized log growth, -29.15% drawdown and 11/14 positive years. The old
+  score reaches CNY2.863m, 8.02% and -29.22% under the same execution contract.
+  These are consumed historical results and do not permit a stable-profit
+  claim.
 
 ## D10 payoff model evidence
 
@@ -146,6 +189,13 @@ the result is adaptive retrospective research, not independent confirmation.
 - Rejected frozen return/q10 fusion evaluation/account:
   `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_score_fusion_evaluation/horizon_10/strong_127__outer_early_stop/manifest.json`
   and the matching path under `payoff_score_fusion_account_replay`.
+- Seven-family framework frozen study:
+  `daily_research/studies/seq100_qver_confirmation_effect_v1.json`.
+- Seven-family framework authoritative summary and Parquet evidence:
+  `daily_research/output/path_policy/studies/seq100_qver_confirmation_effect_v1/summary.json`
+  and the sibling files in that study root.
+- Seven-family framework durable research record:
+  `daily_research/research_records/seq100/seq100_qver_confirmation_effect_v1_20260811/research_record.md`.
 
 ## Code and verification
 
@@ -156,17 +206,26 @@ the result is adaptive retrospective research, not independent confirmation.
   independent artifact namespaces and the matching account replay. Audited
   account caches reject legacy manifests without an explicit zero 2026-read
   count.
+- `daily_research/path_policy/seq100_qver_confirmation_effect.py` implements
+  the frozen attachment audit, post-selection outcome reads, forecast
+  realization, scenario decomposition and matched legal account replay.
 - Focused and full joint tests pass: 40 tests. Ruff, `py_compile` and
   `git diff --check` pass. All new target-variant manifests plus the refreshed
   sequence and three-model mean account manifests explicitly report zero
   forbidden 2026 reads.
+- The seven-family audit's five focused tests pass; its summary schema, file
+  hashes, score reconstruction, selection uniqueness, industry cap, account
+  endpoint and zero forbidden 2026 reads were independently rechecked.
 
 ## Next step
 
 Do not label the current challenger as stable or deploy it. Preserve the
-three-model mean as the current historical benchmark and, when research
-continues, choose one pre-specified architecture competition (for example a
-lightweight StockMixer/MASTER-style sequence model or a return/downside
-multitask head) using the same five folds and exact account contract. Avoid
-another ad hoc fusion or small rule grid until a new model supplies genuinely
-independent OOF information.
+three-model mean as the current short-horizon historical benchmark and the old
+30/30/25/10/5 score as the stronger interpretable D60 baseline. Use the new
+seven-family framework as a candidate-pool and scenario-audit lens, especially
+for revision reversal, multiple compression and early-spike fade risk. When
+research continues, choose one pre-specified architecture competition (for
+example a lightweight StockMixer/MASTER-style sequence model or a
+return/downside multitask head) using the same five folds and exact account
+contract. Avoid another ad hoc fusion, weight adjustment or small rule grid
+until a new model supplies genuinely independent OOF information.

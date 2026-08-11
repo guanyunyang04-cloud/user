@@ -1,0 +1,221 @@
+{
+  "study_id": "seq100_qver_confirmation_effect_v1",
+  "status": "frozen_retrospective_framework_effect_audit",
+  "purpose": "Audit the historical characteristics, subsequent outcome states and prediction realization of the user-supplied main-board Quality x Value x Earnings Revision x Confirmation framework using a pre-outcome, point-in-time quantitative proxy.",
+  "epistemic_contract": {
+    "all_2012_2025_market_outcomes_are_retrospectively_consumed": true,
+    "no_historical_period_is_untouched_confirmation": true,
+    "candidate_selection_precedes_outcome_reads": true,
+    "framework_weights_and_proxy_mapping_are_frozen_before_outcome_reads": true,
+    "qualitative_moat_management_and_discretionary_fair_pe_are_not_backfilled": true,
+    "score_is_a_cross_sectional_priority_measure_not_a_return_forecast": true,
+    "2026_inputs_and_outcomes_are_forbidden": true,
+    "52_week_low_or_distance_from_low_reward_is_forbidden": true,
+    "historical_success_cannot_create_a_live_profit_claim": true
+  },
+  "framework_source": {
+    "attachment_path": "C:/Users/ASUS/.codex/attachments/2eb06062-b99a-4caf-977c-4b7051c2b7b6/pasted-text.txt",
+    "attachment_sha256": "30403dcee4a8131ada9f5d514d1d198a31377e1c717cea687d6b90853da5fa32",
+    "title": "A股主板 Quality × Value × Earnings Revision × Confirmation 选股与估值研究框架"
+  },
+  "source": {
+    "exact_policy_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+    "exact_policy_summary_sha256": "349005a7505ead306db2892061765423d390e065ac043e77b68e969d213e325d",
+    "candidate_features": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+    "candidate_features_sha256": "91956712b39db71eec6175cd25b5cf48c96a576f635789bb906b7c00f15b996b",
+    "old_selections": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+    "old_selections_sha256": "57db1504724912c874d19bd0a7cc24a1abf474b58e8bc69926a93c1b5c73b447",
+    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
+    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
+    "income_statement_quarterly": "quant_data_platform/data/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
+    "income_statement_quarterly_sha256": "5f863d3f3b37779414651bc8860e48b1f1a8bd767525d1c85b624303e5b9314c",
+    "membership_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+    "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
+    "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
+    "formal_start_date": "2012-01-01",
+    "maximum_outcome_date": "2025-12-31",
+    "maximum_account_mark_date": "2025-12-31",
+    "maximum_realized_fiscal_year": 2024,
+    "forbidden_year": 2026
+  },
+  "universe": {
+    "name": "quality_liquidity_pit_main_board",
+    "allowed_prefixes": ["600", "601", "603", "605", "000", "001", "002", "003"],
+    "minimum_listing_open_days": 250,
+    "hard_filter_source": "eligible__exact_full_top10",
+    "hard_conditions": [
+      "positive point-in-time PE and PB",
+      "positive next-fiscal-year consensus net profit with at least three institutions",
+      "both 30-day and 90-day net-profit and EPS revision coordinates covered",
+      "non-negative 20-day PIT industry-relative return and trend slope",
+      "no recent delisting-risk announcement",
+      "minimum listing age and inherited ST, suspension, limit and liquidity constraints"
+    ]
+  },
+  "score_contract": {
+    "scale": "0_to_100_from_industry_relative_percentile_families",
+    "minimum_industry_rank_group_size": 10,
+    "family_weights": {
+      "normalized_valuation": 0.25,
+      "actual_earnings_improvement": 0.20,
+      "earnings_revision": 0.15,
+      "company_quality": 0.20,
+      "earnings_quality_cashflow": 0.10,
+      "price_confirmation": 0.05,
+      "governance_risk": 0.05
+    },
+    "normalized_valuation": [
+      "positive next-fiscal-year consensus earnings yield",
+      "lower positive current PE",
+      "lower positive current PB",
+      "causal TTM free-cash-flow yield",
+      "five-year causal cycle-normalized earnings yield"
+    ],
+    "actual_earnings_improvement": [
+      "financial_net_profit_yoy",
+      "financial_revenue_yoy",
+      "performance_forecast_change_mid"
+    ],
+    "earnings_revision": [
+      "30-day next-FY net-profit revision",
+      "30-day next-FY EPS revision",
+      "90-day next-FY net-profit revision",
+      "90-day next-FY EPS revision"
+    ],
+    "company_quality": [
+      "financial_roe_avg",
+      "financial_net_profit_margin",
+      "financial_gross_profit_margin",
+      "financial_asset_turnover",
+      "lower financial_debt_to_asset",
+      "lower balance_borrowing_ratio"
+    ],
+    "earnings_quality_cashflow": [
+      "cashflow_cfo_to_income",
+      "cashflow_cfo_to_revenue",
+      "cashflow_fcf_to_revenue",
+      "lower trade_receivables_to_total_assets",
+      "lower inventory_ratio",
+      "lower goodwill_ratio"
+    ],
+    "price_confirmation": [
+      "industry_relative_ret20",
+      "trend_slope_20d",
+      "relative_turnover_20d",
+      "volume_ratio_20d"
+    ],
+    "governance_risk": [
+      "no recent penalty announcement",
+      "no recent litigation announcement",
+      "no recent delisting-risk announcement",
+      "no income, balance-sheet or cash-flow source conflict"
+    ],
+    "minimum_nonmissing_components": {
+      "actual_earnings_improvement": 2,
+      "company_quality": 3,
+      "earnings_quality_cashflow": 3,
+      "price_confirmation": 2
+    },
+    "ratings": {
+      "A+": [85, 100],
+      "A": [80, 85],
+      "A-": [75, 80],
+      "B+": [68, 75],
+      "B": [60, 68],
+      "C": [0, 60]
+    },
+    "explicitly_uncovered": [
+      "qualitative moat",
+      "management quality",
+      "ROIC",
+      "historical valuation percentile",
+      "dividend yield",
+      "analyst upgrade and downgrade institution counts",
+      "discretionary bear, base and bull fair-PE ranges",
+      "manual high-frequency operating evidence"
+    ],
+    "explicitly_forbidden": [
+      "52_week_low",
+      "distance_from_52_week_low",
+      "post-outcome score overrides",
+      "post-outcome company-name selection"
+    ]
+  },
+  "selection": {
+    "frequency": "last quality_liquidity_pit signal date in each calendar month",
+    "top_k": 10,
+    "candidate_scan_count": 30,
+    "maximum_names_per_pit_industry": 2,
+    "old_frozen_comparator": "exact_full_top10_30_30_25_10_5",
+    "future_outcomes_used": false
+  },
+  "outcomes": {
+    "entry": "signal close decision and next exchange-open buy request",
+    "fixed_open_day_horizons": [20, 60, 120],
+    "sell_retry_open_days": 20,
+    "round_trip_cost_proxy": 0.006,
+    "path_maximum_open_days": 120,
+    "path_shape_contract": {
+      "early_spike_fade": "MFE20 >= 8% and D60 raw close return <= 25% of MFE20",
+      "dip_then_recover": "MAE10 <= -5% and D60 raw close return > 0",
+      "late_breakout": "D20 raw close return <= 0 and D60 raw close return >= 8%",
+      "persistent_trend": "D5, D20 and D60 raw close returns positive and D60 peak day >= 40",
+      "persistent_loss": "D5, D20 and D60 raw close returns negative",
+      "mixed_range": "all remaining evaluable paths"
+    },
+    "fundamental_realization": {
+      "forecast_target": "signal_calendar_year_plus_one_consensus_parent_net_profit",
+      "actual_target": "latest annual parent_net_income available no later than 2025-12-31",
+      "forecast_close_band": 0.20,
+      "forecast_tight_band": 0.10,
+      "valuation_decomposition_horizon": 120,
+      "valuation_snapshot": "latest monthly PIT candidate snapshot on or before the legal D120 exit",
+      "earnings_and_multiple_change_threshold": 0.05
+    }
+  },
+  "account": {
+    "starting_cash_cny": 1000000.0,
+    "position_slots": 30,
+    "entry": "next legal raw-price open",
+    "exit": "fixed D60 close request deferred until the first legal sellable close",
+    "cost_scenario": "double_slippage",
+    "pyramiding": false,
+    "replace_duplicate_ranked_names": true,
+    "lot_size": 100,
+    "maximum_signal_day_amount_fraction": 0.005,
+    "round_lots_and_minimum_commission_modeled": true
+  },
+  "risk_budget": {
+    "derivation_end_date": "2019-12-31",
+    "target_annualized_volatility": 0.15,
+    "minimum_gross_fraction": 0.25,
+    "maximum_gross_fraction": 1.0,
+    "parameter_grid_performed": false
+  },
+  "evaluation": {
+    "years": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025],
+    "periods": {
+      "development_already_consumed": [2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019],
+      "middle_already_consumed": [2020, 2021, 2022],
+      "late_already_consumed": [2023, 2024, 2025]
+    },
+    "inference": {
+      "hac_lag_months": 3,
+      "block_length_months": 3,
+      "bootstrap_repetitions": 5000,
+      "seed": 20260811
+    }
+  },
+  "decision_boundary": {
+    "retrospective_diagnostic_only": true,
+    "score_or_threshold_optimization_performed": false,
+    "target_price_backtest_claim_allowed": false,
+    "live_alpha_claim_allowed": false,
+    "production_strategy_claim_allowed": false,
+    "output_root": "daily_research/output/path_policy/studies/seq100_qver_confirmation_effect_v1"
+  }
+}
