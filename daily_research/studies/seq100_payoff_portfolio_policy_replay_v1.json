@@ -1,0 +1,37 @@
+{
+  "study_id": "seq100_payoff_portfolio_policy_replay_v1",
+  "status": "frozen_portfolio_policy_diagnostic",
+  "purpose": "Separate model ranking from portfolio construction by replaying the identical D10 OOF Top10 score rows under frozen legal exit horizons and capital/overlap policies.",
+  "epistemic_contract": {
+    "model_scores_are_not_retrained": true,
+    "portfolio_policies_are_frozen_before_replay": true,
+    "five_forward_folds_are_reusable_development_validation": true,
+    "no_2026_outcome_may_be_read": true,
+    "stable_profit_claim_allowed": false
+  },
+  "sources": {
+    "model_study": "daily_research/studies/seq100_full_market_multitask_forecast_v1.json",
+    "model_output_root": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+    "d10_evaluation_manifest": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "frozen_policies": {
+    "score": "same D10 sequence/tree within-date mean-rank OOF score",
+    "breadth": 10,
+    "cost_scenario": "stress",
+    "exit_horizons": [2, 3, 5, 10],
+    "capital_policies": {
+      "fixed_daily_cohort_10pct": "Invest at most 10% of prior equity in each daily cohort for every exit horizon.",
+      "horizon_normalized_full_investment": "Invest at most 1/H of prior equity per cohort so H overlapping cohorts target roughly full gross exposure."
+    },
+    "overlap_policies": [
+      "allow repeated same-symbol cohorts",
+      "skip a symbol while an earlier cohort is open and retain cash without rank substitution"
+    ],
+    "winner_cap_diagnostic": 0.1
+  },
+  "outputs": {
+    "output_root": "daily_research/output/path_policy/studies/seq100_payoff_portfolio_policy_replay_v1_short"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "study_id": "seq100_payoff_episode_audit_v1",
+  "status": "frozen_post_outcome_diagnostic",
+  "purpose": "Audit whether the current primary short-horizon account evidence is concentrated in repeated same-stock episodes or explained by execution, adjustment, corporate-action, industry, year, or fold anomalies before changing models or portfolio rules.",
+  "epistemic_contract": {
+    "audit_is_diagnostic_only": true,
+    "audit_may_not_change_historical_trades": true,
+    "five_forward_folds_are_reusable_development_validation": true,
+    "no_2026_outcome_may_be_read": true,
+    "stable_profit_claim_allowed": false
+  },
+  "sources": {
+    "account_manifest": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "scenarios": {
+    "primary": "Top10 stress with repeated same-symbol cohorts allowed",
+    "control": "Top10 stress with repeated same-symbol cohorts forbidden"
+  },
+  "episode_contract": {
+    "primary": "For a symbol, merge a next trade when its entry index is no later than the running maximum exit index.",
+    "sensitivity": "Also merge a next trade when its entry index is one trading day after the running maximum exit index.",
+    "unit_of_attribution": "realized account CNY PnL",
+    "top_fractions": [0.01, 0.05, 0.1]
+  },
+  "outputs": {
+    "output_root": "daily_research/output/path_policy/studies/seq100_payoff_episode_audit_v1"
+  }
+}

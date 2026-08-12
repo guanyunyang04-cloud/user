@@ -211,6 +211,72 @@ correlations with the sequence rank are only about 0.370-0.389.
 Both component choices were made after reviewing reusable OOF evidence. They
 are adaptive retrospective challengers, not independent confirmation.
 
+## Episode and execution-integrity audit
+
+The current two-component D10 account has now been audited trade by trade and
+by same-symbol holding episodes. The audit is post-outcome diagnosis only; it
+does not alter selections or trades.
+
+- All 13,773 overlap-account trades reconcile exactly to account cash flow,
+  100-share lots and raw entry prices. Adjusted-path legal returns have maximum
+  absolute residual `2.87e-08`. All entries are buyable and all recorded exits
+  are legal. There are 13,702 planned closes and 71 delayed legal opens.
+- The 71 delayed exits lose about CNY81.6k in aggregate. Adjustment-factor
+  changes affect 741 trades and contribute 4.67% of net profit; corporate
+  actions overlap 646 trades and contribute 4.99%. Neither explains the
+  headline result as a price-adjustment or dividend artifact.
+- Merging overlapping trades in the same stock yields 4,284 episodes, averaging
+  3.21 trades and at most 61. The best 1% of episodes contribute 47.62% of net
+  profit but only 16.48% of gross positive PnL; the best 5% contribute 125.61%
+  of net profit because losing episodes offset them. This confirms meaningful
+  right-tail dependence without reducing the result to one or two trades.
+- The best stock contributes 3.38% of net PnL. The largest industry contribution
+  is computer/communications/electronics manufacturing at 19.86%. 2024 and
+  2025 together contribute 63.11% of net PnL, while Fold 2 contributes only
+  3.75%. Time and sector concentration are more important than corporate-action
+  artifacts.
+- In the no-overlap account, the best 1% of episodes contribute 33.55% of net
+  PnL and 10.95% of positive PnL. Forbidding pyramiding reduces, but does not
+  remove, right-tail dependence.
+
+## Model-score and portfolio-policy separation
+
+The identical D10 two-component OOF Top10 score rows were replayed under legal
+D2/D3/D5/D10 exits. The same 14,435 stock-date-rank rows are used at every
+horizon; no score is retrained and no lower-ranked stock replaces an invalid
+order. Two frozen sizing policies separate exit timing from gross exposure.
+
+- Under horizon-normalized sizing and no same-symbol overlap: D2 loses 25.28%
+  with -57.66% drawdown and 3/6 positive years; D3 gains 40.07% with -28.74%
+  drawdown and 4/6 positive years; D5 gains 78.83% with -17.07% drawdown and
+  6/6 positive years; D10 gains 64.90% with -11.70% drawdown and 6/6 positive
+  years.
+- The D5 and D10 no-overlap daily HAC lower bounds are positive. After a 10%
+  winner cap they retain +12.37% and +9.25%, respectively; D2 and D3 cap
+  controls lose money. The current score therefore contains a medium-short
+  holding-period signal, not a robust two- or three-day signal.
+- With a fixed 10% daily cohort, D5 no-overlap gains 31.57% versus D10's 64.90%.
+  The difference between that result and horizon-normalized D5 makes the
+  sizing/exposure effect explicit. D10 remains the primary historical account;
+  D5 is now a legitimate portfolio control, not a new primary selected by a
+  horizon grid.
+
+An architecture-matched D5 target control was also completed before spending
+GPU time on a D5 sequence model.
+
+- `exact_net_return_d5_rank` with `strong_127 price_path_core_183` has five
+  positive Rank IC folds (0.04568/0.05227/0.07519/0.07643/0.07375) and combined
+  Rank IC 0.06463.
+- Its D5 Top10 stress account gains 54.14%, draws down 40.63% and has 4/6
+  positive years. No-overlap gains 57.85%, draws down 20.75%, has 5/6 positive
+  years and loses 3.81% after a 10% winner cap.
+- On the same D5 tree architecture and portfolio, the D5-target score has
+  higher raw no-overlap return than the D10-target score (+57.85% versus
+  +50.66%), but drawdown is 7.98 percentage points worse and the 10% cap is
+  9.11 points worse. It does not robustly Pareto-dominate, so D5 sequence
+  training was not promoted. This is adaptive resource allocation, not proof
+  that no D5-specific model can work.
+
 ## Authoritative artifacts
 
 - Current two-component core OOF:
@@ -239,6 +305,15 @@ are adaptive retrospective challengers, not independent confirmation.
 - Rejected frozen return/q10 fusion evaluation/account:
   `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_score_fusion_evaluation/horizon_10/strong_127__outer_early_stop/manifest.json`
   and the matching path under `payoff_score_fusion_account_replay`.
+- Current account episode/data-integrity audit:
+  `daily_research/output/path_policy/studies/seq100_payoff_episode_audit_v1/manifest.json`.
+- Frozen D10-score portfolio-policy replay:
+  `daily_research/output/path_policy/studies/seq100_payoff_portfolio_policy_replay_v1_short/manifest.json`.
+- Architecture-matched D5/D10 tree target control:
+  `daily_research/output/path_policy/studies/seq100_d5_target_match_tree_control_v1_short/manifest.json`.
+- D5 core-tree evaluation/account:
+  `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d5_rank__strong_127__price_path_core_183/manifest.json`
+  and the matching path under `payoff_account_replay`.
 - Seven-family framework frozen study:
   `daily_research/studies/seq100_qver_confirmation_effect_v1.json`.
 - Seven-family framework authoritative summary and Parquet evidence:
@@ -268,7 +343,7 @@ are adaptive retrospective challengers, not independent confirmation.
 - `daily_research/path_policy/seq100_qver_risk_overlay_validation.py` implements
   the frozen old-Top30 expanding three-head risk rerank, strict D120 label
   availability, paired cohort inference and exactly matched account replay.
-- Focused and full joint tests pass: 42 tests. Ruff, `py_compile` and
+- Focused and full joint tests pass: 50 tests. Ruff, `py_compile` and
   `git diff --check` pass. All new target-variant manifests plus the refreshed
   sequence and three-model mean account manifests explicitly report zero
   forbidden 2026 reads.
@@ -283,14 +358,17 @@ are adaptive retrospective challengers, not independent confirmation.
 ## Next step
 
 Do not label the current challenger as stable or deploy it. Preserve the
-two-component 183-field mean as the current short-horizon historical benchmark,
-the three-component core as its constrained-account robustness alternative, and the old
-30/30/25/10/5 score as the stronger interpretable D60 baseline. Use the new
-seven-family framework as a candidate-pool and scenario-audit lens, especially
-for revision reversal, multiple compression and early-spike fade risk. The
-equal-risk Top30 rerank has now been rejected even though its individual heads
-work. The next clean competition should use a pre-specified cash-aware
-action-value or distributional target on the 183-field path core, then admit
-fundamental/revision data only through a staleness-aware separate branch. Use
-the same five folds, corrected full-slate ranking, no-overlap account stress and
-winner caps. Avoid ad hoc fusion weights, thresholds or small rule grids.
+two-component D10 183-field mean as the primary short-horizon historical
+benchmark, the three-component core as its constrained-account robustness
+alternative, D5 as a portfolio-policy control, and the old 30/30/25/10/5 score
+as the stronger interpretable D60 baseline. Do not train the D5 sequence model
+from the rejected tree gate.
+
+The next clean model competition should make the model/portfolio boundary
+explicit: one shared 183-field representation should output pre-specified
+D2/D3/D5/D10 conditional return distributions (mean, median, q10 and tail-event
+probabilities), while a separate portfolio layer consumes those outputs with
+cash, overlap and cost state. D5 and D10 no-overlap accounts are the primary
+economic controls; D2/D3 are auxiliary horizons, not promotion targets. Admit
+fundamental/revision data later through a staleness-aware separate branch.
+Avoid ad hoc fusion weights, thresholds, TopK grids or exit-rule searches.
