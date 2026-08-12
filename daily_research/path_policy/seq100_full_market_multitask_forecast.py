@@ -112,7 +112,7 @@ PAYOFF_SCORE_FUSION_SCHEMA = "seq100_full_market_payoff_score_fusion_evaluation/
 PAYOFF_SCORE_FUSION_ACCOUNT_SCHEMA = (
     "seq100_full_market_payoff_score_fusion_account_replay/1"
 )
-MARKET_REGIME_SCHEMA = "seq100_full_market_market_regime_evaluation/1"
+MARKET_REGIME_SCHEMA = "seq100_full_market_market_regime_evaluation/2"
 
 DEFAULT_STUDY_PATH = (
     WORKSPACE_ROOT
@@ -2702,6 +2702,120 @@ def _payoff_summary(daily: pd.DataFrame, decile_daily: pd.DataFrame) -> dict[str
     return summary
 
 
+def _evaluate_full_prediction_payoff_frame(
+    frame: pd.DataFrame,
+    *,
+    fold: int,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    """Rank the observable slate before applying any future-outcome mask.
+
+    ``frame`` must contain one finite prediction per observable candidate. Known
+    unfilled or unaffordable orders carry zero ``base``/``stress`` returns. Rows
+    whose future path is right-censored set ``outcome_known=False``. A signal
+    date is evaluable only when every selected Top10 outcome is known;
+    lower-ranked unknown outcomes are excluded from diagnostics without changing
+    anyone's rank.
+    """
+
+    required = {
+        "candidate_id",
+        "date_idx",
+        "trade_date",
+        "prediction",
+        "base",
+        "stress",
+        "outcome_known",
+    }
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise FullMarketForecastError(
+            f"full_prediction_payoff_columns_missing:{missing}"
+        )
+    if frame.empty:
+        raise FullMarketForecastError("full_prediction_payoff_frame_empty")
+    if not bool(np.isfinite(frame["prediction"].to_numpy(dtype=np.float64)).all()):
+        raise FullMarketForecastError("full_prediction_payoff_score_nonfinite")
+
+    ranked = frame.sort_values(
+        ["date_idx", "prediction", "candidate_id"], kind="stable"
+    ).reset_index(drop=True)
+    ranked["score_position"] = ranked.groupby("date_idx", sort=False).cumcount()
+    ranked["date_size"] = ranked.groupby("date_idx", sort=False)[
+        "candidate_id"
+    ].transform("size")
+    ranked["decile"] = np.minimum(
+        10,
+        np.floor(
+            ranked["score_position"].to_numpy(dtype=np.float64)
+            * 10.0
+            / ranked["date_size"].to_numpy(dtype=np.float64)
+        ).astype(np.int8)
+        + 1,
+    )
+    ranked["selection_rank"] = (
+        ranked["date_size"] - ranked["score_position"]
+    ).astype(np.int32)
+
+    top10_known = (
+        ranked.loc[ranked["selection_rank"] <= 10]
+        .groupby("date_idx", sort=False)["outcome_known"]
+        .all()
+    )
+    eligible_dates = top10_known.index[top10_known].to_numpy(dtype=np.int32)
+    ranked = ranked.loc[ranked["date_idx"].isin(eligible_dates)].copy()
+    known = ranked.loc[ranked["outcome_known"].astype(bool)].copy()
+    if ranked.empty or known.empty:
+        raise FullMarketForecastError("full_prediction_payoff_no_known_dates")
+    known_payoffs = known[["base", "stress"]].to_numpy(dtype=np.float64)
+    if not bool(np.isfinite(known_payoffs).all()):
+        raise FullMarketForecastError("known_payoff_value_nonfinite")
+
+    daily = (
+        known.groupby(["date_idx", "trade_date"], sort=False)[["base", "stress"]]
+        .mean()
+        .rename(columns={"base": "baseline_base", "stress": "baseline_stress"})
+        .reset_index()
+    )
+    rank_ic = (
+        known.groupby("date_idx", sort=False)
+        .apply(
+            lambda current: current["prediction"].corr(
+                current["base"], method="spearman"
+            ),
+            include_groups=False,
+        )
+        .rename("rank_ic")
+        .reset_index()
+    )
+    daily = daily.merge(rank_ic, on="date_idx", validate="one_to_one")
+    for top_k in PAYOFF_TOP_KS:
+        selected = ranked.loc[ranked["selection_rank"] <= top_k]
+        means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean()
+        daily = daily.merge(
+            means.rename(
+                columns={
+                    "base": f"top{top_k}_base",
+                    "stress": f"top{top_k}_stress",
+                }
+            ).reset_index(),
+            on="date_idx",
+            how="left",
+            validate="one_to_one",
+        )
+    daily["fold"] = int(fold)
+    deciles = (
+        known.groupby(["date_idx", "trade_date", "decile"], sort=False)[
+            ["base", "stress"]
+        ]
+        .mean()
+        .reset_index()
+    )
+    deciles["fold"] = int(fold)
+    selections = ranked.loc[ranked["selection_rank"] <= 10].copy()
+    summary = _payoff_summary(daily, deciles)
+    return daily, deciles, selections, summary
+
+
 def evaluate_payoff_oof(
     *,
     study_path: Path = DEFAULT_STUDY_PATH,
@@ -2721,11 +2835,8 @@ def evaluate_payoff_oof(
     payoff_manifest = prepare_exact_net_targets(
         study_path=study_path, output_root=output_root
     )
-    ranking_manifest = (
-        payoff_manifest
-        if ranking_panel == "exact_net"
-        else prepare_targets(study_path=study_path, output_root=output_root)
-    )
+    path_manifest = prepare_targets(study_path=study_path, output_root=output_root)
+    ranking_manifest = payoff_manifest if ranking_panel == "exact_net" else path_manifest
     folds = build_forward_folds(
         date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
         trade_date=context.row_index["trade_date"].astype(str).to_numpy(),
@@ -2762,6 +2873,9 @@ def evaluate_payoff_oof(
             "top_k": list(PAYOFF_TOP_KS),
             "deciles": 10,
             "primary_weighting": "equal_signal_date",
+            "ranking_contract": (
+                "rank_all_finite_predictions_before_future_outcome_status__v2"
+            ),
         }
     )
     evaluation_name = f"{target}__{profile_name}"
@@ -2793,9 +2907,11 @@ def evaluate_payoff_oof(
         raise FullMarketForecastError(
             f"payoff_ranking_target_source_missing:{ranking_source}"
         )
-    ranking_column = ranking_columns.index(ranking_source)
-    ranking_valid = _open_array(
-        ranking_manifest["files"]["valid"], dtype=np.uint8
+    path_columns = list(path_manifest["target_columns"])
+    gross_column = path_columns.index(f"legal_exit_return_d{int(payoff_horizon)}")
+    path_valid = _open_array(path_manifest["files"]["valid"], dtype=np.uint8)
+    entry_filled = _open_array(
+        context.pack["masks"]["entry_filled"], dtype=np.bool_
     )
     daily_parts: list[pd.DataFrame] = []
     decile_parts: list[pd.DataFrame] = []
@@ -2815,12 +2931,7 @@ def evaluate_payoff_oof(
         )
         if len(prediction) != len(positions):
             raise FullMarketForecastError("payoff_prediction_row_count_mismatch")
-        usable = (
-            np.asarray(ranking_valid[positions, ranking_column], dtype=bool)
-            & np.asarray(payoff_valid[positions, payoff_base_column], dtype=bool)
-            & np.asarray(payoff_valid[positions, payoff_stress_column], dtype=bool)
-            & np.isfinite(prediction)
-        )
+        usable = np.isfinite(prediction)
         current_positions = positions[usable]
         frame = context.row_index.iloc[current_positions][
             [
@@ -2834,80 +2945,39 @@ def evaluate_payoff_oof(
         frame["model_row_position"] = current_positions
         frame["fold"] = fold_number
         frame["prediction"] = prediction[usable]
-        frame["base"] = np.asarray(
+        exact_valid = np.asarray(
+            payoff_valid[current_positions, payoff_base_column], dtype=bool
+        ) & np.asarray(
+            payoff_valid[current_positions, payoff_stress_column], dtype=bool
+        )
+        exact_base = np.asarray(
             payoff_values[current_positions, payoff_base_column], dtype=np.float32
         )
-        frame["stress"] = np.asarray(
+        exact_stress = np.asarray(
             payoff_values[current_positions, payoff_stress_column], dtype=np.float32
         )
-        frame = frame.sort_values(
-            ["date_idx", "prediction", "candidate_id"], kind="stable"
-        ).reset_index(drop=True)
-        frame["score_position"] = frame.groupby("date_idx", sort=False).cumcount()
-        frame["date_size"] = frame.groupby("date_idx", sort=False)[
-            "candidate_id"
-        ].transform("size")
-        frame["decile"] = np.minimum(
-            10,
-            np.floor(
-                frame["score_position"].to_numpy(dtype=np.float64)
-                * 10.0
-                / frame["date_size"].to_numpy(dtype=np.float64)
-            ).astype(np.int8)
-            + 1,
+        date_indices = frame["date_idx"].to_numpy(dtype=np.int32)
+        symbol_indices = frame["symbol_idx"].to_numpy(dtype=np.int32)
+        market_entry_filled = np.asarray(
+            entry_filled[date_indices, symbol_indices], dtype=bool
         )
-        frame["selection_rank"] = (frame["date_size"] - frame["score_position"]).astype(
-            np.int32
+        gross_path_known = np.asarray(
+            path_valid[current_positions, gross_column], dtype=bool
         )
-        baseline = frame.groupby(["date_idx", "trade_date"], sort=False)[
-            ["base", "stress"]
-        ].mean()
-        baseline = baseline.rename(
-            columns={"base": "baseline_base", "stress": "baseline_stress"}
+        frame["market_entry_filled"] = market_entry_filled
+        frame["entry_filled"] = exact_valid
+        frame["outcome_known"] = ~market_entry_filled | gross_path_known
+        frame["base"] = np.where(exact_valid, exact_base, 0.0)
+        frame["stress"] = np.where(exact_valid, exact_stress, 0.0)
+        fold_daily, fold_deciles, fold_selection, fold_summary = (
+            _evaluate_full_prediction_payoff_frame(frame, fold=fold_number)
         )
-        fold_daily = baseline.reset_index()
-        for top_k in PAYOFF_TOP_KS:
-            selected = frame.loc[frame["selection_rank"] <= top_k]
-            means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean()
-            means = means.rename(
-                columns={
-                    "base": f"top{top_k}_base",
-                    "stress": f"top{top_k}_stress",
-                }
-            )
-            fold_daily = fold_daily.merge(
-                means.reset_index(), on="date_idx", how="left", validate="one_to_one"
-            )
         task_daily = pd.read_parquet(task["files"]["daily_metrics"]["path"])[
             ["date_idx", "rank_ic"]
         ].rename(columns={"rank_ic": "training_target_rank_ic"})
-        payoff_rank_ic = (
-            frame.groupby("date_idx", sort=False)
-            .apply(
-                lambda current: current["prediction"].corr(
-                    current["base"], method="spearman"
-                ),
-                include_groups=False,
-            )
-            .rename("rank_ic")
-            .reset_index()
-        )
         fold_daily = fold_daily.merge(
-            payoff_rank_ic, on="date_idx", how="left", validate="one_to_one"
-        ).merge(
             task_daily, on="date_idx", how="left", validate="one_to_one"
         )
-        fold_daily["fold"] = fold_number
-        fold_deciles = (
-            frame.groupby(["date_idx", "trade_date", "decile"], sort=False)[
-                ["base", "stress"]
-            ]
-            .mean()
-            .reset_index()
-        )
-        fold_deciles["fold"] = fold_number
-        fold_selection = frame.loc[frame["selection_rank"] <= 10].copy()
-        fold_summary = _payoff_summary(fold_daily, fold_deciles)
         fold_summary["fold"] = fold_number
         fold_summaries.append(fold_summary)
         daily_parts.append(fold_daily)
@@ -2984,6 +3054,9 @@ def evaluate_payoff_oof(
         "ranking_panel": ranking_panel,
         "payoff_horizon": int(payoff_horizon),
         "rank_ic_contract": "prediction_vs_matching_exact_net_return_base",
+        "ranking_contract": (
+            "rank_all_finite_predictions_before_future_outcome_status__v2"
+        ),
         "profile": profile_name,
         "feature_variant": feature_variant,
         "training_mode": training_mode,
@@ -3043,6 +3116,7 @@ def evaluate_payoff_downside_fusion(
     payoff_manifest = prepare_exact_net_targets(
         study_path=study_path, output_root=output_root
     )
+    path_manifest = prepare_targets(study_path=study_path, output_root=output_root)
     folds = build_forward_folds(
         date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
         trade_date=context.row_index["trade_date"].astype(str).to_numpy(),
@@ -3068,11 +3142,15 @@ def evaluate_payoff_downside_fusion(
             "schema": PAYOFF_SCORE_FUSION_SCHEMA,
             "study_sha256": _sha256(study_path),
             "target_fingerprint": payoff_manifest["fingerprint"],
+            "path_target_fingerprint": path_manifest["fingerprint"],
             "targets": list(PAYOFF_DOWNSIDE_FUSION_TARGETS),
             "profile": profile_name,
             "feature_variant": feature_variant,
             "training_mode": training_mode,
             "fusion": "equal_average_of_within_date_percentile_ranks",
+            "ranking_contract": (
+                "rank_all_finite_predictions_before_future_outcome_status__v2"
+            ),
             "tasks": {
                 str(path): _sha256(path)
                 for _, path in task_records.values()
@@ -3100,6 +3178,12 @@ def evaluate_payoff_downside_fusion(
     stress_column = target_columns.index("exact_net_return_d10_stress")
     values = _open_array(payoff_manifest["files"]["values"], dtype=np.float32)
     valid = _open_array(payoff_manifest["files"]["valid"], dtype=np.uint8)
+    path_columns = list(path_manifest["target_columns"])
+    gross_column = path_columns.index("legal_exit_return_d10")
+    path_valid = _open_array(path_manifest["files"]["valid"], dtype=np.uint8)
+    entry_filled = _open_array(
+        context.pack["masks"]["entry_filled"], dtype=np.bool_
+    )
     daily_parts: list[pd.DataFrame] = []
     decile_parts: list[pd.DataFrame] = []
     selection_parts: list[pd.DataFrame] = []
@@ -3122,12 +3206,7 @@ def evaluate_payoff_downside_fusion(
             if len(prediction) != len(positions):
                 raise FullMarketForecastError("payoff_score_fusion_prediction_mismatch")
             predictions.append(prediction)
-        usable = (
-            np.asarray(valid[positions, base_column], dtype=bool)
-            & np.asarray(valid[positions, stress_column], dtype=bool)
-            & np.isfinite(predictions[0])
-            & np.isfinite(predictions[1])
-        )
+        usable = np.isfinite(predictions[0]) & np.isfinite(predictions[1])
         current_positions = positions[usable]
         frame = context.row_index.iloc[current_positions][
             ["candidate_id", "date_idx", "trade_date", "symbol", "symbol_idx"]
@@ -3143,31 +3222,35 @@ def evaluate_payoff_downside_fusion(
             "q10_prediction"
         ].rank(pct=True)
         frame["prediction"] = (frame["return_rank"] + frame["q10_rank"]) / 2.0
-        frame["base"] = np.asarray(values[current_positions, base_column], dtype=np.float32)
-        frame["stress"] = np.asarray(values[current_positions, stress_column], dtype=np.float32)
-        frame = frame.sort_values(["date_idx", "prediction", "candidate_id"], kind="stable").reset_index(drop=True)
-        frame["score_position"] = frame.groupby("date_idx", sort=False).cumcount()
-        frame["date_size"] = frame.groupby("date_idx", sort=False)["candidate_id"].transform("size")
-        frame["decile"] = np.minimum(
-            10,
-            np.floor(frame["score_position"].to_numpy(dtype=np.float64) * 10.0 / frame["date_size"].to_numpy(dtype=np.float64)).astype(np.int8) + 1,
+        exact_valid = np.asarray(
+            valid[current_positions, base_column], dtype=bool
+        ) & np.asarray(valid[current_positions, stress_column], dtype=bool)
+        exact_base = np.asarray(
+            values[current_positions, base_column], dtype=np.float32
         )
-        frame["selection_rank"] = (frame["date_size"] - frame["score_position"]).astype(np.int32)
-        baseline = frame.groupby(["date_idx", "trade_date"], sort=False)[["base", "stress"]].mean().rename(columns={"base": "baseline_base", "stress": "baseline_stress"}).reset_index()
-        fold_daily = baseline
-        for top_k in PAYOFF_TOP_KS:
-            selected = frame.loc[frame["selection_rank"] <= top_k]
-            means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean().rename(columns={"base": f"top{top_k}_base", "stress": f"top{top_k}_stress"}).reset_index()
-            fold_daily = fold_daily.merge(means, on="date_idx", how="left", validate="one_to_one")
-        rank_ic = frame.groupby("date_idx", sort=False).apply(lambda current: current["prediction"].corr(current["base"], method="spearman"), include_groups=False).rename("rank_ic").reset_index()
-        fold_daily = fold_daily.merge(rank_ic, on="date_idx", validate="one_to_one")
-        fold_daily["fold"] = fold_number
-        fold_deciles = frame.groupby(["date_idx", "trade_date", "decile"], sort=False)[["base", "stress"]].mean().reset_index()
-        fold_deciles["fold"] = fold_number
-        fold_summaries.append(_payoff_summary(fold_daily, fold_deciles) | {"fold": fold_number})
+        exact_stress = np.asarray(
+            values[current_positions, stress_column], dtype=np.float32
+        )
+        date_indices = frame["date_idx"].to_numpy(dtype=np.int32)
+        symbol_indices = frame["symbol_idx"].to_numpy(dtype=np.int32)
+        market_entry_filled = np.asarray(
+            entry_filled[date_indices, symbol_indices], dtype=bool
+        )
+        gross_path_known = np.asarray(
+            path_valid[current_positions, gross_column], dtype=bool
+        )
+        frame["market_entry_filled"] = market_entry_filled
+        frame["entry_filled"] = exact_valid
+        frame["outcome_known"] = ~market_entry_filled | gross_path_known
+        frame["base"] = np.where(exact_valid, exact_base, 0.0)
+        frame["stress"] = np.where(exact_valid, exact_stress, 0.0)
+        fold_daily, fold_deciles, fold_selection, fold_summary = (
+            _evaluate_full_prediction_payoff_frame(frame, fold=fold_number)
+        )
+        fold_summaries.append(fold_summary | {"fold": fold_number})
         daily_parts.append(fold_daily)
         decile_parts.append(fold_deciles)
-        selection_parts.append(frame.loc[frame["selection_rank"] <= 10].copy())
+        selection_parts.append(fold_selection)
         component_parts.append(frame[["candidate_id", "date_idx", "model_row_position", "return_prediction", "q10_prediction", "return_rank", "q10_rank", "prediction"]].copy())
     daily = pd.concat(daily_parts, ignore_index=True).sort_values("date_idx")
     deciles = pd.concat(decile_parts, ignore_index=True).sort_values(["date_idx", "decile"])
@@ -3192,6 +3275,9 @@ def evaluate_payoff_downside_fusion(
         "training_mode": training_mode,
         "horizon": 10,
         "fusion": "equal_average_of_within_date_percentile_ranks",
+        "ranking_contract": (
+            "rank_all_finite_predictions_before_future_outcome_status__v2"
+        ),
         "fold_summaries": fold_summaries,
         "combined": combined,
         "forbidden_2026_read_count": 0,
@@ -3253,6 +3339,7 @@ def evaluate_market_regime_oof(
     target_manifest = prepare_exact_net_targets(
         study_path=study_path, output_root=output_root
     )
+    path_manifest = prepare_targets(study_path=study_path, output_root=output_root)
     folds = build_forward_folds(
         date_idx=context.row_index["date_idx"].to_numpy(dtype=np.int32),
         trade_date=context.row_index["trade_date"].astype(str).to_numpy(),
@@ -3286,6 +3373,8 @@ def evaluate_market_regime_oof(
             "schema": MARKET_REGIME_SCHEMA,
             "study_sha256": _sha256(study_path),
             "target_fingerprint": target_manifest["fingerprint"],
+            "path_target_fingerprint": path_manifest["fingerprint"],
+            "source_contract": "exact_net_and_path_validity__v2",
             "ranking_target": ranking_target,
             "profile": profile_name,
             "feature_variant": feature_variant,
@@ -3299,6 +3388,9 @@ def evaluate_market_regime_oof(
                 "consensus": "ridge_and_logistic",
             },
             "top_k": [1, 3, 10],
+            "ranking_contract": (
+                "rank_all_finite_predictions_before_future_outcome_status__v2"
+            ),
             "tasks": {str(path): _sha256(path) for _, path in task_records},
         }
     )
@@ -3360,6 +3452,12 @@ def evaluate_market_regime_oof(
         dtype=np.uint8,
         mode="r",
         shape=tuple(int(value) for value in valid_record["shape"]),
+    )
+    path_columns = list(path_manifest["target_columns"])
+    gross_column = path_columns.index("legal_exit_return_d5")
+    path_valid = _open_array(path_manifest["files"]["valid"], dtype=np.uint8)
+    entry_filled = _open_array(
+        context.pack["masks"]["entry_filled"], dtype=np.bool_
     )
     market_base = np.full(len(unique_dates), np.nan, dtype=np.float64)
     market_stress = np.full(len(unique_dates), np.nan, dtype=np.float64)
@@ -3564,31 +3662,45 @@ def evaluate_market_regime_oof(
             ),
             dtype=np.float32,
         )
-        usable = (
-            np.asarray(target_valid[positions, base_column], dtype=bool)
-            & np.asarray(target_valid[positions, stress_column], dtype=bool)
-            & np.isfinite(prediction)
-        )
+        if len(prediction) != len(positions):
+            raise FullMarketForecastError(
+                "market_regime_prediction_row_count_mismatch"
+            )
+        usable = np.isfinite(prediction)
         current_positions = positions[usable]
         frame = context.row_index.iloc[current_positions][
             ["candidate_id", "date_idx", "trade_date", "symbol", "symbol_idx"]
         ].copy()
         frame["model_row_position"] = current_positions
         frame["fold"] = int(fold["fold"])
-        frame["ranking_score"] = prediction[usable]
-        frame["base"] = np.asarray(
+        frame["prediction"] = prediction[usable]
+        exact_valid = np.asarray(
+            target_valid[current_positions, base_column], dtype=bool
+        ) & np.asarray(
+            target_valid[current_positions, stress_column], dtype=bool
+        )
+        exact_base = np.asarray(
             target_values[current_positions, base_column], dtype=np.float32
         )
-        frame["stress"] = np.asarray(
+        exact_stress = np.asarray(
             target_values[current_positions, stress_column], dtype=np.float32
         )
-        frame = frame.sort_values(
-            ["date_idx", "ranking_score", "candidate_id"], kind="stable"
+        date_indices = frame["date_idx"].to_numpy(dtype=np.int32)
+        symbol_indices = frame["symbol_idx"].to_numpy(dtype=np.int32)
+        market_entry_filled = np.asarray(
+            entry_filled[date_indices, symbol_indices], dtype=bool
         )
-        frame["selection_rank"] = (
-            frame.groupby("date_idx", sort=False).cumcount(ascending=False) + 1
+        gross_path_known = np.asarray(
+            path_valid[current_positions, gross_column], dtype=bool
         )
-        selection_parts.append(frame.loc[frame["selection_rank"] <= 10])
+        frame["outcome_known"] = ~market_entry_filled | gross_path_known
+        frame["base"] = np.where(exact_valid, exact_base, 0.0)
+        frame["stress"] = np.where(exact_valid, exact_stress, 0.0)
+        _, _, fold_selections, _ = _evaluate_full_prediction_payoff_frame(
+            frame, fold=int(fold["fold"])
+        )
+        fold_selections["ranking_score"] = fold_selections["prediction"]
+        selection_parts.append(fold_selections)
     selections = pd.concat(selection_parts, ignore_index=True).merge(
         market_predictions[
             [
@@ -3606,6 +3718,7 @@ def evaluate_market_regime_oof(
     )
     daily_parts: list[pd.DataFrame] = []
     summaries: dict[str, Any] = {}
+    evaluable_dates = selections["date_idx"].drop_duplicates()
     for gate_name in ("ridge", "logistic", "consensus"):
         gate_column = f"{gate_name}_gate"
         for top_k in (1, 3, 10):
@@ -3615,7 +3728,10 @@ def evaluate_market_regime_oof(
             aggregate = selected.groupby("date_idx", sort=False)[
                 ["base", "stress"]
             ].agg(["sum", "size"])
-            daily = market_predictions[["date_idx", "trade_date", "fold"]].copy()
+            daily = market_predictions.loc[
+                market_predictions["date_idx"].isin(evaluable_dates),
+                ["date_idx", "trade_date", "fold"],
+            ].copy()
             return_values = aggregate.loc[:, [("base", "sum"), ("stress", "sum")]]
             return_values.columns = ["base", "stress"]
             return_values /= float(top_k)
@@ -3672,6 +3788,9 @@ def evaluate_market_regime_oof(
         "fingerprint": fingerprint,
         "horizon": horizon,
         "ranking_target": ranking_target,
+        "ranking_contract": (
+            "rank_all_finite_predictions_before_future_outcome_status__v2"
+        ),
         "profile": profile_name,
         "feature_variant": feature_variant,
         "training_mode": training_mode,
@@ -3704,6 +3823,10 @@ def evaluate_market_regime_oof(
             "exact_net_targets": _file_record(
                 output_root / "exact_net_targets/manifest.json",
                 target_fingerprint=target_manifest["fingerprint"],
+            ),
+            "path_targets": _file_record(
+                output_root / "targets/manifest.json",
+                target_fingerprint=path_manifest["fingerprint"],
             ),
             "ranking_tasks": [_file_record(path) for _, path in task_records],
         },
@@ -4421,6 +4544,8 @@ def _account_task_id(spec: Mapping[str, Any]) -> str:
     cap = spec.get("maximum_credited_gross_return")
     if cap is not None:
         task_id += f"__cap{round(float(cap) * 100)}pct"
+    if not bool(spec.get("allow_overlapping_same_symbol", True)):
+        task_id += "__no_overlapping_same_symbol"
     return task_id
 
 
@@ -4470,6 +4595,11 @@ def _simulate_account_spec(
     trade_id = 0
     equity_rows: list[dict[str, Any]] = []
     trade_rows: list[dict[str, Any]] = []
+    symbol_open_counts: dict[int, int] = {}
+    same_symbol_overlap_order_count = 0
+    same_symbol_overlap_filled_count = 0
+    same_symbol_overlap_skipped_count = 0
+    maximum_same_symbol_open_cohorts = 0
     total_costs = {
         "commission": 0.0,
         "transfer_fee": 0.0,
@@ -4480,6 +4610,14 @@ def _simulate_account_spec(
     def close_trade(identifier: int, *, current_idx: int) -> None:
         nonlocal cash
         holding = holdings.pop(identifier)
+        symbol_idx = int(holding.position.symbol_idx)
+        remaining = symbol_open_counts.get(symbol_idx, 0) - 1
+        if remaining < 0:
+            raise FullMarketForecastError("account_symbol_open_count_became_negative")
+        if remaining:
+            symbol_open_counts[symbol_idx] = remaining
+        else:
+            symbol_open_counts.pop(symbol_idx, None)
         if holding.legal_gross_return <= -1.0:
             proceeds = 0.0
             sale = {
@@ -4556,6 +4694,12 @@ def _simulate_account_spec(
                 symbol_idx = int(row.symbol_idx)
                 if not bool(entry_filled[signal_idx, symbol_idx]):
                     continue
+                existing_symbol_cohorts = symbol_open_counts.get(symbol_idx, 0)
+                if existing_symbol_cohorts:
+                    same_symbol_overlap_order_count += 1
+                    if not bool(spec.get("allow_overlapping_same_symbol", True)):
+                        same_symbol_overlap_skipped_count += 1
+                        continue
                 adjusted_entry = float(daily_raw[current_idx, symbol_idx, 0])
                 entry_raw = float(raw_open[current_idx, symbol_idx])
                 position, buy = economic._buy_position(
@@ -4576,6 +4720,8 @@ def _simulate_account_spec(
                     raise FullMarketForecastError("account_cash_became_negative")
                 cash = max(cash, 0.0)
                 filled += 1
+                if existing_symbol_cohorts:
+                    same_symbol_overlap_filled_count += 1
                 trade_id += 1
                 fill_day = int(row.fill_day)
                 exit_idx = signal_idx + fill_day
@@ -4612,6 +4758,11 @@ def _simulate_account_spec(
                     exit_phase=phase,
                     buy_costs={str(key): float(value) for key, value in buy.items()},
                 )
+                symbol_open_counts[symbol_idx] = existing_symbol_cohorts + 1
+                maximum_same_symbol_open_cohorts = max(
+                    maximum_same_symbol_open_cohorts,
+                    symbol_open_counts[symbol_idx],
+                )
                 for name in total_costs:
                     total_costs[name] += float(buy.get(name, 0.0))
 
@@ -4634,6 +4785,10 @@ def _simulate_account_spec(
                 "year": int(str(context.date_values[current_idx])[:4]),
                 "cash": cash,
                 "position_count": len(holdings),
+                "unique_symbol_count": len(symbol_open_counts),
+                "maximum_same_symbol_open_cohorts": max(
+                    symbol_open_counts.values(), default=0
+                ),
                 "requested_entry_count": requested,
                 "filled_entry_count": filled,
                 "equity": equity,
@@ -4696,6 +4851,14 @@ def _simulate_account_spec(
         "total_costs": total_costs,
         "minimum_cash": float(equity["cash"].min()),
         "maximum_position_count": int(equity["position_count"].max()),
+        "maximum_unique_symbol_count": int(equity["unique_symbol_count"].max()),
+        "maximum_same_symbol_open_cohorts": int(maximum_same_symbol_open_cohorts),
+        "allow_overlapping_same_symbol": bool(
+            spec.get("allow_overlapping_same_symbol", True)
+        ),
+        "same_symbol_overlap_order_count": int(same_symbol_overlap_order_count),
+        "same_symbol_overlap_filled_count": int(same_symbol_overlap_filled_count),
+        "same_symbol_overlap_skipped_count": int(same_symbol_overlap_skipped_count),
         "unresolved_position_count": 0,
         "forbidden_2026_read_count": 0,
         "annual": annual.to_dict("records"),
@@ -4914,6 +5077,24 @@ def _payoff_account_specs(
                     "maximum_credited_gross_return": float(cap),
                 }
             )
+    # A fixed concentration stress test forbids pyramiding a symbol while an
+    # earlier cohort of that symbol is still open. Skipped slots remain cash and
+    # are never replaced by lower-ranked names.
+    for cap in (None, 0.05, 0.10):
+        spec = {
+            "variant": resolved_variant,
+            "exit_policy": "planned_close",
+            "gate": "always",
+            "top_k": 10,
+            "cost_scenario": "stress",
+            "slippage_multiplier": float(EXACT_NET_SCENARIOS["stress"]),
+            "cohort_equity_fraction": 1.0 / float(horizon),
+            "planned_fill_day": int(horizon),
+            "allow_overlapping_same_symbol": False,
+        }
+        if cap is not None:
+            spec["maximum_credited_gross_return"] = float(cap)
+        specs.append(spec)
     return tuple(specs)
 
 
@@ -5012,6 +5193,7 @@ def _payoff_account_result(
     top_k: int,
     cost_scenario: str,
     cap: float | None = None,
+    allow_overlapping_same_symbol: bool = True,
 ) -> Mapping[str, Any]:
     matches = [
         item
@@ -5019,6 +5201,8 @@ def _payoff_account_result(
         if int(item["spec"]["top_k"]) == int(top_k)
         and str(item["spec"]["cost_scenario"]) == str(cost_scenario)
         and item["spec"].get("maximum_credited_gross_return") == cap
+        and bool(item["spec"].get("allow_overlapping_same_symbol", True))
+        == bool(allow_overlapping_same_symbol)
     ]
     if len(matches) != 1:
         raise FullMarketForecastError(
@@ -5258,6 +5442,29 @@ def replay_payoff_accounts(
         item for item in summaries if str(item["spec"]["cost_scenario"]) == "stress"
     ]
     best_stress = max(stress_summaries, key=lambda item: item["total_net_return"])
+    primary = _payoff_account_result(
+        summaries, top_k=10, cost_scenario="stress"
+    )
+    no_overlap = _payoff_account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap5 = _payoff_account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.05,
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap10 = _payoff_account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.10,
+        allow_overlapping_same_symbol=False,
+    )
     manifest = {
         "schema": PAYOFF_ACCOUNT_REPLAY_SCHEMA,
         "status": "completed",
@@ -5274,6 +5481,10 @@ def replay_payoff_accounts(
         "dropped_selection_count_after_gross_join": dropped_selection_count,
         "task_count": len(summaries),
         "best_stress_account": _json_safe(best_stress),
+        "primary_stress_top10": _json_safe(primary),
+        "stress_top10_no_overlapping_same_symbol": _json_safe(no_overlap),
+        "stress_top10_no_overlap_cap5": _json_safe(no_overlap_cap5),
+        "stress_top10_no_overlap_cap10": _json_safe(no_overlap_cap10),
         "decision_boundary": {
             "historical_result_is_adaptive_not_independent_confirmation": True,
             "outer_validation_used_for_iteration_selection": (
@@ -5443,6 +5654,9 @@ def replay_payoff_downside_fusion_accounts(
                 "maximum_credited_gross_return": item["spec"].get(
                     "maximum_credited_gross_return"
                 ),
+                "allow_overlapping_same_symbol": bool(
+                    item["spec"].get("allow_overlapping_same_symbol", True)
+                ),
                 "total_net_return": item["total_net_return"],
                 "ending_equity": item["ending_equity"],
                 "maximum_drawdown": item["maximum_drawdown"],
@@ -5461,6 +5675,26 @@ def replay_payoff_downside_fusion_accounts(
     )
     cap10 = _payoff_account_result(
         summaries, top_k=10, cost_scenario="stress", cap=0.10
+    )
+    no_overlap = _payoff_account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap5 = _payoff_account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.05,
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap10 = _payoff_account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.10,
+        allow_overlapping_same_symbol=False,
     )
     manifest = {
         "schema": PAYOFF_SCORE_FUSION_ACCOUNT_SCHEMA,
@@ -5481,6 +5715,9 @@ def replay_payoff_downside_fusion_accounts(
         "primary_stress_top10": primary,
         "stress_top10_cap5": cap5,
         "stress_top10_cap10": cap10,
+        "stress_top10_no_overlapping_same_symbol": no_overlap,
+        "stress_top10_no_overlap_cap5": no_overlap_cap5,
+        "stress_top10_no_overlap_cap10": no_overlap_cap10,
         "decision_boundary": {"stable_profit_claim_allowed": False, "same_finite_account_engine_as_payoff_replay": True, "forbidden_2026_read_count": 0},
         "sources": {"evaluation": _file_record(Path(evaluation["files"]["top10_selections"]["path"]).parent / "manifest.json"), "target_panel": _file_record(output_root / "targets/manifest.json"), "selection_schedule": _file_record(schedule_path, row_count=len(schedule))},
         "files": {"summary": _file_record(summary_path, row_count=len(summary)), **files},

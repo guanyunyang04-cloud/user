@@ -110,6 +110,7 @@ def _payoff_ensemble_root(
     seed_offsets: Sequence[int],
     fusion_method: str = "mean",
     tree_profiles: Sequence[str] = (),
+    tree_feature_variant: str = base.DEFAULT_FEATURE_VARIANT,
 ) -> Path:
     """Isolate exact-payoff ensembles from the established D5 gate study."""
 
@@ -126,6 +127,8 @@ def _payoff_ensemble_root(
     normalized_profiles = tuple(str(value) for value in tree_profiles)
     if normalized_profiles:
         protocol += "__tree_profiles_" + "_".join(normalized_profiles)
+    if str(tree_feature_variant) != base.DEFAULT_FEATURE_VARIANT:
+        protocol += f"__tree_features_{tree_feature_variant!s}"
     return root / protocol
 
 
@@ -1103,77 +1106,10 @@ def _build_evaluation_frames(
     frame["market_positive_probability"] = frame["date_idx"].map(
         prediction.market_probability
     )
-    frame = frame.sort_values(
-        ["date_idx", "prediction", "candidate_id"], kind="stable"
-    ).reset_index(drop=True)
-    frame["score_position"] = frame.groupby("date_idx", sort=False).cumcount()
-    frame["date_size"] = frame.groupby("date_idx", sort=False)[
-        "candidate_id"
-    ].transform("size")
-    frame["decile"] = np.minimum(
-        10,
-        np.floor(
-            frame["score_position"].to_numpy(dtype=np.float64)
-            * 10.0
-            / frame["date_size"].to_numpy(dtype=np.float64)
-        ).astype(np.int8)
-        + 1,
-    )
-    frame["selection_rank"] = (frame["date_size"] - frame["score_position"]).astype(
-        np.int32
-    )
-    if unfilled_as_cash:
-        top10_known = (
-            frame.loc[frame["selection_rank"] <= 10]
-            .groupby("date_idx", sort=False)["outcome_known"]
-            .all()
-        )
-        eligible_dates = top10_known.index[top10_known].to_numpy(dtype=np.int32)
-        frame = frame.loc[frame["date_idx"].isin(eligible_dates)].copy()
-    baseline = frame.groupby(["date_idx", "trade_date"], sort=False)[
-        ["base", "stress"]
-    ].mean()
-    daily = baseline.rename(
-        columns={"base": "baseline_base", "stress": "baseline_stress"}
-    ).reset_index()
-    rank_ic = (
-        frame.groupby("date_idx", sort=False)
-        .apply(
-            lambda current: _rank_correlation(
-                current["base"].to_numpy(), current["prediction"].to_numpy()
-            ),
-            include_groups=False,
-        )
-        .rename("rank_ic")
-        .reset_index()
-    )
-    daily = daily.merge(rank_ic, on="date_idx", validate="one_to_one")
-    for top_k in base.PAYOFF_TOP_KS:
-        selected = frame.loc[frame["selection_rank"] <= top_k]
-        means = selected.groupby("date_idx", sort=False)[["base", "stress"]].mean()
-        daily = daily.merge(
-            means.rename(
-                columns={
-                    "base": f"top{top_k}_base",
-                    "stress": f"top{top_k}_stress",
-                }
-            ).reset_index(),
-            on="date_idx",
-            how="left",
-            validate="one_to_one",
-        )
-    daily["fold"] = int(fold)
-    deciles = (
-        frame.groupby(["date_idx", "trade_date", "decile"], sort=False)[
-            ["base", "stress"]
-        ]
-        .mean()
-        .reset_index()
-    )
-    deciles["fold"] = int(fold)
-    selections = frame.loc[frame["selection_rank"] <= 10].copy()
-    summary = base._payoff_summary(daily, deciles)
-    return daily, deciles, selections, summary
+    try:
+        return base._evaluate_full_prediction_payoff_frame(frame, fold=fold)
+    except base.FullMarketForecastError as exc:
+        raise SequenceChallengerError(str(exc)) from exc
 
 
 def _gated_metrics(daily: pd.DataFrame, selections: pd.DataFrame) -> dict[str, Any]:
@@ -2015,6 +1951,9 @@ def _run_exact_payoff_account_tasks(
                 "maximum_credited_gross_return": item["spec"].get(
                     "maximum_credited_gross_return"
                 ),
+                "allow_overlapping_same_symbol": bool(
+                    item["spec"].get("allow_overlapping_same_symbol", True)
+                ),
                 "total_net_return": item["total_net_return"],
                 "ending_equity": item["ending_equity"],
                 "maximum_drawdown": item["maximum_drawdown"],
@@ -2046,6 +1985,7 @@ def _account_result(
     top_k: int,
     cost_scenario: str,
     cap: float | None = None,
+    allow_overlapping_same_symbol: bool = True,
 ) -> Mapping[str, Any]:
     matches = [
         item
@@ -2053,6 +1993,8 @@ def _account_result(
         if int(item["spec"]["top_k"]) == int(top_k)
         and str(item["spec"]["cost_scenario"]) == str(cost_scenario)
         and item["spec"].get("maximum_credited_gross_return") == cap
+        and bool(item["spec"].get("allow_overlapping_same_symbol", True))
+        == bool(allow_overlapping_same_symbol)
     ]
     if len(matches) != 1:
         raise SequenceChallengerError(
@@ -2113,7 +2055,9 @@ def evaluate_sequence_payoff(
             "horizon": int(horizon),
             "training_mode": training_mode,
             "tasks": {str(path): base._sha256(path) for _, path in task_records},
-            "ranking": "full_prediction_rows_then_matching_exact_net_valid_rows",
+            "ranking": (
+                "rank_all_finite_predictions_before_future_outcome_status__v2"
+            ),
             "top_k": list(base.PAYOFF_TOP_KS),
         }
     )
@@ -2146,15 +2090,7 @@ def evaluate_sequence_payoff(
         )
         if len(prediction_values) != len(positions):
             raise SequenceChallengerError("sequence_payoff_prediction_row_mismatch")
-        usable = (
-            np.asarray(
-                sources.exact_valid[positions, sources.base_column], dtype=bool
-            )
-            & np.asarray(
-                sources.exact_valid[positions, sources.stress_column], dtype=bool
-            )
-            & np.isfinite(prediction_values)
-        )
+        usable = np.isfinite(prediction_values)
         rows = positions[usable]
         market_frame = pd.read_parquet(task["files"]["market_predictions"]["path"])
         market_return = {
@@ -2172,7 +2108,10 @@ def evaluate_sequence_payoff(
             market_probability=market_probability,
         )
         daily, deciles, selections, summary = _build_evaluation_frames(
-            sources, prediction, fold=fold_number
+            sources,
+            prediction,
+            fold=fold_number,
+            unfilled_as_cash=True,
         )
         fold_summaries.append(summary | {"fold": fold_number})
         daily_parts.append(daily)
@@ -2210,7 +2149,9 @@ def evaluate_sequence_payoff(
         "training_mode": training_mode,
         "fold_summaries": fold_summaries,
         "combined": combined,
-        "ranking_contract": "same_prediction_universe_then_matching_exact_net_valid_outcomes",
+        "ranking_contract": (
+            "rank_all_finite_predictions_before_future_outcome_status__v2"
+        ),
         "forbidden_2026_read_count": 0,
         "files": {
             "daily_metrics": _file_record(daily_path, row_count=len(daily)),
@@ -2299,6 +2240,26 @@ def replay_sequence_payoff_accounts(
     cap10 = _account_result(
         summaries, top_k=10, cost_scenario="stress", cap=0.10
     )
+    no_overlap = _account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap5 = _account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.05,
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap10 = _account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.10,
+        allow_overlapping_same_symbol=False,
+    )
     result = {
         "schema": SEQUENCE_PAYOFF_ACCOUNT_SCHEMA,
         "status": "completed",
@@ -2314,6 +2275,9 @@ def replay_sequence_payoff_accounts(
         "primary_stress_top10": primary,
         "stress_top10_cap5": cap5,
         "stress_top10_cap10": cap10,
+        "stress_top10_no_overlapping_same_symbol": no_overlap,
+        "stress_top10_no_overlap_cap5": no_overlap_cap5,
+        "stress_top10_no_overlap_cap10": no_overlap_cap10,
         "dropped_selection_count_after_gross_join": int(dropped),
         "decision_boundary": {
             "same_finite_account_engine_as_tree_replay": True,
@@ -2458,18 +2422,7 @@ def _payoff_ensemble_prediction(
     all_predictions = [sequence_prediction, tree_prediction, *extra_predictions.values()]
     if any(len(prediction) != len(validation_positions) for prediction in all_predictions):
         raise SequenceChallengerError("payoff_ensemble_prediction_row_count_mismatch")
-    valid = (
-        np.asarray(
-            sources.exact_valid[validation_positions, sources.base_column],
-            dtype=bool,
-        )
-        & np.asarray(
-            sources.exact_valid[validation_positions, sources.stress_column],
-            dtype=bool,
-        )
-        & np.isfinite(sequence_prediction)
-        & np.isfinite(tree_prediction)
-    )
+    valid = np.isfinite(sequence_prediction) & np.isfinite(tree_prediction)
     for prediction in extra_predictions.values():
         valid &= np.isfinite(prediction)
     rows = validation_positions[valid]
@@ -2525,6 +2478,7 @@ def evaluate_payoff_ensemble(
     sequence_seed_offsets: Sequence[int] = (0,),
     fusion_method: str = "mean",
     tree_profiles: Sequence[str] | None = None,
+    tree_feature_variant: str = base.DEFAULT_FEATURE_VARIANT,
 ) -> dict[str, Any]:
     """Evaluate an always-on tree/sequence rank fusion at one exact horizon."""
 
@@ -2541,6 +2495,10 @@ def evaluate_payoff_ensemble(
     if fusion_method not in PAYOFF_FUSION_METHODS:
         raise SequenceChallengerError(
             f"unknown_payoff_fusion_method:{fusion_method}"
+        )
+    if tree_feature_variant not in base.FEATURE_VARIANT_FAMILIES:
+        raise SequenceChallengerError(
+            f"unknown_tree_feature_variant:{tree_feature_variant}"
         )
     seed_offsets = tuple(
         dict.fromkeys(int(value) for value in sequence_seed_offsets)
@@ -2609,7 +2567,7 @@ def evaluate_payoff_ensemble(
                 fold=int(fold["fold"]),
                 target=target,
                 profile=tree_profile,
-                feature_variant=base.DEFAULT_FEATURE_VARIANT,
+                feature_variant=tree_feature_variant,
                 training_mode=tree_training_mode,
             )
             for tree_profile in profiles
@@ -2629,7 +2587,9 @@ def evaluate_payoff_ensemble(
         "sequence_seed_offsets": list(seed_offsets),
         "fusion_method": str(fusion_method),
         "market_gate": "always",
-        "ranking_universe": "matching_exact_net_valid_rows",
+        "ranking_universe": (
+            "all_rows_with_finite_component_predictions_before_future_status__v2"
+        ),
         "top_k": list(base.PAYOFF_TOP_KS),
         "sequence_tasks": {
             str(path): base._sha256(path)
@@ -2644,6 +2604,8 @@ def evaluate_payoff_ensemble(
     }
     if profile_path_suffix:
         fingerprint_payload["tree_profiles"] = list(profiles)
+    if tree_feature_variant != base.DEFAULT_FEATURE_VARIANT:
+        fingerprint_payload["tree_feature_variant"] = tree_feature_variant
     fingerprint = _stable_hash(fingerprint_payload)
     evaluation_root = _payoff_ensemble_root(
         output_root,
@@ -2655,6 +2617,7 @@ def evaluate_payoff_ensemble(
         seed_offsets=seed_offsets,
         fusion_method=fusion_method,
         tree_profiles=profile_path_suffix,
+        tree_feature_variant=tree_feature_variant,
     )
     manifest_path = evaluation_root / "manifest.json"
     if manifest_path.is_file():
@@ -2729,7 +2692,10 @@ def evaluate_payoff_ensemble(
             fusion_method=fusion_method,
         )
         daily, deciles, selections, summary = _build_evaluation_frames(
-            sources, prediction, fold=fold_number
+            sources,
+            prediction,
+            fold=fold_number,
+            unfilled_as_cash=True,
         )
         component_values = components.drop(columns=["candidate_id", "date_idx"])
         selections = selections.merge(
@@ -2800,6 +2766,7 @@ def evaluate_payoff_ensemble(
         "target": target,
         "profile": profile,
         "tree_profiles": list(profiles),
+        "tree_feature_variant": tree_feature_variant,
         "lookback": int(lookback),
         "horizon": int(horizon),
         "training_mode": training_mode,
@@ -2831,8 +2798,8 @@ def evaluate_payoff_ensemble(
             )
         ),
         "ranking_contract": (
-            "same_exact_net_valid_universe_then_"
-            f"{fusion_method!s}_within_date_rank_fusion"
+            "all_finite_component_predictions_then_"
+            f"{fusion_method!s}_within_date_rank_fusion_before_future_status__v2"
         ),
         "account_replay_performed": False,
         "forbidden_2026_read_count": 0,
@@ -2885,6 +2852,7 @@ def replay_payoff_ensemble_accounts(
     sequence_seed_offsets: Sequence[int] = (0,),
     fusion_method: str = "mean",
     tree_profiles: Sequence[str] | None = None,
+    tree_feature_variant: str = base.DEFAULT_FEATURE_VARIANT,
 ) -> dict[str, Any]:
     """Replay the exact-payoff fusion with the same finite-account engine."""
 
@@ -2898,6 +2866,7 @@ def replay_payoff_ensemble_accounts(
         sequence_seed_offsets=sequence_seed_offsets,
         fusion_method=fusion_method,
         tree_profiles=tree_profiles,
+        tree_feature_variant=tree_feature_variant,
     )
     study = base.load_study(study_path)
     profiles = tuple(
@@ -2906,6 +2875,9 @@ def replay_payoff_ensemble_accounts(
     )
     primary_profile = str(study["lightgbm"]["primary_profile"])
     profile_path_suffix = profiles if profiles != (primary_profile,) else ()
+    resolved_tree_feature_variant = str(
+        evaluation.get("tree_feature_variant", base.DEFAULT_FEATURE_VARIANT)
+    )
     sources = _load_sources(study, output_root=output_root, horizon=horizon)
     selection_path = Path(evaluation["files"]["top10_selections"]["path"])
     selections = pd.read_parquet(selection_path)
@@ -2941,6 +2913,8 @@ def replay_payoff_ensemble_accounts(
     }
     if profile_path_suffix:
         fingerprint_payload["tree_profiles"] = list(profiles)
+    if resolved_tree_feature_variant != base.DEFAULT_FEATURE_VARIANT:
+        fingerprint_payload["tree_feature_variant"] = resolved_tree_feature_variant
     fingerprint = _stable_hash(fingerprint_payload)
     root = _payoff_ensemble_root(
         output_root,
@@ -2952,6 +2926,7 @@ def replay_payoff_ensemble_accounts(
         seed_offsets=seed_offsets,
         fusion_method=str(evaluation["fusion_method"]),
         tree_profiles=profile_path_suffix,
+        tree_feature_variant=resolved_tree_feature_variant,
     )
     manifest_path = root / "manifest.json"
     if manifest_path.is_file():
@@ -2977,6 +2952,26 @@ def replay_payoff_ensemble_accounts(
     cap10 = _account_result(
         summaries, top_k=10, cost_scenario="stress", cap=0.10
     )
+    no_overlap = _account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap5 = _account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.05,
+        allow_overlapping_same_symbol=False,
+    )
+    no_overlap_cap10 = _account_result(
+        summaries,
+        top_k=10,
+        cost_scenario="stress",
+        cap=0.10,
+        allow_overlapping_same_symbol=False,
+    )
     result = {
         "schema": PAYOFF_ENSEMBLE_ACCOUNT_SCHEMA,
         "status": "completed",
@@ -2986,6 +2981,7 @@ def replay_payoff_ensemble_accounts(
         "target": evaluation["target"],
         "profile": evaluation["profile"],
         "tree_profiles": list(profiles),
+        "tree_feature_variant": resolved_tree_feature_variant,
         "lookback": int(lookback),
         "horizon": int(horizon),
         "training_mode": str(evaluation["training_mode"]),
@@ -3000,6 +2996,9 @@ def replay_payoff_ensemble_accounts(
         "primary_stress_top10": primary,
         "stress_top10_cap5": cap5,
         "stress_top10_cap10": cap10,
+        "stress_top10_no_overlapping_same_symbol": no_overlap,
+        "stress_top10_no_overlap_cap5": no_overlap_cap5,
+        "stress_top10_no_overlap_cap10": no_overlap_cap10,
         "decision_boundary": {
             "same_finite_account_engine_as_tree_and_sequence_replays": True,
             "historical_result_is_adaptive_not_independent_confirmation": True,
@@ -3031,6 +3030,7 @@ def replay_payoff_ensemble_accounts(
                     seed_offsets=seed_offsets,
                     fusion_method=str(evaluation["fusion_method"]),
                     tree_profiles=profile_path_suffix,
+                    tree_feature_variant=resolved_tree_feature_variant,
                 )
                 / "manifest.json"
             ),
@@ -6363,6 +6363,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default="",
         help="Comma-separated LightGBM profiles for equal-rank payoff fusion.",
     )
+    parser.add_argument(
+        "--payoff-tree-feature-variant",
+        choices=tuple(base.FEATURE_VARIANT_FAMILIES),
+        default=base.DEFAULT_FEATURE_VARIANT,
+        help="Frozen feature view shared by payoff-fusion tree components.",
+    )
     parser.add_argument("--evaluate-ensemble", action="store_true")
     parser.add_argument("--evaluate-payoff-ensemble", action="store_true")
     parser.add_argument("--evaluate-sequence-payoff", action="store_true")
@@ -6404,6 +6410,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sequence_seed_offsets=(args.seed_offset,),
             fusion_method=args.payoff_fusion_method,
             tree_profiles=payoff_tree_profiles or None,
+            tree_feature_variant=args.payoff_tree_feature_variant,
         )
     elif args.evaluate_payoff_ensemble:
         result = evaluate_payoff_ensemble(
@@ -6416,6 +6423,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sequence_seed_offsets=(args.seed_offset,),
             fusion_method=args.payoff_fusion_method,
             tree_profiles=payoff_tree_profiles or None,
+            tree_feature_variant=args.payoff_tree_feature_variant,
         )
     elif args.replay_sequence_payoff:
         result = replay_sequence_payoff_accounts(

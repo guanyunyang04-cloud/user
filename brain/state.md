@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-11
+Updated: 2026-08-12
 
 ## Active objective
 
@@ -25,6 +25,9 @@ net-return distributions and action value rather than deterministic direction.
   substitution after an unfilled order.
 - Formal economics mark adjusted total return but calculate fills and costs at
   raw exchange prices.
+- Every formal payoff ranking now orders the complete finite-prediction slate
+  before consulting future fill/outcome status. A selected unfilled or
+  unaffordable order is cash; it is never replaced by a lower-ranked stock.
 
 ## Durable negative conclusions
 
@@ -103,27 +106,57 @@ unavailable qualitative analyst judgements.
   These are consumed historical results and do not permit a stable-profit
   claim.
 
-## D10 payoff model evidence
+## Ranking and execution correctness audit
 
-All current D10 payoff evaluations use the exact next-open-to-D10 legal net
-return target and the full 557-field matrix. Formal breadths are now Top1,
-Top3, Top5 and Top10.
+- A real look-ahead selection bug was found and fixed in tree, sequence,
+  downside-fusion, tree/sequence-ensemble and legacy D5 market-regime payoff
+  paths. They previously removed rows using future target validity before
+  ranking, allowing a lower-scored stock to replace a selected unfilled stock.
+- All corrected paths rank finite predictions first, book known unfilled or
+  unaffordable selections as zero-return cash, exclude right-censored selected
+  dates, and never substitute a lower rank. Correcting the established 557-
+  field three-model account reduced Top10 stress from +151.65% to +148.70%; the
+  bug was genuine but not the source of the strategy's headline result.
+- The corrected legacy D5 market gate moved consensus Top10 stress mean only
+  from about 0.1090% to 0.1078%; its HAC lower bound remains negative and it is
+  still rejected.
+- Same-symbol cohort pyramiding is now explicit and stress-tested. The corrected
+  557-field three-model account has +148.70%, -28.08% drawdown and 6/6 positive
+  years when repeated signals may stack, versus +55.77%, -9.02% drawdown and
+  6/6 positive years when an already-held symbol cannot be bought again. The
+  signal is not solely pyramiding, but stacking materially amplifies both gain
+  and risk.
 
-- `strong_127` LightGBM: OOF Rank IC 0.07776; Top10 stress mean 0.6474%;
-  exact Top10 stress account CNY1m to CNY2.027m, -24.37% drawdown, 5/6
-  positive years; 10% winner cap leaves -13.19%.
-- Lookback-16 sequence: OOF Rank IC 0.09938; exact Top10 stress account to
-  CNY2.084m, -36.44% drawdown, 5/6 positive years; 10% cap leaves -36.94%.
-- Single `qlib_capacity_210` LightGBM: OOF Rank IC 0.08037; Top10 stress
-  account to about CNY1.434m with weaker stability. It is useful as a diverse
-  component, not as a standalone policy.
-- The original two-model mean rank fusion (`strong_127` plus sequence) has
-  OOF Rank IC 0.10341 and exact Top10 stress account CNY2.453m, -28.13%
-  drawdown, 6/6 positive years, positive daily HAC lower bound, but 10% cap
-  remains -10.22%.
-- The two-model minimum rank fusion is slightly more conservative (CNY2.439m,
-  -28.04% drawdown, 10% cap -7.15%), but still fails the 5% cap and does not
-  remove tail dependence.
+## Fixed feature-view competition
+
+Three feature views were frozen before comparison with the same
+`strong_127`, exact D10 target, five folds, early stopping and account contract.
+
+- Full `all_causal_557`: best iterations 1/3/12/4/1, OOF Rank IC 0.07739,
+  Top10 stress +100.02%, -24.33% drawdown and 5/6 positive years. No-overlap
+  return is +41.88%; 10% winner cap is -13.70%.
+- `price_path_context_364` (cross-sectional technical, price/volume,
+  traditional technical, market state and same-day 5m): best iterations
+  96/75/84/14/2, OOF Rank IC 0.08531, Top10 stress +92.79% and no-overlap
+  +35.43%. The 10% winner cap is -22.57%.
+- `price_path_core_183` (daily price/volume, market state and same-day 5m):
+  best iterations 18/4/48/21/32, OOF Rank IC 0.08687, Top10 stress +137.17%,
+  -28.74% drawdown and 5/6 positive years. No-overlap is +49.47%, -8.37%
+  drawdown and 6/6 positive years; 10% winner cap is only +3.21%.
+- The reduced view both trains deeper and improves ranking/economics, so the
+  full-field tree's early stopping at a few rounds is not a hard-coded model
+  simplification. Extra fields currently add noise, missingness and temporal
+  drift under this flat LightGBM representation. This does not prove that
+  fundamentals, revisions or announcements are useless; they should return
+  through staleness-aware normalization or a separately validated branch, not
+  be mixed indiscriminately into the flat core.
+- A controlled Fold-1 early-stop audit found that monitoring NDCG@100 alone
+  changes the full-field best iteration from 1 to 2 and improves exact Rank IC
+  from 0.06115 to 0.06534, but worsens Top10 stress mean from +0.041% to
+  -0.100%. Metric choice matters, but no hidden large gain was exposed.
+- Known cash outcomes excluded from exact-net training weights are only about
+  0.19%-0.43% of each validation fold. A cash-aware action-value label remains
+  a clean future challenger, but this mismatch cannot explain the main result.
 
 ## Rejected D10 target variants
 
@@ -146,42 +179,49 @@ three-model benchmark, so do not tune weights or thresholds around them.
   and the 5% cap is -32.07%. It neither improves economics nor removes right-
   tail dependence.
 
-## Current best historical challenger
+## Current best historical challengers
 
-The strongest current candidate is the independent three-model equal rank
-fusion:
+The primary short-horizon benchmark is now the equal within-date rank average
+of `sequence lookback-16 + strong_127 price_path_core_183`, always on and held
+to the legal D10 exit.
 
-`sequence lookback-16 + strong_127 tree + qlib_capacity_210 tree`, with the
-within-date percentile rank of each model averaged and no market gate.
+- Five OOF Rank IC folds are 0.11362/0.07928/0.11524/0.10021/0.12697;
+  combined Rank IC is 0.10693.
+- Exact Top10 stress grows CNY1m to CNY2.897m (+189.65%), with -30.15%
+  drawdown, 6/6 positive years and daily HAC lower +0.01760 percentage points.
+  All five account fold compound returns are positive.
+- Forbidding repeated open cohorts of the same symbol leaves +64.90%, -11.70%
+  drawdown, 6/6 positive years and a positive HAC lower bound.
+- The 10% winner cap leaves only +9.42%, 4/6 positive years and a negative HAC
+  lower bound; the 5% cap is -59.64%. Right-tail dependence remains the main
+  unresolved weakness and no stable-profit claim is allowed.
 
-- Five OOF Rank IC folds: 0.10490, 0.08195, 0.10972, 0.09085, 0.12244;
-  combined Rank IC 0.10183.
-- OOF Top1/3/5/10 stress means are approximately 1.193%, 0.922%, 0.866% and
-  0.811%; all four breadths have positive HAC lower bounds and 6/6 positive
-  years at the event level.
-- Exact finite-account Top10 stress: CNY1m to CNY2.516m, +151.65% total,
-  -28.04% maximum drawdown, 6/6 positive years, daily HAC lower about
-  +0.0066 percentage points. Annual returns are approximately 13.32%, 7.84%,
-  8.61%, 8.96%, 51.56% and 14.82% for 2020-2025.
-- Top1/3/5/10 account stress breadths all have positive years and positive
-  HAC lower bounds; Top10 has the lowest drawdown among them.
-- The 10% winner-cap stress account still ends at about CNY1.057m (+5.66%),
-  but its HAC lower bound is negative and only 3/6 years are positive. The 5%
-  cap ends at about CNY0.431m (-56.93%). This materially improves but does not
-  eliminate right-tail dependence; `stable_profit_claim_allowed` remains
-  false.
-- The three-model minimum fusion was replayed as a pre-specified control and
-  was dominated by the mean (Top10 +151.70% but -30.29% drawdown and 10% cap
-  only +2.99%).
+A three-component robustness alternative adds `qlib_capacity_210` trained on
+the same 183 fields. Its two tree ranks correlate about 0.789, while their
+correlations with the sequence rank are only about 0.370-0.389.
 
-The component set was selected after reviewing the reusable OOF evidence, so
-the result is adaptive retrospective research, not independent confirmation.
+- Combined Rank IC is 0.10508; Top10 stress is +188.11%, -29.77% drawdown,
+  6/6 positive years and HAC lower +0.01586 percentage points.
+- No-overlap return is slightly better than the two-component version at
+  +66.15%, with -11.51% drawdown; no-overlap 10% cap is +11.96%.
+- `qlib_capacity_210` therefore diversifies some constrained-account outcomes
+  but slightly dilutes raw IC and uncapped economics. Keep it as a robustness
+  alternative, not an automatic third component.
+
+Both component choices were made after reviewing reusable OOF evidence. They
+are adaptive retrospective challengers, not independent confirmation.
 
 ## Authoritative artifacts
 
-- Three-model mean OOF:
+- Current two-component core OOF:
+  `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json`
+- Current two-component core account replay:
+  `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json`
+- Three-component core robustness OOF/account use the same paths with
+  `__tree_profiles_strong_127_qlib_capacity_210__tree_features_price_path_core_183`.
+- Corrected legacy 557-field three-model mean OOF:
   `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_profiles_strong_127_qlib_capacity_210/manifest.json`
-- Three-model mean account replay:
+- Corrected legacy 557-field three-model mean account replay:
   `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_profiles_strong_127_qlib_capacity_210/manifest.json`
 - Three-model minimum control uses the same paths with
   `__fusion_minimum__tree_profiles_strong_127_qlib_capacity_210`.
@@ -219,16 +259,16 @@ the result is adaptive retrospective research, not independent confirmation.
   shares `PAYOFF_TOP_KS = (1, 3, 5, 10)` across payoff OOF and account tasks.
 - `daily_research/path_policy/seq100_full_market_sequence_challenger.py` now
   supports horizon-isolated payoff evaluation, multi-tree profile rank fusion,
-  independent artifact namespaces and the matching account replay. Audited
-  account caches reject legacy manifests without an explicit zero 2026-read
-  count.
+  explicit tree feature views, independent artifact namespaces and the matching
+  account replay. Audited account caches reject legacy manifests without an
+  explicit zero 2026-read count.
 - `daily_research/path_policy/seq100_qver_confirmation_effect.py` implements
   the frozen attachment audit, post-selection outcome reads, forecast
   realization, scenario decomposition and matched legal account replay.
 - `daily_research/path_policy/seq100_qver_risk_overlay_validation.py` implements
   the frozen old-Top30 expanding three-head risk rerank, strict D120 label
   availability, paired cohort inference and exactly matched account replay.
-- Focused and full joint tests pass: 40 tests. Ruff, `py_compile` and
+- Focused and full joint tests pass: 42 tests. Ruff, `py_compile` and
   `git diff --check` pass. All new target-variant manifests plus the refreshed
   sequence and three-model mean account manifests explicitly report zero
   forbidden 2026 reads.
@@ -243,13 +283,14 @@ the result is adaptive retrospective research, not independent confirmation.
 ## Next step
 
 Do not label the current challenger as stable or deploy it. Preserve the
-three-model mean as the current short-horizon historical benchmark and the old
+two-component 183-field mean as the current short-horizon historical benchmark,
+the three-component core as its constrained-account robustness alternative, and the old
 30/30/25/10/5 score as the stronger interpretable D60 baseline. Use the new
 seven-family framework as a candidate-pool and scenario-audit lens, especially
 for revision reversal, multiple compression and early-spike fade risk. The
 equal-risk Top30 rerank has now been rejected even though its individual heads
-work. When research continues, prefer one pre-specified return/downside
-multi-task action-value competition that learns the return-risk trade-off using
-the same five folds and exact account contract. Avoid another ad hoc fusion,
-weight adjustment, risk threshold or small rule grid until a new model supplies
-genuinely independent OOF information.
+work. The next clean competition should use a pre-specified cash-aware
+action-value or distributional target on the 183-field path core, then admit
+fundamental/revision data only through a staleness-aware separate branch. Use
+the same five folds, corrected full-slate ranking, no-overlap account stress and
+winner caps. Avoid ad hoc fusion weights, thresholds or small rule grids.

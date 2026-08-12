@@ -229,6 +229,17 @@ def test_payoff_ensemble_artifacts_are_horizon_isolated() -> None:
         seed_offsets=(0,),
         tree_profiles=("strong_127", "qlib_capacity_210"),
     )
+    core_tree = study._payoff_ensemble_root(
+        root,
+        "payoff_ensemble_evaluation",
+        lookback=16,
+        horizon=10,
+        training_mode="outer_early_stop",
+        tree_training_mode="outer_early_stop",
+        seed_offsets=(0,),
+        tree_profiles=("strong_127", "qlib_capacity_210"),
+        tree_feature_variant="price_path_core_183",
+    )
 
     assert d5 == (
         root
@@ -251,9 +262,17 @@ def test_payoff_ensemble_artifacts_are_horizon_isolated() -> None:
         / "sequence_outer_early_stop__tree_outer_early_stop"
         "__tree_profiles_strong_127_qlib_capacity_210"
     )
+    assert core_tree == (
+        root
+        / "payoff_ensemble_evaluation/horizon_10/lookback_16"
+        / "sequence_outer_early_stop__tree_outer_early_stop"
+        "__tree_profiles_strong_127_qlib_capacity_210"
+        "__tree_features_price_path_core_183"
+    )
     assert d5 != d10
     assert conservative != d10
     assert multi_tree != d10
+    assert core_tree != multi_tree
 
 
 def test_audited_manifest_cache_requires_explicit_zero_forbidden_reads() -> None:
@@ -272,7 +291,7 @@ def test_exact_payoff_account_specs_match_tree_stress_contract() -> None:
         variant="sequence_payoff", horizon=10
     )
 
-    assert len(specs) == 12
+    assert len(specs) == 15
     assert {item["variant"] for item in specs} == {"sequence_payoff"}
     assert {item["cohort_equity_fraction"] for item in specs} == {0.1}
     assert {item["planned_fill_day"] for item in specs} == {10}
@@ -283,12 +302,15 @@ def test_exact_payoff_account_specs_match_tree_stress_contract() -> None:
     } == {1, 3, 5, 10}
     assert sum(
         item.get("maximum_credited_gross_return") is None for item in specs
-    ) == 8
+    ) == 9
     assert {
         item.get("maximum_credited_gross_return")
         for item in specs
         if item.get("maximum_credited_gross_return") is not None
     } == {0.05, 0.10}
+    assert sum(
+        not item.get("allow_overlapping_same_symbol", True) for item in specs
+    ) == 3
 
 
 def test_payoff_ensemble_prediction_uses_date_local_component_ranks() -> None:
@@ -298,9 +320,11 @@ def test_payoff_ensemble_prediction_uses_date_local_component_ranks() -> None:
             "date_idx": [10, 10, 11, 11],
         }
     )
+    exact_valid = np.ones((4, 2), dtype=np.uint8)
+    exact_valid[3, :] = 0
     sources = SimpleNamespace(
         context=SimpleNamespace(row_index=row_index),
-        exact_valid=np.ones((4, 2), dtype=np.uint8),
+        exact_valid=exact_valid,
         base_column=0,
         stress_column=1,
     )
@@ -313,6 +337,7 @@ def test_payoff_ensemble_prediction_uses_date_local_component_ranks() -> None:
     )
 
     np.testing.assert_allclose(prediction.stock_score, [0.75, 0.75, 0.5, 1.0])
+    np.testing.assert_array_equal(prediction.rows, np.arange(4, dtype=np.int64))
     np.testing.assert_allclose(
         components["sequence_rank"].to_numpy(), [0.5, 1.0, 0.5, 1.0]
     )
@@ -349,6 +374,9 @@ def test_sequence_parser_defaults_to_direct_outer_early_stop() -> None:
     multi_tree = study._build_parser().parse_args(
         ["--payoff-tree-profiles", "strong_127,qlib_capacity_210"]
     )
+    core_tree = study._build_parser().parse_args(
+        ["--payoff-tree-feature-variant", "price_path_core_183"]
+    )
 
     assert args.training_mode == "outer_early_stop"
     assert args.seed_offset == 0
@@ -356,6 +384,8 @@ def test_sequence_parser_defaults_to_direct_outer_early_stop() -> None:
     assert args.patience == study.DEFAULT_PATIENCE
     assert args.horizon == 5
     assert args.payoff_fusion_method == "mean"
+    assert args.payoff_tree_feature_variant == "all_causal_557"
+    assert core_tree.payoff_tree_feature_variant == "price_path_core_183"
     assert args.payoff_tree_profiles == ""
     assert multi_tree.payoff_tree_profiles == "strong_127,qlib_capacity_210"
     assert (

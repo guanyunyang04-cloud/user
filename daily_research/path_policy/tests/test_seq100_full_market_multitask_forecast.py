@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import lightgbm as lgb
 import numpy as np
@@ -501,6 +502,10 @@ def test_payoff_account_target_and_specs_preserve_horizon_contract() -> None:
         0.05,
         0.10,
     }
+    assert len(specs) == 15
+    assert sum(
+        not item.get("allow_overlapping_same_symbol", True) for item in specs
+    ) == 3
 
 
 def test_downside_fusion_definition_is_frozen_and_cli_is_explicit() -> None:
@@ -527,6 +532,109 @@ def test_newey_west_interval_is_finite_for_daily_returns() -> None:
 
     assert interval["count"] == 5
     assert interval["lower"] < interval["mean"] < interval["upper"]
+
+
+def test_full_prediction_ranking_keeps_unfilled_top_order_as_cash() -> None:
+    frame = pd.DataFrame(
+        {
+            "candidate_id": np.arange(11, dtype=np.int64),
+            "date_idx": np.zeros(11, dtype=np.int32),
+            "trade_date": ["2025-01-02"] * 11,
+            "prediction": np.arange(11, dtype=np.float64),
+            "base": np.linspace(-0.05, 0.05, 11),
+            "stress": np.linspace(-0.06, 0.04, 11),
+            "outcome_known": np.ones(11, dtype=bool),
+        }
+    )
+    # The highest-scored order was not filled. It is a known zero-return cash
+    # slot and must not be replaced by candidate 9, whose future return is known.
+    frame.loc[10, ["base", "stress"]] = 0.0
+
+    daily, _, selections, _ = study._evaluate_full_prediction_payoff_frame(
+        frame, fold=1
+    )
+
+    top1 = selections.loc[selections["selection_rank"] == 1].iloc[0]
+    assert int(top1["candidate_id"]) == 10
+    assert daily.loc[0, "top1_base"] == pytest.approx(0.0)
+    assert daily.loc[0, "top1_stress"] == pytest.approx(0.0)
+
+
+def test_account_can_forbid_overlapping_cohorts_of_the_same_symbol() -> None:
+    daily_raw = np.full((4, 1, 13), np.nan, dtype=np.float32)
+    daily_raw[:, 0, 0] = 10.0
+    daily_raw[:, 0, 3] = 10.0
+    raw_open = np.full((4, 1), 10.0, dtype=np.float32)
+    entry_filled = np.ones((4, 1), dtype=bool)
+    context = SimpleNamespace(
+        pack={"symbol_values": ["000001.SZ"]},
+        date_values=np.asarray(
+            ["2025-01-02", "2025-01-03", "2025-01-06", "2025-01-07"]
+        ),
+        cutoff_idx=3,
+    )
+    selections = pd.DataFrame(
+        {
+            "date_idx": [0, 1],
+            "candidate_id": [10, 11],
+            "selection_rank": [1, 1],
+            "symbol": ["000001.SZ", "000001.SZ"],
+            "variant": ["test", "test"],
+            "exit_policy": ["planned_close", "planned_close"],
+            "gate": ["always", "always"],
+            "top_k": [1, 1],
+            "cost_scenario": ["base", "base"],
+            "legal_gross_return": [0.10, 0.10],
+            "fill_day": [2, 2],
+            "take_profit_hit": [False, False],
+        }
+    )
+    costs = ExecutionCosts(
+        lot_size=100,
+        commission_bps=3.0,
+        minimum_commission_cny=5.0,
+        transfer_fee_bps=0.1,
+        slippage_bps=7.0,
+        stress_slippage_multiplier=2.0,
+        stamp_tax_schedule=(("1900-01-01", 10.0),),
+    )
+    common = {
+        "variant": "test",
+        "exit_policy": "planned_close",
+        "gate": "always",
+        "top_k": 1,
+        "cost_scenario": "stress",
+        "slippage_multiplier": 2.0,
+        "cohort_equity_fraction": 0.5,
+        "planned_fill_day": 2,
+    }
+
+    allowed, _, allowed_trades = study._simulate_account_spec(
+        spec=common,
+        selections=selections,
+        context=context,
+        daily_raw=daily_raw,
+        raw_open=raw_open,
+        entry_filled=entry_filled,
+        costs=costs,
+    )
+    forbidden, _, forbidden_trades = study._simulate_account_spec(
+        spec={**common, "allow_overlapping_same_symbol": False},
+        selections=selections,
+        context=context,
+        daily_raw=daily_raw,
+        raw_open=raw_open,
+        entry_filled=entry_filled,
+        costs=costs,
+    )
+
+    assert len(allowed_trades) == 2
+    assert allowed["maximum_same_symbol_open_cohorts"] == 2
+    assert allowed["same_symbol_overlap_filled_count"] == 1
+    assert len(forbidden_trades) == 1
+    assert forbidden["maximum_same_symbol_open_cohorts"] == 1
+    assert forbidden["same_symbol_overlap_skipped_count"] == 1
+    assert forbidden["task_id"].endswith("__no_overlapping_same_symbol")
 
 
 def test_market_gate_metrics_count_cash_dates_and_stability_groups() -> None:
