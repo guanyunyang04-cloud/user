@@ -337,7 +337,10 @@ WITH keys AS (
         sum(CASE WHEN rn > nbar - 12 THEN amount ELSE 0 END) / NULLIF(day_amount, 0) AS minute_last_hour_amount_share,
         max(amount) / NULLIF(day_amount, 0) AS minute_max_bar_amount_share,
         sum(CASE WHEN close > open THEN 1.0 ELSE 0.0 END) / NULLIF(count(*), 0) AS minute_positive_bar_fraction,
-        abs(last_close / NULLIF(first_open, 0) - 1.0) / NULLIF(sum(CASE WHEN prev_bar_close > 0 AND close > 0 THEN abs(ln(close / prev_bar_close)) ELSE 0 END), 0) AS minute_trend_efficiency,
+        abs(ln(last_close / NULLIF(first_open, 0))) / NULLIF(sum(CASE
+            WHEN rn = 1 AND open > 0 AND close > 0 THEN abs(ln(close / open))
+            WHEN prev_bar_close > 0 AND close > 0 THEN abs(ln(close / prev_bar_close))
+            ELSE 0 END), 0) AS minute_trend_efficiency,
         (sum(amount) / NULLIF(day_volume, 0)) AS minute_vwap,
         sum(CASE WHEN close > (day_amount / NULLIF(day_volume, 0)) THEN 1.0 ELSE 0.0 END) / NULLIF(count(*), 0) AS minute_price_above_vwap_share,
         max(high) / NULLIF(first_open, 0) - 1.0 AS minute_mfe_from_open,

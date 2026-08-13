@@ -1051,8 +1051,8 @@ def _minute_feature_sql(*, signal_date: str, intraday_scan: str) -> str:
     ), bars AS (
       SELECT *,sum(amount) OVER (PARTITION BY symbol) AS total_amount,
              sum(volume) OVER (PARTITION BY symbol) AS total_volume,
-             CASE WHEN previous_close>0 AND close>0
-               THEN ln(close/previous_close) END AS log_return
+              CASE WHEN previous_close>0 AND close>0
+                THEN ln(close/previous_close) END AS log_return
       FROM bars0
     ), aggregate AS (
       SELECT symbol,count(*) AS bar_count,count(DISTINCT bar_time) AS distinct_bar_count,
@@ -1064,7 +1064,10 @@ def _minute_feature_sql(*, signal_date: str, intraday_scan: str) -> str:
              max(CASE WHEN bar_no=24 THEN close END) AS morning_close,
              max(CASE WHEN bar_no=25 THEN open END) AS afternoon_open,
              max(CASE WHEN bar_no=42 THEN close END) AS close_bar_42,
-             sum(abs(log_return)) AS absolute_log_return_sum,
+              sum(CASE
+                WHEN bar_no=1 AND open>0 AND close>0 THEN abs(ln(close/open))
+                ELSE abs(log_return)
+              END) AS absolute_log_return_sum,
              sqrt(sum(log_return*log_return)) AS realized_volatility,
              sqrt(sum(CASE WHEN log_return<0 THEN log_return*log_return ELSE 0 END)) AS downside_semivolatility,
              sqrt(sum(CASE WHEN log_return>0 THEN log_return*log_return ELSE 0 END)) AS upside_semivolatility,

@@ -32,6 +32,12 @@ def test_future_columns_expose_legal_t_plus_one_path() -> None:
     assert "entry_high_next" in columns
 
 
+def test_minute_efficiency_includes_first_bar_open_to_close_return() -> None:
+    sql = MODULE._minute_query([], Path("events.parquet"), 2025)
+    assert "abs(ln(last_close / NULLIF(first_open, 0)))" in sql
+    assert "WHEN rn = 1 AND open > 0 AND close > 0 THEN abs(ln(close / open))" in sql
+
+
 def test_analysis_uses_next_open_and_separates_mfe_from_terminal_return() -> None:
     frame = pd.DataFrame(
         {

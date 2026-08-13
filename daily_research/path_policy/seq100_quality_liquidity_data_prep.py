@@ -33,10 +33,11 @@ CALENDAR_INPUT_BUILDER_VERSION = 2
 MEMBERSHIP_BUILDER_VERSION = 3
 ATLAS_BUILDER_VERSION = 3
 FEATURE_TRANSFORM_VERSIONS = {
-    "minute": 1,
+    "minute": 2,
     "fundamental": 2,
     "event": 1,
 }
+MINUTE_SQL_VERSION = 2
 START_DATE = "2010-01-01"
 END_DATE = "2025-12-31"
 YEARS = tuple(range(2010, 2026))
@@ -401,8 +402,8 @@ def _minute_sql(*, year: int, intraday_scan: str) -> str:
       SELECT *,
              sum(amount) OVER (PARTITION BY symbol,trade_date) AS total_amount,
              sum(volume) OVER (PARTITION BY symbol,trade_date) AS total_volume,
-             CASE WHEN previous_close>0 AND close>0
-               THEN ln(close/previous_close) END AS log_return
+              CASE WHEN previous_close>0 AND close>0
+                THEN ln(close/previous_close) END AS log_return
       FROM bars0
     ), aggregate AS (
       SELECT candidate_id,symbol,trade_date,
@@ -419,7 +420,10 @@ def _minute_sql(*, year: int, intraday_scan: str) -> str:
              max(CASE WHEN bar_no=24 THEN close END) AS morning_close,
              max(CASE WHEN bar_no=25 THEN open END) AS afternoon_open,
              max(CASE WHEN bar_no=42 THEN close END) AS close_bar_42,
-             sum(abs(log_return)) AS absolute_log_return_sum,
+              sum(CASE
+                WHEN bar_no=1 AND open>0 AND close>0 THEN abs(ln(close/open))
+                ELSE abs(log_return)
+              END) AS absolute_log_return_sum,
              sqrt(sum(log_return*log_return)) AS realized_volatility,
              sqrt(sum(CASE WHEN log_return<0 THEN log_return*log_return ELSE 0 END)) AS downside_semivolatility,
              sqrt(sum(CASE WHEN log_return>0 THEN log_return*log_return ELSE 0 END)) AS upside_semivolatility,
@@ -474,7 +478,10 @@ def _minute_sql(*, year: int, intraday_scan: str) -> str:
 
 
 def _minute_input_fingerprint(intraday_paths: Sequence[Path]) -> str:
-    return _path_set_fingerprint([*intraday_paths, CANDIDATE_INDEX])
+    digest = hashlib.sha256()
+    digest.update(f"minute_sql_version={MINUTE_SQL_VERSION}\n".encode())
+    digest.update(_path_set_fingerprint([*intraday_paths, CANDIDATE_INDEX]).encode())
+    return digest.hexdigest()
 
 
 def prepare_minute_features(
