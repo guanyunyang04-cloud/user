@@ -148,15 +148,15 @@ def test_minute_input_fingerprint_includes_sql_version(tmp_path) -> None:
     intraday.write_bytes(b"intraday")
     candidate.write_bytes(b"candidate")
     original_candidate_index = prep.CANDIDATE_INDEX
-    original_version = prep.MINUTE_SQL_VERSION
+    original_version = prep.FEATURE_TRANSFORM_VERSIONS["minute"]
     prep.CANDIDATE_INDEX = candidate
     try:
         before = prep._minute_input_fingerprint([intraday])
-        prep.MINUTE_SQL_VERSION = original_version + 1
+        prep.FEATURE_TRANSFORM_VERSIONS["minute"] = original_version + 1
         after = prep._minute_input_fingerprint([intraday])
     finally:
         prep.CANDIDATE_INDEX = original_candidate_index
-        prep.MINUTE_SQL_VERSION = original_version
+        prep.FEATURE_TRANSFORM_VERSIONS["minute"] = original_version
 
     assert before != after
 
@@ -164,6 +164,8 @@ def test_minute_input_fingerprint_includes_sql_version(tmp_path) -> None:
 def test_minute_sql_includes_first_bar_open_to_close_return() -> None:
     sql = prep._minute_sql(year=2025, intraday_scan="bars")
     assert "WHEN bar_no=1 AND open>0 AND close>0 THEN abs(ln(close/open))" in sql
+    assert "first(bar_no ORDER BY high DESC NULLS LAST,bar_no ASC)" in sql
+    assert "first(bar_no ORDER BY low ASC NULLS LAST,bar_no ASC)" in sql
 
 
 def test_coordinate_row_mapping_uses_stable_panel_coordinates() -> None:

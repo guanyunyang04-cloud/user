@@ -55,6 +55,8 @@ def test_signal_date_cannot_exceed_active_snapshot() -> None:
 def test_minute_feature_sql_includes_first_bar_open_to_close_return() -> None:
     sql = live._minute_feature_sql(signal_date="2025-12-31", intraday_scan="bars")
     assert "WHEN bar_no=1 AND open>0 AND close>0 THEN abs(ln(close/open))" in sql
+    assert "first(bar_no ORDER BY high DESC NULLS LAST,bar_no ASC)" in sql
+    assert "first(bar_no ORDER BY low ASC NULLS LAST,bar_no ASC)" in sql
 
 
 def test_dual_gate_requires_all_four_conditions() -> None:

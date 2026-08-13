@@ -33,11 +33,10 @@ CALENDAR_INPUT_BUILDER_VERSION = 2
 MEMBERSHIP_BUILDER_VERSION = 3
 ATLAS_BUILDER_VERSION = 3
 FEATURE_TRANSFORM_VERSIONS = {
-    "minute": 2,
+    "minute": 3,
     "fundamental": 2,
     "event": 1,
 }
-MINUTE_SQL_VERSION = 2
 START_DATE = "2010-01-01"
 END_DATE = "2025-12-31"
 YEARS = tuple(range(2010, 2026))
@@ -436,8 +435,8 @@ def _minute_sql(*, year: int, intraday_scan: str) -> str:
              -sum(CASE WHEN amount>0 AND total_amount>0
                THEN (amount/total_amount)*ln(amount/total_amount) ELSE 0 END)/ln(48.0) AS amount_entropy,
              sum(CASE WHEN bar_no<=24 THEN volume ELSE -volume END) AS volume_half_difference,
-             arg_max(bar_no,high) AS high_bar_no,
-             arg_min(bar_no,low) AS low_bar_no,
+             first(bar_no ORDER BY high DESC NULLS LAST,bar_no ASC) AS high_bar_no,
+             first(bar_no ORDER BY low ASC NULLS LAST,bar_no ASC) AS low_bar_no,
              sum(((high+low+close)/3.0)*volume) AS typical_value_volume,
              max(total_amount) AS total_amount,
              max(total_volume) AS total_volume
@@ -479,7 +478,9 @@ def _minute_sql(*, year: int, intraday_scan: str) -> str:
 
 def _minute_input_fingerprint(intraday_paths: Sequence[Path]) -> str:
     digest = hashlib.sha256()
-    digest.update(f"minute_sql_version={MINUTE_SQL_VERSION}\n".encode())
+    digest.update(
+        f"minute_sql_version={FEATURE_TRANSFORM_VERSIONS['minute']}\n".encode()
+    )
     digest.update(_path_set_fingerprint([*intraday_paths, CANDIDATE_INDEX]).encode())
     return digest.hexdigest()
 

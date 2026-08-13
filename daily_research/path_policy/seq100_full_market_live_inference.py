@@ -1080,7 +1080,8 @@ def _minute_feature_sql(*, signal_date: str, intraday_scan: str) -> str:
              -sum(CASE WHEN amount>0 AND total_amount>0
                THEN (amount/total_amount)*ln(amount/total_amount) ELSE 0 END)/ln(48.0) AS amount_entropy,
              sum(CASE WHEN bar_no<=24 THEN volume ELSE -volume END) AS volume_half_difference,
-             arg_max(bar_no,high) AS high_bar_no,arg_min(bar_no,low) AS low_bar_no,
+             first(bar_no ORDER BY high DESC NULLS LAST,bar_no ASC) AS high_bar_no,
+             first(bar_no ORDER BY low ASC NULLS LAST,bar_no ASC) AS low_bar_no,
              sum(((high+low+close)/3.0)*volume) AS typical_value_volume,
              max(total_amount) AS total_amount,max(total_volume) AS total_volume
       FROM bars GROUP BY symbol
