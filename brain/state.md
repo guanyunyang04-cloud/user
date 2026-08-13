@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-12
+Updated: 2026-08-13
 
 ## Active objective
 
@@ -277,6 +277,52 @@ GPU time on a D5 sequence model.
   training was not promoted. This is adaptive resource allocation, not proof
   that no D5-specific model can work.
 
+## D5/D10 multi-horizon distribution competition
+
+The frozen `seq100_multi_horizon_distribution_v1` study has now completed all
+five folds. It uses exactly the 183-field price-path core, a lookback-16 GRU
+and market state. The architecture-matched control predicts only the D10 point
+score; the challenger jointly predicts D5/D10 point scores, ordered
+q10/q50/q90 returns, next-entry fill and delayed-exit probabilities. Both rank
+the full signal slate before any future-status lookup. D2/D3 were gated and
+were not trained.
+
+- The single-D10 control has base exact-net Rank IC 0.09900. Its fixed D10
+  stress no-overlap account gains 55.34%, draws down 16.36%, has 5/6 positive
+  years and loses 21.56% after a 10% winner cap.
+- The multi-head D10 score has Rank IC 0.09963, only +0.00063 over the matched
+  control. Its no-overlap account gains 42.22%, draws down 14.89%, has 5/6
+  positive years and loses 24.00% after a 10% cap. The small ranking gain does
+  not translate into robust economics.
+- The multi-head D5 score has Rank IC 0.08145, but its no-overlap account gains
+  only 25.96%, draws down 26.42%, has 3/6 positive years and loses 46.43% after
+  a 10% cap. It is rejected as a portfolio signal.
+- Full-universe mean pinball improves only 1.91% at D5 and 1.57% at D10 versus
+  each fold's training-prefix unconditional quantiles. The gain is negative in
+  the actually traded daily Top10 (-0.34%/-0.40%). Coverage is close in the
+  aggregate but shifts badly in some regimes, especially 2025. Quantile heads
+  therefore are not approved for a risk overlay or per-stock horizon choice.
+- The entry-fill head improves date-equal Brier score about 13.0% versus the
+  training prior, but the event already occurs on 99.74% of rows and has little
+  present portfolio value. D5/D10 delayed-exit heads have negative Brier skill
+  (-2.51%/-3.06%) and overpredict the event; reject them as decision heads.
+- The new D10 rank is meaningfully different: its mean rank correlation with
+  the current core is about 0.658 and daily Top10 overlap is only 7.37%. A
+  predeclared equal three-component audit was therefore completed. Adding the
+  multi-head score raises Rank IC from 0.10693 to 0.11071 and uncapped
+  no-overlap return from 64.90% to 72.70%, with 6/6 positive years, but
+  drawdown is fractionally worse (-11.73%), the daily HAC lower bound slips
+  from +0.00980 to +0.00947 percentage points, the 10% cap falls from +9.25%
+  to +8.69%, and the 5% cap falls from -26.78% to -29.03%. The raw gain is
+  still right-tail dependent, so this component is not promoted.
+- Adding the matched single-D10 control also raises ensemble Rank IC to
+  0.11067 but slightly lowers uncapped return and worsens both winner caps.
+  This independently reinforces that IC improvement alone is not sufficient.
+
+This is a rejection of the frozen v1 loss/head configuration, not a claim that
+all multi-task or distribution models are ineffective. Do not tune its loss
+weights, fusion weights, quantile thresholds or TopK on the consumed folds.
+
 ## Authoritative artifacts
 
 - Current two-component core OOF:
@@ -314,6 +360,12 @@ GPU time on a D5 sequence model.
 - D5 core-tree evaluation/account:
   `daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d5_rank__strong_127__price_path_core_183/manifest.json`
   and the matching path under `payoff_account_replay`.
+- Frozen D5/D10 distribution-model contract audit and matched comparison:
+  `daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1/contract_audit/manifest.json`
+  and
+  `daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1/comparison/manifest.json`.
+- Distribution calibration and fixed equal-component incremental audit:
+  `daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_incremental_v1/manifest.json`.
 - Seven-family framework frozen study:
   `daily_research/studies/seq100_qver_confirmation_effect_v1.json`.
 - Seven-family framework authoritative summary and Parquet evidence:
@@ -343,10 +395,16 @@ GPU time on a D5 sequence model.
 - `daily_research/path_policy/seq100_qver_risk_overlay_validation.py` implements
   the frozen old-Top30 expanding three-head risk rerank, strict D120 label
   availability, paired cohort inference and exactly matched account replay.
-- Focused and full joint tests pass: 50 tests. Ruff, `py_compile` and
-  `git diff --check` pass. All new target-variant manifests plus the refreshed
-  sequence and three-model mean account manifests explicitly report zero
-  forbidden 2026 reads.
+- The new distribution study and incremental audit have focused joint tests;
+  their 10 fold fingerprints match the current implementation, all 2,317,412
+  OOF prediction rows are finite, all quantile outputs are ordered, and all 17
+  study manifests are completed with zero forbidden 2026 reads. The
+  incremental calibration run initially exposed an invalid internal split name
+  (`training` instead of `train`) before producing an audit result; it was
+  corrected and covered by a regression test.
+- Focused joint tests pass: 54 tests. Ruff, `py_compile` and `git diff --check`
+  pass. All new target-variant manifests plus the refreshed sequence and
+  ensemble account manifests explicitly report zero forbidden 2026 reads.
 - The seven-family audit's five focused tests pass; its summary schema, file
   hashes, score reconstruction, selection uniqueness, industry cap, account
   endpoint and zero forbidden 2026 reads were independently rechecked.
@@ -364,11 +422,19 @@ alternative, D5 as a portfolio-policy control, and the old 30/30/25/10/5 score
 as the stronger interpretable D60 baseline. Do not train the D5 sequence model
 from the rejected tree gate.
 
-The next clean model competition should make the model/portfolio boundary
-explicit: one shared 183-field representation should output pre-specified
-D2/D3/D5/D10 conditional return distributions (mean, median, q10 and tail-event
-probabilities), while a separate portfolio layer consumes those outputs with
-cash, overlap and cost state. D5 and D10 no-overlap accounts are the primary
-economic controls; D2/D3 are auxiliary horizons, not promotion targets. Admit
-fundamental/revision data later through a staleness-aware separate branch.
-Avoid ad hoc fusion weights, thresholds, TopK grids or exit-rule searches.
+The approved D5/D10 multi-head competition is complete and rejected, so do not
+add D2/D3 to this v1, use its quantiles as a risk overlay, or search fusion
+weights. Preserve the two-component D10 183-field core as the primary
+benchmark and the three-component core as its constrained-account robustness
+alternative.
+
+The next clean model competition should change one genuinely independent
+source of information. The preferred branch is a separately normalized,
+staleness-aware PIT fundamental/revision encoder: explicitly carry publication
+date, observation age, missing reason, forecast revision direction and
+cross-era availability, then test its residual Rank IC and one predeclared
+equal-rank addition to the current core. Keep price-path and portfolio logic
+unchanged so any increment can be attributed to the information branch. If
+that data contract cannot be reconstructed consistently for live dates, use a
+predeclared architecture-diversity challenger on the 183 fields instead.
+Avoid ad hoc loss, fusion-weight, threshold, TopK or exit-rule searches.

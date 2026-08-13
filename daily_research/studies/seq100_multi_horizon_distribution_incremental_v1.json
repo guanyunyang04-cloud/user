@@ -1,0 +1,56 @@
+{
+  "study_id": "seq100_multi_horizon_distribution_incremental_v1",
+  "status": "frozen_incremental_and_calibration_audit",
+  "purpose": "Complete the conversation-predeclared incremental test for the D5/D10 challenger and benchmark its probabilistic outputs against training-prefix unconditional forecasts without searching fusion weights or risk thresholds.",
+  "epistemic_contract": {
+    "standalone_model_results_were_seen_before_this_file_was_materialized": true,
+    "equal_component_increment_test_was_predeclared_in_conversation": true,
+    "correlation_diagnostics_were_seen_before_account_fusion_replay": true,
+    "comparison_is_adaptive_development_evidence": true,
+    "independent_confirmation_claimed": false,
+    "stable_profit_claim_allowed": false,
+    "no_2026_outcome_may_be_read": true
+  },
+  "sources": {
+    "model_study": "daily_research/studies/seq100_multi_horizon_distribution_v1.json",
+    "model_output_root": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1",
+    "current_core_evaluation": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+    "current_core_account": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "incremental_fusions": {
+    "add_single_d10_point": {
+      "components": ["existing_sequence_rank", "existing_tree_rank", "single_d10_point_rank"],
+      "definition": "equal within-date rank average",
+      "role": "architecture-matched incremental control"
+    },
+    "add_multi_d10_point": {
+      "components": ["existing_sequence_rank", "existing_tree_rank", "multi_d5_d10_D10_point_rank"],
+      "definition": "equal within-date rank average",
+      "role": "multi-horizon incremental challenger"
+    }
+  },
+  "portfolio_contract": {
+    "horizon": 10,
+    "top_k": 10,
+    "cohort_equity_fraction": 0.1,
+    "cost_scenario": "stress",
+    "primary_overlap_policy": "no overlapping same-symbol cohorts",
+    "winner_caps": [0.05, 0.1],
+    "weight_search_allowed": false,
+    "threshold_search_allowed": false,
+    "quantile_overlay_allowed": false
+  },
+  "calibration_audit": {
+    "model_variant": "multi_d5_d10_distribution",
+    "horizons": [5, 10],
+    "reference": "each fold training-prefix unconditional q10/q50/q90 and binary event rates",
+    "slices": ["fold", "calendar_year", "full_universe", "daily_top_decile", "daily_top10"],
+    "quantile_metrics": ["date_equal_pinball", "coverage", "q90_minus_q10"],
+    "binary_metrics": ["date_equal_brier", "training_prior_brier_skill"]
+  },
+  "outputs": {
+    "output_root": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_incremental_v1"
+  }
+}

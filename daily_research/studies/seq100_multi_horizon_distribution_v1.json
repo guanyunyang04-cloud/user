@@ -1,0 +1,122 @@
+{
+  "study_id": "seq100_multi_horizon_distribution_v1",
+  "status": "frozen_adaptive_development_contract",
+  "purpose": "Test whether a shared lookback-16 price-path representation with explicit D5/D10 return-distribution summaries improves executable cross-sectional ranking and fixed-policy economics relative to an architecture-matched single-D10 point model.",
+  "epistemic_contract": {
+    "five_forward_folds_are_reusable_development_evidence": true,
+    "comparison_is_not_independent_confirmation": true,
+    "no_2026_outcome_may_be_read": true,
+    "stable_profit_claim_allowed": false,
+    "deployment_allowed": false
+  },
+  "sources": {
+    "base_study": "daily_research/studies/seq100_full_market_multitask_forecast_v1.json",
+    "base_output_root": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+    "maximum_outcome_date": "2025-12-31",
+    "forbidden_year": 2026
+  },
+  "population": {
+    "universe": "signal-date quality_liquidity_pit",
+    "rank_before_future_fill_or_outcome_filter": true,
+    "unfilled_or_unaffordable_selected_order": "cash_without_rank_substitution"
+  },
+  "features": {
+    "variant": "price_path_core_183",
+    "static_feature_count": 183,
+    "lookback": 16,
+    "sequence_feature_count": 32,
+    "market_feature_count": 54,
+    "analytic_families": [
+      "daily_price_volume_technical",
+      "market_state",
+      "same_day_5m"
+    ]
+  },
+  "targets": {
+    "primary_horizons": [5, 10],
+    "deferred_auxiliary_horizons": [2, 3],
+    "training_return_scenario": "base",
+    "economic_return_scenario": "stress",
+    "entry": "signal close decision then next legal open fill",
+    "planned_exit": "matching D5 or D10 close",
+    "blocked_exit": "first sellable open within 20 trading days, otherwise frozen terminal loss contract",
+    "return_conditioning": "exact-net return is trained only where the reference slot entered and its legal outcome is known",
+    "entry_fill_head": "P(next-open market entry fills) on the full causally known signal slate",
+    "exit_block_head": "P(planned exit is delayed | market entry filled and legal path known)",
+    "quantiles": [0.1, 0.5, 0.9],
+    "quantiles_are_model_outputs_not_materialized_labels": true,
+    "quantile_ordering": "q10 <= q50 <= q90 by construction",
+    "cash_or_actual_account_affordability_is_not_a_stock_target": true
+  },
+  "model_variants": {
+    "single_d10_point": {
+      "horizons": [10],
+      "distribution_heads": false,
+      "role": "architecture-matched 183-field control"
+    },
+    "multi_d5_d10_distribution": {
+      "horizons": [5, 10],
+      "distribution_heads": true,
+      "role": "pre-specified multi-horizon distribution challenger"
+    }
+  },
+  "model": {
+    "encoder": "current static_missingness_plus_one_layer_gru_plus_market_state",
+    "hidden_dim": 64,
+    "dropout": 0.1,
+    "optimizer": "AdamW",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "maximum_epochs": 60,
+    "patience": 10,
+    "selection_smoothing_window": 3,
+    "date_batch_size": 4,
+    "selection_metric": "equal_horizon_mean_validation_daily_rank_ic",
+    "target_normalization": "training-prefix median and interquartile range",
+    "loss_weights": {
+      "daily_cross_sectional_correlation": 1.0,
+      "absolute_huber": 0.15,
+      "quantile_pinball": 0.2,
+      "d10_market_huber": 0.5,
+      "d10_market_binary": 0.2,
+      "entry_fill_binary": 0.1,
+      "exit_block_binary": 0.05
+    }
+  },
+  "validation": {
+    "fold_source": "base study five expanding forward folds",
+    "training_mode": "outer_early_stop",
+    "primary_forecast_metrics": [
+      "daily_rank_ic",
+      "date_equal_pinball",
+      "q10_q50_q90_coverage",
+      "interval_width",
+      "entry_fill_brier",
+      "exit_block_brier"
+    ],
+    "primary_economic_policies": [
+      "fixed_D5_Top10_no_same_symbol_overlap",
+      "fixed_D10_Top10_no_same_symbol_overlap"
+    ],
+    "economic_diagnostics": [
+      "uncapped_return",
+      "maximum_drawdown",
+      "positive_year_count",
+      "daily_HAC_lower",
+      "10pct_winner_cap",
+      "5pct_winner_cap"
+    ],
+    "horizon_choice_per_stock_allowed": false,
+    "topk_or_threshold_search_allowed": false,
+    "quantile_risk_overlay_allowed_in_v1": false,
+    "D2_D3_training_allowed_in_v1": false
+  },
+  "resources": {
+    "reuse_base_resource_plan": true,
+    "single_heavy_task_at_a_time": true,
+    "gpu_mixed_precision": true
+  },
+  "outputs": {
+    "output_root": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1"
+  }
+}
