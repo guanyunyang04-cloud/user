@@ -1,13 +1,18 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-08",
-  "current_model": "margin_observed_residual_risk_budget_candidate",
-  "selection_window": "2014-2022",
-  "confirmation_window": "2023-2025_consumed",
+  "updated_at": "2026-08-19",
+  "current_model": "technical_tree158_raw60_equal_rank_development_benchmark",
+  "selection_window": "five_expanding_forward_folds_2020_2025",
+  "confirmation_window": "none_2026_outcomes_forbidden",
   "records": [
     {
+      "id": "technical_repaired_input_baselines_20260819",
+      "status": "current_development_benchmark_not_production",
+      "path": "daily_research/output/technical/ensemble_tree158_raw60/evaluation/result.json"
+    },
+    {
       "id": "seq100_margin_residual_policy_v1_20260808",
-      "status": "strongest_candidate_not_production",
+      "status": "historical_candidate_not_production",
       "path": "daily_research/research_records/seq100/seq100_margin_residual_policy_v1_20260808/result.json"
     },
     {
@@ -17,12 +22,12 @@
     },
     {
       "id": "current_report",
-      "status": "current",
+      "status": "historical",
       "path": "daily_research/research_records/seq100/current_report/result.json"
     },
     {
       "id": "global_strategy_pool",
-      "status": "current_decision_evidence",
+      "status": "historical_decision_evidence",
       "path": "daily_research/research_records/seq100/global_strategy_pool/report.md"
     },
     {

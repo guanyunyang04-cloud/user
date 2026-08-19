@@ -3,7 +3,9 @@
 This personal workspace has two working systems:
 
 - `quant_data_platform/`: current market datasets and their update, repair, and validation code.
-- `daily_research/`: Seq100 research datasets, models, experiments, and retained scientific results.
+- `daily_research/`: A-share research data and retained scientific results. The
+  active short-horizon model path is `daily_research/technical/`; older Seq100
+  experiments under `path_policy/` are historical/reference code.
 
 Persistent cross-session memory is intentionally small:
 

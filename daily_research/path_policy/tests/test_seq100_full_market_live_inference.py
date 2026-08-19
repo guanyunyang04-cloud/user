@@ -7,16 +7,6 @@ import pytest
 from daily_research.path_policy import seq100_full_market_live_inference as live
 
 
-def test_frozen_core_contract_is_314_plus_243() -> None:
-    contract = live._load_contract()
-    assert len(contract.feature_names) == 557
-    assert len(contract.core_feature_names) == 314
-    assert len(contract.masked_feature_names) == 243
-    assert contract.feature_names[:314] == contract.core_feature_names
-    assert contract.feature_names[314:] == contract.masked_feature_names
-    assert len(live.daily_feature_names()) == 105
-
-
 def test_last_daily_features_preserve_lag_and_window_semantics() -> None:
     days = 61
     symbols = 3

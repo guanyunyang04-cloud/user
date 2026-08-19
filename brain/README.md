@@ -9,15 +9,19 @@ belief.
 
 - `quant_data_platform/` (QDP) owns market-data acquisition, repair, metadata,
   point-in-time semantics, and the active data catalog.
-- `daily_research/` owns Seq100 research datasets, features, models,
-  experiments, account simulation, and scientific results.
+- `daily_research/` owns research datasets, features, models, account
+  simulation, and scientific results.
 - `quant_data_platform/data/qdp_v2/` contains current QDP datasets and audits.
 - `daily_research/data/research_store/` contains downstream research packs.
-- `daily_research/path_policy/` contains current path and account research.
+- `daily_research/technical/` is the active short-horizon research path.
+- `daily_research/path_policy/` contains historical experiments and the data
+  builders still used to reconstruct the current pack.
 - `daily_research/studies/` contains concise study configurations.
 - `daily_research/research_records/` contains durable empirical conclusions.
-- `daily_research/output/path_policy/studies/` contains recomputable study
-  outputs and validation manifests.
+- `daily_research/output/technical/` contains current model and evaluation
+  outputs. Required repaired data/target artifacts remain under
+  `daily_research/output/path_policy/studies/` until the data builder is
+  simplified separately.
 
 ## Runtime
 

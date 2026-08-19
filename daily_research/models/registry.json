@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
   "registry_id": "seq100_model_registry_v1",
-  "selected_research_baseline": "structured_joint_turnover_180x35_v2",
-  "selection_scope": "selected on 2023-2025 double-slippage continuous-account evidence; 2020-2022 are historical durability confirmation and 2026 is time-out confirmation",
+  "status": "historical_pre_technical_mainline",
+  "selected_research_baseline": null,
+  "selection_scope": "Historical model archive only. Current repaired-input development results live under daily_research/output/technical and do not read 2026 outcomes.",
   "bundles": [
     {
       "model_id": "legal_flat_baseline",
