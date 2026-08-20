@@ -11,20 +11,22 @@ node_modules/
 *.pth
 *.onnx
 
-brain/output/
 outputs/
 tmp/
 
-quant_data_platform/data/*
-!quant_data_platform/data/.gitkeep
-
-daily_research/cache/*
-!daily_research/cache/.gitkeep
-daily_research/data/research_store/*
-!daily_research/data/research_store/.gitkeep
-daily_research/output/*
-!daily_research/output/.gitkeep
+# Local data and generated research products are kept outside Git.
+data/qdp/*
+!data/qdp/.gitkeep
+data/research/*
+!data/research/daily/
+data/research/daily/*
+!data/research/daily/manifest.json
+runs/*
+!runs/.gitkeep
 
 # Reproducible hot-money event-study data products are too large for GitHub.
-daily_research/research_records/seq100/seq100_hot_money_event_study_v1_20260806/*.parquet
-daily_research/research_records/seq100/seq100_hot_money_event_study_v1_20260806/path_hits/*.parquet
+research/records/seq100/seq100_hot_money_event_study_v1_20260806/*.parquet
+research/records/seq100/seq100_hot_money_event_study_v1_20260806/path_hits/*.parquet
+
+# Local audit tables are reproducible artifacts, not repository source.
+research/records/seq100/status_repair_v1_20260805/audit/*.parquet
