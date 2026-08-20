@@ -7,5 +7,6 @@ runtime code. Active model execution is implemented in
 
 Older records may retain the original `daily_research` or
 `quant_data_platform` path strings as historical provenance. They are not
-runtime imports; the corresponding legacy trees are recoverable in the
-external archive documented in `CURRENT.md`.
+runtime imports. The large legacy output trees were purged from the external
+archive on 2026-08-21; Git retains tracked source history and the archive
+retains only small audit, migration, and legacy-provenance files.

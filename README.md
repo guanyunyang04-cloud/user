@@ -18,9 +18,10 @@ the execution path and current data products are under `data/`.
 - `tools`: one-off migration and maintenance utilities.
 
 The previous `daily_research/` and `quant_data_platform/` trees are no longer
-active. Their source and large ignored outputs were moved to the external
-same-disk archive `H:\quant_project_archive\20260820` while Git retains their
-history.
+active. Git retains their tracked history; the bulky ignored experiment
+outputs that had been staged in `H:\quant_project_archive\20260820` were
+purged on 2026-08-21 to make room for market-data downloads. Small audit,
+migration, and legacy-provenance files remain in that directory.
 
 ## Environment
 

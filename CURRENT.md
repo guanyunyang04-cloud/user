@@ -18,9 +18,10 @@ never reads outcome data after 2025-12-31.
 - Durable evidence: `research/records/` and `research/studies/`.
 
 The former `daily_research` and `quant_data_platform` trees were removed from
-the active repository. Their source and large ignored artifacts remain
-recoverable at `H:\quant_project_archive\20260820`; Git retains tracked-file
-history.
+the active repository. Their tracked source history remains in Git. The large
+ignored experiment artifacts previously staged at
+`H:\quant_project_archive\20260820` were purged on 2026-08-21; only small
+audit, migration, and legacy-provenance files remain there.
 
 The unified package passes the full test suite and static checks. The QDP
 physical contract checks are green; the deep check reports one expected
