@@ -18,6 +18,7 @@ from quantlab.data.providers import (
     MootdxOnlineProvider,
     _mootdx_xdxr_domain_frame,
 )
+from quantlab.data.qdp_v2 import normalization as _normalization
 from quantlab.data.qdp_v2.auxiliary_update import (
     AUXILIARY_DOMAINS,
     CORPORATE_COLUMNS,
@@ -28,8 +29,6 @@ from quantlab.data.qdp_v2.auxiliary_update import (
     _external_with_retry,
     _fetch_baostock_snapshots,
     _manifest,
-    _normalize_cninfo_dividend,
-    _normalize_cninfo_share_change,
     _paths,
     _scan_sql,
 )
@@ -38,6 +37,9 @@ from quantlab.data.qdp_v2.repair import (
     append_active_shard,
     update_active_manifest_metadata,
 )
+
+_normalize_cninfo_dividend = _normalization.normalize_cninfo_dividend
+_normalize_cninfo_share_change = _normalization.normalize_cninfo_share_change
 
 
 class AuxiliaryTailUpdateError(RuntimeError):

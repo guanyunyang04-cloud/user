@@ -8,6 +8,11 @@ the execution path and current data products are under `data/`.
 
 - `src/quantlab/data`: point-in-time market-data acquisition, repair, catalog,
   and quality checks.
+- `src/quantlab/data/provider_symbols.py` and `src/quantlab/data/identifiers.py`:
+  shared provider-code and security-identity mappings.
+- `src/quantlab/data/qdp_v2/normalization.py` and
+  `src/quantlab/data/qdp_v2/pit_normalization.py`: deterministic provider and
+  PIT transformations kept independent from network/database orchestration.
 - `src/quantlab/research`: daily cross-sectional models, sequence models,
   portfolio replay, and research-data contracts.
 - `data/qdp`: the mutable QDP data lake and its active manifests.

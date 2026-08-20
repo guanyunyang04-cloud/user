@@ -16,11 +16,10 @@ from quantlab.data.core.json_io import json_safe
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.core.security_status import st_status_from_name
 from quantlab.data.providers import BaostockProvider
+from quantlab.data.qdp_v2 import normalization as _normalization
+from quantlab.data.qdp_v2 import pit_normalization as _pit_normalization
 from quantlab.data.qdp_v2.auxiliary_update import (
-    CNINFO_SHARE_NORMALIZED_COLUMNS,
-    NAME_INTERVAL_COLUMNS,
     _external_with_retry,
-    _normalize_cninfo_share_change,
 )
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
@@ -40,6 +39,19 @@ from quantlab.data.qdp_v2.repair import (
     resolve_active_domain,
     update_active_manifest_metadata,
 )
+
+CNINFO_SHARE_NORMALIZED_COLUMNS = _normalization.CNINFO_SHARE_NORMALIZED_COLUMNS
+NAME_INTERVAL_COLUMNS = _normalization.NAME_INTERVAL_COLUMNS
+_normalize_cninfo_share_change = _normalization.normalize_cninfo_share_change
+_factor_rows = _pit_normalization.factor_rows
+_historical_names = _pit_normalization.historical_names
+_identity_exchange = _pit_normalization.identity_exchange
+_is_mainboard = _pit_normalization.is_mainboard
+_name_implies_st = _pit_normalization.name_implies_st
+_normalize_eastmoney_history = _pit_normalization.normalize_eastmoney_history
+_normalize_sina_factors = _pit_normalization.normalize_sina_factors
+_security_id = _pit_normalization.security_id
+_short_exchange = _pit_normalization.short_exchange
 
 DEFAULT_START_DATE = "2010-01-04"
 PART_SEMANTIC_VERSION = "pit_historical_mainboard_daily_nullable_security_status"
@@ -130,26 +142,6 @@ def _context(
     if start > end:
         raise ValueError(f"pit_history_invalid_range:{start}>{end}")
     return PitHistoryContext(workspace, root, runtime, start, end)
-
-
-def _is_mainboard(symbol: object) -> bool:
-    text = str(symbol or "").strip().upper()
-    code = text.split(".", 1)[0]
-    return text.endswith((".SH", ".SZ")) and code.startswith(MAINBOARD_PREFIXES)
-
-
-def _security_id(symbol: str) -> str:
-    code, exchange = str(symbol).upper().split(".", 1)
-    venue = "SSE" if exchange == "SH" else "SZSE"
-    return f"QDP-CN-{venue}-{code}"
-
-
-def _identity_exchange(symbol: str) -> str:
-    return "SSE" if str(symbol).upper().endswith(".SH") else "SZSE"
-
-
-def _short_exchange(symbol: str) -> str:
-    return "SH" if str(symbol).upper().endswith(".SH") else "SZ"
 
 
 def _read_active_symbols(ctx: PitHistoryContext, domain: str) -> set[str]:
@@ -493,47 +485,6 @@ def _build_archive_cache(
     return output
 
 
-def _normalize_eastmoney_history(raw: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
-    columns = [
-        "trade_date", "symbol", "open", "high", "low", "close", "volume",
-        "amount", "tradestatus", "isST", "turn", "pctChg", "peTTM",
-        "pbMRQ", "psTTM", "pcfNcfTTM", "name_on_date", "history_source",
-    ]
-    if raw is None or raw.empty:
-        return pd.DataFrame(columns=columns)
-    data = raw.rename(
-        columns={
-            "日期": "trade_date",
-            "开盘": "open",
-            "最高": "high",
-            "最低": "low",
-            "收盘": "close",
-            "成交量": "volume",
-            "成交额": "amount",
-            "换手率": "turn",
-            "涨跌幅": "pctChg",
-        }
-    ).copy()
-    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
-    data["symbol"] = symbol
-    for column in ("open", "high", "low", "close", "volume", "amount", "turn", "pctChg"):
-        data[column] = pd.to_numeric(data.get(column), errors="coerce")
-    # Eastmoney reports A-share daily volume in lots; QDP and BaoStock use shares.
-    data["volume"] = data["volume"] * 100.0
-    data["tradestatus"] = "1"
-    data["isST"] = ""
-    for column in ("peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"):
-        data[column] = np.nan
-    data["name_on_date"] = ""
-    data["history_source"] = "akshare_eastmoney_unadjusted_history"
-    return (
-        data.loc[data["trade_date"].notna(), columns]
-        .drop_duplicates("trade_date", keep="last")
-        .sort_values("trade_date")
-        .reset_index(drop=True)
-    )
-
-
 def _download_market_supplements(
     ctx: PitHistoryContext,
     *,
@@ -580,26 +531,6 @@ def _download_market_supplements(
             completed += 1
             if completed == 1 or completed % 25 == 0 or completed == len(pending):
                 print(f"pit_history_market={completed}/{len(pending)}", flush=True)
-
-
-def _normalize_sina_factors(raw: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
-    columns = [
-        "symbol", "trade_date", "fore_adjust_factor", "back_adjust_factor",
-        "adjust_factor", "factor_provider", "source",
-    ]
-    if raw is None or raw.empty:
-        return pd.DataFrame(columns=columns)
-    data = raw.rename(columns={"date": "trade_date", "hfq_factor": "factor"}).copy()
-    data["trade_date"] = pd.to_datetime(data["trade_date"], errors="coerce")
-    data["factor"] = pd.to_numeric(data["factor"], errors="coerce")
-    data = data.loc[data["trade_date"].notna() & data["factor"].gt(0)].copy()
-    data["symbol"] = symbol
-    data["fore_adjust_factor"] = data["factor"]
-    data["back_adjust_factor"] = data["factor"]
-    data["adjust_factor"] = data["factor"]
-    data["factor_provider"] = "sina_via_akshare"
-    data["source"] = "akshare_sina_hfq_factor_event"
-    return data.loc[:, columns].sort_values("trade_date").reset_index(drop=True)
 
 
 def _download_sina_factors(
@@ -1064,28 +995,6 @@ def _download_reference_parts(
                 print(f"pit_history_reference={completed}/{len(symbols)}", flush=True)
 
 
-def _historical_names(
-    dates: pd.Series,
-    intervals: pd.DataFrame,
-    *,
-    fallback: str,
-) -> pd.Series:
-    result = pd.Series(str(fallback), index=dates.index, dtype="object")
-    if intervals.empty:
-        return result
-    normalized = intervals.copy()
-    normalized["start_date"] = pd.to_datetime(normalized["start_date"], errors="coerce")
-    normalized["end_date"] = pd.to_datetime(normalized["end_date"], errors="coerce")
-    normalized = normalized.dropna(subset=["start_date"]).sort_values("start_date")
-    date_values = pd.to_datetime(dates, errors="coerce")
-    for row in normalized.itertuples(index=False):
-        start = pd.Timestamp(row.start_date)
-        end = pd.Timestamp(row.end_date) if pd.notna(row.end_date) else pd.Timestamp.max
-        mask = date_values.ge(start) & date_values.le(end)
-        result.loc[mask] = str(row.name)
-    return result
-
-
 def _load_sse_st_transitions() -> pd.DataFrame:
     if not SSE_ST_TRANSITIONS.is_file():
         raise PitHistoryError(f"pit_history_sse_status_resource_missing:{SSE_ST_TRANSITIONS}")
@@ -1095,10 +1004,6 @@ def _load_sse_st_transitions() -> pd.DataFrame:
     if frame["is_st"].isna().any():
         raise PitHistoryError("pit_history_sse_status_resource_invalid_boolean")
     return frame.sort_values(["symbol", "effective_date"]).reset_index(drop=True)
-
-
-def _name_implies_st(names: pd.Series) -> pd.Series:
-    return names.map(st_status_from_name).astype("boolean")
 
 
 def _historical_st_status(
@@ -1129,74 +1034,6 @@ def _historical_st_status(
     # name fallback also covers archive-edge current rows after 2026-06-01.
     result = result.fillna(_name_implies_st(names).astype("boolean"))
     return result.astype("boolean")
-
-
-def _factor_rows(history: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
-    dates = pd.to_datetime(history["trade_date"], errors="raise")
-    event = events.copy()
-    factor_provider = "identity_no_factor_event"
-    factor_source = "identity_factor_pit_history_restore"
-    if event.empty:
-        factor = np.ones(len(history), dtype=np.float64)
-        source_dates = dates.copy()
-    else:
-        event["trade_date"] = pd.to_datetime(event["trade_date"], errors="coerce")
-        event["back_adjust_factor"] = pd.to_numeric(
-            event["back_adjust_factor"], errors="coerce"
-        )
-        event = event.dropna(subset=["trade_date", "back_adjust_factor"])
-        event = event.loc[event["back_adjust_factor"].gt(0)].sort_values("trade_date")
-        if event.empty:
-            factor = np.ones(len(history), dtype=np.float64)
-            source_dates = dates.copy()
-        else:
-            factor_provider = str(
-                event.get("factor_provider", pd.Series(["sina_via_akshare"])).iloc[0]
-            )
-            factor_source = str(
-                event.get("source", pd.Series(["akshare_sina_hfq_factor_event"])).iloc[0]
-            )
-            event_dates = event["trade_date"].to_numpy(dtype="datetime64[ns]")
-            event_values = event["back_adjust_factor"].to_numpy(dtype=np.float64)
-            position = np.searchsorted(
-                event_dates,
-                dates.to_numpy(dtype="datetime64[ns]"),
-                side="right",
-            ) - 1
-            first_position = int(position[0])
-            baseline = (
-                float(event_values[first_position]) if first_position >= 0 else 1.0
-            )
-            current = np.where(
-                position >= 0,
-                event_values[np.maximum(position, 0)],
-                baseline,
-            )
-            factor = current / baseline
-            source_values = np.where(
-                position >= 0,
-                event_dates[np.maximum(position, 0)],
-                dates.to_numpy(dtype="datetime64[ns]"),
-            )
-            source_dates = pd.Series(
-                pd.to_datetime(source_values), index=history.index
-            )
-    symbol = str(history["symbol"].iloc[0])
-    trade_date = history["trade_date"].astype(str)
-    return pd.DataFrame(
-        {
-            "symbol": symbol,
-            "trade_date": trade_date,
-            "fore_adjust_factor": factor,
-            "back_adjust_factor": factor,
-            "adjust_factor": factor,
-            "factor_provider": factor_provider,
-            "factor_semantics": "sina_hfq_factor_ratio_normalized_to_first_qdp_observation",
-            "source": factor_source + "+pit_history_restore",
-            "factor_source_date": source_dates.dt.strftime("%Y-%m-%d"),
-            "ffill_days": (dates - source_dates).dt.days.astype("int64"),
-        }
-    )
 
 
 def _prepare_symbol_parts(

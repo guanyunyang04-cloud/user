@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from quantlab.data import identifiers as _identifiers
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.core.security_status import st_status_from_name
 from quantlab.data.domains.contracts import (
@@ -24,6 +25,10 @@ from quantlab.data.qdp_v2.repair import (
     append_active_shard,
     resolve_active_domain,
 )
+
+_identity_exchange = _identifiers.identity_exchange
+_security_id = _identifiers.security_id
+_short_exchange = _identifiers.short_exchange
 
 CORE_UPDATE_DOMAINS = (
     "trading_calendar",
@@ -487,20 +492,6 @@ def _runtime_root(workspace: Path) -> Path:
         raise BaostockCoreUpdateError(f"runtime_outside_workspace:{root}")
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-def _security_id(symbol: str) -> str:
-    code, suffix = str(symbol).split(".", 1)
-    exchange = {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}.get(suffix, suffix)
-    return f"QDP-CN-{exchange}-{code}"
-
-
-def _identity_exchange(symbol: str) -> str:
-    return {"SH": "SSE", "SZ": "SZSE", "BJ": "BSE"}.get(str(symbol)[-2:], "")
-
-
-def _short_exchange(symbol: str) -> str:
-    return str(symbol)[-2:]
 
 
 def _board_code(symbol: str) -> str:

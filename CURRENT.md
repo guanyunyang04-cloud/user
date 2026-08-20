@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Objective
 
@@ -28,6 +28,23 @@ physical contract checks are green; the deep check reports one expected
 medium-coverage warning because historical 5-minute bars are unavailable for
 some restored daily stock-days. That gap is explicit in the QDP contract and
 is not used as a hidden eligibility filter.
+
+## Refactor status
+
+The active package now keeps provider protocol code separate from deterministic
+normalization code. `data/provider_symbols.py` owns provider symbol
+conversions, `data/identifiers.py` owns stable security identity mappings,
+`data/qdp_v2/normalization.py` owns auxiliary payload normalization, and
+`data/qdp_v2/pit_normalization.py` owns PIT history transformations. The
+original modules retain compatibility names, so no data update or research
+entry point changed during the split.
+
+The remaining large provider and QDP repair modules still contain network,
+retry, multiprocessing, and DuckDB orchestration by design. They are not part
+of the current research import path, and further splitting them should wait
+for a behavior-level need rather than create another layer of wrappers.
+The current refactor is validated by the complete test suite (`158 passed`),
+Ruff, bytecode compilation, and the physical QDP/research checks.
 
 ## Data and execution contract
 

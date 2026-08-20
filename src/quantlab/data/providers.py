@@ -23,7 +23,6 @@ import numpy as np
 import pandas as pd
 import requests
 
-from quantlab.data.core.security_status import st_status_from_name
 from quantlab.data.domains.contracts import (
     DataDomain,
     DatePartitionFetchRequest,
@@ -39,6 +38,19 @@ from quantlab.data.domains.contracts import (
     validate_provider_name,
 )
 from quantlab.data.progress import create_progress, progress_write
+from quantlab.data.provider_symbols import (
+    baostock_board,
+    baostock_exchange,
+    baostock_name_is_st,
+    from_baostock_code,
+    from_tencent_code,
+    is_baostock_a_share_code,
+    is_mootdx_index_symbol,
+    mootdx_symbol,
+    strip_suffix,
+    to_baostock_code,
+    to_tencent_simple_code,
+)
 
 FORMAL_FREE_V3_REQUIRED_DOMAINS: tuple[str, ...] = (
     DataDomain.MARKET_DAILY,
@@ -261,15 +273,6 @@ _PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
         "notes": "BaoStock-first research rebuild core plan; weak web providers excluded from critical path",
     },
 }
-
-
-def _strip_suffix(symbol: str) -> str:
-    raw = str(symbol or "").strip().upper()
-    if "." in raw:
-        return raw.split(".", 1)[0]
-    if raw.startswith(("SH", "SZ", "BJ")) and raw[2:].isdigit():
-        return raw[2:]
-    return raw
 
 
 def _formal_requirement(domain: str) -> str:
@@ -2247,15 +2250,6 @@ def _close_mootdx_client(client: Any) -> None:
             return
 
 
-def _mootdx_symbol(symbol: str) -> str:
-    raw = str(symbol or "").strip().upper()
-    if "." in raw:
-        raw = raw.split(".", 1)[0]
-    if raw.startswith(("SH", "SZ", "BJ")) and raw[2:].isdigit():
-        raw = raw[2:]
-    return raw[-6:].zfill(6)
-
-
 def _mootdx_xdxr_domain_frame(
     raw: pd.DataFrame,
     *,
@@ -2336,17 +2330,6 @@ def _mootdx_xdxr_domain_frame(
         as_of_date=as_of_date,
         require_columns=False,
     )
-
-
-def _is_mootdx_index_symbol(symbol: str) -> bool:
-    raw = str(symbol or "").strip().upper()
-    code = _mootdx_symbol(raw)
-    suffix = raw.rsplit(".", 1)[1] if "." in raw else ""
-    if suffix == "SH" and code.startswith(("000", "880", "881", "882", "883", "884", "885", "886", "887", "889")):
-        return True
-    if suffix == "SZ" and code.startswith("399"):
-        return True
-    return False
 
 
 def _fetch_mootdx_bars_window(
@@ -2670,50 +2653,6 @@ def _fetch_cninfo_org_id(symbol: str) -> str:
     return str(selected.get("secid", selected.get("orgId", ""))).strip()
 
 
-def _to_baostock_code(symbol: str) -> str:
-    raw = str(symbol or "").strip().upper()
-    if raw.endswith(".SH"):
-        return f"sh.{raw[:6]}"
-    if raw.endswith(".SZ"):
-        return f"sz.{raw[:6]}"
-    if raw.endswith(".BJ"):
-        return f"bj.{raw[:6]}"
-    if raw.startswith(("5", "6", "9")):
-        return f"sh.{raw[:6]}"
-    if raw.startswith(("4", "8")):
-        return f"bj.{raw[:6]}"
-    return f"sz.{raw[:6]}"
-
-
-def _to_tencent_simple_code(symbol: str) -> str:
-    raw = str(symbol or "").strip().upper()
-    code = raw.split(".", 1)[0] if "." in raw else raw[-6:]
-    exchange = raw.split(".", 1)[1] if "." in raw else ("SH" if code.startswith(("5", "6", "9")) else "SZ")
-    prefix = "sh" if exchange == "SH" else "sz"
-    return f"s_{prefix}{code}"
-
-
-def _from_tencent_code(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    raw = raw.removeprefix("s_")
-    if raw.startswith("sh"):
-        return f"{raw[2:8].upper()}.SH"
-    if raw.startswith("sz"):
-        return f"{raw[2:8].upper()}.SZ"
-    return str(value or "").strip().upper()
-
-
-def _from_baostock_code(value: Any) -> str:
-    raw = str(value or "").strip().lower()
-    if raw.startswith("sh."):
-        return f"{raw[3:].upper()}.SH"
-    if raw.startswith("sz."):
-        return f"{raw[3:].upper()}.SZ"
-    if raw.startswith("bj."):
-        return f"{raw[3:].upper()}.BJ"
-    return str(value or "").strip().upper()
-
-
 def _baostock_bulk_query_to_frame(query: Any, failure_label: str) -> pd.DataFrame:
     """Decode a BaoStock batch response exactly once.
 
@@ -2903,49 +2842,6 @@ def _baostock_query_to_frame(query: Any, failure_label: str) -> pd.DataFrame:
     while query.next():
         rows.append(query.get_row_data())
     return pd.DataFrame(rows, columns=fields) if fields else pd.DataFrame(rows)
-
-
-def _is_baostock_a_share_code(value: Any) -> bool:
-    raw = str(value or "").strip().lower()
-    if raw.startswith("sh."):
-        code = raw[3:9]
-        return code.startswith(("600", "601", "603", "605", "688"))
-    if raw.startswith("sz."):
-        code = raw[3:9]
-        return code.startswith(("000", "001", "002", "003", "300", "301"))
-    if raw.startswith("bj."):
-        return raw[3:9].isdigit()
-    return False
-
-
-def _baostock_exchange(value: Any) -> str:
-    raw = str(value or "").strip().upper()
-    if raw.endswith(".SH"):
-        return "SH"
-    if raw.endswith(".SZ"):
-        return "SZ"
-    if raw.endswith(".BJ"):
-        return "BJ"
-    return ""
-
-
-def _baostock_board(value: Any) -> str:
-    raw = str(value or "").strip().upper()
-    code = raw.split(".", 1)[0]
-    exchange = raw.split(".", 1)[1] if "." in raw else ""
-    if exchange == "BJ":
-        return "beijing"
-    if exchange == "SH" and code.startswith("688"):
-        return "star"
-    if exchange == "SZ" and code.startswith(("300", "301")):
-        return "chi_next"
-    if exchange in {"SH", "SZ"}:
-        return "main"
-    return "unknown"
-
-
-def _baostock_name_is_st(value: Any) -> bool | None:
-    return st_status_from_name(value)
 
 
 def _baostock_all_stock_raw_frame(query: Any) -> pd.DataFrame:
@@ -4273,3 +4169,19 @@ def _ths_hotspot_frame(ak: Any, request: DomainFetchRequest) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+# Compatibility aliases keep the long-standing private provider helpers
+# available to repair modules while the canonical conversions live in the
+# small, dependency-free provider_symbols module.
+_strip_suffix = strip_suffix
+_mootdx_symbol = mootdx_symbol
+_is_mootdx_index_symbol = is_mootdx_index_symbol
+_to_baostock_code = to_baostock_code
+_to_tencent_simple_code = to_tencent_simple_code
+_from_tencent_code = from_tencent_code
+_from_baostock_code = from_baostock_code
+_is_baostock_a_share_code = is_baostock_a_share_code
+_baostock_exchange = baostock_exchange
+_baostock_board = baostock_board
+_baostock_name_is_st = baostock_name_is_st
