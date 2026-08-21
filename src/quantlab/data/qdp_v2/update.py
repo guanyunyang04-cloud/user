@@ -101,6 +101,7 @@ def run_update(
     keep_runtime: bool = False,
     core_only: bool = False,
     repair_auxiliary: bool = False,
+    legacy_tushare: bool = False,
     restore_pit_history: bool = False,
     normalize_symbol_lifecycle: bool = False,
 ) -> dict[str, Any]:
@@ -123,6 +124,7 @@ def run_update(
         return run_auxiliary_repair(
             as_of_date=as_of_date,
             workspace_root=workspace,
+            allow_legacy_tushare=bool(legacy_tushare),
         )
     plan = plan_update(
         as_of_date=as_of_date,
@@ -313,6 +315,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Repair only the six auxiliary domains; never runs core or 5m history.",
     )
     parser.add_argument(
+        "--legacy-tushare",
+        action="store_true",
+        help=(
+            "Allow --repair-auxiliary to use the historical Tushare-dependent "
+            "repair path; default is the free-source tail path."
+        ),
+    )
+    parser.add_argument(
         "--restore-pit-history",
         action="store_true",
         help="Restore historical main-board securities with point-in-time lifecycle state.",
@@ -376,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
             keep_runtime=bool(args.keep_runtime),
             core_only=bool(args.core_only),
             repair_auxiliary=bool(args.repair_auxiliary),
+            legacy_tushare=bool(args.legacy_tushare),
             restore_pit_history=bool(args.restore_pit_history),
             normalize_symbol_lifecycle=bool(args.normalize_symbol_lifecycle),
         )

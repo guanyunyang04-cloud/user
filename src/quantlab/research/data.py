@@ -22,7 +22,9 @@ from quantlab.core.paths import paths
 
 DATA_MANIFEST = paths().research_data / "daily" / "manifest.json"
 OUTPUT_ROOT = paths().runs / "daily"
-MAXIMUM_OUTCOME_DATE = "2025-12-31"
+DEFAULT_VALIDATION_START_DATE = "2020-01-01"
+CUTOFF_VIOLATION_FIELD = "cutoff_violation_count"
+LEGACY_CUTOFF_VIOLATION_FIELD = "forbidden_2026_read_count"
 
 FEATURE_FAMILIES: dict[int, tuple[str, ...]] = {
     158: ("daily_price_volume_technical", "market_state"),
@@ -36,6 +38,43 @@ FEATURE_FAMILIES: dict[int, tuple[str, ...]] = {
 
 class ResearchDataError(DataContractError):
     pass
+
+
+def _date_text(value: Any, *, field: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ResearchDataError(f"{field} is missing")
+    try:
+        return pd.Timestamp(text).strftime("%Y-%m-%d")
+    except (TypeError, ValueError) as exc:
+        raise ResearchDataError(f"{field} is not a date: {text}") from exc
+
+
+def cutoff_violation_count(record: Mapping[str, Any]) -> int:
+    """Read the generic cutoff audit field, with old-run compatibility."""
+
+    if CUTOFF_VIOLATION_FIELD in record:
+        value = record[CUTOFF_VIOLATION_FIELD]
+    elif LEGACY_CUTOFF_VIOLATION_FIELD in record:
+        value = record[LEGACY_CUTOFF_VIOLATION_FIELD]
+    else:
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ResearchDataError("cutoff violation count is not an integer") from exc
+
+
+def cutoff_audit_fields(count: int = 0) -> dict[str, int]:
+    """Emit the current, calendar-agnostic cutoff audit field.
+
+    Historical run files may still contain the old year-specific field; readers
+    accept that alias through :func:`cutoff_violation_count`, but new artifacts
+    should not perpetuate it.
+    """
+
+    value = int(count)
+    return {CUTOFF_VIOLATION_FIELD: value}
 
 
 def open_array(
@@ -65,6 +104,13 @@ class ResearchData:
         return np.asarray(self.manifest["execution"]["date_values"], dtype=str)
 
     @property
+    def maximum_outcome_date(self) -> str:
+        return _date_text(
+            self.manifest["scope"].get("maximum_outcome_date"),
+            field="maximum_outcome_date",
+        )
+
+    @property
     def symbol_values(self) -> tuple[str, ...]:
         return tuple(str(value) for value in self.manifest["execution"]["symbol_values"])
 
@@ -81,9 +127,11 @@ class ResearchData:
 
     @property
     def cutoff_idx(self) -> int:
-        matches = np.flatnonzero(self.date_values == MAXIMUM_OUTCOME_DATE)
+        matches = np.flatnonzero(self.date_values == self.maximum_outcome_date)
         if len(matches) != 1:
-            raise ResearchDataError("2025-12-31 is not unique in the calendar")
+            raise ResearchDataError(
+                f"{self.maximum_outcome_date} is not unique in the calendar"
+            )
         return int(matches[0])
 
     def feature_count(self, count: int) -> int:
@@ -144,10 +192,10 @@ def load_data() -> ResearchData:
     if manifest.get("status") != "ready":
         raise ResearchDataError("research dataset is not ready")
     scope = dict(manifest["scope"])
-    if (
-        str(scope.get("maximum_outcome_date")) != MAXIMUM_OUTCOME_DATE
-        or int(scope.get("forbidden_2026_read_count", -1)) != 0
-    ):
+    maximum_outcome_date = _date_text(
+        scope.get("maximum_outcome_date"), field="maximum_outcome_date"
+    )
+    if cutoff_violation_count(scope) != 0:
         raise ResearchDataError("research dataset has an invalid outcome boundary")
 
     row_record = dict(manifest["row_index"])
@@ -171,11 +219,10 @@ def load_data() -> ResearchData:
     if np.any(dates[1:] < dates[:-1]):
         raise ResearchDataError("row index is not date sorted")
     trade_dates = row_index["trade_date"].astype(str)
-    if (
-        trade_dates.max() > MAXIMUM_OUTCOME_DATE
-        or trade_dates.str.startswith("2026").any()
-    ):
-        raise ResearchDataError("research rows extend beyond 2025-12-31")
+    if trade_dates.max() > maximum_outcome_date:
+        raise ResearchDataError(
+            f"research rows extend beyond {maximum_outcome_date}"
+        )
     if row_index.duplicated(["date_idx", "symbol_idx"]).any():
         raise ResearchDataError("duplicate date/symbol rows")
 
@@ -201,7 +248,7 @@ def build_forward_folds(
     date_idx: np.ndarray,
     trade_date: np.ndarray,
     validation_start_date: str = "2020-01-01",
-    validation_end_date: str = MAXIMUM_OUTCOME_DATE,
+    validation_end_date: str | None = None,
     fold_count: int = 5,
     purge_days: int = 30,
 ) -> list[dict[str, Any]]:
@@ -209,6 +256,8 @@ def build_forward_folds(
     labels = np.asarray(trade_date, dtype=str)
     unique_dates, first = np.unique(dates, return_index=True)
     unique_labels = labels[first]
+    if validation_end_date is None:
+        validation_end_date = max(str(value) for value in unique_labels)
     selected = unique_dates[
         (unique_labels >= str(validation_start_date))
         & (unique_labels <= str(validation_end_date))
@@ -399,7 +448,7 @@ def verify_current_data(*, chunk_rows: int = 32_768) -> dict[str, Any]:
         "matrix_sha256": matrix_sha256,
         "row_key_unique": True,
         "maximum_trade_date": str(data.row_index["trade_date"].astype(str).max()),
-        "forbidden_2026_read_count": 0,
+        **cutoff_audit_fields(),
         "source_projection_evidence": bool(
             data.manifest["quality"].get("source_557_projection_equal")
         ),

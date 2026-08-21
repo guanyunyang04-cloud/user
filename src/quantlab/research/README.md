@@ -6,8 +6,10 @@ contain live order generation.
 ## Data contract
 
 The current repaired matrix contains 4,191,476 rows from 2012-01-04 through
-2025-12-31. The first two years of the underlying pack are available only as
-lookback/training warm-up. No 2026 outcome is allowed.
+the date declared by the active research manifest. The first two years of the
+underlying pack are available only as lookback/training warm-up. Outcome rows
+after the declared cutoff are rejected; changing the research window only
+requires changing the manifest, not the code.
 
 - `158`: 104 daily price-volume features and 54 market-state features.
 - `183`: the same 158 fields plus 25 features calculated from the signal day's
@@ -20,7 +22,8 @@ separate 158 data copy and no v2/v3 data namespace.
 
 ## Research contract
 
-- Five expanding forward folds evaluate 2020-2025 with a 30-trading-day purge.
+- Five expanding forward folds evaluate the configured validation window with a
+  30-trading-day purge.
 - The common target is executable D10 base-cost net return; portfolio stress
   replay applies double slippage.
 - Models rank the complete finite-score slate before future fill/outcome status

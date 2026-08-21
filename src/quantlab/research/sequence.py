@@ -20,10 +20,13 @@ from torch.nn import functional as F
 from quantlab.core.io import stable_hash
 
 from .data import (
+    DEFAULT_VALIDATION_START_DATE,
     OUTPUT_ROOT,
     ResearchData,
     ResearchDataError,
     build_forward_folds,
+    cutoff_audit_fields,
+    cutoff_violation_count,
     daily_rank_metrics,
     date_relevance_labels,
     fold_rows,
@@ -210,8 +213,8 @@ def _folds(data: ResearchData) -> list[dict[str, Any]]:
     return build_forward_folds(
         date_idx=data.dates,
         trade_date=data.row_index["trade_date"].astype(str).to_numpy(),
-        validation_start_date="2020-01-01",
-        validation_end_date="2025-12-31",
+        validation_start_date=DEFAULT_VALIDATION_START_DATE,
+        validation_end_date=data.maximum_outcome_date,
         fold_count=5,
         purge_days=30,
     )
@@ -377,7 +380,7 @@ def train_fold(fold_number: int) -> dict[str, Any]:
         if (
             result.get("status") == "completed"
             and result.get("fingerprint") == fingerprint
-            and result.get("forbidden_2026_read_count") == 0
+            and cutoff_violation_count(result) == 0
             and all(Path(item["path"]).is_file() for item in result["files"].values())
         ):
             return result
@@ -548,7 +551,7 @@ def train_fold(fold_number: int) -> dict[str, Any]:
         "metrics": metrics,
         "elapsed_seconds": elapsed,
         "history": history,
-        "forbidden_2026_read_count": 0,
+        **cutoff_audit_fields(),
         "files": {
             "model": {"path": str(model_path)},
             "predictions": {"path": str(prediction_path)},
@@ -593,7 +596,7 @@ def load_fold_results() -> tuple[list[dict[str, Any]], pd.DataFrame]:
         if (
             result.get("status") != "completed"
             or result.get("fingerprint") != _task_fingerprint(data, folds[fold - 1])
-            or result.get("forbidden_2026_read_count") != 0
+            or cutoff_violation_count(result) != 0
             or not all(
                 Path(record["path"]).is_file()
                 for record in result.get("files", {}).values()

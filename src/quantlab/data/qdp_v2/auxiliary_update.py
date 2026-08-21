@@ -69,6 +69,8 @@ BAOSTOCK_WORKERS = 4
 SECONDARY_VALIDATION_WORKERS = 4
 SECONDARY_VALIDATION_SAMPLE_SIZE = 200
 SECONDARY_VALIDATION_SEED = 20260716
+FREE_SOURCE_POLICY = "baostock+mootdx_detection+cninfo_confirmation; no_tushare"
+LEGACY_SOURCE_POLICY = "legacy_tushare_plus_free_source_validation"
 
 
 class AuxiliaryUpdateError(RuntimeError):
@@ -439,14 +441,15 @@ def plan_auxiliary_update(
         "status": "planned",
         "as_of_date": ctx.target_date,
         "domains": list(AUXILIARY_DOMAINS),
+        "provider_policy": FREE_SOURCE_POLICY,
         "coverage_before": coverage,
         "provider_order": {
             "industry_concept": ["baostock", "cninfo_validation"],
-            "share_capital": ["tushare_daily_basic", "cninfo_validation"],
-            "valuation": ["existing_baostock", "tushare_daily_basic_gap_fill"],
-            "name_change": ["universe_transitions", "tushare_validation"],
-            "corporate_actions": ["tushare_dividend", "cninfo_validation"],
-            "index_constituents": ["baostock", "tushare_validation"],
+            "share_capital": ["mootdx_detection", "cninfo_confirmation", "state_carry"],
+            "valuation": ["baostock", "qdp_share_price_formula"],
+            "name_change": ["universe_transitions"],
+            "corporate_actions": ["mootdx_detection", "cninfo_confirmation"],
+            "index_constituents": ["baostock"],
         },
     }
 
@@ -3090,16 +3093,39 @@ def run_auxiliary_repair(
     workspace_root: str | Path | None = None,
     domains: Sequence[str] = AUXILIARY_DOMAINS,
     force: bool = False,
+    allow_legacy_tushare: bool = False,
 ) -> dict[str, Any]:
-    ctx = _context(as_of_date=as_of_date, workspace_root=workspace_root)
     selected = tuple(str(item) for item in domains)
     unknown = sorted(set(selected).difference(AUXILIARY_DOMAINS))
     if unknown:
         raise ValueError(f"unknown_auxiliary_domains:{','.join(unknown)}")
+    if not allow_legacy_tushare:
+        # The free-source tail is the safe default.  The historical repair
+        # implementation below remains available only as an explicit legacy
+        # path because it still calls Tushare for several domains.
+        from quantlab.data.qdp_v2.auxiliary_tail_update import (
+            run_auxiliary_tail_update,
+        )
+
+        result = run_auxiliary_tail_update(
+            as_of_date=as_of_date,
+            workspace_root=workspace_root,
+            domains=selected,
+        )
+        result["mode"] = "free_source_tail"
+        result["strict_historical_repair"] = "skipped"
+        result["legacy_tushare_required_for"] = [
+            "historical_name_intervals",
+            "historical_share_capital_gap_repair",
+            "historical_dividend_repair",
+        ]
+        return result
+    ctx = _context(as_of_date=as_of_date, workspace_root=workspace_root)
     state: dict[str, Any] = {
         "status": "repairing",
         "as_of_date": ctx.target_date,
         "domains": list(selected),
+        "provider_policy": LEGACY_SOURCE_POLICY,
         "completed": {},
         "failed_stage": "",
     }
@@ -3213,6 +3239,7 @@ def run_auxiliary_update(
             "status": "current",
             "as_of_date": ctx.target_date,
             "domains": list(AUXILIARY_DOMAINS),
+            "provider_policy": FREE_SOURCE_POLICY,
         }
     from quantlab.data.qdp_v2.auxiliary_tail_update import (
         run_auxiliary_tail_update,
@@ -3236,6 +3263,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--legacy-tushare",
+        action="store_true",
+        help=(
+            "Enable the historical repair path that still requires a valid "
+            "Tushare token; the default uses free-source tail updates."
+        ),
+    )
     parser.add_argument("--domains", default=",".join(AUXILIARY_DOMAINS))
     parser.add_argument("--json", action="store_true")
     return parser
@@ -3266,6 +3301,7 @@ def main(argv: list[str] | None = None) -> int:
             workspace_root=workspace,
             domains=domains,
             force=bool(args.force),
+            allow_legacy_tushare=bool(args.legacy_tushare),
         )
     )
     print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
@@ -3275,6 +3311,7 @@ def main(argv: list[str] | None = None) -> int:
         in {
             "planned",
             "repaired",
+            "updated",
             "validated",
         }
         else 2

@@ -227,6 +227,17 @@ def _archive_paths(ctx: PitHistoryContext) -> dict[str, Path]:
     return required
 
 
+def _workspace_relative_path(path: Path, workspace: Path) -> str:
+    """Serialize provenance without binding the manifest to one machine path."""
+
+    try:
+        return path.resolve().relative_to(workspace.resolve()).as_posix()
+    except ValueError:
+        # External evidence is still useful, but keep an absolute fallback when
+        # it genuinely lives outside the project boundary.
+        return str(path.resolve())
+
+
 def _local_stock_basic(ctx: PitHistoryContext) -> pd.DataFrame:
     paths = _archive_paths(ctx)
     rows: list[pd.DataFrame] = []
@@ -2778,9 +2789,15 @@ def run_pit_history_restore(
     }
     archive_paths = _archive_paths(ctx)
     source_evidence = {
-        "archive_paths": {key: str(value) for key, value in archive_paths.items()},
+        "path_base": "workspace_root",
+        "archive_paths": {
+            key: _workspace_relative_path(value, ctx.workspace)
+            for key, value in archive_paths.items()
+        },
         "sse_factbooks": SSE_FACTBOOK_EVIDENCE,
-        "sse_transition_resource": str(SSE_ST_TRANSITIONS),
+        "sse_transition_resource": _workspace_relative_path(
+            SSE_ST_TRANSITIONS, ctx.workspace
+        ),
         "factor_provider": "sina_via_akshare_hfq_factor_event",
         "boundary_market_provider": "eastmoney_via_akshare_unadjusted_daily",
     }

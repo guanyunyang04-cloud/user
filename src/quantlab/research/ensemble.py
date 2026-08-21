@@ -12,6 +12,8 @@ from quantlab.core.io import stable_hash
 from .data import (
     OUTPUT_ROOT,
     ResearchDataError,
+    cutoff_audit_fields,
+    cutoff_violation_count,
     daily_rank_metrics,
     write_json,
 )
@@ -50,7 +52,7 @@ def _paired_increments(
         result = dict(json.loads(path.read_text(encoding="utf-8")))
         if (
             result.get("status") != "completed"
-            or result.get("forbidden_2026_read_count") != 0
+            or cutoff_violation_count(result) != 0
             or result.get("fold_fingerprints") != component_fingerprints[component]
             or result.get("input_fingerprint") != ensemble_result["input_fingerprint"]
             or result.get("target_fingerprint") != ensemble_result["target_fingerprint"]
@@ -193,7 +195,7 @@ def evaluate() -> dict[str, Any]:
             "components": ["tree_158", "sequence_raw60"],
             "weights": [0.5, 0.5],
             "component_rank_correlation": component_correlations[-1],
-            "forbidden_2026_read_count": 0,
+            **cutoff_audit_fields(),
             "files": {
                 "predictions": {"path": str(prediction_path)},
                 "daily_metrics": {"path": str(daily_path)},

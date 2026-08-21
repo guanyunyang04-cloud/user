@@ -32,6 +32,19 @@ SPECIALTY_AUDITS = (
 )
 TERMINAL_OK_STATUSES = {"applied", "ok", "completed", "already_repaired"}
 
+# The final semantic pass intentionally checks a small, explicit set of
+# specialty domains.  The remaining active domains still receive physical and
+# point-in-time checks, but are not silently presented as deeply certified.
+SPECIALTY_AUDIT_DOMAINS = {
+    "research_report",
+    "financial_quarterly",
+    "balance_sheet_quarterly",
+    "share_capital",
+    "margin_eligibility",
+    "market_intraday_5m",
+    "stk_factor_pro_raw",
+}
+
 
 def _specialty_record(path: Path) -> dict[str, Any]:
     if not path.is_file():
@@ -60,6 +73,12 @@ def _specialty_record(path: Path) -> dict[str, Any]:
     status = str(payload.get("status", "") or "")
     checks = dict(payload.get("checks", {}) or {})
     failed = sorted(str(key) for key, value in checks.items() if value is not True)
+    # A terminal status describes the workflow, not the quality of its output.
+    # Older repair records contain detailed provenance but no machine-checkable
+    # assertions; keep them discoverable while refusing to call them certified.
+    evidence_missing = not checks
+    if evidence_missing:
+        failed.append("evidence_missing:explicit_checks")
     statistics = payload.get("statistics", {})
     if not isinstance(statistics, Mapping):
         statistics = {}
@@ -74,6 +93,7 @@ def _specialty_record(path: Path) -> dict[str, Any]:
         "status": status,
         "ok": status in TERMINAL_OK_STATUSES and not failed,
         "check_count": len(checks),
+        "evidence": "explicit_checks" if checks else "provenance_only",
         "failed_checks": failed,
     }
 
@@ -143,7 +163,11 @@ def _semantic_invariants(root: Path, active: Mapping[str, str]) -> dict[str, Any
         "sse_unknown_count_matches_absent_detail": int(margin[2]) == int(margin[3]),
         "margin_nullable_state_contract": int(margin[4]) == 0,
         "balance_contract_has_exact_extension_conflicts": (
-            balance_manifest.contract_version == "qdp_v2_balance_sheet_quarterly_pit_v4"
+            balance_manifest.contract_version
+            in {
+                "qdp_v2_balance_sheet_quarterly_pit_v4",
+                "qdp_v2_balance_sheet_quarterly_pit_v5",
+            }
         ),
         "balance_extension_conflict_flag_present": conflict_count >= 0,
         "balance_extension_conflict_count_matches_manifest": conflict_count
@@ -175,11 +199,16 @@ def audit_semantics(
     root = qdp_v2_root(workspace_root)
     active = active_dataset_map(read_active_manifest(root))
     audits = [_specialty_record(root / "audits" / name) for name in SPECIALTY_AUDITS]
-    errors = [
-        f"specialty_audit_failed:{item['name']}:{','.join(item['failed_checks'])}"
-        for item in audits
-        if not item["ok"]
-    ]
+    errors: list[str] = []
+    warnings: list[str] = []
+    for item in audits:
+        if item["ok"]:
+            continue
+        message = f"specialty_audit_failed:{item['name']}:{','.join(item['failed_checks'])}"
+        if item.get("evidence") == "provenance_only":
+            warnings.append(message.replace("specialty_audit_failed:", "specialty_audit_evidence_missing:"))
+        else:
+            errors.append(message)
     try:
         invariants = _semantic_invariants(root, active)
         errors.extend(
@@ -190,14 +219,35 @@ def audit_semantics(
     except (FileNotFoundError, duckdb.Error) as exc:
         invariants = {"checks": {}}
         errors.append(f"semantic_invariant_scan_failed:{type(exc).__name__}:{exc}")
+    active_domains = set(active)
+    covered_domains = sorted(active_domains.intersection(SPECIALTY_AUDIT_DOMAINS))
+    uncertified_domains = sorted(active_domains.difference(covered_domains))
+    invariant_checks = dict(invariants.get("checks", {}) or {})
+    specialty_certified = all(item["ok"] for item in audits)
+    invariants_certified = bool(invariant_checks) and all(invariant_checks.values())
     payload = {
         "status": "ok" if not errors else "needs_attention",
         "scope": "specialty_audit_aggregation_and_selected_stable_invariants",
-        "all_active_domains_semantically_certified": False,
+        "all_active_domains_semantically_certified": bool(
+            not errors and not uncertified_domains
+        ),
+        "semantic_certification": {
+            "specialty_audits_certified": specialty_certified,
+            "selected_invariants_certified": invariants_certified,
+            "provenance_only_audits": sorted(
+                item["name"]
+                for item in audits
+                if item.get("evidence") == "provenance_only"
+            ),
+            "covered_active_domains": covered_domains,
+            "uncertified_active_domains": uncertified_domains,
+            "coverage": "complete" if not uncertified_domains else "partial",
+        },
         "qdp_v2_root": str(root.resolve()),
         "audited_at": utc_now(),
         "specialty_audits": audits,
         "invariants": invariants,
+        "warnings": warnings,
         "errors": errors,
     }
     if write:

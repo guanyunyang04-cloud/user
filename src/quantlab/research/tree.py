@@ -18,9 +18,12 @@ import psutil
 from quantlab.core.io import stable_hash
 
 from .data import (
+    DEFAULT_VALIDATION_START_DATE,
     OUTPUT_ROOT,
     ResearchDataError,
     build_forward_folds,
+    cutoff_audit_fields,
+    cutoff_violation_count,
     daily_rank_metrics,
     date_group_sizes,
     date_relevance_labels,
@@ -119,8 +122,8 @@ def _folds(data: Any) -> list[dict[str, Any]]:
     return build_forward_folds(
         date_idx=data.dates,
         trade_date=data.row_index["trade_date"].astype(str).to_numpy(),
-        validation_start_date="2020-01-01",
-        validation_end_date="2025-12-31",
+        validation_start_date=DEFAULT_VALIDATION_START_DATE,
+        validation_end_date=data.maximum_outcome_date,
         fold_count=5,
         purge_days=30,
     )
@@ -169,7 +172,7 @@ def _task_complete(path: Path, fingerprint: str) -> dict[str, Any] | None:
         if (
             result.get("status") == "completed"
             and result.get("fingerprint") == fingerprint
-            and result.get("forbidden_2026_read_count") == 0
+            and cutoff_violation_count(result) == 0
             and all(Path(record["path"]).is_file() for record in files.values())
         ):
             return result
@@ -352,7 +355,7 @@ def train_fold(feature_count: int, fold_number: int) -> dict[str, Any]:
         "elapsed_seconds": elapsed,
         "train_valid_count": int(train_valid.sum()),
         "validation_valid_count": int(validation_valid.sum()),
-        "forbidden_2026_read_count": 0,
+        **cutoff_audit_fields(),
         "files": {
             "model": {"path": str(model_path)},
             "predictions": {"path": str(predictions_path)},
@@ -399,7 +402,7 @@ def load_fold_results(feature_count: int) -> tuple[list[dict[str, Any]], pd.Data
         if (
             result.get("status") != "completed"
             or result.get("fingerprint") != expected_fingerprint
-            or result.get("forbidden_2026_read_count") != 0
+            or cutoff_violation_count(result) != 0
             or not all(
                 Path(record["path"]).is_file()
                 for record in result.get("files", {}).values()
@@ -526,7 +529,7 @@ def evaluate_predictions(
         "selected_row_count": len(selections),
         "right_censored_top10_selection_count": dropped,
         "accounts": account_results,
-        "forbidden_2026_read_count": 0,
+        **cutoff_audit_fields(),
         "files": {
             "oof_predictions": {"path": str(oof_path)},
             "top10_selections": {"path": str(selections_path)},
@@ -716,7 +719,7 @@ def compare() -> dict[str, Any]:
         "minute_feature_importance": minute_importance_rows,
         "metrics": comparison.to_dict("records"),
         "files": {"summary": str(path), "paired_daily": str(paired_path)},
-        "forbidden_2026_read_count": 0,
+        **cutoff_audit_fields(),
     }
     write_json(OUTPUT_ROOT / "tree_158_vs_183.json", _safe_json(output))
     return output

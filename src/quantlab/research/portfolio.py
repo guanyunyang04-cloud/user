@@ -514,7 +514,9 @@ def simulate_account(
         previous_equity = equity
 
     if holdings or open_exits or close_exits:
-        raise PortfolioError("positions remain unresolved at 2025 cutoff")
+        raise PortfolioError(
+            f"positions remain unresolved at {date_values[cutoff_idx]} cutoff"
+        )
     equity = pd.DataFrame(equity_rows)
     trades = pd.DataFrame(trade_rows)
     equity["equity_peak"] = equity["equity"].cummax()
@@ -573,7 +575,7 @@ def simulate_account(
         "same_symbol_overlap_filled_count": overlap_filled,
         "same_symbol_overlap_skipped_count": overlap_skipped,
         "unresolved_position_count": 0,
-        "forbidden_2026_read_count": 0,
+        "cutoff_violation_count": 0,
         "annual": annual,
     }
     return result, equity, trades

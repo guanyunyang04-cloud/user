@@ -7,7 +7,7 @@
     "end_date": "2025-12-31",
     "warmup_start_date": "2010-01-04",
     "maximum_outcome_date": "2025-12-31",
-    "forbidden_2026_read_count": 0,
+    "cutoff_violation_count": 0,
     "row_count": 4191476
   },
   "fingerprints": {

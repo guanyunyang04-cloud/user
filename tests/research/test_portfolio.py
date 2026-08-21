@@ -102,7 +102,7 @@ def test_account_replay_is_finite_and_respects_t1() -> None:
         entry_filled=entry_filled,
         costs=_costs(),
     )
-    assert result["forbidden_2026_read_count"] == 0
+    assert result["cutoff_violation_count"] == 0
     assert np.isfinite(result["ending_equity"])
     assert result["trade_count"] == 2
     assert result["maximum_position_count"] == 1

@@ -58,6 +58,28 @@ def _workspace(tmp_path: Path) -> Path:
     return tmp_path / "workspace"
 
 
+def test_auxiliary_repair_defaults_to_free_source_tail(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_tail(**kwargs):
+        calls.update(kwargs)
+        return {"status": "updated", "provider_policy": "free"}
+
+    monkeypatch.setattr(auxiliary_tail_update, "run_auxiliary_tail_update", fake_tail)
+    result = auxiliary_update.run_auxiliary_repair(
+        as_of_date="2026-07-21",
+        workspace_root=tmp_path,
+        domains=("name_change",),
+    )
+
+    assert result["mode"] == "free_source_tail"
+    assert result["strict_historical_repair"] == "skipped"
+    assert calls["domains"] == ("name_change",)
+
+
 def test_daily_basic_normalization_converts_10k_units_to_base_units() -> None:
     frame = pd.DataFrame(
         {
