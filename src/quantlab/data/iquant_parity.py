@@ -42,6 +42,9 @@ MINUTE_DATES = (
     "2026-07-21",
 )
 VALUE_COLUMNS = ("open", "high", "low", "close", "volume", "amount")
+DAILY_START_DATE = "2010-01-04"
+DAILY_END_DATE = "2026-07-21"
+RECENT_MINUTE_START_DATE = "2025-01-01"
 
 
 def _now() -> str:
@@ -285,6 +288,122 @@ def _sample_metadata(data_dir: Path, symbols: tuple[str, ...], period: str) -> l
     return result
 
 
+def _daily_parity_frames(
+    workspace: Path,
+    source_root: Path,
+) -> tuple[Any, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    manifest, qdp = _query_qdp(
+        workspace,
+        "market_daily_raw",
+        symbols=DAILY_SYMBOLS,
+        start_date=DAILY_START_DATE,
+        end_date=DAILY_END_DATE,
+    )
+    iquant = pd.concat(
+        [
+            read_file(
+                _symbol_path(source_root, symbol, "1d"),
+                symbol=symbol,
+                period="1d",
+                start_date=DAILY_START_DATE,
+                end_date=DAILY_END_DATE,
+            )
+            for symbol in DAILY_SYMBOLS
+        ],
+        ignore_index=True,
+    ).sort_values(["symbol", "trade_date"], ignore_index=True)
+    return manifest, iquant, qdp, _comparison(iquant, qdp, ["symbol", "trade_date"])
+
+
+def _minute_parity_frames(
+    workspace: Path,
+    source_root: Path,
+) -> tuple[Any, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    iquant_1m = pd.concat(
+        [
+            read_file(
+                _symbol_path(source_root, symbol, "1m"),
+                symbol=symbol,
+                period="1m",
+                start_date=min(MINUTE_DATES),
+                end_date=max(MINUTE_DATES),
+            ).loc[lambda frame: frame["trade_date"].isin(MINUTE_DATES)]
+            for symbol in MINUTE_SYMBOLS
+        ],
+        ignore_index=True,
+    ).sort_values(["symbol", "trade_date", "bar_time"], ignore_index=True)
+    iquant_5m = aggregate_1m_to_5m(iquant_1m)
+    manifest, qdp_5m = _query_qdp(
+        workspace,
+        "market_intraday_5m",
+        symbols=MINUTE_SYMBOLS,
+        dates=MINUTE_DATES,
+    )
+    comparison = _comparison(
+        iquant_5m,
+        qdp_5m,
+        ["symbol", "trade_date", "bar_time"],
+    )
+    return manifest, iquant_1m, iquant_5m, qdp_5m, comparison
+
+
+def _write_parity_artifacts(
+    workspace: Path,
+    output: Path,
+    frames: dict[str, pd.DataFrame],
+) -> dict[str, Any]:
+    artifacts: dict[str, Any] = {}
+    for name, frame in frames.items():
+        path = output / f"{name}.parquet"
+        _write_parquet(path, frame)
+        artifacts[name] = _artifact(workspace, path, frame)
+    return artifacts
+
+
+def _minute_parity_summary(
+    comparison: pd.DataFrame,
+    iquant_5m: pd.DataFrame,
+) -> dict[str, Any]:
+    recent = comparison.loc[comparison["trade_date"] >= RECENT_MINUTE_START_DATE]
+    return {
+        **_comparison_summary(comparison),
+        "recent_2025_plus": _comparison_summary(recent),
+        "by_qdp_source": _source_summaries(comparison),
+        "expected_5m_bars_per_day": 48,
+        "sample_day_bar_counts": {
+            str(count): int(frequency)
+            for count, frequency in iquant_5m.groupby(["symbol", "trade_date"])
+            .size()
+            .value_counts()
+            .sort_index()
+            .items()
+        },
+        "one_minute_rows_per_5m_bucket": {
+            str(count): int(frequency)
+            for count, frequency in iquant_5m["minute_count"].value_counts().sort_index().items()
+        },
+    }
+
+
+def _parity_decision(
+    *,
+    minute_coverage: float,
+    daily_summary: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "classification": "supplement_and_validation_only",
+        "historical_minute_replacement_ready": False,
+        "daily_cross_check_ready": daily_summary["key_counts"]["both"] > 10_000,
+        "reasons": [
+            f"The current one-minute cache covers {minute_coverage:.2%} of QDP symbols with daily bars.",
+            "The sampled minute files decode cleanly and all sampled 5-minute keys align with QDP.",
+            "Recent sampled prices are effectively identical, but older vendor bars contain small OHLC and larger thin-bucket flow differences.",
+            "Filling only downloaded symbols would create source and sample-selection bias; do not replace the historical minute table from this snapshot.",
+            "Use iQuant for recent/live supplementation and independent checks until the download is complete, frozen, and reprofiled.",
+        ],
+    }
+
+
 def run_parity(
     *,
     workspace: str | Path | None,
@@ -299,52 +418,16 @@ def run_parity(
     output = Path(output_dir).resolve() if output_dir else (ws / "data" / "staging" / "iquant_parity").resolve()
     output.mkdir(parents=True, exist_ok=True)
 
-    daily_manifest, daily_qdp = _query_qdp(
-        ws,
-        "market_daily_raw",
-        symbols=DAILY_SYMBOLS,
-        start_date="2010-01-04",
-        end_date="2026-07-21",
-    )
-    daily_iquant = pd.concat(
-        [
-            read_file(
-                _symbol_path(source_root, symbol, "1d"),
-                symbol=symbol,
-                period="1d",
-                start_date="2010-01-04",
-                end_date="2026-07-21",
-            )
-            for symbol in DAILY_SYMBOLS
-        ],
-        ignore_index=True,
-    ).sort_values(["symbol", "trade_date"], ignore_index=True)
-    daily_comparison = _comparison(daily_iquant, daily_qdp, ["symbol", "trade_date"])
-
-    minute_iquant = pd.concat(
-        [
-            read_file(
-                _symbol_path(source_root, symbol, "1m"),
-                symbol=symbol,
-                period="1m",
-                start_date=min(MINUTE_DATES),
-                end_date=max(MINUTE_DATES),
-            ).loc[lambda frame: frame["trade_date"].isin(MINUTE_DATES)]
-            for symbol in MINUTE_SYMBOLS
-        ],
-        ignore_index=True,
-    ).sort_values(["symbol", "trade_date", "bar_time"], ignore_index=True)
-    minute_iquant_5m = aggregate_1m_to_5m(minute_iquant)
-    minute_manifest, minute_qdp = _query_qdp(
-        ws,
-        "market_intraday_5m",
-        symbols=MINUTE_SYMBOLS,
-        dates=MINUTE_DATES,
-    )
-    minute_comparison = _comparison(
+    daily_manifest, daily_iquant, daily_qdp, daily_comparison = _daily_parity_frames(ws, source_root)
+    (
+        minute_manifest,
+        minute_iquant,
         minute_iquant_5m,
         minute_qdp,
-        ["symbol", "trade_date", "bar_time"],
+        minute_comparison,
+    ) = _minute_parity_frames(
+        ws,
+        source_root,
     )
 
     qdp_symbols = _qdp_symbols(ws)
@@ -359,18 +442,14 @@ def run_parity(
         "minute_qdp_5m": minute_qdp,
         "minute_comparison": minute_comparison,
     }
-    artifacts: dict[str, Any] = {}
-    for name, frame in frames.items():
-        path = output / f"{name}.parquet"
-        _write_parquet(path, frame)
-        artifacts[name] = _artifact(ws, path, frame)
+    artifacts = _write_parity_artifacts(ws, output, frames)
 
     daily_summary = _comparison_summary(daily_comparison)
-    minute_summary = _comparison_summary(minute_comparison)
-    recent_minute = minute_comparison.loc[minute_comparison["trade_date"] >= "2025-01-01"]
-    recent_minute_summary = _comparison_summary(recent_minute)
+    minute_summary = _minute_parity_summary(minute_comparison, minute_iquant_5m)
     minute_coverage = float(inventory_summary["qdp_symbol_coverage_rate"])
-    cache_mutating = bool(inventory_summary["changed_during_scan"] or inventory_summary["recent_write_within_5_minutes"])
+    cache_mutating = bool(
+        inventory_summary["changed_during_scan"] or inventory_summary["recent_write_within_5_minutes"]
+    )
     result: dict[str, Any] = {
         "schema": "quantlab.iquant_qdp_parity/1",
         "status": "ok_with_mutating_cache_warning" if cache_mutating else "ok",
@@ -378,7 +457,7 @@ def run_parity(
         "scope": {
             "iquant_data_dir": str(source_root),
             "daily_symbols": list(DAILY_SYMBOLS),
-            "daily_range": ["2010-01-04", "2026-07-21"],
+            "daily_range": [DAILY_START_DATE, DAILY_END_DATE],
             "minute_symbols": list(MINUTE_SYMBOLS),
             "minute_dates": list(MINUTE_DATES),
         },
@@ -402,32 +481,11 @@ def run_parity(
         },
         "cache_inventory": inventory_summary,
         "daily_parity": daily_summary,
-        "minute_parity": {
-            **minute_summary,
-            "recent_2025_plus": recent_minute_summary,
-            "by_qdp_source": _source_summaries(minute_comparison),
-            "expected_5m_bars_per_day": 48,
-            "sample_day_bar_counts": {
-                str(count): int(frequency)
-                for count, frequency in minute_iquant_5m.groupby(["symbol", "trade_date"]).size().value_counts().sort_index().items()
-            },
-            "one_minute_rows_per_5m_bucket": {
-                str(count): int(frequency)
-                for count, frequency in minute_iquant_5m["minute_count"].value_counts().sort_index().items()
-            },
-        },
-        "decision": {
-            "classification": "supplement_and_validation_only",
-            "historical_minute_replacement_ready": False,
-            "daily_cross_check_ready": daily_summary["key_counts"]["both"] > 10_000,
-            "reasons": [
-                f"The current one-minute cache covers {minute_coverage:.2%} of QDP symbols with daily bars.",
-                "The sampled minute files decode cleanly and all sampled 5-minute keys align with QDP.",
-                "Recent sampled prices are effectively identical, but older vendor bars contain small OHLC and larger thin-bucket flow differences.",
-                "Filling only downloaded symbols would create source and sample-selection bias; do not replace the historical minute table from this snapshot.",
-                "Use iQuant for recent/live supplementation and independent checks until the download is complete, frozen, and reprofiled.",
-            ],
-        },
+        "minute_parity": minute_summary,
+        "decision": _parity_decision(
+            minute_coverage=minute_coverage,
+            daily_summary=daily_summary,
+        ),
         "artifacts": artifacts,
     }
     manifest_path = output / "manifest.json"

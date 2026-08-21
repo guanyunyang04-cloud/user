@@ -11,12 +11,11 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 import duckdb
-
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 WORKSPACE = SCRIPT_DIR.parents[3]
@@ -56,7 +55,7 @@ BURN_IN_START = "2010-01-04"
 
 
 def now_utc() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def read_json(path: Path) -> dict[str, Any]:

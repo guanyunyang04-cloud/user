@@ -22,7 +22,9 @@ from quantlab.data.qdp_v2.research_event_update import (
     _parquet_safe_provider_frame,
     _report_source_key,
     _report_year_source_coverage,
+    report_download,
 )
+from quantlab.data.qdp_v2.research_event_update import context as research_context
 
 
 def _open_dates() -> np.ndarray:
@@ -30,6 +32,24 @@ def _open_dates() -> np.ndarray:
         pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"]),
         dtype="datetime64[ns]",
     )
+
+
+def test_report_day_initialization_tolerates_null_stored_days(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        report_download,
+        "_cached_report_day",
+        lambda _workspace, _date: (0, False, {}, "pending"),
+    )
+
+    day_state, pending, offsets = report_download._initialize_tushare_report_days(
+        tmp_path,
+        state={"tushare_report_rc": {"days": None}},
+        dates=["2024-01-02"],
+    )
+
+    assert day_state["2024-01-02"]["attempt_count"] == 0
+    assert list(pending) == ["2024-01-02"]
+    assert offsets == {"2024-01-02": 0}
 
 
 def test_report_rc_rows_split_report_identity_from_forecast_quarters() -> None:
@@ -187,11 +207,11 @@ def test_report_daily_download_pages_confirms_empty_and_resumes_failure(
                 raise RuntimeError("transient fixture failure")
             return pd.DataFrame({"ts_code": ["000003.SZ"]})
 
-    monkeypatch.setattr(research_update, "_report_request_dates", lambda: requested_dates)
+    monkeypatch.setattr(report_download, "_report_request_dates", lambda: requested_dates)
     monkeypatch.setattr(
-        research_update, "_resolve_tushare_token", lambda workspace: "fixture-token"
+        report_download, "_resolve_tushare_token", lambda workspace: "fixture-token"
     )
-    monkeypatch.setattr(research_update, "_TushareClient", FakeClient)
+    monkeypatch.setattr(report_download, "_TushareClient", FakeClient)
 
     with pytest.raises(ResearchEventUpdateError, match="daily_tasks_incomplete:1"):
         research_update.download_tushare_reports(
@@ -229,8 +249,8 @@ def test_report_state_atomic_replace_retries_transient_windows_lock(
         if calls["count"] < 3:
             raise PermissionError("fixture lock")
 
-    monkeypatch.setattr(research_update, "atomic_write_json", flaky_write)
-    monkeypatch.setattr(research_update.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(research_context, "atomic_write_json", flaky_write)
+    monkeypatch.setattr(research_context.time, "sleep", lambda seconds: None)
 
     research_update._write_state(tmp_path, {"status": "downloading"})
 

@@ -18,6 +18,7 @@ from typing import Any
 
 import pandas as pd
 
+from quantlab.core.io import sha256_file as _sha256
 from quantlab.data.core.json_io import json_safe
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.qdp_v2.auxiliary_update import (
@@ -65,14 +66,6 @@ class HistoricalIntradayRepairError(RuntimeError):
     pass
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while block := handle.read(1024 * 1024):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def _workspace(value: str | Path | None) -> Path:
     return Path(value or Path.cwd()).resolve()
 
@@ -107,17 +100,11 @@ def _active_domain_paths(workspace: Path, domain: str) -> tuple[Path, ...]:
     dataset_id = str(datasets.get(domain, ""))
     manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
     if manifest_path is None:
-        raise HistoricalIntradayRepairError(
-            f"historical_intraday_active_domain_missing:{domain}"
-        )
+        raise HistoricalIntradayRepairError(f"historical_intraday_active_domain_missing:{domain}")
     manifest = read_dataset_manifest(manifest_path)
-    paths = tuple(
-        resolve_manifest_path(item.path, root=root) for item in manifest.shards
-    )
+    paths = tuple(resolve_manifest_path(item.path, root=root) for item in manifest.shards)
     if not paths or any(not path.is_file() for path in paths):
-        raise HistoricalIntradayRepairError(
-            f"historical_intraday_active_shards_missing:{domain}"
-        )
+        raise HistoricalIntradayRepairError(f"historical_intraday_active_shards_missing:{domain}")
     return paths
 
 
@@ -154,9 +141,7 @@ def prepare_inventory(
     inventory_path_out = runtime / "missing_positive_stock_days.parquet"
     frame = _copy_inventory(source, inventory_path_out)
     daily_reference = runtime / "missing_daily_reference.parquet"
-    daily_paths = [
-        str(item) for item in _active_domain_paths(workspace, "market_daily_raw")
-    ]
+    daily_paths = [str(item) for item in _active_domain_paths(workspace, "market_daily_raw")]
     temporary = daily_reference.with_suffix(".tmp.parquet")
     temporary.unlink(missing_ok=True)
     with open_guarded_duckdb(
@@ -195,8 +180,7 @@ def prepare_inventory(
     if reference_count != len(frame):
         temporary.unlink(missing_ok=True)
         raise HistoricalIntradayRepairError(
-            "historical_intraday_daily_reference_mismatch:"
-            f"{reference_count}!={len(frame)}"
+            f"historical_intraday_daily_reference_mismatch:{reference_count}!={len(frame)}"
         )
     os.replace(temporary, daily_reference)
     frame["month"] = frame["trade_date"].str[:7]
@@ -208,9 +192,7 @@ def prepare_inventory(
         "daily_reference_path": str(daily_reference),
         "missing_day_count_before": len(frame),
         "missing_symbol_count_before": int(frame["symbol"].nunique()),
-        "symbol_month_count_before": int(
-            frame[["symbol", "month"]].drop_duplicates().shape[0]
-        ),
+        "symbol_month_count_before": int(frame[["symbol", "month"]].drop_duplicates().shape[0]),
         "preflight": {},
         "tasks": {},
     }
@@ -239,9 +221,7 @@ def _normalize_stk_mins(raw: pd.DataFrame, symbol: str) -> pd.DataFrame:
     }
     missing = sorted(required.difference(frame.columns))
     if missing:
-        raise HistoricalIntradayRepairError(
-            f"stk_mins_columns_missing:{','.join(missing)}"
-        )
+        raise HistoricalIntradayRepairError(f"stk_mins_columns_missing:{','.join(missing)}")
     timestamp = pd.to_datetime(frame["timestamp"], errors="coerce")
     frame["symbol"] = str(symbol).upper()
     frame["trade_date"] = timestamp.dt.strftime("%Y-%m-%d")
@@ -262,9 +242,7 @@ def _validate_against_daily(
     diagnostics.update(
         {
             "rejected_daily_consistency_day_count": len(unresolved),
-            "rejected_volume_100x_day_count": int(
-                rejection_counts.get("volume_100x_anomaly", 0)
-            ),
+            "rejected_volume_100x_day_count": int(rejection_counts.get("volume_100x_anomaly", 0)),
         }
     )
     return output.reset_index(drop=True), diagnostics
@@ -324,9 +302,7 @@ def _fetch_period(
         months=ordered_months,
     )
     if reference.empty:
-        raise HistoricalIntradayRepairError(
-            f"historical_intraday_period_reference_empty:{symbol}:{ordered_months}"
-        )
+        raise HistoricalIntradayRepairError(f"historical_intraday_period_reference_empty:{symbol}:{ordered_months}")
     wanted = sorted(reference["trade_date"].astype(str).unique())
     raw = client.fetch(
         "stk_mins",
@@ -384,29 +360,20 @@ def _fetch_month(
     return {**result, "month": month}
 
 
-def run_pending(
+def _run_provider_preflight(
+    workspace: Path,
     *,
-    workspace_root: str | Path | None = None,
-) -> dict[str, Any]:
-    workspace = _workspace(workspace_root)
-    state = _read_state(workspace)
-    if not state or state.get("status") == "applied":
-        return state
-    inventory = pd.read_parquet(state["inventory_path"])
-    inventory["month"] = inventory["trade_date"].astype(str).str[:7]
-    reference_path = Path(state["daily_reference_path"])
-    token = _resolve_tushare_token(workspace)
-    client = _TushareClient(token, workspace_root=workspace)
-    parts = _runtime(workspace) / "parts"
-    parts.mkdir(parents=True, exist_ok=True)
-    preflight = dict(state.get("preflight", {}) or {})
-    tasks = dict(state.get("tasks", {}) or {})
-    period_tasks = dict(state.get("period_tasks", {}) or {})
-
-    for number, (symbol, rows) in enumerate(
-        inventory.groupby("symbol", sort=True),
-        start=1,
-    ):
+    state: dict[str, Any],
+    inventory: pd.DataFrame,
+    client: _TushareClient,
+    reference_path: Path,
+    parts: Path,
+    preflight: dict[str, Any],
+    tasks: dict[str, Any],
+    period_tasks: dict[str, Any],
+) -> None:
+    symbol_count = int(inventory["symbol"].nunique())
+    for number, (symbol, rows) in enumerate(inventory.groupby("symbol", sort=True), start=1):
         previous = dict(preflight.get(symbol, {}) or {})
         if previous.get("status") == "completed":
             continue
@@ -421,11 +388,10 @@ def run_pending(
             output_path=output,
         )
         tasks[key] = result
-        available = int(result["provider_row_count"]) > 0
         preflight[symbol] = {
             "status": "completed",
             "probe_month": month,
-            "provider_available": available,
+            "provider_available": int(result["provider_row_count"]) > 0,
             "accepted_probe_day_count": int(result["accepted_day_count"]),
             "provider_row_count": int(result["provider_row_count"]),
         }
@@ -443,52 +409,65 @@ def run_pending(
                 json.dumps(
                     {
                         "preflight": number,
-                        "symbols": int(inventory["symbol"].nunique()),
-                        "available": sum(
-                            bool(item.get("provider_available"))
-                            for item in preflight.values()
-                        ),
+                        "symbols": symbol_count,
+                        "available": sum(bool(item.get("provider_available")) for item in preflight.values()),
                     },
                     ensure_ascii=False,
                 ),
                 flush=True,
             )
 
-    available_symbols = {
-        symbol
-        for symbol, item in preflight.items()
-        if bool(item.get("provider_available"))
-    }
-    completed_months: dict[str, set[str]] = {}
+
+def _completed_download_months(
+    tasks: dict[str, Any],
+    period_tasks: dict[str, Any],
+) -> dict[str, set[str]]:
+    completed: dict[str, set[str]] = {}
     for item in tasks.values():
         record = dict(item)
         if record.get("status") == "completed":
-            completed_months.setdefault(str(record["symbol"]), set()).add(
-                str(record["month"])
-            )
+            completed.setdefault(str(record["symbol"]), set()).add(str(record["month"]))
     for item in period_tasks.values():
         record = dict(item)
         if record.get("status") == "completed":
-            completed_months.setdefault(str(record["symbol"]), set()).update(
-                str(month) for month in record.get("months", [])
-            )
-    pending_chunks: list[tuple[str, tuple[str, ...]]] = []
-    for symbol, rows in inventory.loc[
-        inventory["symbol"].isin(available_symbols)
-    ].groupby("symbol", sort=True):
+            completed.setdefault(str(record["symbol"]), set()).update(str(month) for month in record.get("months", []))
+    return completed
+
+
+def _pending_period_chunks(
+    inventory: pd.DataFrame,
+    *,
+    available_symbols: set[str],
+    completed_months: dict[str, set[str]],
+) -> list[tuple[str, tuple[str, ...]]]:
+    pending: list[tuple[str, tuple[str, ...]]] = []
+    eligible = inventory.loc[inventory["symbol"].isin(available_symbols)]
+    for symbol, rows in eligible.groupby("symbol", sort=True):
         months = [
             str(item)
             for item in sorted(rows["month"].unique())
             if str(item) not in completed_months.get(str(symbol), set())
         ]
-        pending_chunks.extend(
-            (str(symbol), chunk) for chunk in _six_month_chunks(months)
-        )
+        pending.extend((str(symbol), chunk) for chunk in _six_month_chunks(months))
+    return pending
+
+
+def _download_period_chunks(
+    workspace: Path,
+    *,
+    state: dict[str, Any],
+    pending_chunks: Sequence[tuple[str, tuple[str, ...]]],
+    client: _TushareClient,
+    reference_path: Path,
+    parts: Path,
+    preflight: dict[str, Any],
+    tasks: dict[str, Any],
+    period_tasks: dict[str, Any],
+) -> None:
     for number, (symbol, months) in enumerate(pending_chunks, start=1):
         key = f"{symbol}|{months[0]}|{months[-1]}"
         output = parts / (
-            f"{symbol.replace('.', '_')}__"
-            f"{months[0].replace('-', '')}-{months[-1].replace('-', '')}.parquet"
+            f"{symbol.replace('.', '_')}__{months[0].replace('-', '')}-{months[-1].replace('-', '')}.parquet"
         )
         period_tasks[key] = _fetch_period(
             client,
@@ -514,16 +493,62 @@ def run_pending(
                         "pending_period_tasks": len(pending_chunks),
                         "accepted_days": sum(
                             int(item.get("accepted_day_count", 0) or 0)
-                            for item in [
-                                *tasks.values(),
-                                *period_tasks.values(),
-                            ]
+                            for item in [*tasks.values(), *period_tasks.values()]
                         ),
                     },
                     ensure_ascii=False,
                 ),
                 flush=True,
             )
+
+
+def run_pending(
+    *,
+    workspace_root: str | Path | None = None,
+) -> dict[str, Any]:
+    workspace = _workspace(workspace_root)
+    state = _read_state(workspace)
+    if not state or state.get("status") == "applied":
+        return state
+    inventory = pd.read_parquet(state["inventory_path"])
+    inventory["month"] = inventory["trade_date"].astype(str).str[:7]
+    reference_path = Path(state["daily_reference_path"])
+    token = _resolve_tushare_token(workspace)
+    client = _TushareClient(token, workspace_root=workspace)
+    parts = _runtime(workspace) / "parts"
+    parts.mkdir(parents=True, exist_ok=True)
+    preflight = dict(state.get("preflight", {}) or {})
+    tasks = dict(state.get("tasks", {}) or {})
+    period_tasks = dict(state.get("period_tasks", {}) or {})
+    _run_provider_preflight(
+        workspace,
+        state=state,
+        inventory=inventory,
+        client=client,
+        reference_path=reference_path,
+        parts=parts,
+        preflight=preflight,
+        tasks=tasks,
+        period_tasks=period_tasks,
+    )
+
+    available_symbols = {symbol for symbol, item in preflight.items() if bool(item.get("provider_available"))}
+    pending_chunks = _pending_period_chunks(
+        inventory,
+        available_symbols=available_symbols,
+        completed_months=_completed_download_months(tasks, period_tasks),
+    )
+    _download_period_chunks(
+        workspace,
+        state=state,
+        pending_chunks=pending_chunks,
+        client=client,
+        reference_path=reference_path,
+        parts=parts,
+        preflight=preflight,
+        tasks=tasks,
+        period_tasks=period_tasks,
+    )
     state.update(
         {
             "status": "downloaded",
@@ -531,12 +556,9 @@ def run_pending(
             "tasks": tasks,
             "period_tasks": period_tasks,
             "provider_available_symbol_count": len(available_symbols),
-            "provider_unavailable_symbol_count": (
-                int(inventory["symbol"].nunique()) - len(available_symbols)
-            ),
+            "provider_unavailable_symbol_count": (int(inventory["symbol"].nunique()) - len(available_symbols)),
             "accepted_day_count": sum(
-                int(item.get("accepted_day_count", 0) or 0)
-                for item in [*tasks.values(), *period_tasks.values()]
+                int(item.get("accepted_day_count", 0) or 0) for item in [*tasks.values(), *period_tasks.values()]
             ),
         }
     )
@@ -592,9 +614,7 @@ def commit_repair(
     if not state or state.get("status") == "applied":
         return state
     if state.get("status") != "downloaded":
-        raise HistoricalIntradayRepairError(
-            f"historical_intraday_not_downloaded:{state.get('status')}"
-        )
+        raise HistoricalIntradayRepairError(f"historical_intraday_not_downloaded:{state.get('status')}")
     tasks = [
         dict(item)
         for item in [
@@ -606,8 +626,7 @@ def commit_repair(
         {
             Path(str(item["output_path"]))
             for item in tasks
-            if str(item.get("output_path", ""))
-            and Path(str(item["output_path"])).is_file()
+            if str(item.get("output_path", "")) and Path(str(item["output_path"])).is_file()
         }
     )
     bundles = _bundle_parts(workspace, part_paths)
@@ -615,10 +634,7 @@ def commit_repair(
         commit = bulk_append_active_shards_from_parquet(
             INTRADAY_DOMAIN,
             bundles,
-            (
-                "fill exact historical positive-stock-day 5m gaps from a "
-                "Tushare-compatible provider"
-            ),
+            ("fill exact historical positive-stock-day 5m gaps from a Tushare-compatible provider"),
             workspace_root=workspace,
         )
     else:
@@ -638,12 +654,8 @@ def commit_repair(
             "historical_missing_positive_days_before": before,
             "historical_recovered_positive_days": recovered,
             "historical_missing_positive_days_after": remaining,
-            "historical_provider_available_symbol_count": int(
-                state.get("provider_available_symbol_count", 0) or 0
-            ),
-            "historical_provider_unavailable_symbol_count": int(
-                state.get("provider_unavailable_symbol_count", 0) or 0
-            ),
+            "historical_provider_available_symbol_count": int(state.get("provider_available_symbol_count", 0) or 0),
+            "historical_provider_unavailable_symbol_count": int(state.get("provider_unavailable_symbol_count", 0) or 0),
             "intraday_5m_restored_for_historical_symbols": remaining == 0,
             "missing_history_is_not_an_eligibility_filter": True,
         },
@@ -660,16 +672,10 @@ def commit_repair(
     audit_path = qdp_v2_root(workspace) / "audits" / f"{REPAIR_ID}.json"
     atomic_write_json(
         audit_path,
-        {
-            key: value
-            for key, value in state.items()
-            if key not in {"tasks", "period_tasks"}
-        }
+        {key: value for key, value in state.items() if key not in {"tasks", "period_tasks"}}
         | {
             "task_count": len(tasks),
-            "accepted_task_count": sum(
-                int(item.get("accepted_day_count", 0) or 0) > 0 for item in tasks
-            ),
+            "accepted_task_count": sum(int(item.get("accepted_day_count", 0) or 0) > 0 for item in tasks),
         },
     )
     return state
@@ -684,18 +690,10 @@ def status(
         *dict(state.get("tasks", {}) or {}).values(),
         *dict(state.get("period_tasks", {}) or {}).values(),
     ]
-    return {
-        key: value
-        for key, value in state.items()
-        if key not in {"tasks", "period_tasks", "preflight"}
-    } | {
+    return {key: value for key, value in state.items() if key not in {"tasks", "period_tasks", "preflight"}} | {
         "preflight_completed": len(dict(state.get("preflight", {}) or {})),
-        "task_completed": sum(
-            dict(item).get("status") == "completed" for item in tasks
-        ),
-        "task_with_rows": sum(
-            int(dict(item).get("accepted_day_count", 0) or 0) > 0 for item in tasks
-        ),
+        "task_completed": sum(dict(item).get("status") == "completed" for item in tasks),
+        "task_with_rows": sum(int(dict(item).get("accepted_day_count", 0) or 0) > 0 for item in tasks),
     }
 
 

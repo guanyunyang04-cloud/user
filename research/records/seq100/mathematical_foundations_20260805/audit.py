@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 from scipy.special import ndtr
 
-
 WORKSPACE_ROOT = Path(__file__).resolve().parents[4]
 OUTPUT_DIR = Path(__file__).resolve().parent
 CUTOFF_DATE = "2025-12-31"
@@ -473,7 +472,6 @@ def main() -> None:
         raise RuntimeError("row symbols do not align with pack")
     row_symbol_idx = row_symbol_idx.astype(np.int32)
 
-    daily_raw = open_memmap(pack["feature_channels"]["daily_raw"], np.float32)
     daily_state = open_memmap(pack["feature_channels"]["daily_state"], np.float32)
     masks = pack["masks"]
     pit_universe = open_memmap(masks["pit_universe_has_bar"], np.bool_)

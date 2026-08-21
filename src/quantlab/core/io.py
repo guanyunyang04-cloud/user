@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -60,12 +62,25 @@ def stable_hash(payload: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def sha256_file(path: Path, *, block_size: int = 8 << 20) -> str:
+def sha256_file(path: str | Path, *, block_size: int = 8 << 20) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    with Path(path).open("rb") as stream:
         while block := stream.read(block_size):
             digest.update(block)
     return digest.hexdigest()
+
+
+def atomic_copy_file(source: str | Path, target: str | Path) -> Path:
+    """Copy a file into place without exposing a partially written target."""
+
+    source_path = Path(source)
+    target_path = Path(target)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target_path.with_suffix(target_path.suffix + ".partial")
+    temporary.unlink(missing_ok=True)
+    shutil.copy2(source_path, temporary)
+    os.replace(temporary, target_path)
+    return target_path
 
 
 def open_array(
@@ -86,4 +101,3 @@ def open_array(
     if not path.is_file() or path.stat().st_size != expected:
         raise DataContractError(f"array size mismatch: {path}")
     return np.memmap(path, dtype=declared_dtype, mode="r", shape=shape)
-

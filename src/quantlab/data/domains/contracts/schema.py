@@ -1,0 +1,631 @@
+"""Domain contract schema definitions."""
+
+from __future__ import annotations
+
+STANDARD_MARKET_COLUMNS = [
+    "symbol",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+    "source",
+    "adjusted_flag",
+]
+
+
+PRICE_COLUMNS = ["open", "high", "low", "close"]
+
+
+NUMERIC_MARKET_COLUMNS = [*PRICE_COLUMNS, "volume", "amount"]
+
+
+TDX_FAMILY_PROVIDER_NAMES = frozenset({"tq", "tqcenter", "tdx", "pytdx", "mootdx"})
+
+
+class DataDomain:
+    MARKET_DAILY = "market_daily"
+    MARKET_INTRADAY_1M = "market_intraday_1m"
+    MARKET_INTRADAY_5M = "market_intraday_5m"
+    INTRADAY_DAILY_FEATURES = "intraday_daily_features"
+    ADJUST_FACTOR = "adjust_factor"
+    ADJUST_FACTOR_EVENT = "adjust_factor_event"
+    ADJUST_FACTOR_DAILY = "adjust_factor_daily"
+    SECURITY_IDENTITY = "security_identity"
+    SYMBOL_HISTORY = "symbol_history"
+    ELIGIBLE_SIGNAL_D = "eligible_signal_D"
+    TRADABLE_OPEN_D1 = "tradable_open_D1"
+    TRADING_CALENDAR = "trading_calendar"
+    UNIVERSE_SNAPSHOT = "universe_snapshot"
+    SECURITY_STATUS = "security_status"
+    LIMIT_STATUS = "limit_status"
+    INDUSTRY_CONCEPT = "industry_concept"
+    VALUATION = "valuation"
+    INDEX_CONSTITUENTS = "index_constituents"
+    FINANCIAL_QUARTERLY = "financial_quarterly"
+    INCOME_STATEMENT_QUARTERLY = "income_statement_quarterly"
+    BALANCE_SHEET_QUARTERLY = "balance_sheet_quarterly"
+    CASH_FLOW_STATEMENT_QUARTERLY = "cash_flow_statement_quarterly"
+    PERFORMANCE_FORECAST = "performance_forecast"
+    PERFORMANCE_EXPRESS = "performance_express"
+    CORPORATE_ACTIONS = "corporate_actions"
+    SHARE_CAPITAL = "share_capital"
+    NAME_CHANGE = "name_change"
+    MONEY_FLOW_HOTSPOT = "money_flow_hotspot"
+    NEWS_EVENT = "news_event"
+    ANNOUNCEMENT = "announcement"
+    RESEARCH_REPORT = "research_report"
+    RESEARCH_REPORT_FORECAST = "research_report_forecast"
+    STK_FACTOR_PRO_RAW = "stk_factor_pro_raw"
+    MARGIN_MARKET = "margin_market"
+    MARGIN_DETAIL = "margin_detail"
+    MARGIN_ELIGIBILITY = "margin_eligibility"
+    MARGIN_SECS = "margin_secs"
+    MONEYFLOW_RAW = "moneyflow_raw"
+    IWENCAI_SEMANTIC = "iwencai_semantic"
+
+
+CANONICAL_START_DATE = "2010-01-01"
+
+
+CORE_MARKET_DOMAINS = (
+    DataDomain.MARKET_DAILY,
+    DataDomain.MARKET_INTRADAY_1M,
+    DataDomain.MARKET_INTRADAY_5M,
+    DataDomain.INTRADAY_DAILY_FEATURES,
+    DataDomain.ADJUST_FACTOR,
+)
+
+
+STRUCTURAL_STYLE_DOMAINS = (
+    DataDomain.VALUATION,
+    DataDomain.INDUSTRY_CONCEPT,
+    DataDomain.INDEX_CONSTITUENTS,
+)
+
+
+FILTER_DOMAINS = (
+    DataDomain.TRADING_CALENDAR,
+    DataDomain.UNIVERSE_SNAPSHOT,
+    DataDomain.SECURITY_STATUS,
+)
+
+
+EXCLUDED_V1_DOMAINS = (
+    DataDomain.FINANCIAL_QUARTERLY,
+    DataDomain.PERFORMANCE_FORECAST,
+    DataDomain.PERFORMANCE_EXPRESS,
+    DataDomain.NEWS_EVENT,
+    DataDomain.RESEARCH_REPORT,
+    DataDomain.RESEARCH_REPORT_FORECAST,
+    DataDomain.IWENCAI_SEMANTIC,
+)
+
+
+CANONICAL_BUNDLE_SIDECAR_DOMAINS = (
+    DataDomain.MARKET_INTRADAY_1M,
+    DataDomain.MARKET_INTRADAY_5M,
+    DataDomain.INTRADAY_DAILY_FEATURES,
+    DataDomain.ADJUST_FACTOR,
+    DataDomain.TRADING_CALENDAR,
+    DataDomain.UNIVERSE_SNAPSHOT,
+    DataDomain.SECURITY_STATUS,
+    DataDomain.VALUATION,
+    DataDomain.INDUSTRY_CONCEPT,
+    DataDomain.INDEX_CONSTITUENTS,
+)
+
+
+PROFILE_DOMAIN_POLICY = {
+    "short_horizon_core_v1": {
+        "include": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.ADJUST_FACTOR,
+            DataDomain.TRADING_CALENDAR,
+            DataDomain.UNIVERSE_SNAPSHOT,
+            DataDomain.SECURITY_STATUS,
+        ),
+        "exclude": STRUCTURAL_STYLE_DOMAINS + EXCLUDED_V1_DOMAINS,
+    },
+    "style_structural_v1": {
+        "include": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.ADJUST_FACTOR,
+            *STRUCTURAL_STYLE_DOMAINS,
+            *FILTER_DOMAINS,
+        ),
+        "exclude": EXCLUDED_V1_DOMAINS,
+    },
+    "style_structural_alpha_v2": {
+        "include": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.ADJUST_FACTOR,
+            *STRUCTURAL_STYLE_DOMAINS,
+            *FILTER_DOMAINS,
+        ),
+        "exclude": EXCLUDED_V1_DOMAINS,
+    },
+    "medium_horizon_v1": {
+        "include": (
+            DataDomain.MARKET_DAILY,
+            DataDomain.INTRADAY_DAILY_FEATURES,
+            DataDomain.ADJUST_FACTOR,
+            *STRUCTURAL_STYLE_DOMAINS,
+            *FILTER_DOMAINS,
+        ),
+        "exclude": EXCLUDED_V1_DOMAINS,
+    },
+}
+
+
+DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
+    DataDomain.MARKET_DAILY: STANDARD_MARKET_COLUMNS,
+    DataDomain.MARKET_INTRADAY_1M: [
+        "symbol",
+        "trade_date",
+        "bar_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "turnover_rate",
+        "float_share",
+        "total_share",
+        "source",
+        "adjusted_flag",
+    ],
+    DataDomain.MARKET_INTRADAY_5M: [
+        "symbol",
+        "trade_date",
+        "bar_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "source",
+        "adjusted_flag",
+    ],
+    DataDomain.INTRADAY_DAILY_FEATURES: [
+        "symbol",
+        "trade_date",
+        "first_5m_ret",
+        "opening_auction_ret",
+        "opening_auction_amount",
+        "opening_auction_volume",
+        "opening_auction_amount_share",
+        "opening_auction_range",
+        "opening_auction_vwap",
+        "opening_auction_pressure",
+        "first_15m_ret",
+        "first_30m_ret",
+        "first_30m_amount_share",
+        "open_gap",
+        "open_gap_first_30m_follow_through",
+        "open_gap_first_30m_reversal",
+        "last_5m_ret",
+        "closing_auction_ret",
+        "closing_auction_amount",
+        "closing_auction_volume",
+        "closing_auction_amount_share",
+        "closing_auction_range",
+        "closing_auction_vwap",
+        "closing_auction_pressure",
+        "last_30m_ret",
+        "last_30m_amount_share",
+        "intraday_ret",
+        "intraday_vwap",
+        "close_to_vwap",
+        "intraday_range",
+        "close_position",
+        "intraday_realized_vol",
+        "intraday_price_volume_corr",
+        "bar_count",
+        "high_time_frac",
+        "low_time_frac",
+        "high_before_low",
+        "open_to_high_ret",
+        "open_to_low_ret",
+        "high_to_close_ret",
+        "low_to_close_ret",
+        "intraday_max_drawdown",
+        "intraday_max_runup",
+        "price_above_vwap_share",
+        "cum_vwap_slope",
+        "first_5m_amount_share",
+        "last_5m_amount_share",
+        "first_30m_range",
+        "last_30m_range",
+        "amount_top_bar_share",
+        "amount_concentration_hhi",
+        "lunch_gap_ret",
+        "am_ret",
+        "pm_ret",
+        "am_pm_ret_spread",
+        "am_pm_vol_spread",
+        "am_amount_share",
+        "am_pm_amount_spread",
+        "early_strength_late_weak",
+        "close_pressure_30m",
+        "source",
+        "adjusted_flag",
+    ],
+    DataDomain.ADJUST_FACTOR: [
+        "symbol",
+        "trade_date",
+        "fore_adjust_factor",
+        "back_adjust_factor",
+        "adjust_factor",
+        "factor_provider",
+        "factor_semantics",
+        "source",
+    ],
+    DataDomain.ADJUST_FACTOR_EVENT: [
+        "security_id",
+        "divid_operate_date",
+        "symbol_on_date",
+        "provider_symbol",
+        "fore_adjust_factor",
+        "back_adjust_factor",
+        "adjust_factor",
+        "query_date",
+        "source_method",
+        "verification_status",
+        "source",
+    ],
+    DataDomain.ADJUST_FACTOR_DAILY: [
+        "security_id",
+        "trade_date",
+        "symbol_on_date",
+        "fore_adjust_factor",
+        "back_adjust_factor",
+        "adjust_factor",
+        "factor_event_date",
+        "baseline_status",
+        "source",
+    ],
+    DataDomain.SECURITY_IDENTITY: [
+        "security_id",
+        "official_org_id",
+        "issuer_name",
+        "exchange",
+        "list_date",
+        "current_symbol",
+        "identity_source",
+    ],
+    DataDomain.SYMBOL_HISTORY: [
+        "security_id",
+        "symbol",
+        "effective_from",
+        "effective_to",
+        "name_on_date",
+        "board_on_date",
+        "evidence_source",
+        "official_document_hash",
+    ],
+    DataDomain.ELIGIBLE_SIGNAL_D: [
+        "security_id",
+        "trade_date",
+        "symbol_on_date",
+        "is_eligible_signal",
+        "eligibility_reason",
+        "source",
+    ],
+    DataDomain.TRADABLE_OPEN_D1: [
+        "security_id",
+        "trade_date",
+        "symbol_on_date",
+        "next_trade_date",
+        "next_symbol_on_date",
+        "open_d1",
+        "tradable_open_d1",
+        "tradability_reason",
+        "source",
+    ],
+    DataDomain.TRADING_CALENDAR: ["trade_date", "is_open", "exchange", "source"],
+    DataDomain.UNIVERSE_SNAPSHOT: [
+        "symbol",
+        "trade_date",
+        "name",
+        "exchange",
+        "board",
+        "list_status",
+        "list_date",
+        "delist_date",
+        "source",
+    ],
+    DataDomain.SECURITY_STATUS: [
+        "symbol",
+        "trade_date",
+        "is_st",
+        "is_suspended",
+        "is_delisted",
+        "status_reason",
+        "source",
+    ],
+    DataDomain.LIMIT_STATUS: [
+        "symbol",
+        "trade_date",
+        "up_limit",
+        "down_limit",
+        "is_limit_up",
+        "is_limit_down",
+        "source",
+    ],
+    DataDomain.INDUSTRY_CONCEPT: ["symbol", "trade_date", "industry", "concept_tags", "source"],
+    DataDomain.VALUATION: ["symbol", "trade_date", "total_mv", "circ_mv", "pe", "pb", "turnover_rate", "source"],
+    DataDomain.INDEX_CONSTITUENTS: ["index_symbol", "symbol", "trade_date", "index_name", "source"],
+    DataDomain.FINANCIAL_QUARTERLY: [
+        "symbol",
+        "trade_date",
+        "report_date",
+        "fiscal_year",
+        "fiscal_quarter",
+        "publish_date",
+        "roe_avg",
+        "net_profit_margin",
+        "gross_profit_margin",
+        "net_profit_yoy",
+        "revenue_yoy",
+        "eps",
+        "net_profit",
+        "revenue",
+        "asset_turnover",
+        "debt_to_asset",
+        "current_ratio",
+        "cash_flow_ps",
+        "lag_policy",
+        "source",
+    ],
+    DataDomain.PERFORMANCE_FORECAST: [
+        "symbol",
+        "trade_date",
+        "report_date",
+        "fiscal_year",
+        "fiscal_quarter",
+        "publish_date",
+        "forecast_type",
+        "profit_min",
+        "profit_max",
+        "profit_change_min",
+        "profit_change_max",
+        "lag_policy",
+        "source",
+    ],
+    DataDomain.PERFORMANCE_EXPRESS: [
+        "symbol",
+        "trade_date",
+        "report_date",
+        "fiscal_year",
+        "fiscal_quarter",
+        "publish_date",
+        "eps",
+        "roe",
+        "net_profit",
+        "revenue",
+        "total_assets",
+        "lag_policy",
+        "source",
+    ],
+    DataDomain.CORPORATE_ACTIONS: [
+        "symbol",
+        "trade_date",
+        "announcement_date",
+        "ex_date",
+        "record_date",
+        "dividend_pay_date",
+        "action_type",
+        "cash_dividend_per_10",
+        "bonus_share_per_10",
+        "transfer_share_per_10",
+        "description",
+        "source",
+    ],
+    DataDomain.SHARE_CAPITAL: [
+        "symbol",
+        "trade_date",
+        "announcement_date",
+        "change_reason",
+        "total_share",
+        "float_share",
+        "restricted_share",
+        "source",
+    ],
+    DataDomain.NAME_CHANGE: [
+        "symbol",
+        "trade_date",
+        "old_name",
+        "new_name",
+        "change_type",
+        "source",
+    ],
+    DataDomain.MONEY_FLOW_HOTSPOT: [
+        "symbol",
+        "trade_date",
+        "main_net_inflow",
+        "sector_rank",
+        "hotspot_tags",
+        "source",
+    ],
+    DataDomain.NEWS_EVENT: ["symbol", "trade_date", "title", "url", "summary", "source"],
+    DataDomain.ANNOUNCEMENT: [
+        "announcement_id",
+        "symbol",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "publish_time",
+        "title",
+        "normalized_title",
+        "category",
+        "announcement_type_codes",
+        "cninfo_announcement_id",
+        "eastmoney_art_code",
+        "org_id",
+        "url",
+        "pdf_url",
+        "file_size_kb",
+        "cninfo_present",
+        "eastmoney_present",
+        "source_disagreement",
+        "source",
+    ],
+    DataDomain.RESEARCH_REPORT: [
+        "report_id",
+        "source_report_key",
+        "symbol",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "title",
+        "normalized_title",
+        "institution",
+        "normalized_institution",
+        "analyst",
+        "report_type",
+        "classification",
+        "rating",
+        "rating_change",
+        "target_price_min",
+        "target_price_max",
+        "tushare_present",
+        "eastmoney_present",
+        "tushare_source_ids",
+        "eastmoney_info_codes",
+        "url",
+        "pdf_file_size_kb",
+        "pdf_pages",
+        "source_disagreement",
+        "identity_conflict_reason",
+        "source",
+    ],
+    DataDomain.RESEARCH_REPORT_FORECAST: [
+        "report_id",
+        "symbol",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "forecast_quarter",
+        "forecast_year",
+        "operating_revenue",
+        "operating_profit",
+        "total_profit",
+        "net_profit",
+        "eps",
+        "pe",
+        "research_development",
+        "roe",
+        "ev_ebitda",
+        "source_disagreement",
+        "source",
+    ],
+    DataDomain.STK_FACTOR_PRO_RAW: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MARGIN_MARKET: [
+        "trade_date",
+        "exchange_id",
+        "rzye",
+        "rzmre",
+        "rzche",
+        "rqye",
+        "rqmcl",
+        "rzrqye",
+        "rqyl",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MARGIN_DETAIL: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "rzye",
+        "rqye",
+        "rzmre",
+        "rqyl",
+        "rzche",
+        "rqchl",
+        "rqmcl",
+        "rzrqye",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MARGIN_ELIGIBILITY: [
+        "symbol",
+        "trade_date",
+        "exchange",
+        "eligibility_state",
+        "eligible",
+        "finance_eligible",
+        "securities_lending_eligible",
+        "detail_observed",
+        "source_available",
+        "eligibility_source_available",
+        "detail_source_available",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MARGIN_SECS: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "name",
+        "exchange",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.MONEYFLOW_RAW: [
+        "security_id",
+        "symbol",
+        "ts_code",
+        "trade_date",
+        "buy_sm_vol",
+        "buy_sm_amount",
+        "sell_sm_vol",
+        "sell_sm_amount",
+        "buy_md_vol",
+        "buy_md_amount",
+        "sell_md_vol",
+        "sell_md_amount",
+        "buy_lg_vol",
+        "buy_lg_amount",
+        "sell_lg_vol",
+        "sell_lg_amount",
+        "buy_elg_vol",
+        "buy_elg_amount",
+        "sell_elg_vol",
+        "sell_elg_amount",
+        "net_mf_vol",
+        "net_mf_amount",
+        "source_date",
+        "feature_available_date",
+        "burn_in_only",
+        "source",
+    ],
+    DataDomain.IWENCAI_SEMANTIC: ["symbol", "trade_date", "query", "answer", "tags", "source"],
+}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -46,6 +46,35 @@ class Holding:
     exit_date_idx: int
     exit_phase: str
     buy_costs: dict[str, float]
+
+
+@dataclass
+class _AccountState:
+    cash: float
+    previous_equity: float
+    holdings: dict[int, Holding] = field(default_factory=dict)
+    open_exits: dict[int, list[int]] = field(default_factory=dict)
+    close_exits: dict[int, list[int]] = field(default_factory=dict)
+    equity_rows: list[dict[str, Any]] = field(default_factory=list)
+    trade_rows: list[dict[str, Any]] = field(default_factory=list)
+    symbol_open_counts: dict[int, int] = field(default_factory=dict)
+    total_costs: dict[str, float] = field(
+        default_factory=lambda: {
+            "commission": 0.0,
+            "transfer_fee": 0.0,
+            "stamp_tax": 0.0,
+            "slippage": 0.0,
+        }
+    )
+    trade_id: int = 0
+    overlap_orders: int = 0
+    overlap_filled: int = 0
+    overlap_skipped: int = 0
+    maximum_symbol_cohorts: int = 0
+
+    def add_costs(self, details: Mapping[str, float]) -> None:
+        for name in self.total_costs:
+            self.total_costs[name] += float(details.get(name, 0.0))
 
 
 class PortfolioError(RuntimeError):
@@ -101,9 +130,7 @@ def parse_execution_costs(config: Mapping[str, Any]) -> ExecutionCosts:
 
 def _stamp_tax_bps(costs: ExecutionCosts, trade_date: str) -> float:
     matches = [
-        float(rate)
-        for effective_date, rate in costs.stamp_tax_schedule
-        if str(effective_date) <= str(trade_date)
+        float(rate) for effective_date, rate in costs.stamp_tax_schedule if str(effective_date) <= str(trade_date)
     ]
     return float(matches[-1]) if matches else 0.0
 
@@ -115,17 +142,9 @@ def position_value(position: Position, adjusted_price: float) -> float:
         or not math.isfinite(position.entry_adjusted_open)
         or position.entry_adjusted_open <= 0.0
     ):
-        return float(
-            position.gross_entry_notional
-            * position.last_adjusted_price
-            / position.entry_adjusted_open
-        )
+        return float(position.gross_entry_notional * position.last_adjusted_price / position.entry_adjusted_open)
     position.last_adjusted_price = float(adjusted_price)
-    return float(
-        position.gross_entry_notional
-        * float(adjusted_price)
-        / position.entry_adjusted_open
-    )
+    return float(position.gross_entry_notional * float(adjusted_price) / position.entry_adjusted_open)
 
 
 def buy_position(
@@ -294,6 +313,285 @@ def account_specs(horizon: int = 10) -> tuple[dict[str, Any], ...]:
     return tuple(specs)
 
 
+def _selection_schedule(
+    selections: pd.DataFrame,
+    *,
+    top_k: int,
+    symbol_values: Sequence[str],
+) -> tuple[dict[int, pd.DataFrame], int, int]:
+    selected = selections.loc[selections["selection_rank"] <= int(top_k)].copy()
+    selected = selected.drop_duplicates(["date_idx", "candidate_id", "selection_rank"], keep="first").sort_values(
+        ["date_idx", "selection_rank"]
+    )
+    if selected.empty:
+        raise PortfolioError(f"selection schedule is empty for top_k={top_k}")
+    if "symbol_idx" not in selected:
+        mapping = {str(symbol): index for index, symbol in enumerate(symbol_values)}
+        selected["symbol_idx"] = selected["symbol"].map(mapping)
+    if selected["symbol_idx"].isna().any():
+        raise PortfolioError("selection symbol is absent from pack")
+    schedule = {int(date_idx): group.copy() for date_idx, group in selected.groupby("date_idx", sort=True)}
+    return schedule, int(selected["date_idx"].min()), int(selected["date_idx"].max())
+
+
+def _close_holding(
+    state: _AccountState,
+    *,
+    identifier: int,
+    current_idx: int,
+    spec: Mapping[str, Any],
+    date_values: np.ndarray,
+    costs: ExecutionCosts,
+) -> None:
+    holding = state.holdings.pop(identifier)
+    symbol_idx = holding.position.symbol_idx
+    remaining = state.symbol_open_counts.get(symbol_idx, 0) - 1
+    if remaining < 0:
+        raise PortfolioError("negative symbol cohort count")
+    if remaining:
+        state.symbol_open_counts[symbol_idx] = remaining
+    else:
+        state.symbol_open_counts.pop(symbol_idx, None)
+
+    if holding.legal_gross_return <= -1.0:
+        proceeds = 0.0
+        sale = {name: 0.0 for name in (*state.total_costs, "total_cost")}
+    else:
+        adjusted_exit = holding.position.entry_adjusted_open * (1.0 + holding.legal_gross_return)
+        proceeds, sale = sell_position(
+            position=holding.position,
+            adjusted_open=adjusted_exit,
+            trade_date=str(date_values[current_idx]),
+            costs=costs,
+            slippage_multiplier=float(spec["slippage_multiplier"]),
+        )
+    state.cash += proceeds
+    state.add_costs(sale)
+    pnl = proceeds - holding.position.net_cash_outflow
+    state.trade_rows.append(
+        {
+            "trade_id": identifier,
+            "signal_date_idx": holding.signal_date_idx,
+            "signal_date": holding.signal_date,
+            "entry_date_idx": holding.position.entry_date_idx,
+            "entry_date": str(date_values[holding.position.entry_date_idx]),
+            "exit_date_idx": current_idx,
+            "exit_date": str(date_values[current_idx]),
+            "exit_phase": holding.exit_phase,
+            "symbol": holding.symbol,
+            "symbol_idx": symbol_idx,
+            "selection_rank": holding.selection_rank,
+            "shares": holding.position.shares,
+            "gross_entry_notional": holding.position.gross_entry_notional,
+            "net_cash_outflow": holding.position.net_cash_outflow,
+            "proceeds": proceeds,
+            "pnl": pnl,
+            "trade_net_return": pnl / holding.position.net_cash_outflow,
+            "legal_gross_return": holding.legal_gross_return,
+            "buy_cost": float(holding.buy_costs.get("total_cost", 0.0)),
+            "sell_cost": float(sale.get("total_cost", 0.0)),
+        }
+    )
+
+
+def _close_due_holdings(
+    state: _AccountState,
+    exits: dict[int, list[int]],
+    *,
+    current_idx: int,
+    spec: Mapping[str, Any],
+    date_values: np.ndarray,
+    costs: ExecutionCosts,
+) -> None:
+    for identifier in exits.pop(current_idx, []):
+        if identifier in state.holdings:
+            _close_holding(
+                state,
+                identifier=identifier,
+                current_idx=current_idx,
+                spec=spec,
+                date_values=date_values,
+                costs=costs,
+            )
+
+
+def _schedule_exit(
+    state: _AccountState,
+    *,
+    identifier: int,
+    exit_idx: int,
+    fill_day: int,
+    legal_return: float,
+    planned_fill_day: int,
+) -> str:
+    if legal_return <= -1.0:
+        phase = "terminal_recovery"
+        state.close_exits.setdefault(exit_idx, []).append(identifier)
+    elif fill_day == planned_fill_day:
+        phase = "planned_close"
+        state.close_exits.setdefault(exit_idx, []).append(identifier)
+    else:
+        phase = "delayed_open"
+        state.open_exits.setdefault(exit_idx, []).append(identifier)
+    return phase
+
+
+def _open_orders(
+    state: _AccountState,
+    *,
+    orders: pd.DataFrame | None,
+    signal_idx: int,
+    current_idx: int,
+    spec: Mapping[str, Any],
+    date_values: np.ndarray,
+    daily_raw: np.ndarray,
+    raw_open: np.ndarray,
+    entry_filled: np.ndarray,
+    costs: ExecutionCosts,
+) -> tuple[int, int]:
+    requested = 0 if orders is None else len(orders)
+    if orders is None:
+        return requested, 0
+    top_k = int(spec["top_k"])
+    cohort_budget = min(state.cash, state.previous_equity * float(spec["cohort_equity_fraction"]))
+    per_order_budget = cohort_budget / top_k if requested and top_k > 0 else 0.0
+    filled = 0
+    for row in orders.itertuples(index=False):
+        symbol_idx = int(row.symbol_idx)
+        if not bool(entry_filled[signal_idx, symbol_idx]):
+            continue
+        existing = state.symbol_open_counts.get(symbol_idx, 0)
+        if existing:
+            state.overlap_orders += 1
+            if not bool(spec.get("allow_overlapping_same_symbol", True)):
+                state.overlap_skipped += 1
+                continue
+        position, buy = buy_position(
+            available_cash=state.cash,
+            allocated_cash=per_order_budget,
+            symbol_idx=symbol_idx,
+            signal_date_idx=signal_idx,
+            execution_date_idx=current_idx,
+            raw_open=float(raw_open[current_idx, symbol_idx]),
+            adjusted_open=float(daily_raw[current_idx, symbol_idx, 0]),
+            costs=costs,
+            slippage_multiplier=float(spec["slippage_multiplier"]),
+        )
+        if position is None:
+            continue
+        state.cash -= position.net_cash_outflow
+        if state.cash < -1.0e-6:
+            raise PortfolioError("account cash became negative")
+        state.cash = max(state.cash, 0.0)
+        filled += 1
+        if existing:
+            state.overlap_filled += 1
+        state.trade_id += 1
+        fill_day = int(row.fill_day)
+        exit_idx = signal_idx + fill_day
+        uncapped = float(row.legal_gross_return)
+        cap = spec.get("maximum_credited_gross_return")
+        legal_return = min(uncapped, float(cap)) if cap is not None else uncapped
+        phase = _schedule_exit(
+            state,
+            identifier=state.trade_id,
+            exit_idx=exit_idx,
+            fill_day=fill_day,
+            legal_return=legal_return,
+            planned_fill_day=int(spec.get("planned_fill_day", 2)),
+        )
+        state.holdings[state.trade_id] = Holding(
+            trade_id=state.trade_id,
+            position=position,
+            signal_date_idx=signal_idx,
+            signal_date=str(date_values[signal_idx]),
+            symbol=str(row.symbol),
+            selection_rank=int(row.selection_rank),
+            legal_gross_return=legal_return,
+            exit_date_idx=exit_idx,
+            exit_phase=phase,
+            buy_costs={str(key): float(value) for key, value in buy.items()},
+        )
+        state.symbol_open_counts[symbol_idx] = existing + 1
+        state.maximum_symbol_cohorts = max(state.maximum_symbol_cohorts, existing + 1)
+        state.add_costs(buy)
+    return requested, filled
+
+
+def _mark_to_market(state: _AccountState, adjusted_close: np.ndarray) -> float:
+    equity = state.cash
+    for holding in state.holdings.values():
+        equity += position_value(holding.position, adjusted_close[holding.position.symbol_idx])
+    return float(equity)
+
+
+def _annual_account_rows(equity: pd.DataFrame, trades: pd.DataFrame) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for year, group in equity.groupby("year", sort=True):
+        trade_count = 0
+        if not trades.empty:
+            trade_count = int(trades["exit_date"].astype(str).str.startswith(f"{year}-").sum())
+        rows.append(
+            {
+                "year": int(year),
+                "net_return": float(np.prod(1.0 + group["daily_net_return"]) - 1.0),
+                "maximum_drawdown": float(group["drawdown"].min()),
+                "trade_count": trade_count,
+            }
+        )
+    return rows
+
+
+def _account_result(
+    *,
+    state: _AccountState,
+    spec: Mapping[str, Any],
+    equity: pd.DataFrame,
+    trades: pd.DataFrame,
+    annual: list[dict[str, Any]],
+    date_values: np.ndarray,
+    first_signal_idx: int,
+    last_signal_idx: int,
+    cutoff_idx: int,
+    starting_cash: float,
+) -> dict[str, Any]:
+    annual_frame = pd.DataFrame(annual)
+    daily_returns = equity["daily_net_return"].to_numpy(dtype=np.float64)
+    daily_std = daily_returns.std(ddof=1)
+    return {
+        "task_id": account_task_id(spec),
+        "spec": dict(spec),
+        "first_signal_date": str(date_values[first_signal_idx]),
+        "last_signal_date": str(date_values[last_signal_idx]),
+        "last_account_date": str(date_values[cutoff_idx]),
+        "starting_cash": float(starting_cash),
+        "ending_equity": float(equity["equity"].iloc[-1]),
+        "total_net_return": float(equity["equity"].iloc[-1] / starting_cash - 1.0),
+        "maximum_drawdown": float(equity["drawdown"].min()),
+        "annualized_daily_sharpe": (
+            float(np.sqrt(242.0) * daily_returns.mean() / daily_std) if daily_std > 0.0 else math.nan
+        ),
+        "trade_count": len(trades),
+        "positive_trade_fraction": float(trades["pnl"].gt(0.0).mean()) if len(trades) else math.nan,
+        "mean_trade_net_return": float(trades["trade_net_return"].mean()) if len(trades) else math.nan,
+        "positive_year_count": int(annual_frame["net_return"].gt(0.0).sum()),
+        "negative_year_count": int(annual_frame["net_return"].lt(0.0).sum()),
+        "worst_year_return": float(annual_frame["net_return"].min()),
+        "total_costs": state.total_costs,
+        "minimum_cash": float(equity["cash"].min()),
+        "maximum_position_count": int(equity["position_count"].max()),
+        "maximum_unique_symbol_count": int(equity["unique_symbol_count"].max()),
+        "maximum_same_symbol_open_cohorts": state.maximum_symbol_cohorts,
+        "allow_overlapping_same_symbol": bool(spec.get("allow_overlapping_same_symbol", True)),
+        "same_symbol_overlap_order_count": state.overlap_orders,
+        "same_symbol_overlap_filled_count": state.overlap_filled,
+        "same_symbol_overlap_skipped_count": state.overlap_skipped,
+        "unresolved_position_count": 0,
+        "cutoff_violation_count": 0,
+        "annual": annual,
+    }
+
+
 def simulate_account(
     *,
     spec: Mapping[str, Any],
@@ -307,283 +605,87 @@ def simulate_account(
     costs: ExecutionCosts,
     starting_cash: float = 1_000_000.0,
 ) -> tuple[dict[str, Any], pd.DataFrame, pd.DataFrame]:
-    selected = selections.loc[selections["selection_rank"] <= int(spec["top_k"])].copy()
-    selected = selected.drop_duplicates(
-        ["date_idx", "candidate_id", "selection_rank"], keep="first"
-    ).sort_values(["date_idx", "selection_rank"])
-    if selected.empty:
-        raise PortfolioError(f"selection schedule is empty: {spec}")
-    if "symbol_idx" not in selected:
-        mapping = {str(symbol): index for index, symbol in enumerate(symbol_values)}
-        selected["symbol_idx"] = selected["symbol"].map(mapping)
-    if selected["symbol_idx"].isna().any():
-        raise PortfolioError("selection symbol is absent from pack")
-
-    schedule = {
-        int(date_idx): group.copy()
-        for date_idx, group in selected.groupby("date_idx", sort=True)
-    }
-    first_signal_idx = int(selected["date_idx"].min())
-    last_signal_idx = int(selected["date_idx"].max())
-    holdings: dict[int, Holding] = {}
-    open_exits: dict[int, list[int]] = {}
-    close_exits: dict[int, list[int]] = {}
-    cash = float(starting_cash)
-    previous_equity = float(starting_cash)
-    trade_id = 0
-    equity_rows: list[dict[str, Any]] = []
-    trade_rows: list[dict[str, Any]] = []
-    symbol_open_counts: dict[int, int] = {}
-    overlap_orders = 0
-    overlap_filled = 0
-    overlap_skipped = 0
-    maximum_symbol_cohorts = 0
-    total_costs = {
-        "commission": 0.0,
-        "transfer_fee": 0.0,
-        "stamp_tax": 0.0,
-        "slippage": 0.0,
-    }
-
-    def close_trade(identifier: int, current_idx: int) -> None:
-        nonlocal cash
-        holding = holdings.pop(identifier)
-        symbol_idx = holding.position.symbol_idx
-        remaining = symbol_open_counts.get(symbol_idx, 0) - 1
-        if remaining < 0:
-            raise PortfolioError("negative symbol cohort count")
-        if remaining:
-            symbol_open_counts[symbol_idx] = remaining
-        else:
-            symbol_open_counts.pop(symbol_idx, None)
-        if holding.legal_gross_return <= -1.0:
-            proceeds = 0.0
-            sale = {name: 0.0 for name in (*total_costs, "total_cost")}
-        else:
-            adjusted_exit = holding.position.entry_adjusted_open * (
-                1.0 + holding.legal_gross_return
-            )
-            proceeds, sale = sell_position(
-                position=holding.position,
-                adjusted_open=adjusted_exit,
-                trade_date=str(date_values[current_idx]),
-                costs=costs,
-                slippage_multiplier=float(spec["slippage_multiplier"]),
-            )
-        cash += proceeds
-        for name in total_costs:
-            total_costs[name] += float(sale.get(name, 0.0))
-        pnl = proceeds - holding.position.net_cash_outflow
-        trade_rows.append(
-            {
-                "trade_id": identifier,
-                "signal_date_idx": holding.signal_date_idx,
-                "signal_date": holding.signal_date,
-                "entry_date_idx": holding.position.entry_date_idx,
-                "entry_date": str(date_values[holding.position.entry_date_idx]),
-                "exit_date_idx": current_idx,
-                "exit_date": str(date_values[current_idx]),
-                "exit_phase": holding.exit_phase,
-                "symbol": holding.symbol,
-                "symbol_idx": symbol_idx,
-                "selection_rank": holding.selection_rank,
-                "shares": holding.position.shares,
-                "gross_entry_notional": holding.position.gross_entry_notional,
-                "net_cash_outflow": holding.position.net_cash_outflow,
-                "proceeds": proceeds,
-                "pnl": pnl,
-                "trade_net_return": pnl / holding.position.net_cash_outflow,
-                "legal_gross_return": holding.legal_gross_return,
-                "buy_cost": float(holding.buy_costs.get("total_cost", 0.0)),
-                "sell_cost": float(sale.get("total_cost", 0.0)),
-            }
-        )
-
+    schedule, first_signal_idx, last_signal_idx = _selection_schedule(
+        selections,
+        top_k=int(spec["top_k"]),
+        symbol_values=symbol_values,
+    )
+    state = _AccountState(cash=float(starting_cash), previous_equity=float(starting_cash))
     for current_idx in range(first_signal_idx, int(cutoff_idx) + 1):
-        for identifier in open_exits.pop(current_idx, []):
-            if identifier in holdings:
-                close_trade(identifier, current_idx)
-
+        _close_due_holdings(
+            state,
+            state.open_exits,
+            current_idx=current_idx,
+            spec=spec,
+            date_values=date_values,
+            costs=costs,
+        )
         signal_idx = current_idx - 1
-        orders = schedule.get(signal_idx)
-        requested = 0 if orders is None else len(orders)
-        filled = 0
-        cohort_budget = min(
-            cash, previous_equity * float(spec["cohort_equity_fraction"])
+        requested, filled = _open_orders(
+            state,
+            orders=schedule.get(signal_idx),
+            signal_idx=signal_idx,
+            current_idx=current_idx,
+            spec=spec,
+            date_values=date_values,
+            daily_raw=daily_raw,
+            raw_open=raw_open,
+            entry_filled=entry_filled,
+            costs=costs,
         )
-        per_order_budget = (
-            cohort_budget / int(spec["top_k"])
-            if requested and int(spec["top_k"]) > 0
-            else 0.0
+        _close_due_holdings(
+            state,
+            state.close_exits,
+            current_idx=current_idx,
+            spec=spec,
+            date_values=date_values,
+            costs=costs,
         )
-        if orders is not None:
-            for row in orders.itertuples(index=False):
-                symbol_idx = int(row.symbol_idx)
-                if not bool(entry_filled[signal_idx, symbol_idx]):
-                    continue
-                existing = symbol_open_counts.get(symbol_idx, 0)
-                if existing:
-                    overlap_orders += 1
-                    if not bool(spec.get("allow_overlapping_same_symbol", True)):
-                        overlap_skipped += 1
-                        continue
-                adjusted_entry = float(daily_raw[current_idx, symbol_idx, 0])
-                entry_raw = float(raw_open[current_idx, symbol_idx])
-                position, buy = buy_position(
-                    available_cash=cash,
-                    allocated_cash=per_order_budget,
-                    symbol_idx=symbol_idx,
-                    signal_date_idx=signal_idx,
-                    execution_date_idx=current_idx,
-                    raw_open=entry_raw,
-                    adjusted_open=adjusted_entry,
-                    costs=costs,
-                    slippage_multiplier=float(spec["slippage_multiplier"]),
-                )
-                if position is None:
-                    continue
-                cash -= position.net_cash_outflow
-                if cash < -1.0e-6:
-                    raise PortfolioError("account cash became negative")
-                cash = max(cash, 0.0)
-                filled += 1
-                if existing:
-                    overlap_filled += 1
-                trade_id += 1
-                fill_day = int(row.fill_day)
-                exit_idx = signal_idx + fill_day
-                uncapped = float(row.legal_gross_return)
-                cap = spec.get("maximum_credited_gross_return")
-                legal_return = (
-                    min(uncapped, float(cap)) if cap is not None else uncapped
-                )
-                if legal_return <= -1.0:
-                    phase = "terminal_recovery"
-                    close_exits.setdefault(exit_idx, []).append(trade_id)
-                elif fill_day == int(spec.get("planned_fill_day", 2)):
-                    phase = "planned_close"
-                    close_exits.setdefault(exit_idx, []).append(trade_id)
-                else:
-                    phase = "delayed_open"
-                    open_exits.setdefault(exit_idx, []).append(trade_id)
-                holdings[trade_id] = Holding(
-                    trade_id=trade_id,
-                    position=position,
-                    signal_date_idx=signal_idx,
-                    signal_date=str(date_values[signal_idx]),
-                    symbol=str(row.symbol),
-                    selection_rank=int(row.selection_rank),
-                    legal_gross_return=legal_return,
-                    exit_date_idx=exit_idx,
-                    exit_phase=phase,
-                    buy_costs={str(key): float(value) for key, value in buy.items()},
-                )
-                symbol_open_counts[symbol_idx] = existing + 1
-                maximum_symbol_cohorts = max(maximum_symbol_cohorts, existing + 1)
-                for name in total_costs:
-                    total_costs[name] += float(buy.get(name, 0.0))
-
-        for identifier in close_exits.pop(current_idx, []):
-            if identifier in holdings:
-                close_trade(identifier, current_idx)
-
-        adjusted_close = np.asarray(daily_raw[current_idx, :, 3], dtype=np.float64)
-        equity = cash
-        for holding in holdings.values():
-            equity += position_value(
-                holding.position, adjusted_close[holding.position.symbol_idx]
-            )
-        daily_return = equity / previous_equity - 1.0 if previous_equity > 0.0 else 0.0
-        equity_rows.append(
+        equity = _mark_to_market(
+            state,
+            np.asarray(daily_raw[current_idx, :, 3], dtype=np.float64),
+        )
+        daily_return = equity / state.previous_equity - 1.0 if state.previous_equity > 0.0 else 0.0
+        state.equity_rows.append(
             {
                 "date_idx": current_idx,
                 "trade_date": str(date_values[current_idx]),
                 "year": int(str(date_values[current_idx])[:4]),
-                "cash": cash,
-                "position_count": len(holdings),
-                "unique_symbol_count": len(symbol_open_counts),
-                "maximum_same_symbol_open_cohorts": max(
-                    symbol_open_counts.values(), default=0
-                ),
+                "cash": state.cash,
+                "position_count": len(state.holdings),
+                "unique_symbol_count": len(state.symbol_open_counts),
+                "maximum_same_symbol_open_cohorts": max(state.symbol_open_counts.values(), default=0),
                 "requested_entry_count": requested,
                 "filled_entry_count": filled,
                 "equity": equity,
                 "daily_net_return": daily_return,
             }
         )
-        previous_equity = equity
+        state.previous_equity = equity
 
-    if holdings or open_exits or close_exits:
-        raise PortfolioError(
-            f"positions remain unresolved at {date_values[cutoff_idx]} cutoff"
-        )
-    equity = pd.DataFrame(equity_rows)
-    trades = pd.DataFrame(trade_rows)
+    if state.holdings or state.open_exits or state.close_exits:
+        raise PortfolioError(f"positions remain unresolved at {date_values[cutoff_idx]} cutoff")
+    equity = pd.DataFrame(state.equity_rows)
+    trades = pd.DataFrame(state.trade_rows)
     equity["equity_peak"] = equity["equity"].cummax()
     equity["drawdown"] = equity["equity"] / equity["equity_peak"] - 1.0
-    annual: list[dict[str, Any]] = []
-    for year, group in equity.groupby("year", sort=True):
-        trade_count = 0
-        if not trades.empty:
-            trade_count = int(
-                trades["exit_date"].astype(str).str.startswith(f"{year}-").sum()
-            )
-        annual.append(
-            {
-                "year": int(year),
-                "net_return": float(np.prod(1.0 + group["daily_net_return"]) - 1.0),
-                "maximum_drawdown": float(group["drawdown"].min()),
-                "trade_count": trade_count,
-            }
-        )
-    annual_frame = pd.DataFrame(annual)
-    daily_returns = equity["daily_net_return"].to_numpy(dtype=np.float64)
-    result = {
-        "task_id": account_task_id(spec),
-        "spec": dict(spec),
-        "first_signal_date": str(date_values[first_signal_idx]),
-        "last_signal_date": str(date_values[last_signal_idx]),
-        "last_account_date": str(date_values[cutoff_idx]),
-        "starting_cash": float(starting_cash),
-        "ending_equity": float(equity["equity"].iloc[-1]),
-        "total_net_return": float(equity["equity"].iloc[-1] / starting_cash - 1.0),
-        "maximum_drawdown": float(equity["drawdown"].min()),
-        "annualized_daily_sharpe": (
-            float(np.sqrt(242.0) * daily_returns.mean() / daily_returns.std(ddof=1))
-            if daily_returns.std(ddof=1) > 0.0
-            else math.nan
-        ),
-        "trade_count": len(trades),
-        "positive_trade_fraction": (
-            float(trades["pnl"].gt(0.0).mean()) if len(trades) else math.nan
-        ),
-        "mean_trade_net_return": (
-            float(trades["trade_net_return"].mean()) if len(trades) else math.nan
-        ),
-        "positive_year_count": int(annual_frame["net_return"].gt(0.0).sum()),
-        "negative_year_count": int(annual_frame["net_return"].lt(0.0).sum()),
-        "worst_year_return": float(annual_frame["net_return"].min()),
-        "total_costs": total_costs,
-        "minimum_cash": float(equity["cash"].min()),
-        "maximum_position_count": int(equity["position_count"].max()),
-        "maximum_unique_symbol_count": int(equity["unique_symbol_count"].max()),
-        "maximum_same_symbol_open_cohorts": maximum_symbol_cohorts,
-        "allow_overlapping_same_symbol": bool(
-            spec.get("allow_overlapping_same_symbol", True)
-        ),
-        "same_symbol_overlap_order_count": overlap_orders,
-        "same_symbol_overlap_filled_count": overlap_filled,
-        "same_symbol_overlap_skipped_count": overlap_skipped,
-        "unresolved_position_count": 0,
-        "cutoff_violation_count": 0,
-        "annual": annual,
-    }
+    annual = _annual_account_rows(equity, trades)
+    result = _account_result(
+        state=state,
+        spec=spec,
+        equity=equity,
+        trades=trades,
+        annual=annual,
+        date_values=date_values,
+        first_signal_idx=first_signal_idx,
+        last_signal_idx=last_signal_idx,
+        cutoff_idx=cutoff_idx,
+        starting_cash=starting_cash,
+    )
     return result, equity, trades
 
 
-def newey_west_interval(
-    values: np.ndarray, *, lag: int = 20, z_value: float = 1.96
-) -> dict[str, float | int | None]:
+def newey_west_interval(values: np.ndarray, *, lag: int = 20, z_value: float = 1.96) -> dict[str, float | int | None]:
     current = np.asarray(values, dtype=np.float64)
     current = current[np.isfinite(current)]
     count = len(current)
@@ -624,9 +726,7 @@ def add_account_diagnostics(
     result["daily_positive_fraction"] = float(np.mean(daily_returns > 0.0))
     result["daily_return_p01"] = float(np.quantile(daily_returns, 0.01))
     result["daily_return_p05"] = float(np.quantile(daily_returns, 0.05))
-    date_folds = (
-        selections.groupby("date_idx", sort=False)["fold"].first().astype("Int64")
-    )
+    date_folds = selections.groupby("date_idx", sort=False)["fold"].first().astype("Int64")
     with_fold = equity.copy()
     with_fold["fold"] = with_fold["date_idx"].map(date_folds)
     result["fold_account_metrics"] = [
@@ -634,21 +734,15 @@ def add_account_diagnostics(
             "fold": int(fold),
             "date_count": len(group),
             "mean_daily_net_return": float(group["daily_net_return"].mean()),
-            "compound_net_return": float(
-                np.prod(1.0 + group["daily_net_return"]) - 1.0
-            ),
-            "hac20_net_return": newey_west_interval(
-                group["daily_net_return"].to_numpy(dtype=np.float64), lag=20
-            ),
+            "compound_net_return": float(np.prod(1.0 + group["daily_net_return"]) - 1.0),
+            "hac20_net_return": newey_west_interval(group["daily_net_return"].to_numpy(dtype=np.float64), lag=20),
         }
         for fold, group in with_fold.dropna(subset=["fold"]).groupby("fold", sort=True)
     ]
     if trades.empty:
         result["winner_concentration"] = {"trade_count": 0}
         return result
-    positive = np.sort(
-        trades.loc[trades["pnl"] > 0.0, "pnl"].to_numpy(dtype=np.float64)
-    )[::-1]
+    positive = np.sort(trades.loc[trades["pnl"] > 0.0, "pnl"].to_numpy(dtype=np.float64))[::-1]
     positive_total = float(positive.sum())
 
     def share(fraction: float) -> float | None:

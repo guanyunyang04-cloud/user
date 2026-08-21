@@ -18,6 +18,7 @@ from quantlab.data.qdp_v2.auxiliary_tail_update import (
     _only_changed_share_events,
     _unconfirmed_share_detections,
 )
+from quantlab.data.qdp_v2.auxiliary_tail_update import index as auxiliary_tail_index
 from quantlab.data.qdp_v2.auxiliary_update import (
     _baostock_snapshot_worker,
     _normalize_cninfo_dividend,
@@ -625,7 +626,7 @@ def test_index_tail_dates_casts_parquet_dates_before_max(
         }
     ).to_parquet(calendar, index=False)
     monkeypatch.setattr(
-        auxiliary_tail_update,
+        auxiliary_tail_index,
         "_paths",
         lambda ctx, domain: [current if domain == "index_constituents" else calendar],
     )

@@ -13,6 +13,7 @@ from typing import Any
 import duckdb
 import pandas as pd
 
+from quantlab.core.io import sha256_file as _sha256
 from quantlab.data.core.json_io import json_safe
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.qdp_v2.manifest import (
@@ -32,14 +33,6 @@ END_DATE = "2025-12-31"
 
 class PretrainingRepairBaselineError(RuntimeError):
     pass
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _payload_hash(payload: Any) -> str:
@@ -68,9 +61,7 @@ def _copy(con: duckdb.DuckDBPyConnection, query: str, path: Path) -> int:
     temporary = path.with_suffix(path.suffix + ".partial")
     if temporary.exists():
         temporary.unlink()
-    con.execute(
-        f"COPY ({query}) TO '{_sql_path(temporary)}' (FORMAT PARQUET, COMPRESSION ZSTD)"
-    )
+    con.execute(f"COPY ({query}) TO '{_sql_path(temporary)}' (FORMAT PARQUET, COMPRESSION ZSTD)")
     temporary.replace(path)
     return int(con.execute(f"SELECT count(*) FROM ({query})").fetchone()[0])
 
@@ -81,14 +72,7 @@ def _latest_audit(root: Path, prefix: str) -> Path | None:
 
 
 def _quality_diagnostics(workspace: Path) -> list[Path]:
-    state_path = (
-        workspace
-        / "research"
-        / "legacy"
-        / "data_prep"
-        / "seq100_quality_liquidity_data_prep"
-        / "state.json"
-    )
+    state_path = workspace / "research" / "legacy" / "data_prep" / "seq100_quality_liquidity_data_prep" / "state.json"
     if not state_path.is_file():
         return []
     state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -110,9 +94,7 @@ def _dataset_inventory(
     for domain, dataset_id in sorted(dict(active.get("datasets", {}) or {}).items()):
         manifest_path = dataset_manifest_for_id(root, str(dataset_id), str(domain))
         if manifest_path is None:
-            raise PretrainingRepairBaselineError(
-                f"active_dataset_manifest_missing:{domain}:{dataset_id}"
-            )
+            raise PretrainingRepairBaselineError(f"active_dataset_manifest_missing:{domain}:{dataset_id}")
         manifest = read_dataset_manifest(manifest_path)
         schema = [dict(item) for item in manifest.schema]
         dataset_rows.append(
@@ -133,9 +115,7 @@ def _dataset_inventory(
         for shard in manifest.shards:
             path = resolve_manifest_path(shard.path, root=root)
             if not path.is_file():
-                raise PretrainingRepairBaselineError(
-                    f"active_shard_missing:{domain}:{path}"
-                )
+                raise PretrainingRepairBaselineError(f"active_shard_missing:{domain}:{path}")
             domain_paths.append(path)
             shard_rows.append(
                 {
@@ -154,189 +134,209 @@ def _dataset_inventory(
     return pd.DataFrame(dataset_rows), pd.DataFrame(shard_rows), paths_by_domain
 
 
-def freeze_baseline(
-    *, workspace_root: str | Path | None = None, force: bool = False
-) -> dict[str, Any]:
-    workspace = Path(workspace_root or Path.cwd()).resolve()
-    root = qdp_v2_root(workspace)
-    output = qdp_paths(workspace).data_dir / "qdp_runtime" / BASELINE_ID
-    manifest_path = output / "manifest.json"
-    active_path = root / "active" / "active.json"
-    active = read_active_manifest(root)
-    if not active or len(dict(active.get("datasets", {}) or {})) != 26:
-        raise PretrainingRepairBaselineError("expected_26_active_domains")
-    active_hash = _sha256(active_path)
-    if manifest_path.is_file() and not force:
-        existing = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if existing.get("active_manifest_sha256") != active_hash:
-            raise PretrainingRepairBaselineError(
-                "baseline_already_frozen_for_different_active_manifest"
-            )
-        return existing
+def _existing_baseline(
+    manifest_path: Path,
+    *,
+    active_hash: str,
+    force: bool,
+) -> dict[str, Any] | None:
+    if not manifest_path.is_file() or force:
+        return None
+    existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if existing.get("active_manifest_sha256") != active_hash:
+        raise PretrainingRepairBaselineError("baseline_already_frozen_for_different_active_manifest")
+    return existing
 
-    output.mkdir(parents=True, exist_ok=True)
+
+def _write_active_inventory(
+    *,
+    output: Path,
+    active_path: Path,
+    root: Path,
+    active: Mapping[str, Any],
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, list[Path]], dict[str, Path]]:
     dataset_frame, shard_frame, paths = _dataset_inventory(root=root, active=active)
     dataset_path = output / "active_dataset_inventory.parquet"
     shard_path = output / "active_shard_inventory.parquet"
     dataset_frame.to_parquet(dataset_path, index=False, compression="zstd")
     shard_frame.to_parquet(shard_path, index=False, compression="zstd")
     shutil.copy2(active_path, output / "active_manifest.json")
+    return (
+        dataset_frame,
+        shard_frame,
+        paths,
+        {
+            "active_dataset_inventory": dataset_path,
+            "active_shard_inventory": shard_path,
+        },
+    )
 
-    temp = output / "duckdb_tmp"
-    temp.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect()
-    con.execute("SET threads=4")
-    con.execute(f"SET temp_directory='{_sql_path(temp)}'")
-    try:
-        daily = _scan(paths["market_daily_raw"])
-        intraday = _scan(paths["market_intraday_5m"])
-        balance = _scan(paths["balance_sheet_quarterly"])
-        share = _scan(paths["share_capital"])
-        universe = _scan(paths["universe_snapshot"])
-        margin = _scan(paths["margin_detail"])
 
-        v1_report_state_path = (
-            qdp_paths(workspace).data_dir
-            / "qdp_runtime"
-            / "research_report_rc_backfill_v1"
-            / "state.json"
-        )
-        v1_report_state = (
-            json.loads(v1_report_state_path.read_text(encoding="utf-8"))
-            if v1_report_state_path.is_file()
-            else {}
-        )
-        v1_years = dict(
-            dict(v1_report_state.get("tushare_report_rc", {}) or {}).get("years", {})
-            or {}
-        )
-        report_gaps = pd.DataFrame(
-            {
-                "report_date": pd.date_range(START_DATE, END_DATE, freq="D").strftime(
-                    "%Y-%m-%d"
-                )
-            }
-        )
-        report_gaps["year"] = report_gaps["report_date"].str[:4].astype(int)
-        report_gaps["status"] = "pending"
-        report_gaps["reason"] = "v1_has_no_daily_task_ledger"
-        report_gaps["v1_year_status"] = report_gaps["year"].map(
-            lambda year: str(dict(v1_years.get(str(year), {}) or {}).get("status", ""))
-        )
-        report_gap_path = output / "research_report_daily_task_gap.parquet"
-        report_gaps.to_parquet(report_gap_path, index=False, compression="zstd")
+def _report_gap_frame(workspace: Path) -> pd.DataFrame:
+    state_path = qdp_paths(workspace).data_dir / "qdp_runtime" / "research_report_rc_backfill_v1" / "state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.is_file() else {}
+    years = dict(dict(state.get("tushare_report_rc", {}) or {}).get("years", {}) or {})
+    frame = pd.DataFrame({"report_date": pd.date_range(START_DATE, END_DATE, freq="D").strftime("%Y-%m-%d")})
+    frame["year"] = frame["report_date"].str[:4].astype(int)
+    frame["status"] = "pending"
+    frame["reason"] = "v1_has_no_daily_task_ledger"
+    frame["v1_year_status"] = frame["year"].map(
+        lambda year: str(dict(years.get(str(year), {}) or {}).get("status", ""))
+    )
+    return frame
 
-        financial_query = f"""
-          SELECT symbol,report_date,feature_available_date,field_name,
-                 'pending' AS status,'field_absent_from_v1_contract' AS reason
-          FROM {balance}
-          CROSS JOIN (VALUES
-            ('other_receivables_total'),
-            ('other_payables_total'),
-            ('contract_liabilities')
-          ) AS fields(field_name)
-          WHERE report_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+
+def _quality_join(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    workspace: Path,
+) -> str:
+    paths = _quality_diagnostics(workspace)
+    if not paths:
+        return "false"
+    quality = _scan(paths)
+    con.execute(
+        f"""
+        CREATE TEMP TABLE quality_keys AS
+        SELECT DISTINCT symbol,trade_date
+        FROM {quality}
+        WHERE quality_liquidity_keep
+          AND trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
         """
-        financial_gap_path = output / "financial_field_gap.parquet"
-        financial_rows = _copy(con, financial_query, financial_gap_path)
+    )
+    return "EXISTS (SELECT 1 FROM quality_keys q WHERE q.symbol=d.symbol AND q.trade_date=d.trade_date)"
 
-        share_query = f"""
-          SELECT symbol,trade_date,total_share,total_share_source_date,
-                 share_fill_method,source,'pending' AS status
-          FROM {share}
-          WHERE trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
-            AND total_share IS NULL
-          ORDER BY trade_date,symbol
-        """
-        share_gap_path = output / "share_capital_total_share_gap.parquet"
-        share_rows = _copy(con, share_query, share_gap_path)
 
-        margin_query = f"""
-          SELECT u.symbol,u.trade_date,u.exchange,
-                 m.symbol IS NOT NULL AS detail_observed,
-                 'pending' AS eligibility_state,
-                 false AS source_available
-          FROM {universe} u
-          LEFT JOIN {margin} m USING(symbol,trade_date)
-          WHERE u.trade_date BETWEEN '2011-01-01' AND '{END_DATE}'
-            AND upper(coalesce(u.board,'')) IN ('MAIN','MAINBOARD','MAIN_BOARD','主板')
-          ORDER BY u.trade_date,u.symbol
-        """
-        margin_gap_path = output / "margin_eligibility_gap.parquet"
-        margin_rows = _copy(con, margin_query, margin_gap_path)
-
-        quality_paths = _quality_diagnostics(workspace)
-        quality_join = "false"
-        if quality_paths:
-            quality = _scan(quality_paths)
-            con.execute(
-                f"""
-                CREATE TEMP TABLE quality_keys AS
-                SELECT DISTINCT symbol,trade_date
-                FROM {quality}
-                WHERE quality_liquidity_keep
-                  AND trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
-                """
-            )
-            quality_join = (
-                "EXISTS (SELECT 1 FROM quality_keys q "
-                "WHERE q.symbol=d.symbol AND q.trade_date=d.trade_date)"
-            )
-        minute_query = f"""
-          WITH five AS (
-            SELECT symbol,trade_date,count(*) AS bar_count
-            FROM {intraday}
-            WHERE trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
-            GROUP BY symbol,trade_date
-          )
-          SELECT d.symbol,d.trade_date,d.open,d.high,d.low,d.close,d.volume,d.amount,
-                 coalesce(f.bar_count,0) AS existing_bar_count,
-                 {quality_join} AS quality_liquidity_keep,
-                 'pending' AS status
-          FROM {daily} d
-          LEFT JOIN five f USING(symbol,trade_date)
-          WHERE d.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
-            AND d.volume>0
-            AND coalesce(f.bar_count,0)<>48
-          ORDER BY d.trade_date,d.symbol
-        """
-        minute_gap_path = output / "historical_intraday_5m_gap.parquet"
-        minute_rows = _copy(con, minute_query, minute_gap_path)
-        quality_minute_rows = int(
-            con.execute(
-                f"SELECT count(*) FROM read_parquet('{_sql_path(minute_gap_path)}') "
-                "WHERE quality_liquidity_keep"
-            ).fetchone()[0]
+def _write_gap_inventories(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    workspace: Path,
+    output: Path,
+    paths: Mapping[str, list[Path]],
+) -> tuple[dict[str, Path], dict[str, int]]:
+    scans = {
+        domain: _scan(paths[domain])
+        for domain in (
+            "market_daily_raw",
+            "market_intraday_5m",
+            "balance_sheet_quarterly",
+            "share_capital",
+            "universe_snapshot",
+            "margin_detail",
         )
-    finally:
-        con.close()
-
-    latest_active_audit = _latest_audit(root, "active_audit_")
-    latest_database_audit = _latest_audit(root, "database_audit_")
-    copied_audits: dict[str, Any] = {}
-    for name, source in (
-        ("active", latest_active_audit),
-        ("database", latest_database_audit),
-    ):
-        if source is not None:
-            target = output / f"pre_repair_{name}_audit.json"
-            shutil.copy2(source, target)
-            copied_audits[name] = {
-                "source_path": str(source),
-                "copied_path": str(target),
-                "sha256": _sha256(target),
-            }
-
-    files = {
-        "active_dataset_inventory": dataset_path,
-        "active_shard_inventory": shard_path,
-        "research_report_daily_task_gap": report_gap_path,
-        "financial_field_gap": financial_gap_path,
-        "share_capital_total_share_gap": share_gap_path,
-        "margin_eligibility_gap": margin_gap_path,
-        "historical_intraday_5m_gap": minute_gap_path,
     }
-    result = {
+    report_gaps = _report_gap_frame(workspace)
+    report_path = output / "research_report_daily_task_gap.parquet"
+    report_gaps.to_parquet(report_path, index=False, compression="zstd")
+    financial_query = f"""
+      SELECT symbol,report_date,feature_available_date,field_name,
+             'pending' AS status,'field_absent_from_v1_contract' AS reason
+      FROM {scans["balance_sheet_quarterly"]}
+      CROSS JOIN (VALUES
+        ('other_receivables_total'),
+        ('other_payables_total'),
+        ('contract_liabilities')
+      ) AS fields(field_name)
+      WHERE report_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+    """
+    financial_path = output / "financial_field_gap.parquet"
+    financial_rows = _copy(con, financial_query, financial_path)
+    share_query = f"""
+      SELECT symbol,trade_date,total_share,total_share_source_date,
+             share_fill_method,source,'pending' AS status
+      FROM {scans["share_capital"]}
+      WHERE trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+        AND total_share IS NULL
+      ORDER BY trade_date,symbol
+    """
+    share_path = output / "share_capital_total_share_gap.parquet"
+    share_rows = _copy(con, share_query, share_path)
+    margin_query = f"""
+      SELECT u.symbol,u.trade_date,u.exchange,
+             m.symbol IS NOT NULL AS detail_observed,
+             'pending' AS eligibility_state,
+             false AS source_available
+      FROM {scans["universe_snapshot"]} u
+      LEFT JOIN {scans["margin_detail"]} m USING(symbol,trade_date)
+      WHERE u.trade_date BETWEEN '2011-01-01' AND '{END_DATE}'
+        AND upper(coalesce(u.board,'')) IN ('MAIN','MAINBOARD','MAIN_BOARD','主板')
+      ORDER BY u.trade_date,u.symbol
+    """
+    margin_path = output / "margin_eligibility_gap.parquet"
+    margin_rows = _copy(con, margin_query, margin_path)
+    minute_query = f"""
+      WITH five AS (
+        SELECT symbol,trade_date,count(*) AS bar_count
+        FROM {scans["market_intraday_5m"]}
+        WHERE trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+        GROUP BY symbol,trade_date
+      )
+      SELECT d.symbol,d.trade_date,d.open,d.high,d.low,d.close,d.volume,d.amount,
+             coalesce(f.bar_count,0) AS existing_bar_count,
+             {_quality_join(con, workspace=workspace)} AS quality_liquidity_keep,
+             'pending' AS status
+      FROM {scans["market_daily_raw"]} d
+      LEFT JOIN five f USING(symbol,trade_date)
+      WHERE d.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+        AND d.volume>0
+        AND coalesce(f.bar_count,0)<>48
+      ORDER BY d.trade_date,d.symbol
+    """
+    minute_path = output / "historical_intraday_5m_gap.parquet"
+    minute_rows = _copy(con, minute_query, minute_path)
+    quality_minute_rows = int(
+        con.execute(
+            f"SELECT count(*) FROM read_parquet('{_sql_path(minute_path)}') WHERE quality_liquidity_keep"
+        ).fetchone()[0]
+    )
+    files = {
+        "research_report_daily_task_gap": report_path,
+        "financial_field_gap": financial_path,
+        "share_capital_total_share_gap": share_path,
+        "margin_eligibility_gap": margin_path,
+        "historical_intraday_5m_gap": minute_path,
+    }
+    counts = {
+        "research_report_daily_tasks": len(report_gaps),
+        "financial_field_rows": financial_rows,
+        "share_capital_total_share_rows": share_rows,
+        "margin_eligibility_rows": margin_rows,
+        "historical_intraday_5m_stock_days": minute_rows,
+        "quality_liquidity_intraday_5m_stock_days": quality_minute_rows,
+    }
+    return files, counts
+
+
+def _copy_pre_repair_audits(*, root: Path, output: Path) -> dict[str, Any]:
+    copied: dict[str, Any] = {}
+    sources = {
+        "active": _latest_audit(root, "active_audit_"),
+        "database": _latest_audit(root, "database_audit_"),
+    }
+    for name, source in sources.items():
+        if source is None:
+            continue
+        target = output / f"pre_repair_{name}_audit.json"
+        shutil.copy2(source, target)
+        copied[name] = {
+            "source_path": str(source),
+            "copied_path": str(target),
+            "sha256": _sha256(target),
+        }
+    return copied
+
+
+def _baseline_result(
+    *,
+    active: Mapping[str, Any],
+    active_hash: str,
+    dataset_frame: pd.DataFrame,
+    shard_frame: pd.DataFrame,
+    files: Mapping[str, Path],
+    gap_counts: Mapping[str, int],
+    copied_audits: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
         "baseline_id": BASELINE_ID,
         "status": "frozen",
         "created_at": utc_now(),
@@ -351,14 +351,7 @@ def freeze_baseline(
         "active_dataset_count": len(dataset_frame),
         "active_shard_count": len(shard_frame),
         "active_dataset_ids": dict(active.get("datasets", {}) or {}),
-        "gap_counts": {
-            "research_report_daily_tasks": len(report_gaps),
-            "financial_field_rows": financial_rows,
-            "share_capital_total_share_rows": share_rows,
-            "margin_eligibility_rows": margin_rows,
-            "historical_intraday_5m_stock_days": minute_rows,
-            "quality_liquidity_intraday_5m_stock_days": quality_minute_rows,
-        },
+        "gap_counts": dict(gap_counts),
         "state_semantics": [
             "observed",
             "confirmed_empty",
@@ -374,11 +367,62 @@ def freeze_baseline(
             }
             for name, path in files.items()
         },
-        "pre_repair_audits": copied_audits,
+        "pre_repair_audits": dict(copied_audits),
         "credential_persisted": False,
         "read_2026_rows": 0,
         "write_2026_rows": 0,
     }
+
+
+def freeze_baseline(*, workspace_root: str | Path | None = None, force: bool = False) -> dict[str, Any]:
+    workspace = Path(workspace_root or Path.cwd()).resolve()
+    root = qdp_v2_root(workspace)
+    output = qdp_paths(workspace).data_dir / "qdp_runtime" / BASELINE_ID
+    manifest_path = output / "manifest.json"
+    active_path = root / "active" / "active.json"
+    active = read_active_manifest(root)
+    if not active or len(dict(active.get("datasets", {}) or {})) != 26:
+        raise PretrainingRepairBaselineError("expected_26_active_domains")
+    active_hash = _sha256(active_path)
+    existing = _existing_baseline(
+        manifest_path,
+        active_hash=active_hash,
+        force=force,
+    )
+    if existing is not None:
+        return existing
+    output.mkdir(parents=True, exist_ok=True)
+    dataset_frame, shard_frame, paths, inventory_files = _write_active_inventory(
+        output=output,
+        active_path=active_path,
+        root=root,
+        active=active,
+    )
+
+    temp = output / "duckdb_tmp"
+    temp.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect()
+    con.execute("SET threads=4")
+    con.execute(f"SET temp_directory='{_sql_path(temp)}'")
+    try:
+        gap_files, gap_counts = _write_gap_inventories(
+            con,
+            workspace=workspace,
+            output=output,
+            paths=paths,
+        )
+    finally:
+        con.close()
+    files = {**inventory_files, **gap_files}
+    result = _baseline_result(
+        active=active,
+        active_hash=active_hash,
+        dataset_frame=dataset_frame,
+        shard_frame=shard_frame,
+        files=files,
+        gap_counts=gap_counts,
+        copied_audits=_copy_pre_repair_audits(root=root, output=output),
+    )
     atomic_write_json(manifest_path, result)
     audit_path = root / "audits" / f"{BASELINE_ID}.json"
     atomic_write_json(audit_path, result)

@@ -91,23 +91,16 @@ def plan_update(
     }
 
 
-def run_update(
+def _selected_update_mode(
     *,
+    workspace: Path,
     as_of_date: str,
-    start_date: str = "",
-    lookback_days: int = 10,
-    workers: int = 4,
-    workspace_root: str | Path | None = None,
-    keep_runtime: bool = False,
-    core_only: bool = False,
-    repair_auxiliary: bool = False,
-    legacy_tushare: bool = False,
-    restore_pit_history: bool = False,
-    normalize_symbol_lifecycle: bool = False,
-) -> dict[str, Any]:
-    if int(workers) not in {1, 2, 3, 4}:
-        raise ValueError("workers_must_be_between_1_and_4")
-    workspace = Path(workspace_root or Path.cwd()).resolve()
+    workers: int,
+    repair_auxiliary: bool,
+    legacy_tushare: bool,
+    restore_pit_history: bool,
+    normalize_symbol_lifecycle: bool,
+) -> dict[str, Any] | None:
     if normalize_symbol_lifecycle:
         return normalize_symbol_lifecycle_effectivity(
             workspace_root=workspace,
@@ -117,37 +110,31 @@ def run_update(
         return run_pit_history_restore(
             end_date=as_of_date,
             workspace_root=workspace,
-            workers=min(int(workers), 3),
+            workers=min(workers, 3),
             apply=True,
         )
     if repair_auxiliary:
         return run_auxiliary_repair(
             as_of_date=as_of_date,
             workspace_root=workspace,
-            allow_legacy_tushare=bool(legacy_tushare),
+            allow_legacy_tushare=legacy_tushare,
         )
-    plan = plan_update(
-        as_of_date=as_of_date,
-        start_date=start_date,
-        lookback_days=lookback_days,
-        workspace_root=workspace,
-    )
-    if plan.get("status") != "planned":
-        return plan
-    start = str(plan["start_date"])
-    end = str(plan["as_of_date"])
-    payload = {
-        **plan,
-        "status": "updating",
-        "workers": int(workers),
-    }
+    return None
+
+
+def _execute_update_pipeline(
+    workspace: Path,
+    *,
+    start: str,
+    end: str,
+    workers: int,
+    core_only: bool,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
     stage = "baostock_core"
     try:
         valuation_cache = (
-            qdp_paths(workspace).data_dir
-            / "qdp_runtime"
-            / "auxiliary_tail"
-            / "baostock_valuation.parquet"
+            qdp_paths(workspace).data_dir / "qdp_runtime" / "auxiliary_tail" / "baostock_valuation.parquet"
         ).resolve()
         core = run_baostock_core_update(
             start_date=start,
@@ -170,7 +157,7 @@ def run_update(
             start_date=start,
             end_date=end,
             workspace_root=workspace,
-            workers=int(workers),
+            workers=workers,
         )
         payload[stage] = _state_summary(fast_5m)
 
@@ -179,7 +166,7 @@ def run_update(
             start_date=start,
             end_date=end,
             workspace_root=workspace,
-            workers=int(workers),
+            workers=workers,
         )
         payload[stage] = _state_summary(baostock_5m)
 
@@ -192,23 +179,17 @@ def run_update(
             )
             payload[stage] = _state_summary(auxiliary)
             if auxiliary.get("status") not in {"current", "repaired", "updated"}:
-                raise RuntimeError(
-                    f"post_update_auxiliary_failed:{auxiliary.get('status')}"
-                )
+                raise RuntimeError(f"post_update_auxiliary_failed:{auxiliary.get('status')}")
 
         stage = "latest_check"
         latest = audit_latest_keys(workspace_root=workspace)
         payload[stage] = latest
         if latest.get("status") not in {"ok", "warning"}:
-            raise RuntimeError(
-                f"post_update_latest_check_failed:{latest.get('status')}"
-            )
+            raise RuntimeError(f"post_update_latest_check_failed:{latest.get('status')}")
         payload["active_as_of_date"] = _advance_active_date(workspace)
         unresolved = int(baostock_5m.get("unresolved_day_count", 0) or 0)
         provider_errors = int(baostock_5m.get("provider_error_count", 0) or 0)
-        payload["status"] = (
-            "updated_with_gaps" if unresolved or provider_errors else "updated"
-        )
+        payload["status"] = "updated_with_gaps" if unresolved or provider_errors else "updated"
     except Exception as exc:
         payload.update(
             {
@@ -219,22 +200,78 @@ def run_update(
                 "runtime_cleanup": "retained_after_failure",
             }
         )
-        return payload
+    return payload
 
-    if not keep_runtime and payload["status"] == "updated":
-        runtime = qdp_paths(workspace).data_dir / "qdp_runtime" / "recent_market_repair"
-        if runtime.exists():
-            resolved = runtime.resolve(strict=True)
-            resolved.relative_to(workspace)
-            shutil.rmtree(resolved)
-        core_runtime = qdp_paths(workspace).data_dir / "qdp_runtime" / "baostock_update"
-        if core_runtime.exists():
-            resolved = core_runtime.resolve(strict=True)
-            resolved.relative_to(workspace)
-            shutil.rmtree(resolved)
-        payload["runtime_cleanup"] = "deleted_after_success"
-    elif payload["status"] == "updated_with_gaps":
+
+def _cleanup_update_runtime(workspace: Path, payload: dict[str, Any]) -> None:
+    if payload["status"] == "updated_with_gaps":
         payload["runtime_cleanup"] = "retained_for_unresolved_days"
+        return
+    for name in ("recent_market_repair", "baostock_update"):
+        runtime = qdp_paths(workspace).data_dir / "qdp_runtime" / name
+        if not runtime.exists():
+            continue
+        resolved = runtime.resolve(strict=True)
+        resolved.relative_to(workspace)
+        shutil.rmtree(resolved)
+    payload["runtime_cleanup"] = "deleted_after_success"
+
+
+def run_update(
+    *,
+    as_of_date: str,
+    start_date: str = "",
+    lookback_days: int = 10,
+    workers: int = 4,
+    workspace_root: str | Path | None = None,
+    keep_runtime: bool = False,
+    core_only: bool = False,
+    repair_auxiliary: bool = False,
+    legacy_tushare: bool = False,
+    restore_pit_history: bool = False,
+    normalize_symbol_lifecycle: bool = False,
+) -> dict[str, Any]:
+    if int(workers) not in {1, 2, 3, 4}:
+        raise ValueError("workers_must_be_between_1_and_4")
+    workspace = Path(workspace_root or Path.cwd()).resolve()
+    selected = _selected_update_mode(
+        workspace=workspace,
+        as_of_date=as_of_date,
+        workers=int(workers),
+        repair_auxiliary=repair_auxiliary,
+        legacy_tushare=legacy_tushare,
+        restore_pit_history=restore_pit_history,
+        normalize_symbol_lifecycle=normalize_symbol_lifecycle,
+    )
+    if selected is not None:
+        return selected
+    plan = plan_update(
+        as_of_date=as_of_date,
+        start_date=start_date,
+        lookback_days=lookback_days,
+        workspace_root=workspace,
+    )
+    if plan.get("status") != "planned":
+        return plan
+    start = str(plan["start_date"])
+    end = str(plan["as_of_date"])
+    payload = {
+        **plan,
+        "status": "updating",
+        "workers": int(workers),
+    }
+    payload = _execute_update_pipeline(
+        workspace,
+        start=start,
+        end=end,
+        workers=int(workers),
+        core_only=core_only,
+        payload=payload,
+    )
+    if payload["status"] == "failed":
+        return payload
+    if payload["status"] == "updated_with_gaps" or (not keep_runtime and payload["status"] == "updated"):
+        _cleanup_update_runtime(workspace, payload)
     return payload
 
 
@@ -352,8 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if selected_modes > 1:
         raise ValueError(
-            "repair_auxiliary_core_only_restore_pit_history_and_"
-            "normalize_symbol_lifecycle_are_mutually_exclusive"
+            "repair_auxiliary_core_only_restore_pit_history_and_normalize_symbol_lifecycle_are_mutually_exclusive"
         )
     kwargs = {
         "as_of_date": str(args.as_of_date),
@@ -394,15 +430,20 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(json_safe(payload), ensure_ascii=False, indent=2))
     else:
         print(_format(payload))
-    return 0 if payload.get("status") in {
-        "planned",
-        "updated",
-        "updated_with_gaps",
-        "repaired",
-        "already_complete",
-        "normalized",
-        "already_normalized",
-    } else 2
+    return (
+        0
+        if payload.get("status")
+        in {
+            "planned",
+            "updated",
+            "updated_with_gaps",
+            "repaired",
+            "already_complete",
+            "normalized",
+            "already_normalized",
+        }
+        else 2
+    )
 
 
 def _format(payload: dict[str, Any]) -> str:

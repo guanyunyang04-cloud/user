@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
+from quantlab.data.domains.contracts import build_intraday_daily_feature_frame
 from quantlab.data.provider_symbols import (
     from_baostock_code,
     is_mootdx_index_symbol,
@@ -80,3 +82,38 @@ def test_pit_history_normalizers_keep_provider_provenance() -> None:
     assert history.loc[0, "volume"] == 1200.0
     assert factors.loc[0, "adjust_factor"] == 1.0
     assert factors.loc[0, "source"].endswith("+pit_history_restore")
+
+
+def test_intraday_daily_features_preserve_day_keys_and_previous_close_gap() -> None:
+    rows = []
+    bar_times = ["09:35:00", "09:40:00", "09:45:00", "09:50:00", "09:55:00", "10:00:00"]
+    for trade_date, opens in (
+        ("2024-01-02", [10.0, 10.1, 10.2, 10.3, 10.4, 10.5]),
+        ("2024-01-03", [11.0, 11.1, 11.2, 11.3, 11.4, 11.5]),
+    ):
+        for index, opening in enumerate(opens):
+            close = opening + 0.05
+            rows.append(
+                {
+                    "symbol": "600000.SH",
+                    "trade_date": trade_date,
+                    "bar_time": bar_times[index],
+                    "open": opening,
+                    "high": close + 0.02,
+                    "low": opening - 0.02,
+                    "close": close,
+                    "volume": 100.0 + index,
+                    "amount": close * (100.0 + index),
+                }
+            )
+
+    result = build_intraday_daily_feature_frame(pd.DataFrame(rows)).sort_values("trade_date")
+
+    assert result[["trade_date", "symbol"]].values.tolist() == [
+        ["2024-01-02", "600000.SH"],
+        ["2024-01-03", "600000.SH"],
+    ]
+    assert result["bar_count"].tolist() == [6.0, 6.0]
+    assert pd.isna(result.iloc[0]["open_gap"])
+    assert result.iloc[1]["open_gap"] == pytest.approx(11.0 / 10.55 - 1.0)
+    assert result.iloc[0]["first_30m_ret"] == pytest.approx(10.55 / 10.0 - 1.0)

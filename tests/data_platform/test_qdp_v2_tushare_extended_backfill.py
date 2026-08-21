@@ -20,6 +20,7 @@ from quantlab.data.qdp_v2.manifest import (
 from quantlab.data.qdp_v2.provider_credentials import (
     save_tushare_provider_profile,
 )
+from quantlab.data.qdp_v2.tushare_extended_backfill import download as extended_download
 
 
 class FakeClient:
@@ -123,7 +124,7 @@ def test_daily_page_inventory_ignores_truncated_legacy_year_task(tmp_path) -> No
 def test_page_cache_resumes_without_repeating_completed_task(
     tmp_path, monkeypatch
 ) -> None:
-    monkeypatch.setattr(extended, "PAGE_SIZE", 2)
+    monkeypatch.setattr(extended_download, "PAGE_SIZE", 2)
     first = pd.DataFrame(
         {
             "trade_date": ["20110104", "20110104"],
@@ -366,6 +367,17 @@ def test_cleanup_prepared_cache_deletes_only_verified_installed_copy(tmp_path) -
     )
 
     dry = extended.cleanup_prepared_cache(workspace_root=tmp_path)
+    unexpected = prepared.parent / "unverified.txt"
+    unexpected.write_text("do not delete", encoding="utf-8")
+    blocked = extended.cleanup_prepared_cache(
+        workspace_root=tmp_path,
+        delete=True,
+        yes=True,
+    )
+    assert blocked["status"] == "blocked"
+    assert blocked["destructive_actions_performed"] is False
+    assert prepared.is_file()
+    unexpected.unlink()
     deleted = extended.cleanup_prepared_cache(
         workspace_root=tmp_path,
         delete=True,

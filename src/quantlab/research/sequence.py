@@ -6,6 +6,7 @@ import math
 import random
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from itertools import pairwise
 from pathlib import Path
@@ -73,9 +74,7 @@ class RawSequenceBuilder:
         self.daily_raw = open_array(data.execution["daily_raw"])
         self.has_bar = open_array(data.execution["has_bar"])
         self.row_dates = data.row_index["date_idx"].to_numpy(dtype=np.int32, copy=False)
-        self.row_symbols = data.row_index["symbol_idx"].to_numpy(
-            dtype=np.int32, copy=False
-        )
+        self.row_symbols = data.row_index["symbol_idx"].to_numpy(dtype=np.int32, copy=False)
         self.market_mean = np.asarray(market_mean, dtype=np.float32)
         self.market_std = np.asarray(market_std, dtype=np.float32)
         if self.market_mean.shape != (14,) or self.market_std.shape != (14,):
@@ -99,9 +98,7 @@ class RawSequenceBuilder:
             & np.isfinite(current_close[:, None, None])
             & (current_close[:, None, None] > 0.0)
         )
-        denominator = np.where(
-            np.isfinite(current_close) & (current_close > 0.0), current_close, 1.0
-        )
+        denominator = np.where(np.isfinite(current_close) & (current_close > 0.0), current_close, 1.0)
         relative_price = np.zeros_like(prices, dtype=np.float32)
         np.log(
             np.clip(prices / denominator[:, None, None], 1.0e-4, 1.0e4),
@@ -116,26 +113,18 @@ class RawSequenceBuilder:
         np.log1p(np.maximum(activity, 0.0), out=logged, where=activity_valid)
         counts = activity_valid.sum(axis=1, keepdims=True).clip(min=1)
         means = (logged * activity_valid).sum(axis=1, keepdims=True) / counts
-        variance = (np.square(logged - means) * activity_valid).sum(
-            axis=1, keepdims=True
-        ) / counts
+        variance = (np.square(logged - means) * activity_valid).sum(axis=1, keepdims=True) / counts
         scales = np.sqrt(np.maximum(variance, 1.0e-4))
-        normalized_activity = np.where(
-            activity_valid, (logged - means) / scales, 0.0
-        ).astype(np.float32)
+        normalized_activity = np.where(activity_valid, (logged - means) / scales, 0.0).astype(np.float32)
         normalized_activity = np.clip(normalized_activity, -5.0, 5.0)
         bar_mask = has_bar.astype(np.float32)[:, :, None]
-        sequence = np.concatenate(
-            [relative_price, normalized_activity, bar_mask], axis=2
-        ).astype(np.float32)
+        sequence = np.concatenate([relative_price, normalized_activity, bar_mask], axis=2).astype(np.float32)
         if sequence.shape != (len(positions), LOOKBACK, RAW_CHANNEL_COUNT):
             raise RawSequenceError("raw sequence shape changed")
         if not np.isfinite(sequence).all():
             raise RawSequenceError("raw sequence contains non-finite values")
 
-        market = np.asarray(
-            self.data.matrix[positions, MARKET_FEATURE_SLICE], dtype=np.float32
-        )
+        market = np.asarray(self.data.matrix[positions, MARKET_FEATURE_SLICE], dtype=np.float32)
         market = (market - self.market_mean) / self.market_std
         market = np.nan_to_num(market, nan=0.0, posinf=0.0, neginf=0.0)
         market = np.clip(market, -8.0, 8.0).astype(np.float32)
@@ -182,9 +171,7 @@ class RawSequenceModel(nn.Module):
 
     def forward(self, sequence: torch.Tensor, market: torch.Tensor) -> torch.Tensor:
         encoded = self.temporal(self.input(sequence.transpose(1, 2)))
-        pooled = torch.cat(
-            [encoded[:, :, -1], encoded.mean(dim=2), encoded.amax(dim=2)], dim=1
-        )
+        pooled = torch.cat([encoded[:, :, -1], encoded.mean(dim=2), encoded.amax(dim=2)], dim=1)
         return self.head(torch.cat([pooled, self.market(market)], dim=1)).squeeze(1)
 
 
@@ -201,10 +188,7 @@ def ranking_loss(
     predicted_centered = predicted - predicted.mean(dim=1, keepdim=True)
     actual_centered = actual - actual.mean(dim=1, keepdim=True)
     numerator = (predicted_centered * actual_centered).sum(dim=1)
-    denominator = torch.sqrt(
-        predicted_centered.square().sum(dim=1) * actual_centered.square().sum(dim=1)
-        + 1.0e-8
-    )
+    denominator = torch.sqrt(predicted_centered.square().sum(dim=1) * actual_centered.square().sum(dim=1) + 1.0e-8)
     correlation = (numerator / denominator).mean()
     return point + 0.25 * (1.0 - correlation)
 
@@ -220,15 +204,11 @@ def _folds(data: ResearchData) -> list[dict[str, Any]]:
     )
 
 
-def _market_normalization(
-    data: ResearchData, train_rows: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
+def _market_normalization(data: ResearchData, train_rows: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     dates = data.dates[train_rows]
     _, first = np.unique(dates, return_index=True)
     representatives = train_rows[first]
-    values = np.asarray(
-        data.matrix[representatives, MARKET_FEATURE_SLICE], dtype=np.float32
-    )
+    values = np.asarray(data.matrix[representatives, MARKET_FEATURE_SLICE], dtype=np.float32)
     mean = np.nanmean(values, axis=0).astype(np.float32)
     std = np.nanstd(values, axis=0).astype(np.float32)
     std = np.where(np.isfinite(std) & (std > 1.0e-6), std, 1.0).astype(np.float32)
@@ -236,23 +216,17 @@ def _market_normalization(
     return mean, std
 
 
-def _date_row_groups(
-    rows: np.ndarray, dates: np.ndarray, valid: np.ndarray
-) -> list[np.ndarray]:
+def _date_row_groups(rows: np.ndarray, dates: np.ndarray, valid: np.ndarray) -> list[np.ndarray]:
     usable = np.asarray(rows, dtype=np.int64)[np.asarray(valid, dtype=bool)]
     usable_dates = np.asarray(dates, dtype=np.int32)[np.asarray(valid, dtype=bool)]
     if not len(usable):
         raise RawSequenceError("no valid rows for sequence training")
-    boundaries = np.flatnonzero(
-        np.r_[True, usable_dates[1:] != usable_dates[:-1], True]
-    )
+    boundaries = np.flatnonzero(np.r_[True, usable_dates[1:] != usable_dates[:-1], True])
     return [usable[left:right] for left, right in pairwise(boundaries)]
 
 
 def _sample_rows(groups: Sequence[np.ndarray], rng: np.random.Generator) -> np.ndarray:
-    selected_dates = rng.choice(
-        len(groups), size=DATES_PER_BATCH, replace=len(groups) < DATES_PER_BATCH
-    )
+    selected_dates = rng.choice(len(groups), size=DATES_PER_BATCH, replace=len(groups) < DATES_PER_BATCH)
     output = []
     for date_position in selected_dates:
         group = groups[int(date_position)]
@@ -275,10 +249,7 @@ def _validation_sample(
 ) -> np.ndarray:
     groups = _date_row_groups(rows, dates, valid)
     rng = np.random.default_rng(SEED + 991)
-    selected = [
-        rng.choice(group, size=min(stocks_per_date, len(group)), replace=False)
-        for group in groups
-    ]
+    selected = [rng.choice(group, size=min(stocks_per_date, len(group)), replace=False) for group in groups]
     return np.concatenate(selected).astype(np.int64)
 
 
@@ -365,49 +336,157 @@ def _task_fingerprint(data: ResearchData, fold: Mapping[str, Any]) -> str:
     )
 
 
-def train_fold(fold_number: int) -> dict[str, Any]:
+@dataclass(frozen=True)
+class _SequenceFoldInputs:
+    data: ResearchData
+    fold: dict[str, Any]
+    contract: dict[str, Any]
+    fingerprint: str
+    root: Path
+    train_rows: np.ndarray
+    validation_rows: np.ndarray
+    values: np.ndarray
+    target_column: int
+    validation_raw: np.ndarray
+    validation_valid: np.ndarray
+    target_by_row: np.ndarray
+    groups: list[np.ndarray]
+    validation_sample: np.ndarray
+    market_mean: np.ndarray
+    market_std: np.ndarray
+
+
+@dataclass(frozen=True)
+class _SequenceFit:
+    model: RawSequenceModel
+    builder: RawSequenceBuilder
+    device: torch.device
+    best_state: dict[str, torch.Tensor]
+    best_epoch: int
+    best_ic: float
+    history: list[dict[str, Any]]
+
+
+def _sequence_fold_inputs(fold_number: int) -> _SequenceFoldInputs:
     data = load_data()
     folds = _folds(data)
     if not 1 <= int(fold_number) <= len(folds):
         raise ResearchDataError("fold number is outside 1..5")
     fold = folds[int(fold_number) - 1]
     contract = _contract(data, fold)
-    fingerprint = _task_fingerprint(data, fold)
-    root = _root(fold_number)
-    result_path = root / "result.json"
-    if result_path.is_file():
-        result = dict(json.loads(result_path.read_text(encoding="utf-8")))
-        if (
-            result.get("status") == "completed"
-            and result.get("fingerprint") == fingerprint
-            and cutoff_violation_count(result) == 0
-            and all(Path(item["path"]).is_file() for item in result["files"].values())
-        ):
-            return result
-
-    _seed_everything(SEED + int(fold_number))
     train_rows = fold_rows(data.dates, fold, "train")
     validation_rows = fold_rows(data.dates, fold, "validation")
     values, valid_panel, target_column = data.target(TARGET_NAME)
     train_raw = np.asarray(values[train_rows, target_column], dtype=np.float32)
-    train_valid = np.asarray(
-        valid_panel[train_rows, target_column], dtype=bool
-    ) & np.isfinite(train_raw)
-    validation_raw = np.asarray(
-        values[validation_rows, target_column], dtype=np.float32
-    )
-    validation_valid = np.asarray(
-        valid_panel[validation_rows, target_column], dtype=bool
-    ) & np.isfinite(validation_raw)
+    train_valid = np.asarray(valid_panel[train_rows, target_column], dtype=bool) & np.isfinite(train_raw)
+    validation_raw = np.asarray(values[validation_rows, target_column], dtype=np.float32)
+    validation_valid = np.asarray(valid_panel[validation_rows, target_column], dtype=bool) & np.isfinite(validation_raw)
     relevance = date_relevance_labels(data.dates[train_rows], train_raw, train_valid)
     target_by_row = np.zeros(data.row_count, dtype=np.float32)
     target_by_row[train_rows] = (relevance - 4.5) / 4.5
     groups = _date_row_groups(train_rows, data.dates[train_rows], train_valid)
-    validation_sample = _validation_sample(
-        validation_rows, data.dates[validation_rows], validation_valid
-    )
+    validation_sample = _validation_sample(validation_rows, data.dates[validation_rows], validation_valid)
     market_mean, market_std = _market_normalization(data, train_rows)
-    builder = RawSequenceBuilder(data, market_mean=market_mean, market_std=market_std)
+    return _SequenceFoldInputs(
+        data=data,
+        fold=dict(fold),
+        contract=contract,
+        fingerprint=_task_fingerprint(data, fold),
+        root=_root(fold_number),
+        train_rows=train_rows,
+        validation_rows=validation_rows,
+        values=values,
+        target_column=target_column,
+        validation_raw=validation_raw,
+        validation_valid=validation_valid,
+        target_by_row=target_by_row,
+        groups=groups,
+        validation_sample=validation_sample,
+        market_mean=market_mean,
+        market_std=market_std,
+    )
+
+
+def _cached_sequence_result(
+    result_path: Path,
+    fingerprint: str,
+) -> dict[str, Any] | None:
+    if not result_path.is_file():
+        return None
+    result = dict(json.loads(result_path.read_text(encoding="utf-8")))
+    if (
+        result.get("status") == "completed"
+        and result.get("fingerprint") == fingerprint
+        and cutoff_violation_count(result) == 0
+        and all(Path(item["path"]).is_file() for item in result["files"].values())
+    ):
+        return result
+    return None
+
+
+def _sequence_training_step(
+    *,
+    model: RawSequenceModel,
+    builder: RawSequenceBuilder,
+    optimizer: torch.optim.Optimizer,
+    scaler: torch.amp.GradScaler,
+    device: torch.device,
+    rows: np.ndarray,
+    target_by_row: np.ndarray,
+) -> float:
+    sequence, market = builder.build(rows)
+    sequence_tensor = torch.from_numpy(sequence).to(device, non_blocking=True)
+    market_tensor = torch.from_numpy(market).to(device, non_blocking=True)
+    target_tensor = torch.from_numpy(target_by_row[rows]).to(device, non_blocking=True)
+    optimizer.zero_grad(set_to_none=True)
+    with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
+        prediction = model(sequence_tensor, market_tensor)
+        loss = ranking_loss(
+            prediction,
+            target_tensor,
+            dates_per_batch=DATES_PER_BATCH,
+            stocks_per_date=STOCKS_PER_DATE,
+        )
+    scaler.scale(loss).backward()
+    scaler.unscale_(optimizer)
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+    scaler.step(optimizer)
+    scaler.update()
+    return float(loss.detach().cpu())
+
+
+def _sample_validation_ic(
+    *,
+    model: RawSequenceModel,
+    builder: RawSequenceBuilder,
+    inputs: _SequenceFoldInputs,
+    device: torch.device,
+) -> float:
+    prediction = _predict_rows(
+        model,
+        builder,
+        inputs.validation_sample,
+        device,
+        batch_size=8192,
+    )
+    actual = np.asarray(
+        inputs.values[inputs.validation_sample, inputs.target_column],
+        dtype=np.float32,
+    )
+    _, metrics = daily_rank_metrics(
+        dates=inputs.data.dates[inputs.validation_sample],
+        actual=actual,
+        prediction=prediction,
+    )
+    return float(metrics["daily_rank_ic_mean"])
+
+
+def _fit_sequence(inputs: _SequenceFoldInputs, fold_number: int) -> _SequenceFit:
+    builder = RawSequenceBuilder(
+        inputs.data,
+        market_mean=inputs.market_mean,
+        market_std=inputs.market_std,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = RawSequenceModel().to(device)
@@ -419,14 +498,13 @@ def train_fold(fold_number: int) -> dict[str, Any]:
     best_state: dict[str, torch.Tensor] | None = None
     patience_used = 0
     history: list[dict[str, Any]] = []
-    started = time.perf_counter()
     print(
         json.dumps(
             {
                 "event": "raw60_training_started",
                 "fold": fold_number,
-                "train_rows": len(train_rows),
-                "validation_rows": len(validation_rows),
+                "train_rows": len(inputs.train_rows),
+                "validation_rows": len(inputs.validation_rows),
                 "device": str(device),
             }
         ),
@@ -436,41 +514,24 @@ def train_fold(fold_number: int) -> dict[str, Any]:
         model.train()
         losses: list[float] = []
         for _ in range(STEPS_PER_EPOCH):
-            rows = _sample_rows(groups, rng)
-            sequence, market = builder.build(rows)
-            sequence_tensor = torch.from_numpy(sequence).to(device, non_blocking=True)
-            market_tensor = torch.from_numpy(market).to(device, non_blocking=True)
-            target_tensor = torch.from_numpy(target_by_row[rows]).to(
-                device, non_blocking=True
-            )
-            optimizer.zero_grad(set_to_none=True)
-            with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
-                prediction = model(sequence_tensor, market_tensor)
-                loss = ranking_loss(
-                    prediction,
-                    target_tensor,
-                    dates_per_batch=DATES_PER_BATCH,
-                    stocks_per_date=STOCKS_PER_DATE,
+            rows = _sample_rows(inputs.groups, rng)
+            losses.append(
+                _sequence_training_step(
+                    model=model,
+                    builder=builder,
+                    optimizer=optimizer,
+                    scaler=scaler,
+                    device=device,
+                    rows=rows,
+                    target_by_row=inputs.target_by_row,
                 )
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-            scaler.step(optimizer)
-            scaler.update()
-            losses.append(float(loss.detach().cpu()))
-
-        sample_prediction = _predict_rows(
-            model, builder, validation_sample, device, batch_size=8192
+            )
+        validation_ic = _sample_validation_ic(
+            model=model,
+            builder=builder,
+            inputs=inputs,
+            device=device,
         )
-        sample_actual = np.asarray(
-            values[validation_sample, target_column], dtype=np.float32
-        )
-        _, sample_metrics = daily_rank_metrics(
-            dates=data.dates[validation_sample],
-            actual=sample_actual,
-            prediction=sample_prediction,
-        )
-        validation_ic = float(sample_metrics["daily_rank_ic_mean"])
         history.append(
             {
                 "epoch": epoch,
@@ -491,10 +552,7 @@ def train_fold(fold_number: int) -> dict[str, Any]:
         if validation_ic > best_ic + 1.0e-5:
             best_ic = validation_ic
             best_epoch = epoch
-            best_state = {
-                name: tensor.detach().cpu().clone()
-                for name, tensor in model.state_dict().items()
-            }
+            best_state = {name: tensor.detach().cpu().clone() for name, tensor in model.state_dict().items()}
             patience_used = 0
         else:
             patience_used += 1
@@ -504,60 +562,102 @@ def train_fold(fold_number: int) -> dict[str, Any]:
     if best_state is None:
         raise RawSequenceError("sequence training produced no checkpoint")
     model.load_state_dict(best_state)
-    prediction = _predict_rows(model, builder, validation_rows, device)
-    elapsed = time.perf_counter() - started
-    daily, metrics = daily_rank_metrics(
-        dates=data.dates[validation_rows][validation_valid],
-        actual=validation_raw[validation_valid],
-        prediction=prediction[validation_valid],
+    return _SequenceFit(
+        model=model,
+        builder=builder,
+        device=device,
+        best_state=best_state,
+        best_epoch=best_epoch,
+        best_ic=best_ic,
+        history=history,
     )
 
-    root.mkdir(parents=True, exist_ok=True)
-    model_path = root / "model.pt"
+
+def _write_sequence_outputs(
+    *,
+    inputs: _SequenceFoldInputs,
+    fit: _SequenceFit,
+    prediction: np.ndarray,
+    daily: pd.DataFrame,
+    fold_number: int,
+) -> tuple[dict[str, dict[str, str]], pd.DataFrame]:
+    inputs.root.mkdir(parents=True, exist_ok=True)
+    model_path = inputs.root / "model.pt"
     partial_model = model_path.with_suffix(".pt.partial")
     torch.save(
         {
-            "state_dict": best_state,
-            "contract": contract,
-            "market_mean": market_mean,
-            "market_std": market_std,
+            "state_dict": fit.best_state,
+            "contract": inputs.contract,
+            "market_mean": inputs.market_mean,
+            "market_std": inputs.market_std,
         },
         partial_model,
     )
     partial_model.replace(model_path)
-    prediction_frame = data.row_index.iloc[validation_rows][
+    frame = inputs.data.row_index.iloc[inputs.validation_rows][
         ["candidate_id", "date_idx", "trade_date", "symbol", "symbol_idx"]
     ].copy()
-    prediction_frame.insert(0, "row_position", validation_rows)
-    prediction_frame["fold"] = int(fold_number)
-    prediction_frame["score"] = prediction
-    prediction_frame["actual"] = validation_raw
-    prediction_frame["target_valid"] = validation_valid
-    prediction_path = root / "predictions.parquet"
-    daily_path = root / "daily_metrics.parquet"
-    prediction_frame.to_parquet(prediction_path, index=False)
+    frame.insert(0, "row_position", inputs.validation_rows)
+    frame["fold"] = int(fold_number)
+    frame["score"] = prediction
+    frame["actual"] = inputs.validation_raw
+    frame["target_valid"] = inputs.validation_valid
+    prediction_path = inputs.root / "predictions.parquet"
+    daily_path = inputs.root / "daily_metrics.parquet"
+    history_path = inputs.root / "history.parquet"
+    frame.to_parquet(prediction_path, index=False)
     daily.to_parquet(daily_path, index=False)
-    history_path = root / "history.parquet"
-    pd.DataFrame(history).to_parquet(history_path, index=False)
+    pd.DataFrame(fit.history).to_parquet(history_path, index=False)
+    return {
+        "model": {"path": str(model_path)},
+        "predictions": {"path": str(prediction_path)},
+        "daily_metrics": {"path": str(daily_path)},
+        "history": {"path": str(history_path)},
+    }, frame
+
+
+def train_fold(fold_number: int) -> dict[str, Any]:
+    inputs = _sequence_fold_inputs(fold_number)
+    result_path = inputs.root / "result.json"
+    cached = _cached_sequence_result(result_path, inputs.fingerprint)
+    if cached is not None:
+        return cached
+    _seed_everything(SEED + int(fold_number))
+    started = time.perf_counter()
+    fit = _fit_sequence(inputs, fold_number)
+    prediction = _predict_rows(
+        fit.model,
+        fit.builder,
+        inputs.validation_rows,
+        fit.device,
+    )
+    elapsed = time.perf_counter() - started
+    daily, metrics = daily_rank_metrics(
+        dates=inputs.data.dates[inputs.validation_rows][inputs.validation_valid],
+        actual=inputs.validation_raw[inputs.validation_valid],
+        prediction=prediction[inputs.validation_valid],
+    )
+    files, prediction_frame = _write_sequence_outputs(
+        inputs=inputs,
+        fit=fit,
+        prediction=prediction,
+        daily=daily,
+        fold_number=fold_number,
+    )
     result = {
         "status": "completed",
         "completed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "fingerprint": fingerprint,
+        "fingerprint": inputs.fingerprint,
         "model_family": "raw60_temporal_cnn",
-        "fold": fold,
-        "contract": contract,
-        "best_epoch": best_epoch,
-        "best_sample_validation_rank_ic": best_ic,
+        "fold": inputs.fold,
+        "contract": inputs.contract,
+        "best_epoch": fit.best_epoch,
+        "best_sample_validation_rank_ic": fit.best_ic,
         "metrics": metrics,
         "elapsed_seconds": elapsed,
-        "history": history,
+        "history": fit.history,
         **cutoff_audit_fields(),
-        "files": {
-            "model": {"path": str(model_path)},
-            "predictions": {"path": str(prediction_path)},
-            "daily_metrics": {"path": str(daily_path)},
-            "history": {"path": str(history_path)},
-        },
+        "files": files,
     }
     write_json(result_path, _safe_json(result))
     print(
@@ -565,14 +665,14 @@ def train_fold(fold_number: int) -> dict[str, Any]:
             {
                 "event": "raw60_training_completed",
                 "fold": fold_number,
-                "best_epoch": best_epoch,
+                "best_epoch": fit.best_epoch,
                 "rank_ic": metrics["daily_rank_ic_mean"],
                 "elapsed_seconds": elapsed,
             }
         ),
         flush=True,
     )
-    del model, builder, target_by_row, prediction_frame
+    del fit, prediction_frame
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -597,17 +697,12 @@ def load_fold_results() -> tuple[list[dict[str, Any]], pd.DataFrame]:
             result.get("status") != "completed"
             or result.get("fingerprint") != _task_fingerprint(data, folds[fold - 1])
             or cutoff_violation_count(result) != 0
-            or not all(
-                Path(record["path"]).is_file()
-                for record in result.get("files", {}).values()
-            )
+            or not all(Path(record["path"]).is_file() for record in result.get("files", {}).values())
         ):
             raise ResearchDataError(f"raw60 fold is stale or invalid: {path}")
         results.append(result)
         frames.append(pd.read_parquet(Path(result["files"]["predictions"]["path"])))
-    oof = pd.concat(frames, ignore_index=True).sort_values(
-        ["date_idx", "symbol_idx"], kind="stable"
-    )
+    oof = pd.concat(frames, ignore_index=True).sort_values(["date_idx", "symbol_idx"], kind="stable")
     if oof.duplicated("row_position").any():
         raise ResearchDataError("raw60 OOF row positions overlap")
     return results, oof

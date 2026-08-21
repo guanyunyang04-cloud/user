@@ -6,8 +6,8 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ import duckdb
 import pandas as pd
 import pyarrow.parquet as pq
 
+from quantlab.core.io import atomic_copy_file
 from quantlab.data.core.json_io import json_safe
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.qdp_v2.manifest import (
@@ -49,10 +50,43 @@ SHARE_DOMAIN = "share_capital"
 VALUATION_DOMAIN = "valuation"
 FACTOR_DOMAIN = "stk_factor_pro_raw"
 DAILY_DOMAIN = "market_daily_raw"
+EXPECTED_CANDIDATE_COUNT = 559_513
+EXPECTED_UNRESOLVED_COUNT = 3_290
 
 
 class ShareCapitalRepairError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _RepairContext:
+    workspace: Path
+    runtime: Path
+    input_ids: dict[str, str]
+    share_manifest: DatasetManifest
+    valuation_manifest: DatasetManifest
+    share_scan: str
+    factor_scan: str
+    valuation_scan: str
+    daily_scan: str
+
+
+@dataclass(frozen=True)
+class _RepairInventory:
+    candidate_path: Path
+    unresolved_path: Path
+    boundary_path: Path
+    candidate_count: int
+    unresolved_count: int
+    boundary_count: int
+
+
+@dataclass(frozen=True)
+class _PreparedData:
+    share_paths: list[Path]
+    valuation_paths: list[Path]
+    share_scan: str
+    valuation_scan: str
 
 
 def _workspace(value: str | Path | None) -> Path:
@@ -88,10 +122,7 @@ def _write_state(workspace: Path, state: Mapping[str, Any]) -> None:
 
 
 def _sql_paths(paths: Sequence[Path]) -> str:
-    return ",".join(
-        f"'{path.resolve().as_posix().replace(chr(39), chr(39) * 2)}'"
-        for path in paths
-    )
+    return ",".join(f"'{path.resolve().as_posix().replace(chr(39), chr(39) * 2)}'" for path in paths)
 
 
 def _dataset(
@@ -125,9 +156,7 @@ def _copy_query(
     if temporary.exists():
         temporary.unlink()
     quoted = temporary.resolve().as_posix().replace("'", "''")
-    connection.execute(
-        f"COPY ({query}) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD)"
-    )
+    connection.execute(f"COPY ({query}) TO '{quoted}' (FORMAT PARQUET, COMPRESSION ZSTD)")
     os.replace(temporary, path)
 
 
@@ -142,9 +171,7 @@ def _content_dataset_id(domain: str, paths: Sequence[Path]) -> str:
 def _repair_value(existing: Any, provider_total_share_wan: Any) -> float | None:
     if pd.notna(existing):
         return float(existing)
-    provider = pd.to_numeric(
-        pd.Series([provider_total_share_wan]), errors="coerce"
-    ).iloc[0]
+    provider = pd.to_numeric(pd.Series([provider_total_share_wan]), errors="coerce").iloc[0]
     if pd.isna(provider) or float(provider) <= 0:
         return None
     return float(provider) * TOTAL_SHARE_UNIT_MULTIPLIER
@@ -158,300 +185,347 @@ def _market_value(close: Any, shares: Any) -> float | None:
     return float(price) * float(count)
 
 
-def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
-    workspace = _workspace(workspace_root)
-    state = _read_state(workspace)
-    if state.get("status") in {"prepared", "applied"}:
-        return state
-    root = qdp_v2_root(workspace)
-    active = active_dataset_map(read_active_manifest(root))
-    input_ids = {
-        domain: active[domain]
-        for domain in (SHARE_DOMAIN, VALUATION_DOMAIN, FACTOR_DOMAIN, DAILY_DOMAIN)
-    }
+def _parquet_scan(paths: Sequence[Path]) -> str:
+    return f"read_parquet([{_sql_paths(paths)}], union_by_name=true, hive_partitioning=false)"
+
+
+def _repair_context(workspace: Path) -> _RepairContext:
+    active = active_dataset_map(read_active_manifest(qdp_v2_root(workspace)))
+    domains = (SHARE_DOMAIN, VALUATION_DOMAIN, FACTOR_DOMAIN, DAILY_DOMAIN)
+    input_ids = {domain: active[domain] for domain in domains}
     share_manifest, share_paths = _dataset(workspace, domain=SHARE_DOMAIN)
     valuation_manifest, valuation_paths = _dataset(workspace, domain=VALUATION_DOMAIN)
     _, factor_paths = _dataset(workspace, domain=FACTOR_DOMAIN)
     _, daily_paths = _dataset(workspace, domain=DAILY_DOMAIN)
-    runtime = _runtime(workspace)
+    return _RepairContext(
+        workspace=workspace,
+        runtime=_runtime(workspace),
+        input_ids=input_ids,
+        share_manifest=share_manifest,
+        valuation_manifest=valuation_manifest,
+        share_scan=_parquet_scan(share_paths),
+        factor_scan=_parquet_scan(factor_paths),
+        valuation_scan=_parquet_scan(valuation_paths),
+        daily_scan=_parquet_scan(daily_paths),
+    )
+
+
+def _open_connection(runtime: Path) -> duckdb.DuckDBPyConnection:
     temp = runtime / "duckdb_tmp"
     temp.mkdir(parents=True, exist_ok=True)
     connection = duckdb.connect()
     connection.execute("SET threads=4")
+    quoted_temp = temp.resolve().as_posix().replace("'", "''")
+    connection.execute(f"SET temp_directory='{quoted_temp}'")
+    return connection
+
+
+def _prepare_inventory(
+    connection: duckdb.DuckDBPyConnection,
+    context: _RepairContext,
+) -> _RepairInventory:
     connection.execute(
-        f"SET temp_directory='{temp.resolve().as_posix().replace(chr(39), chr(39) * 2)}'"
+        f"""
+        CREATE TEMP TABLE repair_candidates AS
+        SELECT s.symbol,s.trade_date,
+               try_cast(f.total_share AS DOUBLE) AS provider_total_share_wan,
+               try_cast(f.total_share AS DOUBLE)*{TOTAL_SHARE_UNIT_MULTIPLIER}
+                 AS repaired_total_share,
+               s.total_share AS prior_total_share,
+               s.total_share_source_date AS prior_total_share_source_date,
+               'observed' AS status,
+               'stk_factor_pro_raw.total_share' AS fill_source,
+               'same_day_wan_shares_x10000' AS fill_method,
+               s.trade_date AS source_date
+        FROM {context.share_scan} s
+        JOIN {context.factor_scan} f USING(symbol,trade_date)
+        WHERE s.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+          AND s.total_share IS NULL
+          AND try_cast(f.total_share AS DOUBLE)>0
+        """
     )
-    share_scan = (
-        f"read_parquet([{_sql_paths(share_paths)}], union_by_name=true, "
-        "hive_partitioning=false)"
+    candidate_count = int(connection.execute("SELECT count(*) FROM repair_candidates").fetchone()[0])
+    if candidate_count != EXPECTED_CANDIDATE_COUNT:
+        raise ShareCapitalRepairError(f"unexpected_repair_candidate_count:{candidate_count}")
+    candidate_path = context.runtime / "inventory" / "repair_candidates.parquet"
+    _copy_query(
+        connection,
+        query="SELECT * FROM repair_candidates ORDER BY trade_date,symbol",
+        path=candidate_path,
     )
-    factor_scan = (
-        f"read_parquet([{_sql_paths(factor_paths)}], union_by_name=true, "
-        "hive_partitioning=false)"
+    unresolved_query = f"""
+      SELECT s.symbol,s.trade_date,'unknown' AS status,
+             'same_day_stk_factor_total_share_unavailable' AS reason
+      FROM {context.share_scan} s
+      LEFT JOIN repair_candidates c USING(symbol,trade_date)
+      WHERE s.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+        AND s.total_share IS NULL AND c.symbol IS NULL
+      ORDER BY s.trade_date,s.symbol
+    """
+    unresolved_path = context.runtime / "inventory" / "unresolved.parquet"
+    _copy_query(connection, query=unresolved_query, path=unresolved_path)
+    unresolved_count = int(connection.execute(f"SELECT count(*) FROM ({unresolved_query})").fetchone()[0])
+    boundary_query = f"""
+      WITH ordered AS (
+        SELECT symbol,trade_date,total_share,
+          last_value(total_share IGNORE NULLS) OVER (
+            PARTITION BY symbol ORDER BY trade_date
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+          ) AS previous_known_total_share,
+          first_value(total_share IGNORE NULLS) OVER (
+            PARTITION BY symbol ORDER BY trade_date
+            ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING
+          ) AS next_known_total_share
+        FROM {context.share_scan}
+        WHERE trade_date<='{END_DATE}'
+      )
+      SELECT c.symbol,c.trade_date,c.repaired_total_share,
+             o.previous_known_total_share,o.next_known_total_share,
+             CASE WHEN o.previous_known_total_share>0 THEN
+               abs(c.repaired_total_share-o.previous_known_total_share)
+                 /o.previous_known_total_share END AS previous_relative_change,
+             CASE WHEN o.next_known_total_share>0 THEN
+               abs(c.repaired_total_share-o.next_known_total_share)
+                 /o.next_known_total_share END AS next_relative_change,
+             'review_share_change_boundary' AS status
+      FROM repair_candidates c JOIN ordered o USING(symbol,trade_date)
+      WHERE (o.previous_known_total_share>0 AND
+             abs(c.repaired_total_share-o.previous_known_total_share)
+               /o.previous_known_total_share>{BOUNDARY_RELATIVE_TOLERANCE})
+         OR (o.next_known_total_share>0 AND
+             abs(c.repaired_total_share-o.next_known_total_share)
+               /o.next_known_total_share>{BOUNDARY_RELATIVE_TOLERANCE})
+      ORDER BY c.trade_date,c.symbol
+    """
+    boundary_path = context.runtime / "inventory" / "share_change_boundary_review.parquet"
+    _copy_query(connection, query=boundary_query, path=boundary_path)
+    boundary_count = int(connection.execute(f"SELECT count(*) FROM ({boundary_query})").fetchone()[0])
+    return _RepairInventory(
+        candidate_path=candidate_path,
+        unresolved_path=unresolved_path,
+        boundary_path=boundary_path,
+        candidate_count=candidate_count,
+        unresolved_count=unresolved_count,
+        boundary_count=boundary_count,
     )
-    valuation_scan = (
-        f"read_parquet([{_sql_paths(valuation_paths)}], union_by_name=true, "
-        "hive_partitioning=false)"
-    )
-    daily_scan = (
-        f"read_parquet([{_sql_paths(daily_paths)}], union_by_name=true, "
-        "hive_partitioning=false)"
-    )
-    try:
-        connection.execute(
-            f"""
-            CREATE TEMP TABLE repair_candidates AS
-            SELECT s.symbol,s.trade_date,
-                   try_cast(f.total_share AS DOUBLE) AS provider_total_share_wan,
-                   try_cast(f.total_share AS DOUBLE)*{TOTAL_SHARE_UNIT_MULTIPLIER}
-                     AS repaired_total_share,
-                   s.total_share AS prior_total_share,
-                   s.total_share_source_date AS prior_total_share_source_date,
-                   'observed' AS status,
-                   'stk_factor_pro_raw.total_share' AS fill_source,
-                   'same_day_wan_shares_x10000' AS fill_method,
-                   s.trade_date AS source_date
-            FROM {share_scan} s
-            JOIN {factor_scan} f USING(symbol,trade_date)
-            WHERE s.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
-              AND s.total_share IS NULL
-              AND try_cast(f.total_share AS DOUBLE)>0
-            """
-        )
-        candidate_count = int(
-            connection.execute("SELECT count(*) FROM repair_candidates").fetchone()[0]
-        )
-        if candidate_count != 559_513:
-            raise ShareCapitalRepairError(
-                f"unexpected_repair_candidate_count:{candidate_count}"
-            )
-        candidate_path = runtime / "inventory" / "repair_candidates.parquet"
-        _copy_query(
-            connection,
-            query="SELECT * FROM repair_candidates ORDER BY trade_date,symbol",
-            path=candidate_path,
-        )
-        unresolved_query = f"""
-          SELECT s.symbol,s.trade_date,'unknown' AS status,
-                 'same_day_stk_factor_total_share_unavailable' AS reason
-          FROM {share_scan} s
+
+
+def _prepare_share_paths(
+    connection: duckdb.DuckDBPyConnection,
+    context: _RepairContext,
+) -> list[Path]:
+    root = context.runtime / "prepared" / SHARE_DOMAIN
+    paths: list[Path] = []
+    fill_method = "same_day_stk_factor_pro_raw_total_share_wan_x10000"
+    for year in range(2010, 2027):
+        path = root / f"year={year}" / "part-0000.parquet"
+        query = f"""
+          SELECT s.symbol,s.trade_date,
+            CASE WHEN c.symbol IS NOT NULL THEN c.repaired_total_share
+                 ELSE s.total_share END AS total_share,
+            s.float_share,s.restricted_share,
+            CASE WHEN c.symbol IS NOT NULL THEN c.source_date
+                 ELSE s.total_share_source_date END AS total_share_source_date,
+            s.float_share_source_date,s.restricted_share_source_date,
+            CASE WHEN c.symbol IS NOT NULL THEN '{fill_method}'
+                 ELSE s.share_fill_method END AS share_fill_method,
+            CASE WHEN c.symbol IS NOT NULL THEN
+                 concat(s.source,'+stk_factor_pro_raw_total_share_repair')
+                 ELSE s.source END AS source
+          FROM {context.share_scan} s
           LEFT JOIN repair_candidates c USING(symbol,trade_date)
-          WHERE s.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
-            AND s.total_share IS NULL AND c.symbol IS NULL
+          WHERE s.trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
           ORDER BY s.trade_date,s.symbol
         """
-        unresolved_path = runtime / "inventory" / "unresolved.parquet"
-        _copy_query(connection, query=unresolved_query, path=unresolved_path)
-        unresolved_count = int(
-            connection.execute(f"SELECT count(*) FROM ({unresolved_query})").fetchone()[0]
-        )
+        _copy_query(connection, query=query, path=path)
+        paths.append(path)
+    return paths
 
-        boundary_query = f"""
-          WITH ordered AS (
-            SELECT symbol,trade_date,total_share,
-              last_value(total_share IGNORE NULLS) OVER (
-                PARTITION BY symbol ORDER BY trade_date
-                ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-              ) AS previous_known_total_share,
-              first_value(total_share IGNORE NULLS) OVER (
-                PARTITION BY symbol ORDER BY trade_date
-                ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING
-              ) AS next_known_total_share
-            FROM {share_scan}
-            WHERE trade_date<='{END_DATE}'
-          )
-          SELECT c.symbol,c.trade_date,c.repaired_total_share,
-                 o.previous_known_total_share,o.next_known_total_share,
-                 CASE WHEN o.previous_known_total_share>0 THEN
-                   abs(c.repaired_total_share-o.previous_known_total_share)
-                     /o.previous_known_total_share END AS previous_relative_change,
-                 CASE WHEN o.next_known_total_share>0 THEN
-                   abs(c.repaired_total_share-o.next_known_total_share)
-                     /o.next_known_total_share END AS next_relative_change,
-                 'review_share_change_boundary' AS status
-          FROM repair_candidates c JOIN ordered o USING(symbol,trade_date)
-          WHERE (o.previous_known_total_share>0 AND
-                 abs(c.repaired_total_share-o.previous_known_total_share)
-                   /o.previous_known_total_share>{BOUNDARY_RELATIVE_TOLERANCE})
-             OR (o.next_known_total_share>0 AND
-                 abs(c.repaired_total_share-o.next_known_total_share)
-                   /o.next_known_total_share>{BOUNDARY_RELATIVE_TOLERANCE})
-          ORDER BY c.trade_date,c.symbol
+
+def _prepare_valuation_paths(
+    connection: duckdb.DuckDBPyConnection,
+    context: _RepairContext,
+    prepared_share_scan: str,
+) -> list[Path]:
+    root = context.runtime / "prepared" / VALUATION_DOMAIN
+    paths: list[Path] = []
+    for year in range(2010, 2027):
+        path = root / f"year={year}" / "part-0000.parquet"
+        query = f"""
+          SELECT v.symbol,v.trade_date,
+            CASE WHEN v.trade_date<='{END_DATE}'
+                 THEN d.close*s.total_share ELSE v.total_mv END AS total_mv,
+            CASE WHEN v.trade_date<='{END_DATE}'
+                 THEN d.close*s.float_share ELSE v.circ_mv END AS circ_mv,
+            v.pe,v.pb,v.turnover_rate,
+            CASE WHEN c.symbol IS NOT NULL THEN
+              concat(v.source,'+qdp_close_x_repaired_total_share')
+              ELSE v.source END AS source
+          FROM {context.valuation_scan} v
+          JOIN {prepared_share_scan} s USING(symbol,trade_date)
+          JOIN {context.daily_scan} d USING(symbol,trade_date)
+          LEFT JOIN repair_candidates c USING(symbol,trade_date)
+          WHERE v.trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
+          ORDER BY v.trade_date,v.symbol
         """
-        boundary_path = runtime / "inventory" / "share_change_boundary_review.parquet"
-        _copy_query(connection, query=boundary_query, path=boundary_path)
-        boundary_count = int(
-            connection.execute(f"SELECT count(*) FROM ({boundary_query})").fetchone()[0]
-        )
+        _copy_query(connection, query=query, path=path)
+        paths.append(path)
+    return paths
 
-        prepared_share_root = runtime / "prepared" / SHARE_DOMAIN
-        prepared_share_paths: list[Path] = []
-        share_fill_method = "same_day_stk_factor_pro_raw_total_share_wan_x10000"
-        for year in range(2010, 2027):
-            path = prepared_share_root / f"year={year}" / "part-0000.parquet"
-            query = f"""
-              SELECT s.symbol,s.trade_date,
-                CASE WHEN c.symbol IS NOT NULL THEN c.repaired_total_share
-                     ELSE s.total_share END AS total_share,
-                s.float_share,s.restricted_share,
-                CASE WHEN c.symbol IS NOT NULL THEN c.source_date
-                     ELSE s.total_share_source_date END AS total_share_source_date,
-                s.float_share_source_date,s.restricted_share_source_date,
-                CASE WHEN c.symbol IS NOT NULL THEN '{share_fill_method}'
-                     ELSE s.share_fill_method END AS share_fill_method,
-                CASE WHEN c.symbol IS NOT NULL THEN
-                     concat(s.source,'+stk_factor_pro_raw_total_share_repair')
-                     ELSE s.source END AS source
-              FROM {share_scan} s
-              LEFT JOIN repair_candidates c USING(symbol,trade_date)
-              WHERE s.trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
-              ORDER BY s.trade_date,s.symbol
-            """
-            _copy_query(connection, query=query, path=path)
-            prepared_share_paths.append(path)
 
-        prepared_share_scan = (
-            f"read_parquet([{_sql_paths(prepared_share_paths)}], "
-            "union_by_name=true, hive_partitioning=false)"
-        )
-        prepared_valuation_root = runtime / "prepared" / VALUATION_DOMAIN
-        prepared_valuation_paths: list[Path] = []
-        for year in range(2010, 2027):
-            path = prepared_valuation_root / f"year={year}" / "part-0000.parquet"
-            query = f"""
-              SELECT v.symbol,v.trade_date,
-                CASE WHEN v.trade_date<='{END_DATE}'
-                     THEN d.close*s.total_share ELSE v.total_mv END AS total_mv,
-                CASE WHEN v.trade_date<='{END_DATE}'
-                     THEN d.close*s.float_share ELSE v.circ_mv END AS circ_mv,
-                v.pe,v.pb,v.turnover_rate,
-                CASE WHEN c.symbol IS NOT NULL THEN
-                  concat(v.source,'+qdp_close_x_repaired_total_share')
-                  ELSE v.source END AS source
-              FROM {valuation_scan} v
-              JOIN {prepared_share_scan} s USING(symbol,trade_date)
-              JOIN {daily_scan} d USING(symbol,trade_date)
-              LEFT JOIN repair_candidates c USING(symbol,trade_date)
-              WHERE v.trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
-              ORDER BY v.trade_date,v.symbol
-            """
-            _copy_query(connection, query=query, path=path)
-            prepared_valuation_paths.append(path)
+def _prepare_datasets(
+    connection: duckdb.DuckDBPyConnection,
+    context: _RepairContext,
+) -> _PreparedData:
+    share_paths = _prepare_share_paths(connection, context)
+    share_scan = _parquet_scan(share_paths)
+    valuation_paths = _prepare_valuation_paths(connection, context, share_scan)
+    return _PreparedData(
+        share_paths=share_paths,
+        valuation_paths=valuation_paths,
+        share_scan=share_scan,
+        valuation_scan=_parquet_scan(valuation_paths),
+    )
 
-        prepared_valuation_scan = (
-            f"read_parquet([{_sql_paths(prepared_valuation_paths)}], "
-            "union_by_name=true, hive_partitioning=false)"
-        )
-        share_stats = connection.execute(
+
+def _validate_prepared(
+    connection: duckdb.DuckDBPyConnection,
+    context: _RepairContext,
+    prepared: _PreparedData,
+) -> dict[str, Any]:
+    share_stats = connection.execute(
+        f"""
+        SELECT count(*),min(trade_date),max(trade_date),
+          count(*) FILTER(WHERE trade_date<='{END_DATE}' AND total_share IS NULL),
+          count(*) FILTER(WHERE trade_date>'{END_DATE}')
+        FROM {prepared.share_scan}
+        """
+    ).fetchone()
+    valuation_stats = connection.execute(
+        f"SELECT count(*),min(trade_date),max(trade_date),"
+        f"count(*) FILTER(WHERE trade_date>'{END_DATE}') "
+        f"FROM {prepared.valuation_scan}"
+    ).fetchone()
+    existing_share_mismatch = int(
+        connection.execute(
             f"""
-            SELECT count(*),min(trade_date),max(trade_date),
-              count(*) FILTER(WHERE trade_date<='{END_DATE}' AND total_share IS NULL),
-              count(*) FILTER(WHERE trade_date>'{END_DATE}')
-            FROM {prepared_share_scan}
+            SELECT count(*) FROM {context.share_scan} old
+            JOIN {prepared.share_scan} new USING(symbol,trade_date)
+            WHERE old.trade_date<='{END_DATE}' AND old.total_share IS NOT NULL
+              AND new.total_share IS DISTINCT FROM old.total_share
             """
-        ).fetchone()
-        valuation_stats = connection.execute(
-            f"SELECT count(*),min(trade_date),max(trade_date),"
-            f"count(*) FILTER(WHERE trade_date>'{END_DATE}') "
-            f"FROM {prepared_valuation_scan}"
-        ).fetchone()
-        existing_share_mismatch = int(
-            connection.execute(
-                f"""
-                SELECT count(*) FROM {share_scan} old
-                JOIN {prepared_share_scan} new USING(symbol,trade_date)
-                WHERE old.trade_date<='{END_DATE}' AND old.total_share IS NOT NULL
-                  AND new.total_share IS DISTINCT FROM old.total_share
-                """
-            ).fetchone()[0]
-        )
-        share_2026_mismatch = int(
-            connection.execute(
-                f"""
-                SELECT count(*) FROM (
-                  (SELECT * FROM {share_scan} WHERE trade_date>'{END_DATE}')
-                  EXCEPT ALL
-                  (SELECT * FROM {prepared_share_scan} WHERE trade_date>'{END_DATE}')
-                )
-                """
-            ).fetchone()[0]
-        )
-        valuation_2026_mismatch = int(
-            connection.execute(
-                f"""
-                SELECT count(*) FROM (
-                  (SELECT * FROM {valuation_scan} WHERE trade_date>'{END_DATE}')
-                  EXCEPT ALL
-                  (SELECT * FROM {prepared_valuation_scan} WHERE trade_date>'{END_DATE}')
-                )
-                """
-            ).fetchone()[0]
-        )
-        formula_errors = connection.execute(
+        ).fetchone()[0]
+    )
+    share_2026_mismatch = int(
+        connection.execute(
             f"""
-            SELECT
-              count(*) FILTER(WHERE s.total_share IS NOT NULL AND
-                (v.total_mv IS NULL OR abs(v.total_mv-d.close*s.total_share)>
-                  greatest(1.0,abs(d.close*s.total_share))*1e-10)),
-              count(*) FILTER(WHERE s.float_share IS NOT NULL AND
-                (v.circ_mv IS NULL OR abs(v.circ_mv-d.close*s.float_share)>
-                  greatest(1.0,abs(d.close*s.float_share))*1e-10))
-            FROM {prepared_valuation_scan} v
-            JOIN {prepared_share_scan} s USING(symbol,trade_date)
-            JOIN {daily_scan} d USING(symbol,trade_date)
-            WHERE v.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+            SELECT count(*) FROM (
+              (SELECT * FROM {context.share_scan} WHERE trade_date>'{END_DATE}')
+              EXCEPT ALL
+              (SELECT * FROM {prepared.share_scan} WHERE trade_date>'{END_DATE}')
+            )
             """
-        ).fetchone()
-        quality_paths = _quality_diagnostics(workspace)
-        quality_missing = None
-        if quality_paths:
-            quality_scan = (
-                f"read_parquet([{_sql_paths(quality_paths)}], "
-                "union_by_name=true, hive_partitioning=false)"
+        ).fetchone()[0]
+    )
+    valuation_2026_mismatch = int(
+        connection.execute(
+            f"""
+            SELECT count(*) FROM (
+              (SELECT * FROM {context.valuation_scan} WHERE trade_date>'{END_DATE}')
+              EXCEPT ALL
+              (SELECT * FROM {prepared.valuation_scan} WHERE trade_date>'{END_DATE}')
             )
-            quality_missing = int(
-                connection.execute(
-                    f"""
-                    SELECT count(*) FROM {quality_scan} q
-                    JOIN {prepared_share_scan} s USING(symbol,trade_date)
-                    WHERE q.trade_date BETWEEN '2011-01-01' AND '{END_DATE}'
-                      AND q.quality_liquidity_keep AND s.total_share IS NULL
-                    """
-                ).fetchone()[0]
-            )
-    finally:
-        connection.close()
+            """
+        ).fetchone()[0]
+    )
+    formula_errors = connection.execute(
+        f"""
+        SELECT
+          count(*) FILTER(WHERE s.total_share IS NOT NULL AND
+            (v.total_mv IS NULL OR abs(v.total_mv-d.close*s.total_share)>
+              greatest(1.0,abs(d.close*s.total_share))*1e-10)),
+          count(*) FILTER(WHERE s.float_share IS NOT NULL AND
+            (v.circ_mv IS NULL OR abs(v.circ_mv-d.close*s.float_share)>
+              greatest(1.0,abs(d.close*s.float_share))*1e-10))
+        FROM {prepared.valuation_scan} v
+        JOIN {prepared.share_scan} s USING(symbol,trade_date)
+        JOIN {context.daily_scan} d USING(symbol,trade_date)
+        WHERE v.trade_date BETWEEN '{START_DATE}' AND '{END_DATE}'
+        """
+    ).fetchone()
+    quality_missing = None
+    quality_paths = _quality_diagnostics(context.workspace)
+    if quality_paths:
+        quality_scan = _parquet_scan(quality_paths)
+        quality_missing = int(
+            connection.execute(
+                f"""
+                SELECT count(*) FROM {quality_scan} q
+                JOIN {prepared.share_scan} s USING(symbol,trade_date)
+                WHERE q.trade_date BETWEEN '2011-01-01' AND '{END_DATE}'
+                  AND q.quality_liquidity_keep AND s.total_share IS NULL
+                """
+            ).fetchone()[0]
+        )
+    return {
+        "share_stats": share_stats,
+        "valuation_stats": valuation_stats,
+        "existing_share_mismatch": existing_share_mismatch,
+        "share_2026_mismatch": share_2026_mismatch,
+        "valuation_2026_mismatch": valuation_2026_mismatch,
+        "formula_errors": formula_errors,
+        "quality_missing": quality_missing,
+    }
 
-    checks = {
-        "candidate_count_expected": candidate_count == 559_513,
-        "unresolved_count_expected": unresolved_count == 3_290,
-        "share_row_count_unchanged": int(share_stats[0]) == share_manifest.row_count,
-        "share_date_range_unchanged": str(share_stats[1]) == share_manifest.start_date
-        and str(share_stats[2]) == share_manifest.end_date,
-        "valuation_row_count_unchanged": int(valuation_stats[0])
-        == valuation_manifest.row_count,
-        "valuation_date_range_unchanged": str(valuation_stats[1])
-        == valuation_manifest.start_date
-        and str(valuation_stats[2]) == valuation_manifest.end_date,
-        "existing_nonnull_total_share_unchanged": existing_share_mismatch == 0,
-        "quality_liquidity_total_share_missing_zero": quality_missing == 0,
+
+def _prepare_checks(
+    context: _RepairContext,
+    inventory: _RepairInventory,
+    validation: Mapping[str, Any],
+) -> dict[str, bool]:
+    share_stats = validation["share_stats"]
+    valuation_stats = validation["valuation_stats"]
+    formula_errors = validation["formula_errors"]
+    return {
+        "candidate_count_expected": inventory.candidate_count == EXPECTED_CANDIDATE_COUNT,
+        "unresolved_count_expected": inventory.unresolved_count == EXPECTED_UNRESOLVED_COUNT,
+        "share_row_count_unchanged": int(share_stats[0]) == context.share_manifest.row_count,
+        "share_date_range_unchanged": str(share_stats[1]) == context.share_manifest.start_date
+        and str(share_stats[2]) == context.share_manifest.end_date,
+        "valuation_row_count_unchanged": int(valuation_stats[0]) == context.valuation_manifest.row_count,
+        "valuation_date_range_unchanged": str(valuation_stats[1]) == context.valuation_manifest.start_date
+        and str(valuation_stats[2]) == context.valuation_manifest.end_date,
+        "existing_nonnull_total_share_unchanged": validation["existing_share_mismatch"] == 0,
+        "quality_liquidity_total_share_missing_zero": validation["quality_missing"] == 0,
         "total_mv_formula_valid": int(formula_errors[0] or 0) == 0,
         "circ_mv_formula_valid": int(formula_errors[1] or 0) == 0,
-        "out_of_scope_2026_share_values_unchanged": share_2026_mismatch == 0,
-        "out_of_scope_2026_valuation_values_unchanged": valuation_2026_mismatch == 0,
+        "out_of_scope_2026_share_values_unchanged": validation["share_2026_mismatch"] == 0,
+        "out_of_scope_2026_valuation_values_unchanged": validation["valuation_2026_mismatch"] == 0,
         "provider_requests_2026": True,
     }
-    if not all(checks.values()):
-        raise ShareCapitalRepairError(f"prepared_contract_failed:{checks}")
+
+
+def _update_prepared_state(
+    state: dict[str, Any],
+    *,
+    context: _RepairContext,
+    inventory: _RepairInventory,
+    prepared: _PreparedData,
+    validation: Mapping[str, Any],
+    checks: Mapping[str, bool],
+) -> None:
+    share_stats = validation["share_stats"]
+    valuation_stats = validation["valuation_stats"]
+    formula_errors = validation["formula_errors"]
     state.update(
         {
             "status": "prepared",
-            "input_dataset_ids": input_ids,
-            "repair_candidate_count": candidate_count,
-            "unresolved_count": unresolved_count,
-            "boundary_review_count": boundary_count,
-            "formal_quality_missing_count": quality_missing,
-            "existing_nonnull_total_share_mismatch_count": existing_share_mismatch,
+            "input_dataset_ids": context.input_ids,
+            "repair_candidate_count": inventory.candidate_count,
+            "unresolved_count": inventory.unresolved_count,
+            "boundary_review_count": inventory.boundary_count,
+            "formal_quality_missing_count": validation["quality_missing"],
+            "existing_nonnull_total_share_mismatch_count": validation["existing_share_mismatch"],
             "formula_error_count": {
                 "total_mv": int(formula_errors[0] or 0),
                 "circ_mv": int(formula_errors[1] or 0),
@@ -459,22 +533,48 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
             "out_of_scope_2026": {
                 "provider_request_count": 0,
                 "repair_candidate_count": 0,
-                "modified_share_row_count": share_2026_mismatch,
-                "modified_valuation_row_count": valuation_2026_mismatch,
+                "modified_share_row_count": validation["share_2026_mismatch"],
+                "modified_valuation_row_count": validation["valuation_2026_mismatch"],
                 "pass_through_share_row_count": int(share_stats[4] or 0),
                 "pass_through_valuation_row_count": int(valuation_stats[3] or 0),
             },
             "prepared": {
-                SHARE_DOMAIN: [str(path) for path in prepared_share_paths],
-                VALUATION_DOMAIN: [str(path) for path in prepared_valuation_paths],
+                SHARE_DOMAIN: [str(path) for path in prepared.share_paths],
+                VALUATION_DOMAIN: [str(path) for path in prepared.valuation_paths],
             },
             "inventories": {
-                "repair_candidates": str(candidate_path),
-                "unresolved": str(unresolved_path),
-                "share_change_boundary_review": str(boundary_path),
+                "repair_candidates": str(inventory.candidate_path),
+                "unresolved": str(inventory.unresolved_path),
+                "share_change_boundary_review": str(inventory.boundary_path),
             },
-            "checks": checks,
+            "checks": dict(checks),
         }
+    )
+
+
+def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
+    workspace = _workspace(workspace_root)
+    state = _read_state(workspace)
+    if state.get("status") in {"prepared", "applied"}:
+        return state
+    context = _repair_context(workspace)
+    connection = _open_connection(context.runtime)
+    try:
+        inventory = _prepare_inventory(connection, context)
+        prepared = _prepare_datasets(connection, context)
+        validation = _validate_prepared(connection, context, prepared)
+    finally:
+        connection.close()
+    checks = _prepare_checks(context, inventory, validation)
+    if not all(checks.values()):
+        raise ShareCapitalRepairError(f"prepared_contract_failed:{checks}")
+    _update_prepared_state(
+        state,
+        context=context,
+        inventory=inventory,
+        prepared=prepared,
+        validation=validation,
+        checks=checks,
     )
     _write_state(workspace, state)
     return state
@@ -496,10 +596,7 @@ def _install(
         year = prepared.parent.name
         target = dataset_root / "shards" / year / "part-0000.parquet"
         if not target.is_file():
-            target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_suffix(".tmp.parquet")
-            shutil.copy2(prepared, temporary)
-            os.replace(temporary, target)
+            atomic_copy_file(prepared, target)
         parquet = pq.ParquetFile(target)
         year_value = int(year.split("=", 1)[1])
         entries.append(
@@ -521,9 +618,7 @@ def _install(
         layer=input_manifest.layer,
         frequency=input_manifest.frequency,
         contract_version=(
-            "qdp_v2_share_capital_strict_pit_v4"
-            if domain == SHARE_DOMAIN
-            else "qdp_v2_valuation_formula_v4"
+            "qdp_v2_share_capital_strict_pit_v4" if domain == SHARE_DOMAIN else "qdp_v2_valuation_formula_v4"
         ),
         primary_key=list(input_manifest.primary_key),
         start_date=input_manifest.start_date,
@@ -544,21 +639,13 @@ def _install(
         quality={
             **dict(input_manifest.quality or {}),
             "primary_key_unique": True,
-            "formal_quality_total_share_missing_rows": int(
-                state.get("formal_quality_missing_count", 0) or 0
-            ),
-            "unresolved_total_share_rows_through_2025": int(
-                state.get("unresolved_count", 0) or 0
-            ),
+            "formal_quality_total_share_missing_rows": int(state.get("formal_quality_missing_count", 0) or 0),
+            "unresolved_total_share_rows_through_2025": int(state.get("unresolved_count", 0) or 0),
             "existing_nonnull_total_share_mismatch_count": int(
                 state.get("existing_nonnull_total_share_mismatch_count", 0) or 0
             ),
-            "total_mv_formula_error_count": int(
-                dict(state.get("formula_error_count", {}) or {}).get("total_mv", 0)
-            ),
-            "circ_mv_formula_error_count": int(
-                dict(state.get("formula_error_count", {}) or {}).get("circ_mv", 0)
-            ),
+            "total_mv_formula_error_count": int(dict(state.get("formula_error_count", {}) or {}).get("total_mv", 0)),
+            "circ_mv_formula_error_count": int(dict(state.get("formula_error_count", {}) or {}).get("circ_mv", 0)),
         },
         schema=_manifest_schema_from_arrow(pq.read_schema(prepared_paths[0])),
         notes=[
@@ -634,15 +721,11 @@ def evaluate(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
             "valuation_dataset_active": active.get(VALUATION_DOMAIN)
             == dict(installed.get(VALUATION_DOMAIN, {}) or {}).get("dataset_id"),
             "repair_performed_2026_rows_zero": int(
-                dict(state.get("out_of_scope_2026", {}) or {}).get(
-                    "repair_candidate_count", -1
-                )
+                dict(state.get("out_of_scope_2026", {}) or {}).get("repair_candidate_count", -1)
             )
             == 0,
             "provider_requests_2026_zero": int(
-                dict(state.get("out_of_scope_2026", {}) or {}).get(
-                    "provider_request_count", -1
-                )
+                dict(state.get("out_of_scope_2026", {}) or {}).get("provider_request_count", -1)
             )
             == 0,
         }

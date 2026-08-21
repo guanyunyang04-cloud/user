@@ -9,12 +9,13 @@ explicit so they can be tested before the data is used in research.
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Final
 
 import numpy as np
 import pandas as pd
+
+from quantlab.core.io import sha256_file
 
 HEADER_SIZE: Final = 8
 RECORD_SIZE: Final = 64
@@ -92,16 +93,6 @@ def _mapped_records(path: Path) -> np.memmap:
     count = _record_count(path)
     _read_header(path)
     return np.memmap(path, dtype=KLINE_DTYPE, mode="r", offset=HEADER_SIZE, shape=(count,))
-
-
-def sha256_file(path: str | Path, *, block_size: int = 8 << 20) -> str:
-    """Return a content hash without loading a K-line file into memory."""
-
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        while block := stream.read(block_size):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def inspect_file(

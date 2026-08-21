@@ -29,6 +29,20 @@ class FactorTailUpdateError(RuntimeError):
     pass
 
 
+FACTOR_COLUMNS = (
+    "symbol",
+    "trade_date",
+    "fore_adjust_factor",
+    "back_adjust_factor",
+    "adjust_factor",
+    "factor_provider",
+    "factor_semantics",
+    "source",
+    "factor_source_date",
+    "ffill_days",
+)
+
+
 def missing_factor_keys(
     *,
     start_date: str,
@@ -77,34 +91,10 @@ def missing_factor_keys(
         ).fetchdf()
 
 
-def build_factor_tail_rows(
+def _fetch_factor_events(
     missing: pd.DataFrame,
-    *,
     provider: BaostockProvider,
-) -> tuple[pd.DataFrame, dict[str, Any]]:
-    columns = (
-        "symbol",
-        "trade_date",
-        "fore_adjust_factor",
-        "back_adjust_factor",
-        "adjust_factor",
-        "factor_provider",
-        "factor_semantics",
-        "source",
-        "factor_source_date",
-        "ffill_days",
-    )
-    if missing.empty:
-        return pd.DataFrame(columns=columns), {
-            "missing_key_count": 0,
-            "event_count": 0,
-            "continued_event_count": 0,
-            "initialized_symbol_count": 0,
-        }
-    required = {"symbol", "trade_date", "prior_date", "prior_fore", "prior_back", "prior_adjust"}
-    absent = sorted(required.difference(missing.columns))
-    if absent:
-        raise FactorTailUpdateError(f"factor_tail_missing_inventory_columns:{absent}")
+) -> pd.DataFrame:
     event_frames: list[pd.DataFrame] = []
     for trade_date in sorted(missing["trade_date"].astype(str).unique()):
         result = provider.fetch_date_partition(
@@ -117,71 +107,165 @@ def build_factor_tail_rows(
         frame = result.data.copy()
         if not frame.empty:
             event_frames.append(frame)
-    events = pd.concat(event_frames, ignore_index=True, sort=False) if event_frames else pd.DataFrame()
-    missing_symbols = set(missing["symbol"].astype(str))
-    if not events.empty:
-        events = events.loc[events["provider_symbol"].astype(str).isin(missing_symbols)].copy()
-        events["divid_operate_date"] = events["divid_operate_date"].astype(str).str.slice(0, 10)
-        for column in ("adjust_factor", "back_adjust_factor"):
-            events[column] = pd.to_numeric(events[column], errors="coerce")
-        if (
-            events[["adjust_factor", "back_adjust_factor"]].isna().any().any()
-            or events[["adjust_factor", "back_adjust_factor"]].le(0).any().any()
-        ):
-            raise FactorTailUpdateError("factor_tail_baostock_event_factor_invalid")
-        duplicate = events.duplicated(["provider_symbol", "divid_operate_date"], keep=False)
-        if duplicate.any():
-            conflicts = (
-                events.loc[duplicate]
-                .groupby(["provider_symbol", "divid_operate_date"])[
-                    ["adjust_factor", "back_adjust_factor"]
-                ]
-                .nunique()
-                .gt(1)
-                .any(axis=1)
-            )
-            if conflicts.any():
-                raise FactorTailUpdateError("factor_tail_baostock_event_duplicate_conflict")
-            events = events.drop_duplicates(["provider_symbol", "divid_operate_date"], keep="last")
+    return pd.concat(event_frames, ignore_index=True, sort=False) if event_frames else pd.DataFrame()
 
-    event_symbols = tuple(sorted(set(events.get("provider_symbol", pd.Series(dtype=str)).astype(str))))
-    history = pd.DataFrame()
-    if event_symbols:
-        result = provider.fetch_domain(
-            DomainFetchRequest(
-                domain=DataDomain.ADJUST_FACTOR,
-                symbols=event_symbols,
-                start_date="1990-01-01",
-                end_date=str(missing["trade_date"].max()),
-            )
+
+def _normalize_factor_events(
+    events: pd.DataFrame,
+    *,
+    missing_symbols: set[str],
+) -> pd.DataFrame:
+    if events.empty:
+        return events
+    events = events.loc[events["provider_symbol"].astype(str).isin(missing_symbols)].copy()
+    events["divid_operate_date"] = events["divid_operate_date"].astype(str).str.slice(0, 10)
+    for column in ("adjust_factor", "back_adjust_factor"):
+        events[column] = pd.to_numeric(events[column], errors="coerce")
+    factors = events[["adjust_factor", "back_adjust_factor"]]
+    if factors.isna().any().any() or factors.le(0).any().any():
+        raise FactorTailUpdateError("factor_tail_baostock_event_factor_invalid")
+    duplicate = events.duplicated(["provider_symbol", "divid_operate_date"], keep=False)
+    if duplicate.any():
+        conflicts = (
+            events.loc[duplicate]
+            .groupby(["provider_symbol", "divid_operate_date"])[["adjust_factor", "back_adjust_factor"]]
+            .nunique()
+            .gt(1)
+            .any(axis=1)
         )
-        if result.error_report:
-            raise FactorTailUpdateError(
-                f"factor_tail_baostock_history_errors:{len(result.error_report)}"
-            )
-        history = result.data.copy()
-        history["trade_date"] = history["trade_date"].astype(str).str.slice(0, 10)
-        for column in ("adjust_factor", "back_adjust_factor"):
-            history[column] = pd.to_numeric(history[column], errors="coerce")
-        history = history.loc[
-            np.isfinite(history["adjust_factor"])
-            & history["adjust_factor"].gt(0)
-            & np.isfinite(history["back_adjust_factor"])
-            & history["back_adjust_factor"].gt(0)
-        ]
+        if conflicts.any():
+            raise FactorTailUpdateError("factor_tail_baostock_event_duplicate_conflict")
+        events = events.drop_duplicates(["provider_symbol", "divid_operate_date"], keep="last")
+    return events
 
-    event_by_key = {
-        (str(row.provider_symbol), str(row.divid_operate_date)): {
-            "adjust_factor": float(row.adjust_factor),
-            "back_adjust_factor": float(row.back_adjust_factor),
+
+def _fetch_factor_history(
+    *,
+    events: pd.DataFrame,
+    maximum_date: str,
+    provider: BaostockProvider,
+) -> pd.DataFrame:
+    event_symbols = tuple(sorted(set(events.get("provider_symbol", pd.Series(dtype=str)).astype(str))))
+    if not event_symbols:
+        return pd.DataFrame()
+    result = provider.fetch_domain(
+        DomainFetchRequest(
+            domain=DataDomain.ADJUST_FACTOR,
+            symbols=event_symbols,
+            start_date="1990-01-01",
+            end_date=maximum_date,
+        )
+    )
+    if result.error_report:
+        raise FactorTailUpdateError(f"factor_tail_baostock_history_errors:{len(result.error_report)}")
+    history = result.data.copy()
+    history["trade_date"] = history["trade_date"].astype(str).str.slice(0, 10)
+    for column in ("adjust_factor", "back_adjust_factor"):
+        history[column] = pd.to_numeric(history[column], errors="coerce")
+    return history.loc[
+        np.isfinite(history["adjust_factor"])
+        & history["adjust_factor"].gt(0)
+        & np.isfinite(history["back_adjust_factor"])
+        & history["back_adjust_factor"].gt(0)
+    ]
+
+
+def _factor_lookup_tables(
+    events: pd.DataFrame,
+    history: pd.DataFrame,
+) -> tuple[dict[tuple[str, str], dict[str, float]], dict[str, pd.DataFrame]]:
+    event_by_key = (
+        {
+            (str(row.provider_symbol), str(row.divid_operate_date)): {
+                "adjust_factor": float(row.adjust_factor),
+                "back_adjust_factor": float(row.back_adjust_factor),
+            }
+            for row in events.itertuples(index=False)
         }
-        for row in events.itertuples(index=False)
-    } if not events.empty else {}
-    history_by_symbol = {
-        str(symbol): group.sort_values("trade_date", kind="stable").reset_index(drop=True)
-        for symbol, group in history.groupby("symbol", sort=False)
-    } if not history.empty else {}
+        if not events.empty
+        else {}
+    )
+    history_by_symbol = (
+        {
+            str(symbol): group.sort_values("trade_date", kind="stable").reset_index(drop=True)
+            for symbol, group in history.groupby("symbol", sort=False)
+        }
+        if not history.empty
+        else {}
+    )
+    return event_by_key, history_by_symbol
 
+
+def _continued_factor(
+    *,
+    symbol: str,
+    trade_date: str,
+    current: float,
+    event: dict[str, float] | None,
+    history: pd.DataFrame | None,
+    has_qdp_baseline: bool,
+) -> tuple[float, bool]:
+    if event is None or not has_qdp_baseline:
+        return current, False
+    if history is None or history.empty:
+        raise FactorTailUpdateError(f"factor_tail_baostock_history_missing:{symbol}")
+    prior = history.loc[history["trade_date"].lt(trade_date)]
+    on_date = history.loc[history["trade_date"].eq(trade_date)]
+    if prior.empty or on_date.empty:
+        raise FactorTailUpdateError(f"factor_tail_baostock_ratio_anchor_missing:{symbol}:{trade_date}")
+    history_adjust = float(on_date.iloc[-1]["adjust_factor"])
+    if not np.isclose(
+        history_adjust,
+        event["adjust_factor"],
+        rtol=1e-10,
+        atol=1e-12,
+    ):
+        raise FactorTailUpdateError(f"factor_tail_baostock_event_history_mismatch:{symbol}:{trade_date}")
+    provider_current = float(on_date.iloc[-1]["back_adjust_factor"])
+    if not np.isclose(
+        provider_current,
+        event["back_adjust_factor"],
+        rtol=1e-10,
+        atol=1e-12,
+    ):
+        raise FactorTailUpdateError(f"factor_tail_baostock_back_factor_history_mismatch:{symbol}:{trade_date}")
+    provider_prior = float(prior.iloc[-1]["back_adjust_factor"])
+    return current * provider_current / provider_prior, True
+
+
+def build_factor_tail_rows(
+    missing: pd.DataFrame,
+    *,
+    provider: BaostockProvider,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    if missing.empty:
+        return pd.DataFrame(columns=FACTOR_COLUMNS), {
+            "missing_key_count": 0,
+            "event_count": 0,
+            "continued_event_count": 0,
+            "initialized_symbol_count": 0,
+        }
+    required = {
+        "symbol",
+        "trade_date",
+        "prior_date",
+        "prior_fore",
+        "prior_back",
+        "prior_adjust",
+    }
+    absent = sorted(required.difference(missing.columns))
+    if absent:
+        raise FactorTailUpdateError(f"factor_tail_missing_inventory_columns:{absent}")
+    events = _normalize_factor_events(
+        _fetch_factor_events(missing, provider),
+        missing_symbols=set(missing["symbol"].astype(str)),
+    )
+    history = _fetch_factor_history(
+        events=events,
+        maximum_date=str(missing["trade_date"].max()),
+        provider=provider,
+    )
+    event_by_key, history_by_symbol = _factor_lookup_tables(events, history)
     generated: dict[str, tuple[str, float]] = {}
     rows: list[dict[str, Any]] = []
     continued_event_count = 0
@@ -190,53 +274,25 @@ def build_factor_tail_rows(
         symbol = str(item.symbol)
         trade_date = str(item.trade_date)
         prior_available = bool(
-            pd.notna(item.prior_date)
-            and np.isfinite(float(item.prior_adjust))
-            and float(item.prior_adjust) > 0
+            pd.notna(item.prior_date) and np.isfinite(float(item.prior_adjust)) and float(item.prior_adjust) > 0
         )
         prior_date = str(item.prior_date) if prior_available else ""
         current = float(item.prior_adjust) if prior_available else 1.0
         previous_generated = generated.get(symbol)
-        if previous_generated is not None and (
-            not prior_date or previous_generated[0] > prior_date
-        ):
+        if previous_generated is not None and (not prior_date or previous_generated[0] > prior_date):
             current = float(previous_generated[1])
         has_qdp_baseline = prior_available or previous_generated is not None
         if not has_qdp_baseline:
             initialized_symbol_count += 1
-        event = event_by_key.get((symbol, trade_date))
-        if event is not None and has_qdp_baseline:
-            symbol_history = history_by_symbol.get(symbol)
-            if symbol_history is None or symbol_history.empty:
-                raise FactorTailUpdateError(f"factor_tail_baostock_history_missing:{symbol}")
-            prior_history = symbol_history.loc[symbol_history["trade_date"].lt(trade_date)]
-            current_history = symbol_history.loc[symbol_history["trade_date"].eq(trade_date)]
-            if prior_history.empty or current_history.empty:
-                raise FactorTailUpdateError(
-                    f"factor_tail_baostock_ratio_anchor_missing:{symbol}:{trade_date}"
-                )
-            history_current_adjust = float(current_history.iloc[-1]["adjust_factor"])
-            if not np.isclose(
-                history_current_adjust,
-                float(event["adjust_factor"]),
-                rtol=1e-10,
-                atol=1e-12,
-            ):
-                raise FactorTailUpdateError(
-                    f"factor_tail_baostock_event_history_mismatch:{symbol}:{trade_date}"
-                )
-            provider_current = float(current_history.iloc[-1]["back_adjust_factor"])
-            if not np.isclose(
-                provider_current,
-                float(event["back_adjust_factor"]),
-                rtol=1e-10,
-                atol=1e-12,
-            ):
-                raise FactorTailUpdateError(
-                    f"factor_tail_baostock_back_factor_history_mismatch:{symbol}:{trade_date}"
-                )
-            provider_prior = float(prior_history.iloc[-1]["back_adjust_factor"])
-            current *= provider_current / provider_prior
+        current, continued = _continued_factor(
+            symbol=symbol,
+            trade_date=trade_date,
+            current=current,
+            event=event_by_key.get((symbol, trade_date)),
+            history=history_by_symbol.get(symbol),
+            has_qdp_baseline=has_qdp_baseline,
+        )
+        if continued:
             continued_event_count += 1
         if not np.isfinite(current) or current <= 0:
             raise FactorTailUpdateError(f"factor_tail_result_invalid:{symbol}:{trade_date}")
@@ -259,7 +315,7 @@ def build_factor_tail_rows(
                 "ffill_days": 0,
             }
         )
-    frame = pd.DataFrame(rows, columns=columns)
+    frame = pd.DataFrame(rows, columns=FACTOR_COLUMNS)
     return frame, {
         "missing_key_count": int(len(missing)),
         "event_count": int(len(events)),

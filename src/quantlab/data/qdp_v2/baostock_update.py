@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,132 @@ class BaostockCoreUpdateError(RuntimeError):
     pass
 
 
+def _fetch_core_calendar(source: Any, *, start: str, end: str) -> tuple[pd.DataFrame, tuple[str, ...]]:
+    result = source.fetch_domain(
+        DomainFetchRequest(
+            domain=DataDomain.TRADING_CALENDAR,
+            start_date=start,
+            end_date=end,
+            exchange="SSE",
+        )
+    )
+    if list(getattr(result, "error_report", []) or []):
+        raise BaostockCoreUpdateError("baostock_calendar_provider_errors")
+    calendar = _calendar_frame(result.data)
+    if calendar.empty:
+        raise BaostockCoreUpdateError("baostock_calendar_empty")
+    open_dates = tuple(calendar.loc[calendar["is_open"], "trade_date"].astype(str).sort_values())
+    return calendar, open_dates
+
+
+@dataclass
+class _CorePartitions:
+    daily: list[pd.DataFrame]
+    valuation: list[pd.DataFrame]
+    universe: list[pd.DataFrame]
+    status: list[pd.DataFrame]
+
+
+def _fetch_core_partitions(
+    source: Any,
+    *,
+    open_dates: Sequence[str],
+    stock_basic: pd.DataFrame,
+) -> _CorePartitions:
+    partitions = _CorePartitions([], [], [], [])
+    for trade_date in open_dates:
+        result, all_stock = source.fetch_date_partition_with_all_stock(
+            DatePartitionFetchRequest(
+                domain=DataDomain.MARKET_DAILY,
+                trade_date=trade_date,
+                universe_kind="all_a",
+                fetch_mode="date_snapshot",
+            )
+        )
+        if list(getattr(result, "error_report", []) or []):
+            raise BaostockCoreUpdateError(f"baostock_daily_partition_errors:{trade_date}")
+        daily = _daily_frame(result.data, trade_date=trade_date)
+        raw = getattr(result, "raw_data", pd.DataFrame())
+        valuation = _valuation_frame(raw, trade_date=trade_date)
+        universe, status = _universe_and_status_frames(
+            all_stock,
+            daily_status=raw,
+            stock_basic=stock_basic,
+            trade_date=trade_date,
+        )
+        if universe.empty or status.empty:
+            raise BaostockCoreUpdateError(f"baostock_reference_partition_empty:{trade_date}")
+        partitions.daily.append(daily)
+        partitions.valuation.append(valuation)
+        partitions.universe.append(universe)
+        partitions.status.append(status)
+    return partitions
+
+
+def _core_missing_rows(
+    workspace: Path,
+    *,
+    calendar: pd.DataFrame,
+    identity: pd.DataFrame,
+    history: pd.DataFrame,
+    partitions: _CorePartitions,
+) -> dict[str, pd.DataFrame]:
+    candidates = {
+        "trading_calendar": calendar,
+        "security_identity": identity,
+        "symbol_history": history,
+        "universe_snapshot": _concat(partitions.universe),
+        "security_status": _concat(partitions.status),
+        "market_daily_raw": _concat(partitions.daily),
+    }
+    return {
+        domain: _only_missing_keys(frame, domain=domain, workspace=workspace) for domain, frame in candidates.items()
+    }
+
+
+def _write_valuation_cache(
+    workspace: Path,
+    *,
+    path: str | Path,
+    frames: Sequence[pd.DataFrame],
+) -> tuple[Path, int]:
+    cache = Path(path).resolve()
+    if workspace not in cache.parents:
+        raise BaostockCoreUpdateError(f"valuation_cache_outside_workspace:{cache}")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    temporary = cache.with_name(f".{cache.name}.tmp")
+    temporary.unlink(missing_ok=True)
+    cache.unlink(missing_ok=True)
+    valuation = _concat(frames)
+    try:
+        valuation.to_parquet(temporary, index=False, compression="zstd")
+        temporary.replace(cache)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return cache, int(len(valuation))
+
+
+def _commit_core_rows(
+    workspace: Path,
+    *,
+    missing: dict[str, pd.DataFrame],
+    start: str,
+    end: str,
+) -> dict[str, Any]:
+    commits: dict[str, Any] = {}
+    for domain in CORE_UPDATE_DOMAINS:
+        frame = missing[domain]
+        if frame.empty:
+            continue
+        commits[domain] = append_active_shard(
+            domain,
+            frame,
+            f"append BaoStock core facts {start}..{end}",
+            workspace_root=workspace,
+        )
+    return commits
+
+
 def run_baostock_core_update(
     *,
     start_date: str,
@@ -66,78 +193,28 @@ def run_baostock_core_update(
     source = provider or BaostockProvider()
     owned = provider is None
     try:
-        calendar_result = source.fetch_domain(
-            DomainFetchRequest(
-                domain=DataDomain.TRADING_CALENDAR,
-                start_date=start,
-                end_date=end,
-                exchange="SSE",
-            )
+        calendar, open_dates = _fetch_core_calendar(
+            source,
+            start=start,
+            end=end,
         )
-        if list(getattr(calendar_result, "error_report", []) or []):
-            raise BaostockCoreUpdateError("baostock_calendar_provider_errors")
-        calendar = _calendar_frame(calendar_result.data)
-        if calendar.empty:
-            raise BaostockCoreUpdateError("baostock_calendar_empty")
-        open_dates = tuple(
-            calendar.loc[calendar["is_open"], "trade_date"].astype(str).sort_values()
-        )
-
         stock_basic = source.fetch_stock_basic_snapshot(trade_date=end)
         identity, history = _identity_additions(
             stock_basic,
             workspace=workspace,
         )
-
-        daily_frames: list[pd.DataFrame] = []
-        valuation_frames: list[pd.DataFrame] = []
-        universe_frames: list[pd.DataFrame] = []
-        status_frames: list[pd.DataFrame] = []
-        for trade_date in open_dates:
-            result, all_stock = source.fetch_date_partition_with_all_stock(
-                DatePartitionFetchRequest(
-                    domain=DataDomain.MARKET_DAILY,
-                    trade_date=trade_date,
-                    universe_kind="all_a",
-                    fetch_mode="date_snapshot",
-                )
-            )
-            if list(getattr(result, "error_report", []) or []):
-                raise BaostockCoreUpdateError(
-                    f"baostock_daily_partition_errors:{trade_date}"
-                )
-            daily = _daily_frame(result.data, trade_date=trade_date)
-            valuation = _valuation_frame(
-                getattr(result, "raw_data", pd.DataFrame()),
-                trade_date=trade_date,
-            )
-            universe, status = _universe_and_status_frames(
-                all_stock,
-                daily_status=getattr(result, "raw_data", pd.DataFrame()),
-                stock_basic=stock_basic,
-                trade_date=trade_date,
-            )
-            if universe.empty or status.empty:
-                raise BaostockCoreUpdateError(
-                    f"baostock_reference_partition_empty:{trade_date}"
-                )
-            daily_frames.append(daily)
-            valuation_frames.append(valuation)
-            universe_frames.append(universe)
-            status_frames.append(status)
-
-        candidates = {
-            "trading_calendar": calendar,
-            "security_identity": identity,
-            "symbol_history": history,
-            "universe_snapshot": _concat(universe_frames),
-            "security_status": _concat(status_frames),
-            "market_daily_raw": _concat(daily_frames),
-        }
-        missing = {
-            domain: _only_missing_keys(frame, domain=domain, workspace=workspace)
-            for domain, frame in candidates.items()
-        }
+        partitions = _fetch_core_partitions(
+            source,
+            open_dates=open_dates,
+            stock_basic=stock_basic,
+        )
+        missing = _core_missing_rows(
+            workspace,
+            calendar=calendar,
+            identity=identity,
+            history=history,
+            partitions=partitions,
+        )
         counts = {domain: int(len(frame)) for domain, frame in missing.items()}
         payload: dict[str, Any] = {
             "status": "planned" if any(counts.values()) else "already_complete",
@@ -148,43 +225,22 @@ def run_baostock_core_update(
             "provider": "baostock",
         }
         if valuation_cache_path is not None:
-            cache = Path(valuation_cache_path).resolve()
-            if workspace not in cache.parents:
-                raise BaostockCoreUpdateError(
-                    f"valuation_cache_outside_workspace:{cache}"
-                )
-            cache.parent.mkdir(parents=True, exist_ok=True)
-            temporary = cache.with_name(f".{cache.name}.tmp")
-            temporary.unlink(missing_ok=True)
-            cache.unlink(missing_ok=True)
-            valuation = _concat(valuation_frames)
-            try:
-                valuation.to_parquet(
-                    temporary,
-                    index=False,
-                    compression="zstd",
-                )
-                temporary.replace(cache)
-            finally:
-                temporary.unlink(missing_ok=True)
+            cache, row_count = _write_valuation_cache(
+                workspace,
+                path=valuation_cache_path,
+                frames=partitions.valuation,
+            )
             payload["valuation_cache_path"] = str(cache)
-            payload["valuation_cache_row_count"] = int(len(valuation))
+            payload["valuation_cache_row_count"] = row_count
         if not apply or not any(counts.values()):
             return payload
-
-        commits: dict[str, Any] = {}
-        for domain in CORE_UPDATE_DOMAINS:
-            frame = missing[domain]
-            if frame.empty:
-                continue
-            commits[domain] = append_active_shard(
-                domain,
-                frame,
-                f"append BaoStock core facts {start}..{end}",
-                workspace_root=workspace,
-            )
         payload["status"] = "updated"
-        payload["commits"] = commits
+        payload["commits"] = _commit_core_rows(
+            workspace,
+            missing=missing,
+            start=start,
+            end=end,
+        )
         return payload
     finally:
         if owned:
@@ -205,9 +261,11 @@ def _calendar_frame(frame: pd.DataFrame) -> pd.DataFrame:
     data["exchange"] = data.get("exchange", "SSE").fillna("SSE").astype(str).replace("", "SSE")
     data["source"] = "baostock"
     data = data.dropna(subset=["trade_date"])
-    return data.loc[:, ["trade_date", "is_open", "exchange", "source"]].drop_duplicates(
-        ["trade_date", "exchange"], keep="last"
-    ).reset_index(drop=True)
+    return (
+        data.loc[:, ["trade_date", "is_open", "exchange", "source"]]
+        .drop_duplicates(["trade_date", "exchange"], keep="last")
+        .reset_index(drop=True)
+    )
 
 
 def _identity_additions(
@@ -283,9 +341,11 @@ def _daily_frame(frame: pd.DataFrame, *, trade_date: str) -> pd.DataFrame:
         raise BaostockCoreUpdateError(f"baostock_daily_symbol_missing:{trade_date}")
     data["symbol"] = data["symbol"].astype(str).str.upper()
     data["trade_date"] = str(trade_date)
-    numeric = data.loc[:, ["open", "high", "low", "close", "volume", "amount"]].apply(
-        pd.to_numeric, errors="coerce"
-    ).astype("float64")
+    numeric = (
+        data.loc[:, ["open", "high", "low", "close", "volume", "amount"]]
+        .apply(pd.to_numeric, errors="coerce")
+        .astype("float64")
+    )
     data[numeric.columns] = numeric
     values = numeric.to_numpy(dtype="float64", na_value=np.nan)
     valid = (
@@ -295,9 +355,7 @@ def _daily_frame(frame: pd.DataFrame, *, trade_date: str) -> pd.DataFrame:
         & (values[:, 1] >= values[:, [0, 2, 3]].max(axis=1))
         & (values[:, 2] <= values[:, [0, 1, 3]].min(axis=1))
     )
-    data = data.loc[
-        valid & data["symbol"].map(_is_supported_mainboard_symbol)
-    ].copy()
+    data = data.loc[valid & data["symbol"].map(_is_supported_mainboard_symbol)].copy()
     data["source"] = "baostock"
     data["adjusted_flag"] = "none"
     return data.loc[:, columns].drop_duplicates(["trade_date", "symbol"], keep="last").reset_index(drop=True)
@@ -310,9 +368,7 @@ def _valuation_frame(frame: pd.DataFrame, *, trade_date: str) -> pd.DataFrame:
     required = {"code", "peTTM", "pbMRQ", "turn"}
     missing = sorted(required.difference(frame.columns))
     if missing:
-        raise BaostockCoreUpdateError(
-            f"baostock_daily_valuation_fields_missing:{trade_date}:{missing}"
-        )
+        raise BaostockCoreUpdateError(f"baostock_daily_valuation_fields_missing:{trade_date}:{missing}")
     data = frame.copy()
     code = data["code"].fillna("").astype(str).str.lower()
     data["symbol"] = np.where(
@@ -329,11 +385,7 @@ def _valuation_frame(frame: pd.DataFrame, *, trade_date: str) -> pd.DataFrame:
     data["pb"] = pd.to_numeric(data["pbMRQ"], errors="coerce")
     data["turnover_rate"] = pd.to_numeric(data["turn"], errors="coerce")
     data = data.loc[data["symbol"].map(_is_supported_mainboard_symbol)]
-    return (
-        data.loc[:, columns]
-        .drop_duplicates(["trade_date", "symbol"], keep="last")
-        .reset_index(drop=True)
-    )
+    return data.loc[:, columns].drop_duplicates(["trade_date", "symbol"], keep="last").reset_index(drop=True)
 
 
 def _universe_and_status_frames(
@@ -363,7 +415,8 @@ def _universe_and_status_frames(
     data["list_status"] = "L"
     data["source"] = "baostock"
     universe = data.loc[
-        :, [
+        :,
+        [
             "symbol",
             "trade_date",
             "name",
@@ -373,7 +426,7 @@ def _universe_and_status_frames(
             "list_date",
             "delist_date",
             "source",
-        ]
+        ],
     ].drop_duplicates(["trade_date", "symbol"], keep="last")
     if "is_suspended" in data:
         is_suspended = data["is_suspended"].map(_to_nullable_bool).astype("boolean")
@@ -383,9 +436,7 @@ def _universe_and_status_frames(
     else:
         is_suspended = pd.Series(pd.NA, index=data.index, dtype="boolean")
     name_is_st = data["name"].map(st_status_from_name).astype("boolean")
-    daily_is_st = data["symbol"].map(
-        _daily_is_st_lookup(daily_status)
-    ).astype("boolean")
+    daily_is_st = data["symbol"].map(_daily_is_st_lookup(daily_status)).astype("boolean")
     is_st = daily_is_st.fillna(name_is_st).astype("boolean")
     known_st = is_st.fillna(False).astype(bool)
     known_suspended = is_suspended.fillna(False).astype(bool)
@@ -473,17 +524,32 @@ def _concat(frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
 
 
 def _empty_identity() -> pd.DataFrame:
-    return pd.DataFrame(columns=[
-        "security_id", "official_org_id", "issuer_name", "exchange",
-        "list_date", "current_symbol", "identity_source",
-    ])
+    return pd.DataFrame(
+        columns=[
+            "security_id",
+            "official_org_id",
+            "issuer_name",
+            "exchange",
+            "list_date",
+            "current_symbol",
+            "identity_source",
+        ]
+    )
 
 
 def _empty_history() -> pd.DataFrame:
-    return pd.DataFrame(columns=[
-        "security_id", "symbol", "effective_from", "effective_to",
-        "name_on_date", "board_on_date", "evidence_source", "official_document_hash",
-    ])
+    return pd.DataFrame(
+        columns=[
+            "security_id",
+            "symbol",
+            "effective_from",
+            "effective_to",
+            "name_on_date",
+            "board_on_date",
+            "evidence_source",
+            "official_document_hash",
+        ]
+    )
 
 
 def _runtime_root(workspace: Path) -> Path:
@@ -529,9 +595,7 @@ def _daily_is_st_lookup(frame: pd.DataFrame | None) -> pd.Series:
     if "symbol" in raw.columns:
         symbol = raw["symbol"].fillna("").astype(str).str.upper().str.strip()
     elif "provider_symbol" in raw.columns:
-        symbol = (
-            raw["provider_symbol"].fillna("").astype(str).str.upper().str.strip()
-        )
+        symbol = raw["provider_symbol"].fillna("").astype(str).str.upper().str.strip()
     elif "code" in raw.columns:
         code = raw["code"].fillna("").astype(str).str.lower().str.strip()
         symbol = pd.Series(
@@ -549,13 +613,9 @@ def _daily_is_st_lookup(frame: pd.DataFrame | None) -> pd.Series:
     else:
         return pd.Series(dtype="boolean")
     values = raw["isST"].fillna("").astype(str).str.strip().str.lower()
-    parsed = values.map(
-        {"1": True, "true": True, "0": False, "false": False}
-    ).astype("boolean")
+    parsed = values.map({"1": True, "true": True, "0": False, "false": False}).astype("boolean")
     result = pd.DataFrame({"symbol": symbol, "is_st": parsed})
-    result = result.loc[result["symbol"].ne("")].drop_duplicates(
-        "symbol", keep="last"
-    )
+    result = result.loc[result["symbol"].ne("")].drop_duplicates("symbol", keep="last")
     return result.set_index("symbol")["is_st"]
 
 
@@ -577,9 +637,7 @@ def _date_text(value: str) -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Append BaoStock low-frequency facts to the current QDP tables."
-    )
+    parser = argparse.ArgumentParser(description="Append BaoStock low-frequency facts to the current QDP tables.")
     parser.add_argument("--workspace-root", default="")
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", required=True)
@@ -596,11 +654,16 @@ def main(argv: list[str] | None = None) -> int:
         apply=not bool(args.dry_run),
     )
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
-    return 0 if result.get("status") in {
-        "planned",
-        "updated",
-        "already_complete",
-    } else 2
+    return (
+        0
+        if result.get("status")
+        in {
+            "planned",
+            "updated",
+            "already_complete",
+        }
+        else 2
+    )
 
 
 __all__ = ["BaostockCoreUpdateError", "run_baostock_core_update"]

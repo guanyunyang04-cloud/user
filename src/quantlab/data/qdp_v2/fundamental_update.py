@@ -6,7 +6,6 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
+from quantlab.core.io import atomic_copy_file
 from quantlab.data.core.json_io import json_safe
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.qdp_v2.auxiliary_update import (
@@ -405,10 +405,7 @@ def _install_domain(
     dataset_dir = root / "datasets" / domain / dataset_id
     shard = dataset_dir / "shards" / "part-0000.parquet"
     if not shard.is_file():
-        shard.parent.mkdir(parents=True, exist_ok=True)
-        temporary = shard.with_suffix(".tmp.parquet")
-        shutil.copy2(prepared, temporary)
-        os.replace(temporary, shard)
+        atomic_copy_file(prepared, shard)
     parquet = pq.ParquetFile(shard)
     table = pd.read_parquet(
         shard,

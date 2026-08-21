@@ -10,7 +10,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parent
 GENERATED_AT = "2026-08-05T23:00:00+08:00"
 
@@ -204,8 +203,6 @@ def build() -> dict[str, Any]:
     summary = json.loads((ROOT / "summary.json").read_text(encoding="utf-8"))
     barrier = load_csv("barrier_by_volatility_decile.csv")
     annual = load_csv("barrier_by_year.csv")
-    endpoint_year = load_csv("endpoint_distribution_by_year.csv")
-    st_annual = load_csv("st_rate_annual.csv")
     st_daily = load_csv("st_rate_daily.csv")
     policy_delays = load_csv("policy_label_delays.csv")
     importance = load_csv("st_feature_importance_summary.csv")

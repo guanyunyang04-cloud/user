@@ -32,6 +32,77 @@ ACCOUNT_TASKS = (
 )
 
 
+def _ensemble_fold(
+    *,
+    fold: int,
+    tree_result: dict[str, Any],
+    sequence_result: dict[str, Any],
+    fold_root: Path,
+) -> tuple[dict[str, Any], pd.DataFrame, dict[str, Any]]:
+    tree = pd.read_parquet(Path(tree_result["files"]["predictions"]["path"]))
+    sequence = pd.read_parquet(
+        Path(sequence_result["files"]["predictions"]["path"]),
+        columns=["row_position", "score"],
+    ).rename(columns={"score": "sequence_score"})
+    merged = tree.merge(sequence, on="row_position", validate="one_to_one")
+    merged["tree_rank"] = merged.groupby("date_idx", sort=False)["score"].rank(pct=True)
+    merged["sequence_rank"] = merged.groupby("date_idx", sort=False)["sequence_score"].rank(pct=True)
+    merged["score"] = 0.5 * merged["tree_rank"] + 0.5 * merged["sequence_rank"]
+    valid = merged["target_valid"].astype(bool) & np.isfinite(merged["actual"])
+    daily, metrics = daily_rank_metrics(
+        dates=merged.loc[valid, "date_idx"].to_numpy(dtype=np.int32),
+        actual=merged.loc[valid, "actual"].to_numpy(dtype=np.float32),
+        prediction=merged.loc[valid, "score"].to_numpy(dtype=np.float32),
+    )
+    correlation = merged.groupby("date_idx")[["tree_rank", "sequence_rank"]].corr()
+    correlation = correlation.iloc[0::2, -1]
+    correlation_record = {
+        "fold": fold,
+        "mean_daily_rank_correlation": float(correlation.mean()),
+    }
+    keep = [
+        "row_position",
+        "candidate_id",
+        "date_idx",
+        "trade_date",
+        "symbol",
+        "symbol_idx",
+        "fold",
+        "score",
+        "actual",
+        "target_valid",
+    ]
+    fold_root.mkdir(parents=True, exist_ok=True)
+    prediction_path = fold_root / "predictions.parquet"
+    daily_path = fold_root / "daily_metrics.parquet"
+    merged[keep].to_parquet(prediction_path, index=False)
+    daily.to_parquet(daily_path, index=False)
+    result = {
+        "status": "completed",
+        "model_family": "equal_rank_ensemble",
+        "fingerprint": stable_hash(
+            {
+                "pipeline": "equal_rank_ensemble",
+                "fold": fold,
+                "components": [tree_result["fingerprint"], sequence_result["fingerprint"]],
+                "weights": [0.5, 0.5],
+            }
+        ),
+        "fold": tree_result["fold"],
+        "metrics": metrics,
+        "components": ["tree_158", "sequence_raw60"],
+        "weights": [0.5, 0.5],
+        "component_rank_correlation": correlation_record,
+        **cutoff_audit_fields(),
+        "files": {
+            "predictions": {"path": str(prediction_path)},
+            "daily_metrics": {"path": str(daily_path)},
+        },
+    }
+    write_json(fold_root / "result.json", result)
+    return result, merged[keep], correlation_record
+
+
 def _paired_increments(
     ensemble_result: dict[str, Any],
     component_fingerprints: dict[str, list[str]],
@@ -129,81 +200,15 @@ def evaluate() -> dict[str, Any]:
     component_correlations: list[dict[str, Any]] = []
     run_root = OUTPUT_ROOT / RUN_NAME
     for fold in range(1, 6):
-        tree_result = tree_results[fold - 1]
-        sequence_result = sequence_results[fold - 1]
-        tree = pd.read_parquet(Path(tree_result["files"]["predictions"]["path"]))
-        sequence = pd.read_parquet(
-            Path(sequence_result["files"]["predictions"]["path"]),
-            columns=["row_position", "score"],
-        ).rename(columns={"score": "sequence_score"})
-        merged = tree.merge(sequence, on="row_position", validate="one_to_one")
-        merged["tree_rank"] = merged.groupby("date_idx", sort=False)["score"].rank(
-            pct=True
+        result, prediction_frame, correlation = _ensemble_fold(
+            fold=fold,
+            tree_result=tree_results[fold - 1],
+            sequence_result=sequence_results[fold - 1],
+            fold_root=run_root / f"fold_{fold:02d}",
         )
-        merged["sequence_rank"] = merged.groupby("date_idx", sort=False)[
-            "sequence_score"
-        ].rank(pct=True)
-        merged["score"] = 0.5 * merged["tree_rank"] + 0.5 * merged["sequence_rank"]
-        valid = merged["target_valid"].astype(bool) & np.isfinite(merged["actual"])
-        daily, metrics = daily_rank_metrics(
-            dates=merged.loc[valid, "date_idx"].to_numpy(dtype=np.int32),
-            actual=merged.loc[valid, "actual"].to_numpy(dtype=np.float32),
-            prediction=merged.loc[valid, "score"].to_numpy(dtype=np.float32),
-        )
-        correlation = merged.groupby("date_idx")[["tree_rank", "sequence_rank"]].corr()
-        correlation = correlation.iloc[0::2, -1]
-        component_correlations.append(
-            {
-                "fold": fold,
-                "mean_daily_rank_correlation": float(correlation.mean()),
-            }
-        )
-        fold_root = run_root / f"fold_{fold:02d}"
-        fold_root.mkdir(parents=True, exist_ok=True)
-        prediction_path = fold_root / "predictions.parquet"
-        daily_path = fold_root / "daily_metrics.parquet"
-        keep = [
-            "row_position",
-            "candidate_id",
-            "date_idx",
-            "trade_date",
-            "symbol",
-            "symbol_idx",
-            "fold",
-            "score",
-            "actual",
-            "target_valid",
-        ]
-        merged[keep].to_parquet(prediction_path, index=False)
-        daily.to_parquet(daily_path, index=False)
-        result = {
-            "status": "completed",
-            "model_family": "equal_rank_ensemble",
-            "fingerprint": stable_hash(
-                {
-                    "pipeline": "equal_rank_ensemble",
-                    "fold": fold,
-                    "components": [
-                        tree_result["fingerprint"],
-                        sequence_result["fingerprint"],
-                    ],
-                    "weights": [0.5, 0.5],
-                }
-            ),
-            "fold": tree_result["fold"],
-            "metrics": metrics,
-            "components": ["tree_158", "sequence_raw60"],
-            "weights": [0.5, 0.5],
-            "component_rank_correlation": component_correlations[-1],
-            **cutoff_audit_fields(),
-            "files": {
-                "predictions": {"path": str(prediction_path)},
-                "daily_metrics": {"path": str(daily_path)},
-            },
-        }
-        write_json(fold_root / "result.json", result)
         fold_results.append(result)
-        predictions.append(merged[keep])
+        predictions.append(prediction_frame)
+        component_correlations.append(correlation)
     oof = pd.concat(predictions, ignore_index=True).sort_values(
         ["date_idx", "symbol_idx"], kind="stable"
     )

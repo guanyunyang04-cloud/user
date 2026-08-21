@@ -6,13 +6,18 @@ the execution path and current data products are under `data/`.
 
 ## Layout
 
-- `src/quantlab/data`: point-in-time market-data acquisition, repair, catalog,
-  and quality checks.
-- `src/quantlab/data/provider_symbols.py` and `src/quantlab/data/identifiers.py`:
-  shared provider-code and security-identity mappings.
+- `src/quantlab/core`: shared file hashing, atomic file installation, paths,
+  and research artifact I/O.
+- `src/quantlab/data/domains/contracts`: domain requests, schemas,
+  normalization dispatch, and coverage checks.
+- `src/quantlab/data/providers`: provider registry plus focused BaoStock,
+  MootDX, CNInfo, and web adapters. Transport is separate from frame shaping.
+- `src/quantlab/data/qdp_v2`: the point-in-time store. Multi-stage workflows
+  use focused `config`, `context`, `download`, `prepare`, `install`, `audit`,
+  and `workflow` modules rather than monolithic scripts.
 - `src/quantlab/data/qdp_v2/normalization.py` and
   `src/quantlab/data/qdp_v2/pit_normalization.py`: deterministic provider and
-  PIT transformations kept independent from network/database orchestration.
+  PIT transformations independent from network/database orchestration.
 - `src/quantlab/research`: daily cross-sectional models, sequence models,
   portfolio replay, and research-data contracts.
 - `data/qdp`: the mutable QDP data lake and its active manifests.
@@ -45,6 +50,17 @@ active. Git retains their tracked history; the bulky ignored experiment
 outputs that had been staged in `H:\quant_project_archive\20260820` were
 purged on 2026-08-21 to make room for market-data downloads. Small audit,
 migration, and legacy-provenance files remain in that directory.
+
+The former large Python modules were replaced by packages at the same import
+paths. Their `__init__.py` files preserve the established callable API while
+the implementation is divided by responsibility. Repeated SHA-256 and atomic
+installation logic is centralized. Production orchestration functions are
+bounded and focused; the sole function over 100 lines is a named SQL query
+builder kept intact so its relational logic can be reviewed as one statement.
+
+Cross-session project state lives only in [`CURRENT.md`](CURRENT.md). The old
+project `brain/` directory and user-level `workspace-brain` skill are removed;
+normal Codex context plus this concise handoff file are sufficient.
 
 ## Environment
 

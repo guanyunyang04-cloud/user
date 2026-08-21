@@ -7,7 +7,6 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
-from quantlab.data.qdp_v2 import repair as repair_module
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -27,6 +26,7 @@ from quantlab.data.qdp_v2.repair import (
     replace_active_table_from_parquet,
     resolve_active_domain,
 )
+from quantlab.data.qdp_v2.repair import mutation as repair_mutation
 
 DOMAIN = "market_daily_raw"
 DATASET_ID = "market_daily_raw__repair_fixture"
@@ -206,8 +206,8 @@ def test_mutate_commits_manifest_before_removing_old_shards(
         workspace, "appended", _frame("2026-01-07", "000003.SZ", 30.0)
     )
     events: list[str] = []
-    original_commit = repair_module._commit_manifest
-    original_remove = repair_module._remove_old_shards
+    original_commit = repair_mutation._commit_manifest
+    original_remove = repair_mutation._remove_old_shards
 
     def record_commit(context, manifest):
         original_commit(context, manifest)
@@ -217,8 +217,8 @@ def test_mutate_commits_manifest_before_removing_old_shards(
         events.append("old_shards_removed")
         return original_remove(context, paths)
 
-    monkeypatch.setattr(repair_module, "_commit_manifest", record_commit)
-    monkeypatch.setattr(repair_module, "_remove_old_shards", record_remove)
+    monkeypatch.setattr(repair_mutation, "_commit_manifest", record_commit)
+    monkeypatch.setattr(repair_mutation, "_remove_old_shards", record_remove)
 
     result = mutate_active_shards_from_parquet(
         DOMAIN,
@@ -245,12 +245,12 @@ def test_failed_commit_keeps_old_data_and_retry_succeeds(
     workspace = _workspace(tmp_path)
     old_paths = _install_active(workspace)
     before = resolve_active_domain(DOMAIN, workspace_root=workspace).manifest_path.read_bytes()
-    original_commit = repair_module._commit_manifest
+    original_commit = repair_mutation._commit_manifest
 
     def fail_commit(*_args, **_kwargs):
         raise OSError("simulated interruption")
 
-    monkeypatch.setattr(repair_module, "_commit_manifest", fail_commit)
+    monkeypatch.setattr(repair_mutation, "_commit_manifest", fail_commit)
     with pytest.raises(OSError, match="simulated interruption"):
         append_active_shard(
             DOMAIN,
@@ -261,7 +261,7 @@ def test_failed_commit_keeps_old_data_and_retry_succeeds(
     context = resolve_active_domain(DOMAIN, workspace_root=workspace)
     assert context.manifest_path.read_bytes() == before
     assert all(path.is_file() for path in old_paths)
-    monkeypatch.setattr(repair_module, "_commit_manifest", original_commit)
+    monkeypatch.setattr(repair_mutation, "_commit_manifest", original_commit)
 
     result = append_active_shard(
         DOMAIN,

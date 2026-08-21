@@ -30,6 +30,80 @@ VALUATION_REQUIRED_COLUMNS = {
 }
 
 
+def _audit_active_dataset(
+    *,
+    root: Path,
+    domain: str,
+    dataset_id: str,
+    verify_footers: bool,
+) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+    manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
+    if manifest_path is None:
+        return None, [f"dataset_manifest_missing:{domain}:{dataset_id}"], []
+    manifest = read_dataset_manifest(manifest_path)
+    missing_shards: list[str] = []
+    footer_errors: list[str] = []
+    warnings: list[str] = []
+    footer_rows = 0
+    declared_schema = list(manifest.schema)
+    declared_names = [str(item.get("name", "") or "") for item in declared_schema]
+    canonical_schema = canonical_manifest_schema(declared_schema)
+    if not declared_schema:
+        footer_errors.append(f"manifest_schema_missing:{domain}:{dataset_id}")
+    elif canonical_schema is None:
+        warnings.append(f"legacy_untyped_manifest_schema:{domain}:{dataset_id}")
+    for shard in manifest.shards:
+        shard_path = _manifest_path(shard.path, root)
+        if not shard_path.is_file():
+            missing_shards.append(str(shard_path))
+            continue
+        try:
+            parquet = _parquet_footer(shard_path)
+            footer_schema = _manifest_schema_from_arrow(parquet.schema_arrow)
+            footer_names = [item["name"] for item in footer_schema]
+            if footer_names != declared_names:
+                mismatch = "order" if set(footer_names) == set(declared_names) else "set"
+                footer_errors.append(
+                    f"schema_column_{mismatch}_mismatch:{shard.path}:"
+                    f"manifest={declared_names}:footer={footer_names}"
+                )
+            elif canonical_schema is not None and footer_schema != canonical_schema:
+                footer_errors.append(f"footer_schema_mismatch:{shard.path}")
+            if verify_footers:
+                rows = int(parquet.metadata.num_rows)
+                footer_rows += rows
+                if shard.row_count > 0 and rows > 0 and rows != int(shard.row_count):
+                    footer_errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
+        except Exception as exc:  # noqa: BLE001 - an audit must report every unreadable shard
+            footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
+    errors = []
+    if missing_shards:
+        errors.append(f"missing_shards:{domain}:{len(missing_shards)}")
+    errors.extend(footer_errors[:20])
+    if len(footer_errors) > 20:
+        warnings.append(f"footer_errors_truncated:{domain}:{len(footer_errors)}")
+    if verify_footers and manifest.row_count and footer_rows and int(manifest.row_count) != footer_rows:
+        errors.append(f"dataset_row_count_mismatch:{domain}:manifest={manifest.row_count}:footer={footer_rows}")
+    contract_errors, contract_warnings = _manifest_contract_findings(domain, manifest.to_dict())
+    errors.extend(contract_errors)
+    warnings.extend(contract_warnings)
+    report = {
+        "domain": domain,
+        "layer": manifest.layer,
+        "dataset_id": dataset_id,
+        "manifest_path": str(manifest_path.resolve()),
+        "start_date": manifest.start_date,
+        "end_date": manifest.end_date,
+        "row_count": manifest.row_count,
+        "footer_row_count": footer_rows,
+        "shard_count": len(manifest.shards),
+        "missing_shard_count": len(missing_shards),
+        "footer_error_count": len(footer_errors),
+        "quality": manifest.quality,
+    }
+    return report, errors, warnings
+
+
 def audit_active(*, workspace_root: str | Path | None = None, write: bool = False, verify_footers: bool = True) -> dict[str, Any]:
     root = qdp_v2_root(workspace_root)
     active = read_active_manifest(root)
@@ -39,82 +113,16 @@ def audit_active(*, workspace_root: str | Path | None = None, write: bool = Fals
     errors: list[str] = []
     warnings: list[str] = []
     for _, domain, dataset_id in _active_dataset_refs(active):
-        manifest_path = dataset_manifest_for_id(root, dataset_id, domain)
-        if manifest_path is None:
-            errors.append(f"dataset_manifest_missing:{domain}:{dataset_id}")
-            continue
-        manifest = read_dataset_manifest(manifest_path)
-        missing_shards: list[str] = []
-        footer_errors: list[str] = []
-        footer_rows = 0
-        declared_schema = list(manifest.schema)
-        declared_names = [str(item.get("name", "") or "") for item in declared_schema]
-        # A legacy declaration carries no convertible ``type``, so only its
-        # column names and order can be compared against a Parquet footer.
-        # Normalizing a typed declaration keeps equivalent spellings such as
-        # ``string``/``VARCHAR`` from being reported as drift.
-        canonical_schema = canonical_manifest_schema(declared_schema)
-        if not declared_schema:
-            footer_errors.append(f"manifest_schema_missing:{domain}:{dataset_id}")
-        elif canonical_schema is None:
-            warnings.append(
-                f"legacy_untyped_manifest_schema:{domain}:{dataset_id}"
-            )
-        for shard in manifest.shards:
-            shard_path = _manifest_path(shard.path, root)
-            if not shard_path.is_file():
-                missing_shards.append(str(shard_path))
-                continue
-            try:
-                parquet = _parquet_footer(shard_path)
-                footer_schema = _manifest_schema_from_arrow(parquet.schema_arrow)
-                footer_names = [item["name"] for item in footer_schema]
-                if footer_names != declared_names and set(footer_names) == set(declared_names):
-                    footer_errors.append(
-                        f"schema_column_order_mismatch:{shard.path}:"
-                        f"manifest={declared_names}:footer={footer_names}"
-                    )
-                elif footer_names != declared_names:
-                    footer_errors.append(
-                        f"schema_column_set_mismatch:{shard.path}:"
-                        f"manifest={declared_names}:footer={footer_names}"
-                    )
-                elif canonical_schema is not None and footer_schema != canonical_schema:
-                    footer_errors.append(f"footer_schema_mismatch:{shard.path}")
-                if verify_footers:
-                    rows = int(parquet.metadata.num_rows)
-                    footer_rows += int(rows)
-                    if shard.row_count > 0 and rows > 0 and int(rows) != int(shard.row_count):
-                        footer_errors.append(f"row_count_mismatch:{shard.path}:manifest={shard.row_count}:footer={rows}")
-            except Exception as exc:  # noqa: BLE001 - an audit must report every unreadable shard
-                footer_errors.append(f"footer_unreadable:{shard.path}:{exc}")
-        if missing_shards:
-            errors.append(f"missing_shards:{domain}:{len(missing_shards)}")
-        if footer_errors:
-            errors.extend(footer_errors[:20])
-            if len(footer_errors) > 20:
-                warnings.append(f"footer_errors_truncated:{domain}:{len(footer_errors)}")
-        if verify_footers and manifest.row_count and footer_rows and int(manifest.row_count) != int(footer_rows):
-            errors.append(f"dataset_row_count_mismatch:{domain}:manifest={manifest.row_count}:footer={footer_rows}")
-        contract_errors, contract_warnings = _manifest_contract_findings(domain, manifest.to_dict())
-        errors.extend(contract_errors)
-        warnings.extend(contract_warnings)
-        dataset_reports.append(
-            {
-                "domain": domain,
-                "layer": manifest.layer,
-                "dataset_id": dataset_id,
-                "manifest_path": str(manifest_path.resolve()),
-                "start_date": manifest.start_date,
-                "end_date": manifest.end_date,
-                "row_count": manifest.row_count,
-                "footer_row_count": footer_rows,
-                "shard_count": len(manifest.shards),
-                "missing_shard_count": len(missing_shards),
-                "footer_error_count": len(footer_errors),
-                "quality": manifest.quality,
-            }
+        report, dataset_errors, dataset_warnings = _audit_active_dataset(
+            root=root,
+            domain=domain,
+            dataset_id=dataset_id,
+            verify_footers=verify_footers,
         )
+        errors.extend(dataset_errors)
+        warnings.extend(dataset_warnings)
+        if report is not None:
+            dataset_reports.append(report)
     payload = {
         "status": "ok" if not errors else "error",
         "scope": "active_manifest_files_schema_and_declared_contracts",

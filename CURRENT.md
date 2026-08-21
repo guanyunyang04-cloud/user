@@ -32,21 +32,27 @@ is not used as a hidden eligibility filter.
 
 ## Refactor status
 
-The active package now keeps provider protocol code separate from deterministic
-normalization code. `data/provider_symbols.py` owns provider symbol
-conversions, `data/identifiers.py` owns stable security identity mappings,
-`data/qdp_v2/normalization.py` owns auxiliary payload normalization, and
-`data/qdp_v2/pit_normalization.py` owns PIT history transformations. The
-original modules retain compatibility names, so no data update or research
-entry point changed during the split.
+The repository-wide refactor is complete to the agreed standard: legacy large
+modules were not merely moved; their mixed internals were divided into focused
+packages and helpers. Provider transport, normalization, retry, preparation,
+installation, auditing, workflow state, model evaluation, and account replay
+now have explicit owners. Former module import paths remain available through
+small package facades, so callers did not need a migration.
 
-The remaining large provider and QDP repair modules still contain network,
-retry, multiprocessing, and DuckDB orchestration by design. They are not part
-of the current research import path, and further splitting them should wait
-for a behavior-level need rather than create another layer of wrappers.
-The current refactor is validated by the complete test suite (`163 passed`),
-Ruff, bytecode compilation, and the physical QDP/research checks. The selected
-semantic invariants pass. Five specialty repair records contain explicit
+Shared SHA-256 and atomic file installation live in `quantlab.core.io`.
+Production code has no mixed-responsibility function of 100 lines or more. The
+only function above that threshold is `_prepared_sql`, a single named DuckDB
+query builder whose complete relational statement is intentionally kept
+together. Large files such as PIT preparation and tree research now consist of
+small cohesive helpers rather than monolithic control flow.
+
+The project `brain/` directory and the user-level `workspace-brain` skill were
+deleted. This file is the sole concise cross-session handoff; detailed evidence
+belongs in `research/records/` and code behavior belongs in tests.
+
+The refactor is validated by the complete suite (`169 passed`), whole-repository
+Ruff checks, bytecode compilation, and the physical QDP/research checks. The
+selected semantic invariants pass. Five specialty repair records contain explicit
 machine-checkable checks; three older records (research reports, quarterly
 statements, and the legacy Tushare backfill) contain provenance and workflow
 statistics but no explicit checks, so the semantic command now reports
@@ -99,7 +105,7 @@ The historical Tushare-dependent repair path is isolated behind the explicit
   found no problems and no bad sectors; the volume now reports
   `HealthStatus=Healthy`, `OperationalStatus=OK`, and `fsutil dirty query H:`
   returns `NOT Dirty`.
-- iQuant was running and actively writing during the latest check. The installed
+- At the frozen parity snapshot, iQuant was running and actively writing. The installed
   `xtdata.get_local_data` is an empty compatibility stub, so the project now has
   a tested read-only DAT adapter. It decodes the fixed 64-byte K-line records as
   Asia/Shanghai right-edge bars, price `/1000`, volume lots `*100`, amount in
@@ -128,9 +134,9 @@ The historical Tushare-dependent repair path is isolated behind the explicit
 
 ## Immediate next action
 
-1. Let the current iQuant download finish, then rerun `quantlab data
-   iquant-parity` against the frozen cache. Do not merge it into QDP unless the
-   final symbol/date coverage and whole-cache checks pass.
+1. After the intended iQuant download and account/API setup are available,
+   rerun `quantlab data iquant-parity` against a stable cache. Do not merge it
+   into QDP unless final symbol/date coverage and whole-cache checks pass.
 2. Rerun the predeclared raw-60 seed check and paired ensemble increment using
    the unified package. Do not search blend weights, TopK, exit grids, minute
    subsets, or LightGBM parameter grids on the already-used folds. Build a

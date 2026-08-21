@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,27 @@ class FloatShareInvariantRepairError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class _FloatRepairContext:
+    workspace: Path
+    runtime: Path
+    input_ids: dict[str, str]
+    share_manifest: DatasetManifest
+    valuation_manifest: DatasetManifest
+    share_scan: str
+    valuation_scan: str
+    daily_scan: str
+    target: str
+
+
+@dataclass(frozen=True)
+class _FloatPreparedData:
+    share_paths: list[Path]
+    valuation_paths: list[Path]
+    share_scan: str
+    valuation_scan: str
+
+
 def _workspace(value: str | Path | None) -> Path:
     return Path(value or Path.cwd()).resolve()
 
@@ -90,91 +112,93 @@ def _capped_float_share(total_share: Any, float_share: Any) -> float | None:
 
 
 def _scan(paths: Sequence[Path]) -> str:
-    return (
-        f"read_parquet([{_sql_paths(paths)}], union_by_name=true, "
-        "hive_partitioning=false)"
-    )
+    return f"read_parquet([{_sql_paths(paths)}], union_by_name=true, hive_partitioning=false)"
 
 
-def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
-    workspace = _workspace(workspace_root)
-    state = _read_state(workspace)
-    if state.get("status") in {"prepared", "applied"}:
-        return state
+def _repair_context(workspace: Path) -> _FloatRepairContext:
     active = active_dataset_map(read_active_manifest(qdp_v2_root(workspace)))
-    input_ids = {
-        domain: active[domain]
-        for domain in (SHARE_DOMAIN, VALUATION_DOMAIN, DAILY_DOMAIN)
-    }
+    input_ids: dict[str, str] = {domain: active[domain] for domain in (SHARE_DOMAIN, VALUATION_DOMAIN, DAILY_DOMAIN)}
     share_manifest, share_paths = _dataset(workspace, domain=SHARE_DOMAIN)
     valuation_manifest, valuation_paths = _dataset(workspace, domain=VALUATION_DOMAIN)
     _, daily_paths = _dataset(workspace, domain=DAILY_DOMAIN)
-    share_scan = _scan(share_paths)
-    valuation_scan = _scan(valuation_paths)
-    daily_scan = _scan(daily_paths)
     target = (
         f"trade_date<='{END_DATE}' AND share_fill_method='{TARGET_FILL_METHOD}' "
         "AND total_share IS NOT NULL AND float_share>total_share"
     )
-    runtime = _runtime(workspace)
+    return _FloatRepairContext(
+        workspace=workspace,
+        runtime=_runtime(workspace),
+        input_ids=input_ids,
+        share_manifest=share_manifest,
+        valuation_manifest=valuation_manifest,
+        share_scan=_scan(share_paths),
+        valuation_scan=_scan(valuation_paths),
+        daily_scan=_scan(daily_paths),
+        target=target,
+    )
+
+
+def _open_connection(runtime: Path) -> tuple[duckdb.DuckDBPyConnection, Path]:
     connection = duckdb.connect()
     connection.execute("SET threads=4")
     spill = runtime / "duckdb_tmp"
     spill.mkdir(parents=True, exist_ok=True)
-    connection.execute(
-        f"SET temp_directory='{spill.resolve().as_posix().replace(chr(39), chr(39) * 2)}'"
+    connection.execute(f"SET temp_directory='{spill.resolve().as_posix().replace(chr(39), chr(39) * 2)}'")
+    return connection, spill
+
+
+def _write_inventory(
+    connection: duckdb.DuckDBPyConnection,
+    context: _FloatRepairContext,
+) -> tuple[Path, int]:
+    path = context.runtime / "inventory" / "float_share_above_total_share.parquet"
+    _copy_query(
+        connection,
+        query=(f"SELECT * FROM {context.share_scan} WHERE {context.target} ORDER BY trade_date,symbol"),
+        path=path,
     )
-    try:
-        target_path = runtime / "inventory" / "float_share_above_total_share.parquet"
-        _copy_query(
-            connection,
-            query=f"SELECT * FROM {share_scan} WHERE {target} ORDER BY trade_date,symbol",
-            path=target_path,
-        )
-        target_count = int(
-            connection.execute(
-                f"SELECT count(*) FROM {share_scan} WHERE {target}"
-            ).fetchone()[0]
-        )
-        prepared_share_paths: list[Path] = []
-        for year in range(2010, 2027):
-            path = (
-                runtime
-                / "prepared"
-                / SHARE_DOMAIN
-                / f"year={year}"
-                / "part-0000.parquet"
-            )
-            query = f"""
+    count = int(connection.execute(f"SELECT count(*) FROM {context.share_scan} WHERE {context.target}").fetchone()[0])
+    return path, count
+
+
+def _write_share_data(
+    connection: duckdb.DuckDBPyConnection,
+    context: _FloatRepairContext,
+) -> list[Path]:
+    paths: list[Path] = []
+    for year in range(2010, 2027):
+        path = context.runtime / "prepared" / SHARE_DOMAIN / f"year={year}" / "part-0000.parquet"
+        query = f"""
               SELECT symbol,trade_date,total_share,
-                CASE WHEN {target} THEN total_share ELSE float_share END AS float_share,
-                CASE WHEN {target} THEN 0.0 ELSE restricted_share END AS restricted_share,
+                CASE WHEN {context.target} THEN total_share ELSE float_share END AS float_share,
+                CASE WHEN {context.target} THEN 0.0 ELSE restricted_share END AS restricted_share,
                 total_share_source_date,
-                CASE WHEN {target} THEN coalesce(total_share_source_date,trade_date)
+                CASE WHEN {context.target} THEN coalesce(total_share_source_date,trade_date)
                      ELSE float_share_source_date END AS float_share_source_date,
-                CASE WHEN {target} THEN coalesce(total_share_source_date,trade_date)
+                CASE WHEN {context.target} THEN coalesce(total_share_source_date,trade_date)
                      ELSE restricted_share_source_date END AS restricted_share_source_date,
-                CASE WHEN {target} THEN concat(share_fill_method,'+float_capped_by_total_share')
+                CASE WHEN {context.target} THEN concat(share_fill_method,'+float_capped_by_total_share')
                      ELSE share_fill_method END AS share_fill_method,
-                CASE WHEN {target} THEN concat(source,'+float_share_invariant_repair')
+                CASE WHEN {context.target} THEN concat(source,'+float_share_invariant_repair')
                      ELSE source END AS source
-              FROM {share_scan}
+              FROM {context.share_scan}
               WHERE trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
               ORDER BY trade_date,symbol
-            """
-            _copy_query(connection, query=query, path=path)
-            prepared_share_paths.append(path)
-        prepared_share_scan = _scan(prepared_share_paths)
-        prepared_valuation_paths: list[Path] = []
-        for year in range(2010, 2027):
-            path = (
-                runtime
-                / "prepared"
-                / VALUATION_DOMAIN
-                / f"year={year}"
-                / "part-0000.parquet"
-            )
-            query = f"""
+        """
+        _copy_query(connection, query=query, path=path)
+        paths.append(path)
+    return paths
+
+
+def _write_valuation_data(
+    connection: duckdb.DuckDBPyConnection,
+    context: _FloatRepairContext,
+    prepared_share_scan: str,
+) -> list[Path]:
+    paths: list[Path] = []
+    for year in range(2010, 2027):
+        path = context.runtime / "prepared" / VALUATION_DOMAIN / f"year={year}" / "part-0000.parquet"
+        query = f"""
               SELECT v.symbol,v.trade_date,
                 CASE WHEN v.trade_date<='{END_DATE}' THEN d.close*s.total_share
                      ELSE v.total_mv END AS total_mv,
@@ -186,28 +210,50 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
                            AND old.share_fill_method='{TARGET_FILL_METHOD}'
                      THEN concat(v.source,'+qdp_close_x_capped_float_share')
                      ELSE v.source END AS source
-              FROM {valuation_scan} v
+              FROM {context.valuation_scan} v
               JOIN {prepared_share_scan} s USING(symbol,trade_date)
-              JOIN {share_scan} old USING(symbol,trade_date)
-              JOIN {daily_scan} d USING(symbol,trade_date)
+              JOIN {context.share_scan} old USING(symbol,trade_date)
+              JOIN {context.daily_scan} d USING(symbol,trade_date)
               WHERE v.trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
               ORDER BY v.trade_date,v.symbol
-            """
-            _copy_query(connection, query=query, path=path)
-            prepared_valuation_paths.append(path)
-        prepared_valuation_scan = _scan(prepared_valuation_paths)
-        share_stats = connection.execute(
-            f"SELECT count(*),min(trade_date),max(trade_date),"
-            f"count(*) FILTER(WHERE float_share>total_share) FROM {prepared_share_scan}"
-        ).fetchone()
-        valuation_stats = connection.execute(
-            f"SELECT count(*),min(trade_date),max(trade_date) FROM {prepared_valuation_scan}"
-        ).fetchone()
-        non_target_mismatch = int(
-            connection.execute(
-                f"""
-                SELECT count(*) FROM {share_scan} old
-                JOIN {prepared_share_scan} new USING(symbol,trade_date)
+        """
+        _copy_query(connection, query=query, path=path)
+        paths.append(path)
+    return paths
+
+
+def _write_prepared_data(
+    connection: duckdb.DuckDBPyConnection,
+    context: _FloatRepairContext,
+) -> _FloatPreparedData:
+    share_paths = _write_share_data(connection, context)
+    share_scan = _scan(share_paths)
+    valuation_paths = _write_valuation_data(connection, context, share_scan)
+    return _FloatPreparedData(
+        share_paths=share_paths,
+        valuation_paths=valuation_paths,
+        share_scan=share_scan,
+        valuation_scan=_scan(valuation_paths),
+    )
+
+
+def _validate_prepared(
+    connection: duckdb.DuckDBPyConnection,
+    context: _FloatRepairContext,
+    prepared: _FloatPreparedData,
+) -> dict[str, Any]:
+    share_stats = connection.execute(
+        f"SELECT count(*),min(trade_date),max(trade_date),"
+        f"count(*) FILTER(WHERE float_share>total_share) FROM {prepared.share_scan}"
+    ).fetchone()
+    valuation_stats = connection.execute(
+        f"SELECT count(*),min(trade_date),max(trade_date) FROM {prepared.valuation_scan}"
+    ).fetchone()
+    non_target_mismatch = int(
+        connection.execute(
+            f"""
+                SELECT count(*) FROM {context.share_scan} old
+                JOIN {prepared.share_scan} new USING(symbol,trade_date)
                 WHERE NOT (old.trade_date<='{END_DATE}'
                   AND old.share_fill_method='{TARGET_FILL_METHOD}'
                   AND old.total_share IS NOT NULL
@@ -221,75 +267,106 @@ def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
                     OR old.share_fill_method IS DISTINCT FROM new.share_fill_method
                     OR old.source IS DISTINCT FROM new.source)
                 """
-            ).fetchone()[0]
-        )
-        share_2026_mismatch = int(
-            connection.execute(
-                f"SELECT count(*) FROM ((SELECT * FROM {share_scan} WHERE trade_date>'{END_DATE}') "
-                f"EXCEPT ALL (SELECT * FROM {prepared_share_scan} WHERE trade_date>'{END_DATE}'))"
-            ).fetchone()[0]
-        )
-        valuation_2026_mismatch = int(
-            connection.execute(
-                f"SELECT count(*) FROM ((SELECT * FROM {valuation_scan} WHERE trade_date>'{END_DATE}') "
-                f"EXCEPT ALL (SELECT * FROM {prepared_valuation_scan} WHERE trade_date>'{END_DATE}'))"
-            ).fetchone()[0]
-        )
-        formula_errors = connection.execute(
-            f"""
+        ).fetchone()[0]
+    )
+    share_2026_mismatch = int(
+        connection.execute(
+            f"SELECT count(*) FROM ((SELECT * FROM {context.share_scan} WHERE trade_date>'{END_DATE}') "
+            f"EXCEPT ALL (SELECT * FROM {prepared.share_scan} WHERE trade_date>'{END_DATE}'))"
+        ).fetchone()[0]
+    )
+    valuation_2026_mismatch = int(
+        connection.execute(
+            f"SELECT count(*) FROM ((SELECT * FROM {context.valuation_scan} WHERE trade_date>'{END_DATE}') "
+            f"EXCEPT ALL (SELECT * FROM {prepared.valuation_scan} WHERE trade_date>'{END_DATE}'))"
+        ).fetchone()[0]
+    )
+    formula_errors = connection.execute(
+        f"""
             SELECT count(*) FILTER(WHERE s.total_share IS NOT NULL AND
                      abs(v.total_mv-d.close*s.total_share)>
                      greatest(abs(d.close*s.total_share)*1e-8,1e-6)),
                    count(*) FILTER(WHERE s.float_share IS NOT NULL AND
                      abs(v.circ_mv-d.close*s.float_share)>
                      greatest(abs(d.close*s.float_share)*1e-8,1e-6))
-            FROM {prepared_valuation_scan} v
-            JOIN {prepared_share_scan} s USING(symbol,trade_date)
-            JOIN {daily_scan} d USING(symbol,trade_date)
+            FROM {prepared.valuation_scan} v
+            JOIN {prepared.share_scan} s USING(symbol,trade_date)
+            JOIN {context.daily_scan} d USING(symbol,trade_date)
             """
-        ).fetchone()
+    ).fetchone()
+    return {
+        "share_stats": share_stats,
+        "valuation_stats": valuation_stats,
+        "non_target_mismatch": non_target_mismatch,
+        "share_2026_mismatch": share_2026_mismatch,
+        "valuation_2026_mismatch": valuation_2026_mismatch,
+        "formula_errors": formula_errors,
+    }
+
+
+def _prepare_checks(
+    context: _FloatRepairContext,
+    *,
+    target_count: int,
+    validation: Mapping[str, Any],
+) -> dict[str, bool]:
+    share_stats = validation["share_stats"]
+    valuation_stats = validation["valuation_stats"]
+    formula_errors = validation["formula_errors"]
+    return {
+        "target_count_expected": target_count == EXPECTED_REPAIR_ROWS,
+        "share_row_count_unchanged": int(share_stats[0]) == context.share_manifest.row_count,
+        "share_date_range_unchanged": str(share_stats[1]) == context.share_manifest.start_date
+        and str(share_stats[2]) == context.share_manifest.end_date,
+        "float_share_never_exceeds_total_share": int(share_stats[3]) == 0,
+        "valuation_row_count_unchanged": int(valuation_stats[0]) == context.valuation_manifest.row_count,
+        "valuation_date_range_unchanged": str(valuation_stats[1]) == context.valuation_manifest.start_date
+        and str(valuation_stats[2]) == context.valuation_manifest.end_date,
+        "non_target_share_rows_unchanged": validation["non_target_mismatch"] == 0,
+        "total_mv_formula_valid": int(formula_errors[0]) == 0,
+        "circ_mv_formula_valid": int(formula_errors[1]) == 0,
+        "out_of_scope_2026_share_values_unchanged": validation["share_2026_mismatch"] == 0,
+        "out_of_scope_2026_valuation_values_unchanged": validation["valuation_2026_mismatch"] == 0,
+        "provider_request_2026_count_zero": True,
+    }
+
+
+def prepare(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
+    workspace = _workspace(workspace_root)
+    state = _read_state(workspace)
+    if state.get("status") in {"prepared", "applied"}:
+        return state
+    context = _repair_context(workspace)
+    connection, spill = _open_connection(context.runtime)
+    try:
+        target_path, target_count = _write_inventory(connection, context)
+        prepared = _write_prepared_data(connection, context)
+        validation = _validate_prepared(connection, context, prepared)
     finally:
         connection.close()
         shutil.rmtree(spill, ignore_errors=True)
-    checks = {
-        "target_count_expected": target_count == EXPECTED_REPAIR_ROWS,
-        "share_row_count_unchanged": int(share_stats[0]) == share_manifest.row_count,
-        "share_date_range_unchanged": str(share_stats[1]) == share_manifest.start_date
-        and str(share_stats[2]) == share_manifest.end_date,
-        "float_share_never_exceeds_total_share": int(share_stats[3]) == 0,
-        "valuation_row_count_unchanged": int(valuation_stats[0])
-        == valuation_manifest.row_count,
-        "valuation_date_range_unchanged": str(valuation_stats[1])
-        == valuation_manifest.start_date
-        and str(valuation_stats[2]) == valuation_manifest.end_date,
-        "non_target_share_rows_unchanged": non_target_mismatch == 0,
-        "total_mv_formula_valid": int(formula_errors[0]) == 0,
-        "circ_mv_formula_valid": int(formula_errors[1]) == 0,
-        "out_of_scope_2026_share_values_unchanged": share_2026_mismatch == 0,
-        "out_of_scope_2026_valuation_values_unchanged": valuation_2026_mismatch == 0,
-        "provider_request_2026_count_zero": True,
-    }
+    checks = _prepare_checks(context, target_count=target_count, validation=validation)
     if not all(checks.values()):
         raise FloatShareInvariantRepairError(f"float_share_prepare_failed:{checks}")
     state.update(
         {
             "status": "prepared",
-            "input_dataset_ids": input_ids,
+            "input_dataset_ids": context.input_ids,
             "repair_row_count": target_count,
             "inventory_path": str(target_path),
             "inventory_sha256": _sha256(target_path),
             "prepared": {
-                SHARE_DOMAIN: [str(path) for path in prepared_share_paths],
-                VALUATION_DOMAIN: [str(path) for path in prepared_valuation_paths],
+                SHARE_DOMAIN: [str(path) for path in prepared.share_paths],
+                VALUATION_DOMAIN: [str(path) for path in prepared.valuation_paths],
             },
             "formula_error_count": {
-                "total_mv": int(formula_errors[0]),
-                "circ_mv": int(formula_errors[1]),
+                "total_mv": int(validation["formula_errors"][0]),
+                "circ_mv": int(validation["formula_errors"][1]),
             },
             "out_of_scope_2026": {
                 "provider_request_count": 0,
-                "modified_share_row_count": share_2026_mismatch,
-                "modified_valuation_row_count": valuation_2026_mismatch,
+                "modified_share_row_count": validation["share_2026_mismatch"],
+                "modified_valuation_row_count": validation["valuation_2026_mismatch"],
             },
             "checks": checks,
         }
@@ -323,9 +400,7 @@ def _install(
         source_hash = _sha256(source_path)
         if target.is_file():
             if _sha256(target) != source_hash:
-                raise FloatShareInvariantRepairError(
-                    f"installed_hash_conflict:{target}"
-                )
+                raise FloatShareInvariantRepairError(f"installed_hash_conflict:{target}")
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
             temporary = target.with_suffix(target.suffix + ".partial")
@@ -373,15 +448,9 @@ def _install(
             **dict(input_manifest.quality or {}),
             "primary_key_unique": True,
             "float_share_above_total_share_rows": 0,
-            "float_share_capped_by_total_share_rows": int(
-                state.get("repair_row_count", 0)
-            ),
-            "total_mv_formula_error_count": int(
-                dict(state.get("formula_error_count", {}) or {}).get("total_mv", 0)
-            ),
-            "circ_mv_formula_error_count": int(
-                dict(state.get("formula_error_count", {}) or {}).get("circ_mv", 0)
-            ),
+            "float_share_capped_by_total_share_rows": int(state.get("repair_row_count", 0)),
+            "total_mv_formula_error_count": int(dict(state.get("formula_error_count", {}) or {}).get("total_mv", 0)),
+            "circ_mv_formula_error_count": int(dict(state.get("formula_error_count", {}) or {}).get("circ_mv", 0)),
         },
         schema=_manifest_schema_from_arrow(pq.read_schema(paths[0])),
         notes=[
@@ -408,16 +477,12 @@ def commit(*, workspace_root: str | Path | None = None) -> dict[str, Any]:
     if state.get("status") == "applied":
         return state
     if state.get("status") != "prepared":
-        raise FloatShareInvariantRepairError(
-            f"float_share_not_prepared:{state.get('status')}"
-        )
+        raise FloatShareInvariantRepairError(f"float_share_not_prepared:{state.get('status')}")
     inputs = dict(state.get("input_dataset_ids", {}) or {})
     installed: dict[str, Any] = {}
     ids: dict[str, str] = {}
     for domain in (SHARE_DOMAIN, VALUATION_DOMAIN):
-        input_manifest, _ = _dataset(
-            workspace, domain=domain, dataset_id=str(inputs[domain])
-        )
+        input_manifest, _ = _dataset(workspace, domain=domain, dataset_id=str(inputs[domain]))
         dataset_id, record = _install(
             workspace,
             domain=domain,
