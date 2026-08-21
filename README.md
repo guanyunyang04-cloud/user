@@ -26,10 +26,14 @@ The default incremental data path uses BaoStock for structured daily facts,
 MootDX for recent intraday/corporate-action detection, and CNInfo through
 AkShare for disclosure confirmation. Tushare-compatible code is retained only
 as an explicitly selected legacy repair path. iQuant is treated as a runtime
-and execution source, not as the sole historical research store. Its current
-download is a platform cache (about 4.8 GiB; only 276 SH and 5 SZ one-minute
-files are present), so it still needs a read/parity adapter and measured
-coverage before it can feed research data.
+and execution source, not as the sole historical research store. A read-only
+adapter now decodes its local daily/one-minute K-line files and compares them
+with QDP without an RPC or trading connection. The 2026-08-21 parity snapshot
+found excellent recent agreement but only 60 one-minute files matching the
+3,416 symbols with QDP daily bars; the download was still active. The cache is
+therefore a recent/live supplement and independent validator, not a historical
+replacement. Compact evidence is retained in
+`research/records/iquant_cache_parity_20260821/result.json`.
 
 PIT restore provenance in the active QDP manifest is stored relative to the
 workspace (`path_base=workspace_root`), so moving the project does not leave
@@ -51,6 +55,16 @@ $env:PYTHONPATH='H:\quant_project\src'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab data status --verify-files
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab data check --quick --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research verify
+```
+
+Local iQuant K-line files can be sampled without a trading connection. The
+adapter validates the binary layout and records all inferred units before
+comparing the sample with the active QDP store:
+
+```powershell
+$env:PYTHONPATH='H:\quant_project\src'
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab data iquant-parity `
+  --data-dir 'H:\国信iQuant策略交易平台\datadir'
 ```
 
 The current research dataset covers 4,191,476 stock-days through the cutoff

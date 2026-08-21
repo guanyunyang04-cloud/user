@@ -18,6 +18,7 @@ commands:
   check --quick|--full|--semantic
                           Validate physical or selected semantic contracts.
   update                  Add recent market data in place.
+  iquant-parity           Compare a small local iQuant cache sample with QDP.
   compact                 Merge the 5-minute table into yearly files.
   repair                  Repair active shards with explicit CAS protection.
   gc                      Remove unreferenced files.
@@ -34,6 +35,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("check",): "quantlab.data.qdp_v2.check",
     ("gc",): "quantlab.data.qdp_v2.gc",
     ("update",): "quantlab.data.qdp_v2.update",
+    ("iquant-parity",): "quantlab.data.iquant_parity",
     ("compact",): "quantlab.data.qdp_v2.compact",
     ("repair",): "quantlab.data.qdp_v2.repair",
 }

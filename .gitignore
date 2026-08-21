@@ -21,6 +21,7 @@ data/research/*
 !data/research/daily/
 data/research/daily/*
 !data/research/daily/manifest.json
+data/staging/
 runs/*
 !runs/.gitkeep
 

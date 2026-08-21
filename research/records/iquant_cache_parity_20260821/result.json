@@ -1,0 +1,649 @@
+{
+  "schema": "quantlab.iquant_qdp_parity/1",
+  "status": "ok_with_mutating_cache_warning",
+  "created_at": "2026-08-21T08:05:39+00:00",
+  "scope": {
+    "iquant_data_dir": "H:\\国信iQuant策略交易平台\\datadir",
+    "daily_symbols": [
+      "000001.SZ",
+      "600000.SH",
+      "600011.SH",
+      "600276.SH"
+    ],
+    "daily_range": [
+      "2010-01-04",
+      "2026-07-21"
+    ],
+    "minute_symbols": [
+      "600011.SH",
+      "600276.SH"
+    ],
+    "minute_dates": [
+      "2010-04-16",
+      "2012-01-04",
+      "2015-01-05",
+      "2018-06-28",
+      "2020-01-02",
+      "2023-01-03",
+      "2025-01-02",
+      "2025-12-31",
+      "2026-07-21"
+    ]
+  },
+  "format_contract": {
+    "container": "8-byte little-endian header plus 64-byte fixed K-line records",
+    "timezone": "Asia/Shanghai",
+    "price": "stored integer / 1000",
+    "volume": "stored lots * 100 = shares",
+    "amount": "currency units",
+    "minute_label": "right edge; 09:31..09:35 aggregate to 09:35",
+    "adjustment": "unadjusted/raw, confirmed against QDP adjusted_flag=none on the sample",
+    "installed_xtdata_get_local_data": "empty compatibility stub; DAT decoded read-only"
+  },
+  "source_files": {
+    "daily": [
+      {
+        "path": "SZ/86400/000001.DAT",
+        "symbol": "000001.SZ",
+        "period": "1d",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 8242,
+        "file_size": 527496,
+        "mtime_ns": 1787247302000000000,
+        "stable_during_read": true,
+        "decoded_start": "1991-12-23T00:00:00+08:00",
+        "decoded_end": "2026-08-20T00:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity",
+        "sha256": "e20129b091f82f6ae1ac492e08d69347bb51f67169af85fbd34704970b53a537"
+      },
+      {
+        "path": "SH/86400/600000.DAT",
+        "symbol": "600000.SH",
+        "period": "1d",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 6372,
+        "file_size": 407816,
+        "mtime_ns": 1787245118000000000,
+        "stable_during_read": true,
+        "decoded_start": "1999-11-10T00:00:00+08:00",
+        "decoded_end": "2026-08-20T00:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity",
+        "sha256": "0473f893fa2a90b3d64d1862530e284f4d7625663418cfdbdb9b634773277686"
+      },
+      {
+        "path": "SH/86400/600011.DAT",
+        "symbol": "600011.SH",
+        "period": "1d",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 5923,
+        "file_size": 379080,
+        "mtime_ns": 1787245000000000000,
+        "stable_during_read": true,
+        "decoded_start": "2001-12-06T00:00:00+08:00",
+        "decoded_end": "2026-08-20T00:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity",
+        "sha256": "4be60146f42e111626a4cd9574649791a950fb7efb09b19af827c1468f967ce5"
+      },
+      {
+        "path": "SH/86400/600276.DAT",
+        "symbol": "600276.SH",
+        "period": "1d",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 6222,
+        "file_size": 398216,
+        "mtime_ns": 1787245478000000000,
+        "stable_during_read": true,
+        "decoded_start": "2000-10-18T00:00:00+08:00",
+        "decoded_end": "2026-08-20T00:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity",
+        "sha256": "b543ce8912146e60658c48d678ba935c14970d41f7c56a8fb07faed0c936222c"
+      }
+    ],
+    "minute": [
+      {
+        "path": "SH/60/600011.DAT",
+        "symbol": "600011.SH",
+        "period": "1m",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 943372,
+        "file_size": 60375816,
+        "mtime_ns": 1787240080000000000,
+        "stable_during_read": true,
+        "decoded_start": "2010-04-16T09:31:00+08:00",
+        "decoded_end": "2026-08-20T15:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity",
+        "sha256": "6390147f2c29d7c9b94d1b19b5650f212cb9f9dc1927474d981bf67d449844f6"
+      },
+      {
+        "path": "SH/60/600276.DAT",
+        "symbol": "600276.SH",
+        "period": "1m",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 944680,
+        "file_size": 60459528,
+        "mtime_ns": 1787237902000000000,
+        "stable_during_read": true,
+        "decoded_start": "2010-04-16T09:31:00+08:00",
+        "decoded_end": "2026-08-20T15:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity",
+        "sha256": "747ca86a360289e4d8e40292394cf823a0435949de4b4760c6ecb862535b87cb"
+      }
+    ]
+  },
+  "qdp": {
+    "market_daily_raw_dataset_id": "market_daily_raw__0559f722eb9142e5f476854a",
+    "market_intraday_5m_dataset_id": "market_intraday_5m__2c071f88738b5cdea4695f16"
+  },
+  "cache_inventory": {
+    "scan_started_at": "2026-08-21T08:05:38+00:00",
+    "scan_finished_at": "2026-08-21T08:05:39+00:00",
+    "file_count": 867,
+    "file_count_after_scan": 867,
+    "changed_during_scan": false,
+    "latest_write_at": "2026-08-21T08:05:36+00:00",
+    "latest_write_age_seconds": 3.512163,
+    "recent_write_within_5_minutes": true,
+    "total_bytes": 2155162776,
+    "format_valid_count": 867,
+    "qdp_daily_symbol_count": 3416,
+    "qdp_symbol_file_count": 60,
+    "qdp_symbol_coverage_rate": 0.01756440281030445,
+    "qdp_symbol_files_at_most_one_session": 7,
+    "qdp_symbol_files_at_most_two_sessions": 8,
+    "qdp_symbol_files_over_100k_rows": 51
+  },
+  "daily_parity": {
+    "row_count": 15931,
+    "key_counts": {
+      "both": 15930,
+      "iquant_only": 0,
+      "qdp_only": 1
+    },
+    "metrics": {
+      "open": {
+        "compared_count": 15930,
+        "exact_count": 15930,
+        "exact_rate": 1.0,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0,
+        "maximum_absolute_error": 0.0
+      },
+      "high": {
+        "compared_count": 15930,
+        "exact_count": 15930,
+        "exact_rate": 1.0,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0,
+        "maximum_absolute_error": 0.0
+      },
+      "low": {
+        "compared_count": 15930,
+        "exact_count": 15928,
+        "exact_rate": 0.9998744507219084,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0029030817329165374,
+        "maximum_absolute_error": 0.13000000000000256
+      },
+      "close": {
+        "compared_count": 15930,
+        "exact_count": 15924,
+        "exact_rate": 0.9996233521657251,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0018621973929236102,
+        "maximum_absolute_error": 0.030000000000001137
+      },
+      "volume": {
+        "compared_count": 15930,
+        "exact_count": 1129,
+        "exact_rate": 0.07087256748273697,
+        "median_relative_error": 5.985102837647947e-07,
+        "p95_relative_error": 7.046538516687694e-06,
+        "maximum_relative_error": 9.342011023573007e-05,
+        "maximum_absolute_error": 116.0
+      },
+      "amount": {
+        "compared_count": 15930,
+        "exact_count": 707,
+        "exact_rate": 0.04438166980539862,
+        "median_relative_error": 4.532168173060631e-08,
+        "p95_relative_error": 8.097977948614742e-07,
+        "maximum_relative_error": 1.1813467966031467e-05,
+        "maximum_absolute_error": 1359.9999990463257
+      }
+    }
+  },
+  "minute_parity": {
+    "row_count": 864,
+    "key_counts": {
+      "both": 864,
+      "iquant_only": 0,
+      "qdp_only": 0
+    },
+    "metrics": {
+      "open": {
+        "compared_count": 864,
+        "exact_count": 681,
+        "exact_rate": 0.7881944444444444,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0015861731738508644,
+        "maximum_relative_error": 0.0036391993761372646,
+        "maximum_absolute_error": 0.1700000000000017
+      },
+      "high": {
+        "compared_count": 864,
+        "exact_count": 778,
+        "exact_rate": 0.9004629629629629,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0005184571427766153,
+        "maximum_relative_error": 0.005567928730512328,
+        "maximum_absolute_error": 0.09999999999999432
+      },
+      "low": {
+        "compared_count": 864,
+        "exact_count": 780,
+        "exact_rate": 0.9027777777777778,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0003481693597478179,
+        "maximum_relative_error": 0.00659630606860156,
+        "maximum_absolute_error": 0.0799999999999983
+      },
+      "close": {
+        "compared_count": 864,
+        "exact_count": 697,
+        "exact_rate": 0.8067129629629629,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0013847541982275953,
+        "maximum_relative_error": 0.005115089514066501,
+        "maximum_absolute_error": 0.10000000000000142
+      },
+      "volume": {
+        "compared_count": 864,
+        "exact_count": 259,
+        "exact_rate": 0.29976851851851855,
+        "median_relative_error": 0.0006892949752102751,
+        "p95_relative_error": 0.06995707146366945,
+        "maximum_relative_error": 0.6113074204946997,
+        "maximum_absolute_error": 689000.0
+      },
+      "amount": {
+        "compared_count": 864,
+        "exact_count": 220,
+        "exact_rate": 0.25462962962962965,
+        "median_relative_error": 0.0005894400676146978,
+        "p95_relative_error": 0.06730485224445061,
+        "maximum_relative_error": 0.6143266164760912,
+        "maximum_absolute_error": 7183434.0
+      }
+    },
+    "recent_2025_plus": {
+      "row_count": 288,
+      "key_counts": {
+        "both": 288,
+        "iquant_only": 0,
+        "qdp_only": 0
+      },
+      "metrics": {
+        "open": {
+          "compared_count": 288,
+          "exact_count": 288,
+          "exact_rate": 1.0,
+          "median_relative_error": 0.0,
+          "p95_relative_error": 0.0,
+          "maximum_relative_error": 0.0,
+          "maximum_absolute_error": 0.0
+        },
+        "high": {
+          "compared_count": 288,
+          "exact_count": 288,
+          "exact_rate": 1.0,
+          "median_relative_error": 0.0,
+          "p95_relative_error": 0.0,
+          "maximum_relative_error": 0.0,
+          "maximum_absolute_error": 0.0
+        },
+        "low": {
+          "compared_count": 288,
+          "exact_count": 288,
+          "exact_rate": 1.0,
+          "median_relative_error": 0.0,
+          "p95_relative_error": 0.0,
+          "maximum_relative_error": 0.0,
+          "maximum_absolute_error": 0.0
+        },
+        "close": {
+          "compared_count": 288,
+          "exact_count": 288,
+          "exact_rate": 1.0,
+          "median_relative_error": 0.0,
+          "p95_relative_error": 0.0,
+          "maximum_relative_error": 0.0,
+          "maximum_absolute_error": 0.0
+        },
+        "volume": {
+          "compared_count": 288,
+          "exact_count": 194,
+          "exact_rate": 0.6736111111111112,
+          "median_relative_error": 0.0,
+          "p95_relative_error": 0.00024818799796738215,
+          "maximum_relative_error": 0.000970873786407767,
+          "maximum_absolute_error": 300.0
+        },
+        "amount": {
+          "compared_count": 288,
+          "exact_count": 218,
+          "exact_rate": 0.7569444444444444,
+          "median_relative_error": 0.0,
+          "p95_relative_error": 5.6367942490673256e-08,
+          "maximum_relative_error": 1.5021099387254306e-07,
+          "maximum_absolute_error": 26.0
+        }
+      }
+    },
+    "by_qdp_source": {
+      "external_quant_archive_5m_direct_repair": {
+        "row_count": 96,
+        "key_counts": {
+          "both": 96,
+          "iquant_only": 0,
+          "qdp_only": 0
+        },
+        "metrics": {
+          "open": {
+            "compared_count": 96,
+            "exact_count": 71,
+            "exact_rate": 0.7395833333333334,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.002212634872624719,
+            "maximum_relative_error": 0.003098030537729599,
+            "maximum_absolute_error": 0.14000000000000057
+          },
+          "high": {
+            "compared_count": 96,
+            "exact_count": 90,
+            "exact_rate": 0.9375,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.00021823933146385125,
+            "maximum_relative_error": 0.001991591059968938,
+            "maximum_absolute_error": 0.0899999999999963
+          },
+          "low": {
+            "compared_count": 96,
+            "exact_count": 93,
+            "exact_rate": 0.96875,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0,
+            "maximum_relative_error": 0.0013869625520110662,
+            "maximum_absolute_error": 0.010000000000005116
+          },
+          "close": {
+            "compared_count": 96,
+            "exact_count": 75,
+            "exact_rate": 0.78125,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0013893718127028292,
+            "maximum_relative_error": 0.002777777777777842,
+            "maximum_absolute_error": 0.10000000000000142
+          },
+          "volume": {
+            "compared_count": 96,
+            "exact_count": 11,
+            "exact_rate": 0.11458333333333333,
+            "median_relative_error": 0.010647132753394612,
+            "p95_relative_error": 0.1912442396313364,
+            "maximum_relative_error": 0.46755852842809364,
+            "maximum_absolute_error": 69900.0
+          },
+          "amount": {
+            "compared_count": 96,
+            "exact_count": 1,
+            "exact_rate": 0.010416666666666666,
+            "median_relative_error": 0.008647402639642615,
+            "p95_relative_error": 0.16842318700575706,
+            "maximum_relative_error": 0.466989706010159,
+            "maximum_absolute_error": 505097.0
+          }
+        }
+      },
+      "external_quant_zip": {
+        "row_count": 672,
+        "key_counts": {
+          "both": 672,
+          "iquant_only": 0,
+          "qdp_only": 0
+        },
+        "metrics": {
+          "open": {
+            "compared_count": 672,
+            "exact_count": 514,
+            "exact_rate": 0.7648809523809523,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0016041772324612278,
+            "maximum_relative_error": 0.0036391993761372646,
+            "maximum_absolute_error": 0.1700000000000017
+          },
+          "high": {
+            "compared_count": 672,
+            "exact_count": 592,
+            "exact_rate": 0.8809523809523809,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0009796736175667704,
+            "maximum_relative_error": 0.005567928730512328,
+            "maximum_absolute_error": 0.09999999999999432
+          },
+          "low": {
+            "compared_count": 672,
+            "exact_count": 591,
+            "exact_rate": 0.8794642857142857,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0008020201095143517,
+            "maximum_relative_error": 0.00659630606860156,
+            "maximum_absolute_error": 0.0799999999999983
+          },
+          "close": {
+            "compared_count": 672,
+            "exact_count": 526,
+            "exact_rate": 0.7827380952380952,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0014670079342914385,
+            "maximum_relative_error": 0.005115089514066501,
+            "maximum_absolute_error": 0.09000000000000341
+          },
+          "volume": {
+            "compared_count": 672,
+            "exact_count": 186,
+            "exact_rate": 0.2767857142857143,
+            "median_relative_error": 0.0008383225117351098,
+            "p95_relative_error": 0.056468807939797125,
+            "maximum_relative_error": 0.6113074204946997,
+            "maximum_absolute_error": 689000.0
+          },
+          "amount": {
+            "compared_count": 672,
+            "exact_count": 187,
+            "exact_rate": 0.27827380952380953,
+            "median_relative_error": 0.0007021583561442738,
+            "p95_relative_error": 0.05268804400959519,
+            "maximum_relative_error": 0.6143266164760912,
+            "maximum_absolute_error": 7183434.0
+          }
+        }
+      },
+      "mootdx_online": {
+        "row_count": 96,
+        "key_counts": {
+          "both": 96,
+          "iquant_only": 0,
+          "qdp_only": 0
+        },
+        "metrics": {
+          "open": {
+            "compared_count": 96,
+            "exact_count": 96,
+            "exact_rate": 1.0,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0,
+            "maximum_relative_error": 0.0,
+            "maximum_absolute_error": 0.0
+          },
+          "high": {
+            "compared_count": 96,
+            "exact_count": 96,
+            "exact_rate": 1.0,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0,
+            "maximum_relative_error": 0.0,
+            "maximum_absolute_error": 0.0
+          },
+          "low": {
+            "compared_count": 96,
+            "exact_count": 96,
+            "exact_rate": 1.0,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0,
+            "maximum_relative_error": 0.0,
+            "maximum_absolute_error": 0.0
+          },
+          "close": {
+            "compared_count": 96,
+            "exact_count": 96,
+            "exact_rate": 1.0,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 0.0,
+            "maximum_relative_error": 0.0,
+            "maximum_absolute_error": 0.0
+          },
+          "volume": {
+            "compared_count": 96,
+            "exact_count": 62,
+            "exact_rate": 0.6458333333333334,
+            "median_relative_error": 0.0,
+            "p95_relative_error": 9.231404069644046e-05,
+            "maximum_relative_error": 0.0001859773107680863,
+            "maximum_absolute_error": 200.0
+          },
+          "amount": {
+            "compared_count": 96,
+            "exact_count": 32,
+            "exact_rate": 0.3333333333333333,
+            "median_relative_error": 1.868952460345666e-08,
+            "p95_relative_error": 9.207038435950448e-08,
+            "maximum_relative_error": 1.5021099387254306e-07,
+            "maximum_absolute_error": 26.0
+          }
+        }
+      }
+    },
+    "expected_5m_bars_per_day": 48,
+    "sample_day_bar_counts": {
+      "48": 18
+    },
+    "one_minute_rows_per_5m_bucket": {
+      "2": 1,
+      "3": 10,
+      "4": 21,
+      "5": 832
+    }
+  },
+  "decision": {
+    "classification": "supplement_and_validation_only",
+    "historical_minute_replacement_ready": false,
+    "daily_cross_check_ready": true,
+    "reasons": [
+      "The current one-minute cache covers 1.76% of QDP symbols with daily bars.",
+      "The sampled minute files decode cleanly and all sampled 5-minute keys align with QDP.",
+      "Recent sampled prices are effectively identical, but older vendor bars contain small OHLC and larger thin-bucket flow differences.",
+      "Filling only downloaded symbols would create source and sample-selection bias; do not replace the historical minute table from this snapshot.",
+      "Use iQuant for recent/live supplementation and independent checks until the download is complete, frozen, and reprofiled."
+    ]
+  },
+  "artifacts": {
+    "cache_inventory": {
+      "path": "data/staging/iquant_parity/cache_inventory.parquet",
+      "row_count": 867,
+      "file_size": 36859,
+      "sha256": "cd3c604e2d5c3e323e4027bf15e9590f870b2346438dcfb0c5e482447649d196"
+    },
+    "daily_iquant": {
+      "path": "data/staging/iquant_parity/daily_iquant.parquet",
+      "row_count": 15930,
+      "file_size": 459176,
+      "sha256": "6808c9515d884f9bf4b8e5a04ae088c2f66397b527243b344e513a824b41df9e"
+    },
+    "daily_qdp": {
+      "path": "data/staging/iquant_parity/daily_qdp.parquet",
+      "row_count": 15931,
+      "file_size": 468803,
+      "sha256": "ce281465719fc3e196a73711320e4456c8e323acaaa0bfdb30751f248e9accde"
+    },
+    "daily_comparison": {
+      "path": "data/staging/iquant_parity/daily_comparison.parquet",
+      "row_count": 15931,
+      "file_size": 1244208,
+      "sha256": "e6b580fcef89abaf4788f9a91f33646a9ca32f9b19c0bf6c3571bde0e0a19076"
+    },
+    "minute_iquant_1m": {
+      "path": "data/staging/iquant_parity/minute_iquant_1m.parquet",
+      "row_count": 4276,
+      "file_size": 91880,
+      "sha256": "3d7626c0a67b5078d5d3ef8a90a6b8a98214c02af15376981884874d24f34250"
+    },
+    "minute_iquant_5m": {
+      "path": "data/staging/iquant_parity/minute_iquant_5m.parquet",
+      "row_count": 864,
+      "file_size": 30084,
+      "sha256": "07d26a44b65a1ba2d2b4c789b55c6ad46df786b704ce275663a7572bf554acb7"
+    },
+    "minute_qdp_5m": {
+      "path": "data/staging/iquant_parity/minute_qdp_5m.parquet",
+      "row_count": 864,
+      "file_size": 30621,
+      "sha256": "ed1b01d7ff2524c412df59196ac7fb3397d76be30df8e5fd01af6188ddffc319"
+    },
+    "minute_comparison": {
+      "path": "data/staging/iquant_parity/minute_comparison.parquet",
+      "row_count": 864,
+      "file_size": 94398,
+      "sha256": "e1f083990e15f0e57824c99aeb0689edf51ab01d2120c591842cdb5e20a042c7"
+    }
+  }
+}

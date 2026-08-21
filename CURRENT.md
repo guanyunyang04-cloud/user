@@ -98,15 +98,28 @@ The historical Tushare-dependent repair path is isolated behind the explicit
 - H: filesystem repair is complete. `chkdsk H: /f` verified 543,565 files,
   found no problems and no bad sectors; the volume now reports
   `HealthStatus=Healthy`, `OperationalStatus=OK`, and `fsutil dirty query H:`
-  returns `NOT Dirty`. iQuant is currently stopped.
-- iQuant's own download log records a completed task message for 2,170,416
-  one-minute requests and 50,280 daily requests. The platform data directory
-  contains about 4.8 GiB of `.DAT` files, but the A-share minute cache currently
-  has only 276 SH files and 5 SZ files (the roughly 630-file total also includes
-  other markets). The external `xtdata` probe still returns empty frames because
-  its RPC data directory is unset/defaulted to `userdata_mini`. This is useful
-  evidence for a recent-data adapter, not a replacement for the project's
-  complete PIT history. No trade or order API has been called by this project.
+  returns `NOT Dirty`.
+- iQuant was running and actively writing during the latest check. The installed
+  `xtdata.get_local_data` is an empty compatibility stub, so the project now has
+  a tested read-only DAT adapter. It decodes the fixed 64-byte K-line records as
+  Asia/Shanghai right-edge bars, price `/1000`, volume lots `*100`, amount in
+  currency units, and raw/unadjusted prices.
+- The frozen 2026-08-21 16:05 parity sample compared 15,930 common daily rows:
+  open/high matched exactly, low matched 99.987%, close matched 99.962%, and
+  volume/amount p95 relative errors were 0.00070%/0.000081%. QDP alone contained
+  one additional day. The 1-minute-to-5-minute test compared 864/864 common
+  buckets across two stocks and nine dates; every key aligned and all 18 stock-
+  days produced 48 bars. In the 288 buckets from 2025 onward, OHLC matched 100%,
+  volume p95 relative error was 0.0248%, and amount p95 was below 0.000006%.
+- The cache was not complete at that snapshot: 867 one-minute files occupied
+  2.16 GB, only 60 matched the 3,416 symbols with QDP daily bars (1.76%), and the
+  latest file write occurred 3.5 seconds before the scan ended. Older minute
+  sources also show small OHLC differences and larger relative flow differences
+  in thin buckets. iQuant is therefore approved for recent/live supplementation
+  and independent validation, but not for replacing or selectively filling the
+  historical QDP minute table. Evidence is in
+  `research/records/iquant_cache_parity_20260821/result.json`; no trade or order
+  API was called.
 - QDP contains optional historical repair modules with frozen legacy contracts
   and Tushare provenance. They are outside the current technical research
   import path; the default tail updater now uses free sources, while replacing
@@ -115,10 +128,9 @@ The historical Tushare-dependent repair path is isolated behind the explicit
 
 ## Immediate next action
 
-1. Copy a small iQuant sample to a project-owned
-   staging area and compare it with the existing daily/5-minute bars. Do not
-   treat the platform cache as a complete historical source until symbol,
-   date, adjustment and unit coverage are measured.
+1. Let the current iQuant download finish, then rerun `quantlab data
+   iquant-parity` against the frozen cache. Do not merge it into QDP unless the
+   final symbol/date coverage and whole-cache checks pass.
 2. Rerun the predeclared raw-60 seed check and paired ensemble increment using
    the unified package. Do not search blend weights, TopK, exit grids, minute
    subsets, or LightGBM parameter grids on the already-used folds. Build a
