@@ -79,7 +79,7 @@ def normalize_intraday_1m_frame(
         frame, domain=DataDomain.MARKET_INTRADAY_1M, source=provider, as_of_date="", require_columns=False
     )
     _rename_first(data, "bar_time", ("time", "bar_time", "minute", "bar_datetime", "datetime", "日期", "时间", "分钟"))
-    _rename_intraday_value_columns(data, include_share_fields=True)
+    _rename_intraday_value_columns(data, include_share_fields=False)
     if "bar_time" not in data.columns and "trade_date" in data.columns:
         data["bar_time"] = ""
     if "adjusted_flag" not in data.columns:
@@ -91,7 +91,7 @@ def normalize_intraday_1m_frame(
     data["symbol"] = data["symbol"].map(_normalize_symbol)
     data = _split_intraday_datetime_column(data)
     data["bar_time"] = data["bar_time"].map(_normalize_bar_time)
-    for column in ("open", "high", "low", "close", "volume", "amount", "turnover_rate", "float_share", "total_share"):
+    for column in NUMERIC_MARKET_COLUMNS:
         data[column] = pd.to_numeric(data[column], errors="coerce")
     data["source"] = _source_series(data, provider)
     data["adjusted_flag"] = (

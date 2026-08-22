@@ -24,11 +24,9 @@ SPECIALTY_AUDITS = (
     "research_report_rc_backfill_v2.json",
     "financial_statement_quarterly_pit_v2.json",
     "balance_extension_conflict_semantics_repair_v2.json",
-    "share_capital_total_share_repair_v1.json",
-    "share_capital_float_share_invariant_repair_v1.json",
+    "canonical_curation.json",
     "margin_eligibility_sse_semantics_repair_v1.json",
     "historical_intraday_5m_external_archive_repair_v2.json",
-    "tushare_extended_backfill_v1.json",
 )
 TERMINAL_OK_STATUSES = {"applied", "ok", "completed", "already_repaired"}
 
@@ -42,7 +40,6 @@ SPECIALTY_AUDIT_DOMAINS = {
     "share_capital",
     "margin_eligibility",
     "market_intraday_5m",
-    "stk_factor_pro_raw",
 }
 
 

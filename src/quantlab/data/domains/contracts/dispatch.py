@@ -62,6 +62,10 @@ def normalize_domain_frame(
         return normalize_intraday_1m_frame(
             frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns
         )
+    if normalized_domain == DataDomain.MARKET_OPENING_AUCTION:
+        return normalize_intraday_1m_frame(
+            frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns
+        )
     if normalized_domain == DataDomain.INTRADAY_DAILY_FEATURES:
         return normalize_intraday_daily_features_frame(
             frame, source=source, adjusted_flag=adjusted_flag, require_columns=require_columns
@@ -110,7 +114,6 @@ def normalize_domain_frame(
         DataDomain.NEWS_EVENT,
         DataDomain.ANNOUNCEMENT,
         DataDomain.RESEARCH_REPORT,
-        DataDomain.RESEARCH_REPORT_FORECAST,
         DataDomain.IWENCAI_SEMANTIC,
     }:
         return normalize_generic_text_domain_frame(

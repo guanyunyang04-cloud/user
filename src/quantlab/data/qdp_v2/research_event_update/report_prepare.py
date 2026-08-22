@@ -396,9 +396,8 @@ def _prepare_tushare_report_years(
     task_days: dict[str, Any],
     request_dates: tuple[str, ...],
     normalized_root: Path,
-) -> tuple[list[Path], list[Path], list[dict[str, Any]]]:
+) -> tuple[list[Path], list[dict[str, Any]]]:
     report_parts: list[Path] = []
-    forecast_parts: list[Path] = []
     statistics: list[dict[str, Any]] = []
     for year in range(2010, 2026):
         year_root = _report_rc_page_path(workspace, f"{year}-01-01", 0).parent.parent
@@ -411,16 +410,13 @@ def _prepare_tushare_report_years(
             task_days=task_days,
         )
         raw = pd.concat([pd.read_parquet(path) for path in raw_paths], ignore_index=True)
-        reports, forecasts, stats = _normalize_tushare_report_year(
+        reports, _, stats = _normalize_tushare_report_year(
             raw,
             open_dates=open_dates,
         )
         report_path = normalized_root / f"reports_{year}.parquet"
-        forecast_path = normalized_root / f"forecasts_{year}.parquet"
         _write_parquet(reports, report_path)
-        _write_parquet(forecasts, forecast_path)
         report_parts.append(report_path)
-        forecast_parts.append(forecast_path)
         statistics.append(
             {
                 "year": year,
@@ -429,7 +425,7 @@ def _prepare_tushare_report_years(
                 **_report_year_source_coverage(year, stats, task_coverage),
             }
         )
-    return report_parts, forecast_parts, statistics
+    return report_parts, statistics
 
 
 def _load_eastmoney_reports(workspace: Path, *, open_dates: np.ndarray) -> pd.DataFrame:
@@ -477,7 +473,7 @@ def prepare_reports(
     request_dates = _report_request_dates()
     if int(report_state.get("requested_date_count", 0) or 0) != len(request_dates):
         raise ResearchEventUpdateError("tushare_report_daily_ledger_incomplete")
-    report_parts, forecast_parts, statistics = _prepare_tushare_report_years(
+    report_parts, statistics = _prepare_tushare_report_years(
         workspace,
         open_dates=open_dates,
         task_days=task_days,
@@ -487,23 +483,16 @@ def prepare_reports(
     tushare_reports = pd.concat([pd.read_parquet(path) for path in report_parts], ignore_index=True)
     eastmoney_reports = _load_eastmoney_reports(workspace, open_dates=open_dates)
     reports = _merge_reports(tushare_reports, eastmoney_reports)
-    forecasts = pd.concat([pd.read_parquet(path) for path in forecast_parts], ignore_index=True).sort_values(
-        ["trade_date", "symbol", "report_id", "forecast_quarter"]
-    )
     prepared = _runtime(workspace) / "prepared"
     report_path = prepared / "research_report.parquet"
-    forecast_path = prepared / "research_report_forecast.parquet"
     stats_path = prepared / "report_annual_statistics.parquet"
     _write_parquet(reports, report_path)
-    _write_parquet(forecasts, forecast_path)
     _write_parquet(pd.DataFrame(statistics), stats_path)
     unavailable_years, partial_years, incomplete_years = _report_coverage_years(statistics)
     result = {
         "status": "completed",
         "report_path": str(report_path),
         "report_row_count": len(reports),
-        "forecast_path": str(forecast_path),
-        "forecast_row_count": len(forecasts),
         "annual_statistics_path": str(stats_path),
         "tushare_only_report_count": int((reports["tushare_present"] & ~reports["eastmoney_present"]).sum()),
         "eastmoney_only_report_count": int((~reports["tushare_present"] & reports["eastmoney_present"]).sum()),
@@ -517,10 +506,7 @@ def prepare_reports(
             "coverage is proven by a complete daily request ledger; confirmed-empty "
             "dates are distinct from provider failures"
         ),
-        "eastmoney_forecasts_used": False,
-        "eastmoney_forecast_exclusion_reason": (
-            "historical predict-slot year semantics are not stable; Eastmoney is metadata-only"
-        ),
+        "forecast_domain_retired": True,
     }
     state = _read_state(workspace)
     state["reports_prepared"] = result

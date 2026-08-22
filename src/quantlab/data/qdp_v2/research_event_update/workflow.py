@@ -77,7 +77,7 @@ def evaluate(
         "forbidden_2026_rows": True,
         "credential_not_persisted": True,
         "pdf_not_downloaded": True,
-        "report_forecast_is_separate_domain": DataDomain.RESEARCH_REPORT_FORECAST in domains,
+        "report_forecast_domain_retired": "research_report_forecast" not in domains,
         "daily_report_tasks_closed": bool(
             len(task_days) == len(requested_dates)
             and all(

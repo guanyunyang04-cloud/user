@@ -30,6 +30,12 @@ class QdpPaths:
     def event_packs_dir(self) -> Path:
         return self.data_dir / "event_packs"
 
+    @property
+    def source_archives_dir(self) -> Path:
+        """Immutable external inputs kept outside the active QDP datasets."""
+
+        return self.data_dir / "source_archives"
+
 
 def workspace_root(start: str | Path | None = None) -> Path:
     env_root = os.environ.get("QDP_WORKSPACE_ROOT", "").strip()

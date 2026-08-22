@@ -52,7 +52,9 @@ PART_SEMANTIC_VERSION = "pit_historical_mainboard_daily_nullable_security_status
 MAINBOARD_PREFIXES = ("600", "601", "603", "605", "000", "001", "002", "003")
 
 
-ARCHIVE_ROOT = Path("data/research/archive/traditional_quant_baostock_archive_v1/raw")
+ARCHIVE_ROOT = Path(
+    "data/qdp/source_archives/baostock/traditional_quant_baostock_archive_v1/raw"
+)
 
 
 ARCHIVE_RECENT = ARCHIVE_ROOT / "baostock_daily_mainboard_v2_pit"

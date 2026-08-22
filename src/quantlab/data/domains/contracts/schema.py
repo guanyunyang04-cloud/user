@@ -28,6 +28,7 @@ TDX_FAMILY_PROVIDER_NAMES = frozenset({"tq", "tqcenter", "tdx", "pytdx", "mootdx
 class DataDomain:
     MARKET_DAILY = "market_daily"
     MARKET_INTRADAY_1M = "market_intraday_1m"
+    MARKET_OPENING_AUCTION = "market_opening_auction"
     MARKET_INTRADAY_5M = "market_intraday_5m"
     INTRADAY_DAILY_FEATURES = "intraday_daily_features"
     ADJUST_FACTOR = "adjust_factor"
@@ -57,13 +58,10 @@ class DataDomain:
     NEWS_EVENT = "news_event"
     ANNOUNCEMENT = "announcement"
     RESEARCH_REPORT = "research_report"
-    RESEARCH_REPORT_FORECAST = "research_report_forecast"
-    STK_FACTOR_PRO_RAW = "stk_factor_pro_raw"
     MARGIN_MARKET = "margin_market"
     MARGIN_DETAIL = "margin_detail"
     MARGIN_ELIGIBILITY = "margin_eligibility"
     MARGIN_SECS = "margin_secs"
-    MONEYFLOW_RAW = "moneyflow_raw"
     IWENCAI_SEMANTIC = "iwencai_semantic"
 
 
@@ -73,6 +71,7 @@ CANONICAL_START_DATE = "2010-01-01"
 CORE_MARKET_DOMAINS = (
     DataDomain.MARKET_DAILY,
     DataDomain.MARKET_INTRADAY_1M,
+    DataDomain.MARKET_OPENING_AUCTION,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.INTRADAY_DAILY_FEATURES,
     DataDomain.ADJUST_FACTOR,
@@ -99,13 +98,13 @@ EXCLUDED_V1_DOMAINS = (
     DataDomain.PERFORMANCE_EXPRESS,
     DataDomain.NEWS_EVENT,
     DataDomain.RESEARCH_REPORT,
-    DataDomain.RESEARCH_REPORT_FORECAST,
     DataDomain.IWENCAI_SEMANTIC,
 )
 
 
 CANONICAL_BUNDLE_SIDECAR_DOMAINS = (
     DataDomain.MARKET_INTRADAY_1M,
+    DataDomain.MARKET_OPENING_AUCTION,
     DataDomain.MARKET_INTRADAY_5M,
     DataDomain.INTRADAY_DAILY_FEATURES,
     DataDomain.ADJUST_FACTOR,
@@ -175,9 +174,19 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "close",
         "volume",
         "amount",
-        "turnover_rate",
-        "float_share",
-        "total_share",
+        "source",
+        "adjusted_flag",
+    ],
+    DataDomain.MARKET_OPENING_AUCTION: [
+        "symbol",
+        "trade_date",
+        "bar_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
         "source",
         "adjusted_flag",
     ],
@@ -507,36 +516,6 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "identity_conflict_reason",
         "source",
     ],
-    DataDomain.RESEARCH_REPORT_FORECAST: [
-        "report_id",
-        "symbol",
-        "trade_date",
-        "source_date",
-        "feature_available_date",
-        "forecast_quarter",
-        "forecast_year",
-        "operating_revenue",
-        "operating_profit",
-        "total_profit",
-        "net_profit",
-        "eps",
-        "pe",
-        "research_development",
-        "roe",
-        "ev_ebitda",
-        "source_disagreement",
-        "source",
-    ],
-    DataDomain.STK_FACTOR_PRO_RAW: [
-        "security_id",
-        "symbol",
-        "ts_code",
-        "trade_date",
-        "source_date",
-        "feature_available_date",
-        "burn_in_only",
-        "source",
-    ],
     DataDomain.MARGIN_MARKET: [
         "trade_date",
         "exchange_id",
@@ -594,34 +573,6 @@ DOMAIN_STANDARD_COLUMNS: dict[str, list[str]] = {
         "trade_date",
         "name",
         "exchange",
-        "source_date",
-        "feature_available_date",
-        "burn_in_only",
-        "source",
-    ],
-    DataDomain.MONEYFLOW_RAW: [
-        "security_id",
-        "symbol",
-        "ts_code",
-        "trade_date",
-        "buy_sm_vol",
-        "buy_sm_amount",
-        "sell_sm_vol",
-        "sell_sm_amount",
-        "buy_md_vol",
-        "buy_md_amount",
-        "sell_md_vol",
-        "sell_md_amount",
-        "buy_lg_vol",
-        "buy_lg_amount",
-        "sell_lg_vol",
-        "sell_lg_amount",
-        "buy_elg_vol",
-        "buy_elg_amount",
-        "sell_elg_vol",
-        "sell_elg_amount",
-        "net_mf_vol",
-        "net_mf_amount",
         "source_date",
         "feature_available_date",
         "burn_in_only",

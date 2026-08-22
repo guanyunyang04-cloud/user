@@ -185,22 +185,6 @@ def _prepared_domain_specs(
                 "tushare_annual_source_coverage": annual_statistics,
             },
         ),
-        _PreparedDomain(
-            domain=DataDomain.RESEARCH_REPORT_FORECAST,
-            path=prepared / "research_report_forecast.parquet",
-            contract_version="qdp_v2_research_report_forecast_pit_v2",
-            primary_key=["report_id", "forecast_quarter", "source"],
-            frequency="event_forecast",
-            source={
-                "provider": "tushare_report_rc",
-                "availability_semantics": "parent report date; consume next exchange-open day",
-                "quarter_rows_do_not_repeat_report_weight": True,
-                "request_granularity": "report_date",
-                "page_size": REPORT_RC_PAGE_SIZE,
-                "coverage_contract": "complete_daily_task_ledger",
-                "tushare_annual_source_coverage": annual_statistics,
-            },
-        ),
     ]
     if include_announcements:
         policy = dict(_read_state(workspace).get("announcement_source_policy", {}) or {})
