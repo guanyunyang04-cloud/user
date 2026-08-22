@@ -14,6 +14,8 @@ from quantlab.data.qdp_v2.runtime_archive import (
     verify_archive,
 )
 
+WORKFLOW = "research_report_rc_backfill_v1"
+
 
 def _expanded_fixture(workspace: Path) -> Path:
     root = (
@@ -21,7 +23,7 @@ def _expanded_fixture(workspace: Path) -> Path:
         / "data"
         / "qdp"
         / "qdp_runtime"
-        / "tushare_extended_backfill_v1"
+        / WORKFLOW
         / "raw"
         / "moneyflow"
         / "year=2020"
@@ -65,7 +67,7 @@ def test_runtime_archive_seal_verify_restore_and_explicit_delete(
 
     sealed = seal_workflows(
         workspace_root=tmp_path,
-        workflows=("tushare_extended_backfill_v1",),
+        workflows=(WORKFLOW,),
     )
 
     assert sealed["status"] == "sealed"
@@ -92,13 +94,13 @@ def test_runtime_archive_seal_verify_restore_and_explicit_delete(
     with pytest.raises(RuntimeArchiveError, match="requires_yes"):
         seal_workflows(
             workspace_root=tmp_path,
-            workflows=("tushare_extended_backfill_v1",),
+            workflows=(WORKFLOW,),
             delete_expanded=True,
         )
 
     deleted = seal_workflows(
         workspace_root=tmp_path,
-        workflows=("tushare_extended_backfill_v1",),
+        workflows=(WORKFLOW,),
         delete_expanded=True,
         yes=True,
     )
@@ -111,7 +113,7 @@ def test_runtime_archive_corruption_is_rejected(tmp_path: Path) -> None:
     _expanded_fixture(tmp_path)
     sealed = seal_workflows(
         workspace_root=tmp_path,
-        workflows=("tushare_extended_backfill_v1",),
+        workflows=(WORKFLOW,),
     )
     manifest = json.loads(Path(sealed["manifests"][0]).read_text(encoding="utf-8"))
     archive = Path(manifest["archive_path"])
@@ -128,7 +130,7 @@ def test_runtime_archive_auto_seal_and_different_existing_unit_is_rejected(
 ) -> None:
     source = _expanded_fixture(tmp_path)
     sealed = seal_completed_workflow(
-        "tushare_extended_backfill_v1",
+        WORKFLOW,
         workspace_root=tmp_path,
     )
     assert sealed["status"] == "sealed_and_deleted"
@@ -138,6 +140,6 @@ def test_runtime_archive_auto_seal_and_different_existing_unit_is_rejected(
     (source / "new.json").write_text('{"status":"observed"}', encoding="utf-8")
     with pytest.raises(RuntimeArchiveError, match="restore_before_reseal"):
         seal_completed_workflow(
-            "tushare_extended_backfill_v1",
+            WORKFLOW,
             workspace_root=tmp_path,
         )

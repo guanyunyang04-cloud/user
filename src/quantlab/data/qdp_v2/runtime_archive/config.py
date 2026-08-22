@@ -26,8 +26,6 @@ SENSITIVE_KEYS = {"token", "api_key", "apikey", "authorization", "password", "se
 DEFAULT_SELECTIONS: dict[str, tuple[str, ...]] = {
     "research_report_rc_backfill_v1": ("raw", "normalized"),
     "research_report_rc_backfill_v2": ("raw", "normalized"),
-    "historical_intraday_5m_repair_v1": ("parts",),
-    "historical_intraday_5m_external_archive_repair_v2": ("symbols",),
     "pit_history_restore": (
         "domain_parts",
         "factor_parts",

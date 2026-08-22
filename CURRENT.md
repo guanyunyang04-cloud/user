@@ -50,25 +50,23 @@ The project `brain/` directory and the user-level `workspace-brain` skill were
 deleted. This file is the sole concise cross-session handoff; detailed evidence
 belongs in `research/records/` and code behavior belongs in tests.
 
-The refactor is validated by the complete suite (`169 passed`), whole-repository
-Ruff checks, bytecode compilation, and the physical QDP/research checks. The
-selected semantic invariants pass. Five specialty repair records contain explicit
-machine-checkable checks; three older records (research reports, quarterly
-statements, and the legacy Tushare backfill) contain provenance and workflow
-statistics but no explicit checks, so the semantic command now reports
-warnings and marks them `provenance_only` without blocking the technical path.
-The active store also contains domains outside the specialty pass; covered and uncertified domain
-lists are recorded in the audit output. This is an evidence boundary, not a
-failure of the 158-field technical research matrix.
+The refactor is validated by the complete suite (`157 passed`), whole-repository Ruff checks,
+bytecode compilation, and the physical QDP/research checks. The canonical
+curation record contains explicit machine-checkable assertions for industry,
+share capital, valuation, source archives and retired domains. Older specialty
+records that contain provenance but no explicit assertions are reported as
+`provenance_only`; they do not certify unrelated domains and do not block the
+technical path. Covered and uncertified domain lists remain explicit in the
+semantic audit.
 
 The research cutoff is now read from `data/research/daily/manifest.json` rather
 than encoded as a calendar year in the active model code. New run files emit
 only the generic `cutoff_violation_count`; the former year-specific field is
 accepted only when reading historical results. Auxiliary updates use the
 free-source tail policy by default (BaoStock, MootDX detection and CNInfo
-confirmation).
-The historical Tushare-dependent repair path is isolated behind the explicit
-`--legacy-tushare` option.
+confirmation). The unmaintainable Tushare factor, black-box money-flow and
+analyst-forecast domains have been removed from the active store and their
+dedicated producer code has been retired.
 
 ## Data and execution contract
 
@@ -101,24 +99,36 @@ The historical Tushare-dependent repair path is isolated behind the explicit
 
 ## Local minute research (2026-08-22)
 
-- Two downloaded archives are preserved outside Git under
-  `H:\BaiduNetdiskDownload\量化数据`: the 2000-2025 1-minute archive is about
-  71.94 GB compressed (about 377.55 GiB unpacked), and the 2026 multi-period
-  archive is about 7.46 GB compressed (about 29.52 GiB unpacked). They are not
-  copied into the iQuant cache.
-- `quantlab.data.minute_archive` selectively reads ZIP members and writes
-  standard Parquet without unpacking the archives. The active research extract
-  contains 256 fixed symbols and only `09:31`-`10:10`: 14,752,840 rows for
-  2020-2025. A separate 1,341,400-row 2026 extract is staged for a future
-  research window but is not read by the formal run. The standalone `09:30`
-  auction row is excluded and the manifest declares raw prices.
-- The auction row is retained in a separate parity extract. For two symbols and
-  485 dates (46,560 five-minute bars), folding `09:30` into the `09:35` bucket
-  reproduces the active QDP intraday archive exactly for OHLC and volume; amount
-  differs only by floating-point rounding. The iQuant minute cache starts at
-  `09:31`, so it is a different first-bucket convention and must not be mixed
-  without an explicit transformation. Evidence is in
-  `research/records/minute_local_parity_probe_20260822.json`.
+- The immutable archives now live inside QDP source management at
+  `data/qdp/source_archives/minute/`. The 2000-2025 one-minute ZIP is
+  71,942,482,275 bytes and the 2026 multi-period ZIP is 7,464,393,924 bytes.
+  They are streamed directly and are neither unpacked into a 400-GiB CSV tree
+  nor copied into the iQuant private cache.
+- The completed 2025 pilot installed 315,421,721 continuous one-minute bars and
+  1,314,298 separate 09:30 rows. All 5,485 source members contributed data.
+  Exactly 1,314,257 stock-days contain 240 continuous bars; the other 41 are
+  zero-flow suspension placeholders for `920680.BJ`, leaving zero unexplained
+  incomplete active sessions. Primary keys are unique and no stock-day has
+  inconsistent repeated share fields.
+- A zero-volume 09:30 source row is a pre-open placeholder, not proof of an
+  auction transaction. Daily parity therefore uses the first/high/low/last
+  trade-bearing bar, with an all-zero-day fallback. Across 770,074 common QDP
+  stock-days, 99.9971% of opens match exactly and every OHLC field is within one
+  cent on at least 99.9968% of rows. Volume and amount p95 relative errors are
+  about 0.00105% and 0.000103%.
+- Fifty-seven stock-days differ from the trusted daily sources by more than one
+  cent. Available iQuant daily files confirm QDP rather than the ZIP on all 15
+  affected rows they cover. The raw minute rows remain immutable, while those
+  57 stock-days are excluded from minute-derived features until an exact
+  independent minute source is available. Evidence is under
+  `data/qdp/source_archives/minute/quality/year=2025/`.
+- Earlier 64/256-symbol staging Parquets and parity extracts were deleted after
+  the formal import; they are reproducible from the ZIP and no active manifest
+  referenced them. The failed model result and compact research record remain
+  as evidence, not as a second market-data source.
+- The two frozen, one-off 5-minute repair producers were removed from active
+  code. Their audit record and current legacy 5-minute dataset remain until the
+  complete canonical 1-minute history can replace that dataset deterministically.
 - The executable minute contract is now explicit: use information through
   10:00, rank candidates before seeing the fill window, enter at the
   10:01-10:10 VWAP, and begin exits in the same window on the next market day.
@@ -172,24 +182,21 @@ The historical Tushare-dependent repair path is isolated behind the explicit
   historical QDP minute table. Evidence is in
   `research/records/iquant_cache_parity_20260821/result.json`; no trade or order
   API was called.
-- QDP contains optional historical repair modules with frozen legacy contracts
-  and Tushare provenance. They are outside the current technical research
-  import path; the default tail updater now uses free sources, while replacing
-  old provenance-only repair code is a separate migration, not evidence that
-  the 158-field research matrix is invalid.
+- QDP source archives now own BaoStock evidence, both minute ZIPs, and the
+  Shenwan industry/index files. The active manifest no longer exposes the
+  obsolete factor, black-box money-flow or Tushare analyst-forecast datasets.
+  Retained historical research-report metadata is separate from the deleted
+  forecast panel.
 
 ## Immediate next action
 
-1. Freeze one paired minute increment: compare a prior-close daily technical
-   score, the existing morning-only score, and a hybrid using the prior-close
-   daily structure plus information available by 10:00. Keep the same 256
-   symbols, annual expanding folds, execution contract, Top-5 rule, and costs.
-   This tests whether minute state improves a known daily signal without an
-   exit-time or parameter search.
-2. Only if the hybrid adds stable OOF and account value, test a raw 30-minute
-   sequence encoder and predeclared D1/D3 targets. Do not tune decision time,
-   TopK, holding period, or feature subsets on these same folds.
-3. After iQuant account/API access and a stable download are available, rerun
-   both parity commands against the complete cache. Use iQuant for current-day
-   supplementation and execution; keep the project Parquet store as the
-   reproducible historical source unless whole-cache coverage proves otherwise.
+1. Extend the audited importer with partition-safe append semantics and ingest
+   2010-2024 plus the available 2026 tail. The 2000-2009 archive remains source
+   evidence until a matching PIT universe is available.
+2. Derive 5/15/30/60-minute bars and daily intraday features from canonical 1m;
+   then rerun the fixed 158-versus-183 comparison without using minute
+   availability to redefine the historical stock universe.
+3. If minute features add value, compare a prior-close daily score with one
+   predeclared hybrid using only information available at the decision time.
+   iQuant should provide current-day supplementation and execution, while QDP
+   remains the reproducible historical store.

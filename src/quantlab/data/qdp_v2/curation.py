@@ -33,7 +33,6 @@ from quantlab.data.qdp_v2.manifest import (
 )
 from quantlab.data.qdp_v2.repair.mutation import replace_active_table_from_parquet
 
-
 RETIRED_DOMAINS = (
     "stk_factor_pro_raw",
     "moneyflow_raw",
@@ -652,6 +651,63 @@ def retire_obsolete_domains(*, workspace: Path) -> dict[str, Any]:
     return record
 
 
+def curated_state_checks(*, workspace: Path) -> dict[str, bool]:
+    """Return the small set of invariants established by this curation."""
+
+    root = qdp_v2_root(workspace)
+    active = read_active_manifest(root)
+    datasets = dict(active.get("datasets", {}) or {})
+    _, industry_paths = _active_domain(root, active, "industry_concept")
+    _, share_paths = _active_domain(root, active, "share_capital")
+    _, valuation_paths = _active_domain(root, active, "valuation")
+    with duckdb.connect() as connection:
+        unknown_industry, industry_duplicates = connection.execute(
+            f"SELECT count(*) FILTER(WHERE industry='Unknown' OR industry IS NULL),"
+            "count(*)-count(DISTINCT (symbol,trade_date)) "
+            f"FROM {_scan(industry_paths)}"
+        ).fetchone()
+        share_state = connection.execute(
+            f"SELECT count(*) FILTER(WHERE total_share IS NULL),"
+            "count(*) FILTER(WHERE total_share<=0),"
+            "count(*) FILTER(WHERE float_share>total_share+0.5),"
+            "count(*) FILTER(WHERE restricted_share IS NULL),"
+            "count(*) FILTER(WHERE share_fill_method LIKE '%stk_factor_pro_raw%' "
+            "OR source LIKE '%stk_factor_pro_raw%'),"
+            "count(*)-count(DISTINCT (symbol,trade_date)) "
+            f"FROM {_scan(share_paths)}"
+        ).fetchone()
+        valuation_state = connection.execute(
+            "SELECT count(*) FILTER(WHERE total_mv IS NULL),"
+            "count(*) FILTER(WHERE total_mv<=0),"
+            "count(*)-count(DISTINCT (symbol,trade_date)) "
+            f"FROM {_scan(valuation_paths)}"
+        ).fetchone()
+    sources = qdp_paths(workspace).source_archives_dir
+    required_sources = (
+        sources / "baostock" / "traditional_quant_baostock_archive_v1",
+        sources / "minute" / "1分钟(2000-2025).zip",
+        sources / "minute" / "2026_20260821_180131.zip",
+        sources / "industry_index" / "sw_first_daily.csv.gz",
+        sources / "industry_index" / "sw_second_daily.csv.gz",
+        sources / "share_capital" / "legacy_total_share_evidence.parquet",
+    )
+    return {
+        "unknown_industry_rows_zero": int(unknown_industry or 0) == 0,
+        "industry_primary_key_unique": int(industry_duplicates or 0) == 0,
+        "total_share_null_rows_zero": int(share_state[0] or 0) == 0,
+        "total_share_positive": int(share_state[1] or 0) == 0,
+        "float_share_not_above_total": int(share_state[2] or 0) == 0,
+        "restricted_share_complete": int(share_state[3] or 0) == 0,
+        "share_factor_dependency_rows_zero": int(share_state[4] or 0) == 0,
+        "share_primary_key_unique": int(share_state[5] or 0) == 0,
+        "total_mv_null_rows_zero": int(valuation_state[0] or 0) == 0,
+        "total_mv_positive": int(valuation_state[1] or 0) == 0,
+        "valuation_primary_key_unique": int(valuation_state[2] or 0) == 0,
+        "retired_domains_absent": not set(RETIRED_DOMAINS).intersection(datasets),
+        "source_archives_present": all(path.exists() for path in required_sources),
+    }
+
+
 def run(*, workspace_root_value: str | Path | None = None, apply: bool = False) -> dict[str, Any]:
     workspace = workspace_root(workspace_root_value)
     if not apply:
@@ -663,6 +719,24 @@ def run(*, workspace_root_value: str | Path | None = None, apply: bool = False) 
             "retired_domains": list(RETIRED_DOMAINS),
         }
     root = qdp_v2_root(workspace)
+    audit_path = root / "audits" / "canonical_curation.json"
+    active = read_active_manifest(root)
+    if not set(RETIRED_DOMAINS).intersection(dict(active.get("datasets", {}) or {})):
+        checks = curated_state_checks(workspace=workspace)
+        if not all(checks.values()):
+            failed = sorted(name for name, passed in checks.items() if not passed)
+            raise QdpCurationError(f"completed_curation_invariant_failed:{failed}")
+        if audit_path.is_file():
+            existing = json.loads(audit_path.read_text(encoding="utf-8"))
+            if isinstance(existing, dict) and existing.get("status") == "completed":
+                existing["checks"] = checks
+                atomic_write_json(audit_path, existing)
+        return {
+            "status": "already_completed",
+            "workspace": str(workspace),
+            "checks": checks,
+            "audit": str(audit_path.resolve()),
+        }
     staging = root / "tmp" / "canonical_curation"
     if staging.exists():
         shutil.rmtree(staging)
@@ -672,15 +746,20 @@ def run(*, workspace_root_value: str | Path | None = None, apply: bool = False) 
         shares = repair_share_and_valuation(workspace=workspace, staging=staging)
         moved = move_source_archives(workspace=workspace)
         retired = retire_obsolete_domains(workspace=workspace)
+        checks = curated_state_checks(workspace=workspace)
+        if not all(checks.values()):
+            failed = sorted(name for name, passed in checks.items() if not passed)
+            raise QdpCurationError(f"curation_invariant_failed:{failed}")
         result = {
             "status": "completed",
             "created_at": utc_now(),
+            "checks": checks,
             "industry": industry,
             "shares": shares,
             "source_archives": moved,
             "retirement": retired,
         }
-        atomic_write_json(root / "audits" / "canonical_curation.json", result)
+        atomic_write_json(audit_path, result)
         return result
     finally:
         shutil.rmtree(staging, ignore_errors=True)

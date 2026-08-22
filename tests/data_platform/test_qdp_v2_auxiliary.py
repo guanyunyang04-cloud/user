@@ -35,13 +35,7 @@ from quantlab.data.qdp_v2.fundamental_update import (
     _normalize_financial,
     _normalize_forecast,
 )
-from quantlab.data.qdp_v2.historical_intraday_repair import (
-    _normalize_stk_mins,
-    _six_month_chunks,
-    _validate_against_daily,
-)
 from quantlab.data.qdp_v2.manifest import (
-    EXPECTED_BAR_TIMES,
     DatasetManifest,
     ShardManifestEntry,
     qdp_v2_root,
@@ -104,97 +98,6 @@ def test_daily_basic_normalization_converts_10k_units_to_base_units() -> None:
     assert result["float_share"] == 1_002_500.0
     assert result["total_mv"] == 12_350_000.0
     assert result["circ_mv"] == 10_025_000.0
-
-
-def test_historical_stk_mins_normalization_and_daily_unit_reconciliation() -> None:
-    date = "2020-01-02"
-    raw = pd.DataFrame(
-        {
-            "ts_code": ["600000.SH"] * 48,
-            "trade_time": [
-                f"{date} {item[:2]}:{item[2:4]}:00" for item in EXPECTED_BAR_TIMES
-            ],
-            "open": [10.0] * 48,
-            "high": [10.0] * 48,
-            "low": [10.0] * 48,
-            "close": [10.0] * 48,
-            "vol": [1.0] * 48,
-            "amount": [1000.0] * 48,
-        }
-    )
-    normalized = _normalize_stk_mins(raw, "600000.SH")
-    reference = pd.DataFrame(
-        {
-            "symbol": ["600000.SH"],
-            "trade_date": [date],
-            "open": [10.0],
-            "high": [10.0],
-            "low": [10.0],
-            "close": [10.0],
-            "volume": [4800.0],
-            "amount": [48_000.0],
-        }
-    )
-
-    accepted, diagnostics = _validate_against_daily(normalized, reference)
-
-    assert len(accepted) == 48
-    assert diagnostics["accepted_day_count"] == 1
-    assert diagnostics["volume_scale"] == 100.0
-    assert diagnostics["amount_scale"] == 1.0
-    assert accepted["volume"].sum() == 4800.0
-
-
-def test_historical_intraday_rejects_isolated_100x_volume_anomaly() -> None:
-    dates = ["2020-01-02", "2020-01-03", "2020-01-06"]
-    rows: list[dict[str, object]] = []
-    for date in dates:
-        per_bar_volume = 10_000.0 if date == dates[-1] else 100.0
-        for bar_time in EXPECTED_BAR_TIMES:
-            rows.append(
-                {
-                    "symbol": "600000.SH",
-                    "trade_date": date,
-                    "bar_time": bar_time,
-                    "open": 10.0,
-                    "high": 10.0,
-                    "low": 10.0,
-                    "close": 10.0,
-                    "volume": per_bar_volume,
-                    "amount": 1_000.0,
-                }
-            )
-    reference = pd.DataFrame(
-        {
-            "symbol": ["600000.SH"] * 3,
-            "trade_date": dates,
-            "open": [10.0] * 3,
-            "high": [10.0] * 3,
-            "low": [10.0] * 3,
-            "close": [10.0] * 3,
-            "volume": [4_800.0] * 3,
-            "amount": [48_000.0] * 3,
-        }
-    )
-
-    accepted, diagnostics = _validate_against_daily(pd.DataFrame(rows), reference)
-
-    assert len(accepted) == 96
-    assert accepted["trade_date"].unique().tolist() == dates[:2]
-    assert diagnostics["volume_scale"] == 1.0
-    assert diagnostics["accepted_day_count"] == 2
-    assert diagnostics["rejected_daily_consistency_day_count"] == 1
-    assert diagnostics["rejected_volume_100x_day_count"] == 1
-
-
-def test_historical_intraday_chunks_never_span_more_than_six_calendar_months() -> None:
-    assert _six_month_chunks(
-        ("2020-01", "2020-02", "2020-06", "2020-07", "2022-01")
-    ) == [
-        ("2020-01", "2020-02", "2020-06"),
-        ("2020-07",),
-        ("2022-01",),
-    ]
 
 
 def test_fundamental_events_use_announcement_dates_and_mainboard_identity() -> None:

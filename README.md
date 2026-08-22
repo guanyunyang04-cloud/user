@@ -90,23 +90,23 @@ contract and empirical conclusions are summarized in
 [`CURRENT.md`](CURRENT.md); detailed evidence remains in `research/records/`
 and the manifests beside each data product.
 
-Downloaded minute archives can be sampled without unpacking them. The focused
-archive reader removes the standalone opening-auction row for continuous 1m
-research and can retain/fold it into the first 5m bucket when reproducing the
-QDP convention. The current 256-symbol expanding walk-forward run is:
+Downloaded minute archives are managed as immutable QDP sources under
+`data/qdp/source_archives/minute/`; they are never unpacked into a second CSV
+tree or written into a broker cache. `quantlab.data.minute_archive` can create
+short-lived research extracts, but its formal path streams a complete year
+directly from ZIP into the canonical one-minute store.
 
 ```powershell
 $env:PYTHONPATH='H:\quant_project\src'
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research minute-walk-forward `
-  --parquet 'H:\quant_project\data\staging\minute_local\minute_morning_256_2020_2025.parquet' `
-  --evaluation-start-year 2021 `
-  --evaluation-end-year 2025 `
-  --output-dir 'H:\quant_project\runs\minute_walk_forward_256_2021_2025'
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.data.minute_archive import-year `
+  --archive 'H:\quant_project\data\qdp\source_archives\minute\1分钟(2000-2025).zip' `
+  --year 2025 `
+  --workspace-root 'H:\quant_project'
 ```
 
-The run uses only information available by 10:00, trades the 10:01-10:10 VWAP,
-and simulates T+1, status/limit restrictions, costs, finite cash, overlap,
-volume participation, partial fills, and delayed exits. The current
-morning-only model failed the 2021-2025 test and is deliberately separate from
-the 158/raw-60 daily benchmark. See [`CURRENT.md`](CURRENT.md) for the measured
-result and the next paired hybrid experiment.
+The completed 2025 pilot stores 09:30 rows in `market_opening_auction` and the
+240 continuous bars in `market_intraday_1m`. Repeated share fields are retained
+once per stock-day as audit evidence, not duplicated into every minute. The
+quality directory records member CRCs, session completeness, daily parity and
+the sparse stock-day exclusion list. See [`CURRENT.md`](CURRENT.md) for the
+measured quality and research findings.
