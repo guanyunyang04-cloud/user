@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-21
+Updated: 2026-08-22
 
 ## Objective
 
@@ -99,6 +99,52 @@ The historical Tushare-dependent repair path is isolated behind the explicit
   must be PIT- and age-aware and prove residual value over the technical
   baseline.
 
+## Local minute research (2026-08-22)
+
+- Two downloaded archives are preserved outside Git under
+  `H:\BaiduNetdiskDownload\量化数据`: the 2000-2025 1-minute archive is about
+  71.94 GB compressed (about 377.55 GiB unpacked), and the 2026 multi-period
+  archive is about 7.46 GB compressed (about 29.52 GiB unpacked). They are not
+  copied into the iQuant cache.
+- `quantlab.data.minute_archive` selectively reads ZIP members and writes
+  standard Parquet without unpacking the archives. The active research extract
+  contains 256 fixed symbols and only `09:31`-`10:10`: 14,752,840 rows for
+  2020-2025. A separate 1,341,400-row 2026 extract is staged for a future
+  research window but is not read by the formal run. The standalone `09:30`
+  auction row is excluded and the manifest declares raw prices.
+- The auction row is retained in a separate parity extract. For two symbols and
+  485 dates (46,560 five-minute bars), folding `09:30` into the `09:35` bucket
+  reproduces the active QDP intraday archive exactly for OHLC and volume; amount
+  differs only by floating-point rounding. The iQuant minute cache starts at
+  `09:31`, so it is a different first-bucket convention and must not be mixed
+  without an explicit transformation. Evidence is in
+  `research/records/minute_local_parity_probe_20260822.json`.
+- The executable minute contract is now explicit: use information through
+  10:00, rank candidates before seeing the fill window, enter at the
+  10:01-10:10 VWAP, and begin exits in the same window on the next market day.
+  Prices are adjusted across days with the QDP factor. Entries and each partial
+  exit are capped at 1% of window volume; ordinary-share T+1, ST/suspension
+  state, fees, slippage, one-price windows, finite cash, overlap, and delayed
+  exits are simulated. One-price entries are rejected; a one-price-down exit is
+  delayed while a one-price-up exit remains sellable.
+- The final expanding walk-forward test uses 368,821 stock-days and predicts
+  each year from 2021 through 2025 using only prior years. Its contract filters
+  source bars at `2025-12-31`; the last complete T+1 signal is therefore
+  2025-12-30. Across 304,852
+  observed OOF labels, the seven-feature morning LightGBM has Rank IC
+  `-0.00967`; four of five years are negative. Top-5 mean action gross return is
+  `-0.00463%` per signal day even though the conditional universe mean is
+  `+0.05168%`. The base-cost account loses `90.24%` with a `-91.26%` maximum
+  drawdown; double-slippage stress loses `98.51%`. Every evaluation year loses
+  money under both scenarios. Artifacts are under
+  `runs/minute_walk_forward_256_2021_2025`.
+- This rejects the current combination of seven morning summaries, fixed
+  10:00 decision, and one-night target. It does not show that minute data are
+  useless. The sample is not the full market, the model has no prior-day trend
+  context or raw minute sequence, and it does not model Level-2 queue position.
+  The failed baseline is not a paper- or live-trading candidate and remains
+  separate from the 158/raw-60 daily benchmark.
+
 ## Operational status
 
 - H: filesystem repair is complete. `chkdsk H: /f` verified 543,565 files,
@@ -134,11 +180,16 @@ The historical Tushare-dependent repair path is isolated behind the explicit
 
 ## Immediate next action
 
-1. After the intended iQuant download and account/API setup are available,
-   rerun `quantlab data iquant-parity` against a stable cache. Do not merge it
-   into QDP unless final symbol/date coverage and whole-cache checks pass.
-2. Rerun the predeclared raw-60 seed check and paired ensemble increment using
-   the unified package. Do not search blend weights, TopK, exit grids, minute
-   subsets, or LightGBM parameter grids on the already-used folds. Build a
-   historical/live parity path only after winner-cap and seed-stability checks
-   pass.
+1. Freeze one paired minute increment: compare a prior-close daily technical
+   score, the existing morning-only score, and a hybrid using the prior-close
+   daily structure plus information available by 10:00. Keep the same 256
+   symbols, annual expanding folds, execution contract, Top-5 rule, and costs.
+   This tests whether minute state improves a known daily signal without an
+   exit-time or parameter search.
+2. Only if the hybrid adds stable OOF and account value, test a raw 30-minute
+   sequence encoder and predeclared D1/D3 targets. Do not tune decision time,
+   TopK, holding period, or feature subsets on these same folds.
+3. After iQuant account/API access and a stable download are available, rerun
+   both parity commands against the complete cache. Use iQuant for current-day
+   supplementation and execution; keep the project Parquet store as the
+   reproducible historical source unless whole-cache coverage proves otherwise.

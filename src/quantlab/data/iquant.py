@@ -197,8 +197,20 @@ def read_file(
     return frame.reset_index(drop=True)
 
 
-def aggregate_1m_to_5m(frame: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate one-minute rows into QDP's 48 right-edge 5-minute buckets."""
+def aggregate_1m_to_5m(
+    frame: pd.DataFrame,
+    *,
+    include_opening_auction: bool = False,
+) -> pd.DataFrame:
+    """Aggregate one-minute rows into right-edge 5-minute buckets.
+
+    The downloaded archive has a standalone ``09:30`` auction row.  iQuant's
+    minute cache starts at ``09:31``; the historical QDP 5-minute archive
+    instead folds that row into the first ``09:35`` bucket.  The default keeps
+    the former behavior for continuous-minute data.  Set
+    ``include_opening_auction=True`` when reproducing QDP's historical 5-minute
+    convention.
+    """
 
     required = {"symbol", "trade_date", "bar_time", "open", "high", "low", "close", "volume", "amount"}
     missing = sorted(required.difference(frame.columns))
@@ -208,6 +220,14 @@ def aggregate_1m_to_5m(frame: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=[*sorted(required), "minute_count"])
     working = frame.copy()
     clock = working["bar_time"].astype(str).str[:6]
+    if not include_opening_auction:
+        # Continuous one-minute data starts at 09:31.  Drop a standalone
+        # auction row defensively so callers cannot accidentally create a
+        # spurious 09:30 five-minute bucket.
+        working = working.loc[clock != "093000"].copy()
+        clock = working["bar_time"].astype(str).str[:6]
+        if working.empty:
+            return pd.DataFrame(columns=[*sorted(required), "minute_count"])
     seconds = (
         pd.to_numeric(clock.str[:2], errors="raise") * 3600
         + pd.to_numeric(clock.str[2:4], errors="raise") * 60
@@ -216,7 +236,10 @@ def aggregate_1m_to_5m(frame: pd.DataFrame) -> pd.DataFrame:
     # A bar ending at 09:35 contains 09:31..09:35.  The same rule naturally
     # skips the lunch break because no 11:31..13:00 source rows exist.
     end_seconds = ((seconds + 299) // 300) * 300
-    working["bar_time"] = _bar_time_from_seconds(end_seconds.to_numpy())
+    if include_opening_auction:
+        opening = seconds == (9 * 3600 + 30 * 60)
+        end_seconds = np.where(opening, 9 * 3600 + 35 * 60, end_seconds)
+    working["bar_time"] = _bar_time_from_seconds(np.asarray(end_seconds))
     result = (
         working.groupby(["symbol", "trade_date", "bar_time"], sort=True, observed=True)
         .agg(
@@ -230,6 +253,10 @@ def aggregate_1m_to_5m(frame: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
+    if include_opening_auction:
+        # A 09:30-only bucket cannot occur under this mapping, but retaining
+        # this guard makes the contract explicit for malformed input.
+        result = result.loc[result["bar_time"] != "093000000"].copy()
     return result.loc[
         :, ["symbol", "trade_date", "bar_time", "open", "high", "low", "close", "volume", "amount", "minute_count"]
     ]

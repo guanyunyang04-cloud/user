@@ -116,6 +116,48 @@ def test_minute_aggregation_uses_right_edge_and_keeps_lunch_break() -> None:
     assert result.loc[result["bar_time"] == "093500000", "volume"].item() == 500.0
 
 
+def test_minute_aggregation_can_fold_opening_auction_into_first_bucket() -> None:
+    rows = []
+    for minute, volume in (("09:30", 20.0), ("09:31", 100.0), ("09:32", 100.0), ("09:33", 100.0), ("09:34", 100.0), ("09:35", 100.0)):
+        rows.append(
+            {
+                "symbol": "600000.SH",
+                "trade_date": "2020-01-02",
+                "bar_time": minute.replace(":", "") + "00000",
+                "open": 10.0,
+                "high": 10.0,
+                "low": 10.0,
+                "close": 10.0,
+                "volume": volume,
+                "amount": volume * 10.0,
+            }
+        )
+    result = aggregate_1m_to_5m(pd.DataFrame(rows), include_opening_auction=True)
+    assert result["bar_time"].tolist() == ["093500000"]
+    assert result.loc[0, "volume"] == 520.0
+
+
+def test_continuous_minute_aggregation_drops_standalone_auction() -> None:
+    rows = []
+    for minute in ("09:30", "09:31", "09:32", "09:33", "09:34", "09:35"):
+        rows.append(
+            {
+                "symbol": "600000.SH",
+                "trade_date": "2020-01-02",
+                "bar_time": minute.replace(":", "") + "00000",
+                "open": 10.0,
+                "high": 10.0,
+                "low": 10.0,
+                "close": 10.0,
+                "volume": 100.0,
+                "amount": 1000.0,
+            }
+        )
+    result = aggregate_1m_to_5m(pd.DataFrame(rows))
+    assert result["bar_time"].tolist() == ["093500000"]
+    assert result.loc[0, "minute_count"] == 5
+
+
 def test_invalid_header_and_size_are_rejected(tmp_path: Path) -> None:
     bad_header = tmp_path / "bad_header.DAT"
     bad_header.write_bytes(b"\x00" * 72)

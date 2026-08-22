@@ -1,0 +1,225 @@
+{
+  "schema": "quantlab.minute_local_parity/2",
+  "status": "ok",
+  "created_at": "2026-08-22T05:36:28+00:00",
+  "scope": {
+    "symbols": [
+      "600011.SH",
+      "600276.SH"
+    ],
+    "start_date": "2024-01-02",
+    "end_date": "2025-12-31",
+    "date_count": 485
+  },
+  "contracts": {
+    "local_archive": "raw/unadjusted; standalone 09:30 auction retained in this probe",
+    "qdp_5m": "09:30 auction folded into the right-edge 09:35 bucket",
+    "iquant_5m": "continuous 09:31..09:35 maps to the right-edge 09:35 bucket"
+  },
+  "sources": {
+    "local": {
+      "path": "H:\\quant_project\\data\\staging\\minute_local\\parity_probe_1m_with_0930.parquet",
+      "row_count": 233770,
+      "file_size": 4328011,
+      "sha256": "bd908fbe58676f702400d2596a0609205dc0e86ac0ce87819258c675d60c9359"
+    },
+    "qdp": {
+      "dataset_id": "market_intraday_5m__2c071f88738b5cdea4695f16",
+      "source_counts": {
+        "external_quant_zip": 46560
+      }
+    },
+    "iquant": [
+      {
+        "path": "H:\\国信iQuant策略交易平台\\datadir\\SH\\60\\600011.DAT",
+        "symbol": "600011.SH",
+        "period": "1m",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 943372,
+        "file_size": 60375816,
+        "mtime_ns": 1787240080000000000,
+        "stable_during_read": true,
+        "decoded_start": "2010-04-16T09:31:00+08:00",
+        "decoded_end": "2026-08-20T15:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity"
+      },
+      {
+        "path": "H:\\国信iQuant策略交易平台\\datadir\\SH\\60\\600276.DAT",
+        "symbol": "600276.SH",
+        "period": "1m",
+        "header_magic": "0x7ffffffffffffffe",
+        "header_size": 8,
+        "record_size": 64,
+        "row_count": 944680,
+        "file_size": 60459528,
+        "mtime_ns": 1787237902000000000,
+        "stable_during_read": true,
+        "decoded_start": "2010-04-16T09:31:00+08:00",
+        "decoded_end": "2026-08-20T15:00:00+08:00",
+        "price_scale": 1000.0,
+        "volume_unit": "shares_after_lot_size_conversion",
+        "volume_lot_size": 100.0,
+        "amount_unit": "currency_units",
+        "adjustment_metadata": "not_stored_in_DAT_header; assessed by parity"
+      }
+    ]
+  },
+  "row_counts": {
+    "local_qdp_5m": 46560,
+    "local_continuous_5m": 46560,
+    "qdp_5m": 46560,
+    "iquant_1m": 231444,
+    "iquant_5m": 46541
+  },
+  "session_bar_counts": {
+    "local_qdp_5m": {
+      "48": 970
+    },
+    "local_continuous_5m": {
+      "48": 970
+    },
+    "iquant_5m": {
+      "37": 1,
+      "40": 1,
+      "48": 968
+    }
+  },
+  "local_qdp": {
+    "row_count": 46560,
+    "key_counts": {
+      "both": 46560,
+      "local_only": 0,
+      "qdp_only": 0
+    },
+    "metrics": {
+      "open": {
+        "compared_count": 46560,
+        "exact_count": 46560,
+        "exact_rate": 1.0,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0,
+        "maximum_absolute_error": 0.0
+      },
+      "high": {
+        "compared_count": 46560,
+        "exact_count": 46560,
+        "exact_rate": 1.0,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0,
+        "maximum_absolute_error": 0.0
+      },
+      "low": {
+        "compared_count": 46560,
+        "exact_count": 46560,
+        "exact_rate": 1.0,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0,
+        "maximum_absolute_error": 0.0
+      },
+      "close": {
+        "compared_count": 46560,
+        "exact_count": 46560,
+        "exact_rate": 1.0,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0,
+        "maximum_absolute_error": 0.0
+      },
+      "volume": {
+        "compared_count": 46560,
+        "exact_count": 46560,
+        "exact_rate": 1.0,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0,
+        "maximum_absolute_error": 0.0
+      },
+      "amount": {
+        "compared_count": 46560,
+        "exact_count": 46550,
+        "exact_rate": 0.9997852233676976,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 1.881488635720617e-16,
+        "maximum_absolute_error": 3.725290298461914e-09
+      }
+    }
+  },
+  "local_iquant": {
+    "row_count": 46560,
+    "key_counts": {
+      "both": 46541,
+      "local_only": 19,
+      "iquant_only": 0
+    },
+    "metrics": {
+      "open": {
+        "compared_count": 46541,
+        "exact_count": 46002,
+        "exact_rate": 0.9884188135192626,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.004207573632538604,
+        "maximum_absolute_error": 0.12000000000000455
+      },
+      "high": {
+        "compared_count": 46541,
+        "exact_count": 45481,
+        "exact_rate": 0.9772243828022604,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.004395604395604458,
+        "maximum_absolute_error": 0.20000000000000284
+      },
+      "low": {
+        "compared_count": 46541,
+        "exact_count": 45365,
+        "exact_rate": 0.9747319567693001,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.0075596503661705715,
+        "maximum_absolute_error": 0.3500000000000014
+      },
+      "close": {
+        "compared_count": 46541,
+        "exact_count": 46018,
+        "exact_rate": 0.9887625964203606,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0,
+        "maximum_relative_error": 0.00158982511923685,
+        "maximum_absolute_error": 0.07000000000000028
+      },
+      "volume": {
+        "compared_count": 46541,
+        "exact_count": 29476,
+        "exact_rate": 0.6333340495477107,
+        "median_relative_error": 0.0,
+        "p95_relative_error": 0.0005633802816901409,
+        "maximum_relative_error": 0.667807730708886,
+        "maximum_absolute_error": 6656600.0
+      },
+      "amount": {
+        "compared_count": 46541,
+        "exact_count": 21992,
+        "exact_rate": 0.4725295975591414,
+        "median_relative_error": 3.554813689637286e-08,
+        "p95_relative_error": 0.0005161602719403863,
+        "maximum_relative_error": 0.6682892839003356,
+        "maximum_absolute_error": 241825452.0
+      }
+    }
+  },
+  "independence": {
+    "local_vs_qdp": "conversion parity only; QDP source counts show whether the underlying vendor archive is shared",
+    "local_vs_iquant": "independent storage path and broker-client cache; useful as a source cross-check"
+  }
+}

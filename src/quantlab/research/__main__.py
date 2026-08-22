@@ -6,6 +6,7 @@ from typing import Any
 
 from .data import verify_current_data
 from .ensemble import evaluate as evaluate_ensemble
+from .minute import DEFAULT_PARTICIPATION_RATE, run_minute_baseline, run_minute_walk_forward
 from .sequence import evaluate as evaluate_sequence
 from .sequence import train_all as train_all_sequence
 from .sequence import train_fold as train_sequence_fold
@@ -33,6 +34,21 @@ def main(argv: list[str] | None = None) -> int:
     sequence.add_argument("--fold", type=int, choices=range(1, 6))
     subparsers.add_parser("evaluate-sequence")
     subparsers.add_parser("evaluate-ensemble")
+    minute = subparsers.add_parser("minute-baseline")
+    minute.add_argument("--parquet", action="append", required=True)
+    minute.add_argument("--train-end-date", required=True)
+    minute.add_argument("--evaluation-start-date", required=True)
+    minute.add_argument("--evaluation-end-date", default="")
+    minute.add_argument("--output-dir", required=True)
+    minute.add_argument("--top-k", type=int, default=5)
+    minute.add_argument("--maximum-participation-rate", type=float, default=DEFAULT_PARTICIPATION_RATE)
+    walk = subparsers.add_parser("minute-walk-forward")
+    walk.add_argument("--parquet", action="append", required=True)
+    walk.add_argument("--evaluation-start-year", type=int, required=True)
+    walk.add_argument("--evaluation-end-year", type=int, required=True)
+    walk.add_argument("--output-dir", required=True)
+    walk.add_argument("--top-k", type=int, default=5)
+    walk.add_argument("--maximum-participation-rate", type=float, default=DEFAULT_PARTICIPATION_RATE)
     args = parser.parse_args(argv)
 
     if args.command == "verify":
@@ -59,6 +75,29 @@ def main(argv: list[str] | None = None) -> int:
         _print(evaluate_sequence())
     elif args.command == "evaluate-ensemble":
         _print(evaluate_ensemble())
+    elif args.command == "minute-baseline":
+        _print(
+            run_minute_baseline(
+                args.parquet,
+                train_end_date=args.train_end_date,
+                evaluation_start_date=args.evaluation_start_date,
+                evaluation_end_date=args.evaluation_end_date,
+                output_dir=args.output_dir,
+                top_k=args.top_k,
+                maximum_participation_rate=args.maximum_participation_rate,
+            )
+        )
+    elif args.command == "minute-walk-forward":
+        _print(
+            run_minute_walk_forward(
+                args.parquet,
+                evaluation_start_year=args.evaluation_start_year,
+                evaluation_end_year=args.evaluation_end_year,
+                output_dir=args.output_dir,
+                top_k=args.top_k,
+                maximum_participation_rate=args.maximum_participation_rate,
+            )
+        )
     else:
         _print(verify_current_data())
         for feature_count in (158, 183):
