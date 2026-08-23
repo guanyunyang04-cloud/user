@@ -254,11 +254,27 @@ dedicated producer code has been retired.
   empty for 2026-08-21, so freshness is endpoint-specific. A bulk name-history
   request returned exactly 10,000 rows and historical records outside the
   requested window; the existing per-symbol implementation must be retained.
-- The current tier does not include the provider's separate stock-minute
-  permission. It therefore cannot reconstruct missing intraday highs/lows or
-  directly repair the canonical one-minute table. Daily references remain
-  useful for aggregate validation, and the historical field-level quality
-  masks remain authoritative rather than synthesizing minute extrema.
+- The earlier inference that tier 15000 excluded stock minutes was wrong. The
+  current token actually returns `stk_mins` for A-share stocks at
+  1/5/15/30/60-minute frequencies: a normal day returned 241/48/16/8/4 rows,
+  both 2009 and 2010 historical one-minute probes returned 241 rows, and a long
+  query stopped at the documented 8,000-row limit. Both `pro.stk_mins` and
+  `ts.pro_bar(api=pro, freq="1min")` work through the proxy. Actual calls, not
+  the public tier label, are authoritative for this vendor's bundled weekly
+  permission.
+- The permission is specifically A-share stock history, not every minute
+  family. `etf_mins`, `idx_mins`, `ft_mins` and `opt_mins` returned HTTP 403;
+  opening/closing auction calls returned permission code 40101, and `anns_d`
+  returned HTTP 403. Continue using the existing CNInfo announcement path and
+  the QDP auction domain unless a separate entitlement is bought.
+- Stock-minute access makes targeted repair possible, but not safe as a bulk
+  replacement. Six known bad stock-days across 2010-2026 were compared against
+  the old ZIP and trusted daily bars. The proxy repaired the absurd 2010
+  `600000.SH` high of 189.10 back to 19.17, but its volume for that day was far
+  below the daily reference. On the other five samples the proxy and ZIP shared
+  the same missing open/high/low extremum. Repairs must therefore be accepted
+  per field only when the proxy improves daily reconciliation without
+  regressing another price or flow field; existing quality masks stay active.
 - The 2026-07-22 through 2026-08-21 cross-check joined 73,364 common main-board
   stock-days. All had 241 source rows; 73,359 matched daily OHLC exactly, four
   stayed inside the normal absolute tolerance, one open was warning-only, and
@@ -278,11 +294,14 @@ dedicated producer code has been retired.
 ## Immediate next action
 
 1. While the weekly provider entitlement remains valid, add a compact,
-   resumable raw-capture path for the missing daily/factor/daily-basic tail and
-   PIT financial, margin and research-report increments. Advance market daily
-   first, record each endpoint's observed cutoff, cross-check candidate rows
-   against BaoStock/iQuant/QDP, and install only validated partitions. Do not
-   rerun the legacy 5-minute updater or bulk name-history query.
+   resumable raw-capture path for `stk_mins` on already flagged minute
+   stock-days, plus the missing daily/factor/daily-basic tail and PIT financial,
+   margin and research-report increments. Do not mirror all 3.3 billion minute
+   rows. First pilot the exclusion records and accept only field-level repairs
+   that improve daily reconciliation without a new price/flow regression.
+   Advance market daily before auxiliary domains, record each endpoint's
+   observed cutoff, and do not rerun the legacy 5-minute updater or bulk
+   name-history query.
 2. Finish the QDP storage migration before starting another large model run.
    Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
    up one level without copying the 42-GiB store, flatten each active domain to

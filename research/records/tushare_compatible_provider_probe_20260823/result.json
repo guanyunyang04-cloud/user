@@ -1,6 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "created_at": "2026-08-23T23:20:00+08:00",
+  "corrected_at": "2026-08-23T21:33:22+08:00",
   "purpose": "Evaluate the restored Tushare-compatible source as a QDP repair and cross-validation source without mutating active QDP datasets.",
   "provider": {
     "api_url": "https://ts.gyzcloud.top/api",
@@ -20,10 +21,12 @@
       "adjustment-factor and daily-basic candidate updates",
       "point-in-time financial-statement and indicator candidate updates",
       "margin and analyst-report candidate updates through each endpoint's observed cutoff",
-      "per-symbol dividend and name-history checks"
+      "per-symbol dividend and name-history checks",
+      "targeted A-share stock minute repair after per-field daily-reconciliation gates"
     ],
     "rejected_uses": [
-      "direct one-minute repair under the current plan",
+      "blanket replacement of canonical one-minute history without per-day and per-field validation",
+      "ETF, index, futures or options minute ingestion under the current token",
       "sole-source overwrite of QDP facts",
       "bulk name-change history ingestion",
       "announcement replacement for the CNInfo primary path",
@@ -37,7 +40,60 @@
     "timeout_seconds": 45,
     "workers": 3,
     "rate_limiter": "one shared lock-serialized minute limiter",
-    "sdk_compatibility": "The provider accepts Tushare Pro request envelopes at the exact /api URL. pro_bar requires api=pro according to the provider documentation."
+    "sdk_compatibility": "The provider accepts Tushare Pro request envelopes at the exact /api URL. Both pro.stk_mins and ts.pro_bar(api=pro, freq='1min') returned 241 rows in Tushare SDK 1.4.29."
+  },
+  "minute_permission_recheck": {
+    "reason": "The original probe incorrectly inferred stock-minute denial from the public tier label without calling stk_mins.",
+    "authoritative_result": "The current token is authorized for A-share stock historical minutes.",
+    "stock_frequencies": {
+      "1min_rows_on_2026_08_21": 241,
+      "5min_rows_on_2026_08_21": 48,
+      "15min_rows_on_2026_08_21": 16,
+      "30min_rows_on_2026_08_21": 8,
+      "60min_rows_on_2026_08_21": 4
+    },
+    "history_checks": {
+      "600000_SH_2009_01_05_1min_rows": 241,
+      "600000_SH_2010_01_04_1min_rows": 241,
+      "600000_SH_2025_08_21_1min_rows": 241,
+      "long_range_rows": 8000,
+      "long_range_hit_documented_cap": true
+    },
+    "sdk_checks": {
+      "tushare_version": "1.4.29",
+      "pro_stk_mins_rows": 241,
+      "ts_pro_bar_rows": 241
+    },
+    "separately_denied": [
+      {
+        "api_name": "etf_mins",
+        "http_status": 403
+      },
+      {
+        "api_name": "idx_mins",
+        "http_status": 403
+      },
+      {
+        "api_name": "ft_mins",
+        "http_status": 403
+      },
+      {
+        "api_name": "opt_mins",
+        "http_status": 403
+      },
+      {
+        "api_name": "stk_auction_o",
+        "api_code": 40101
+      },
+      {
+        "api_name": "stk_auction_c",
+        "api_code": 40101
+      },
+      {
+        "api_name": "anns_d",
+        "http_status": 403
+      }
+    ]
   },
   "reference_daily_checks": [
     {
@@ -222,9 +278,22 @@
     },
     {
       "api_name": "stk_mins",
-      "params": "not_called",
-      "rows": null,
-      "status": "not_entitled_by_tier_15000_separate_minute_permission_required"
+      "params": "600000.SH; 1min/5min/15min/30min/60min; recent and historical dates",
+      "rows": 241,
+      "rows_by_frequency": {
+        "1min": 241,
+        "5min": 48,
+        "15min": 16,
+        "30min": 8,
+        "60min": 4
+      },
+      "status": "current_token_authorized_for_A_share_stock_history"
+    },
+    {
+      "api_name": "etf_mins,idx_mins,ft_mins,opt_mins",
+      "params": "official documentation sample instruments and dates",
+      "rows": 0,
+      "status": "current_token_denied_http_403_separate_entitlement_required"
     }
   ],
   "repeatability_checks": [
@@ -280,6 +349,76 @@
     "zero_flow_0930_rows": 265,
     "aggregation_rule": "Use first/high/low/last trade-bearing bars where volume>0 or amount>0, with the existing all-zero-day fallback."
   },
+  "minute_repair_sample": {
+    "sample_size": 6,
+    "years": [
+      2010,
+      2015,
+      2020,
+      2024,
+      2025,
+      2026
+    ],
+    "known_bad_field_repaired_by_provider": 1,
+    "provider_shared_existing_bad_field": 5,
+    "cases": [
+      {
+        "ts_code": "600000.SH",
+        "trade_date": "2010-05-17",
+        "field": "high",
+        "daily_reference": 19.17,
+        "local_zip": 189.1,
+        "provider_minute": 19.17,
+        "result": "provider_repairs_price_field_but_whole_day_replace_unsafe_due_large_volume_regression"
+      },
+      {
+        "ts_code": "601098.SH",
+        "trade_date": "2015-07-08",
+        "field": "high",
+        "daily_reference": 22.67,
+        "local_zip": 19.35,
+        "provider_minute": 19.35,
+        "result": "shared_missing_extremum"
+      },
+      {
+        "ts_code": "603607.SH",
+        "trade_date": "2020-07-02",
+        "field": "low",
+        "daily_reference": 13.7,
+        "local_zip": 15.16,
+        "provider_minute": 15.16,
+        "result": "shared_missing_extremum"
+      },
+      {
+        "ts_code": "003017.SZ",
+        "trade_date": "2024-03-20",
+        "field": "low",
+        "daily_reference": 17.04,
+        "local_zip": 18.85,
+        "provider_minute": 18.85,
+        "result": "shared_missing_extremum"
+      },
+      {
+        "ts_code": "603388.SH",
+        "trade_date": "2025-03-14",
+        "field": "high",
+        "daily_reference": 3.78,
+        "local_zip": 3.72,
+        "provider_minute": 3.72,
+        "result": "shared_missing_extremum"
+      },
+      {
+        "ts_code": "605081.SH",
+        "trade_date": "2026-02-09",
+        "field": "open",
+        "daily_reference": 9.95,
+        "local_zip": 10.08,
+        "provider_minute": 10.08,
+        "result": "shared_open_mismatch"
+      }
+    ],
+    "decision": "Use stk_mins for targeted candidate repair, never whole-day overwrite solely because access succeeds. Accept a field only when it improves the trusted daily aggregate and does not regress other OHLC, volume or amount checks."
+  },
   "integrity_and_freshness_risks": [
     {
       "finding": "The public provider frontend exposes an administrative poison control described as randomly polluting a marked user's API data, plus deprioritization/throttling controls.",
@@ -308,7 +447,7 @@
     "Replace hard-coded 2025/2026 one-time backfill cutoffs with an explicit as-of date and an endpoint-specific observed cutoff.",
     "Treat 2026-Q2 financial data as a point-in-time partial disclosure set until the disclosure season closes; preserve ann_date/f_ann_date, next-open-day availability lag, and restatements.",
     "A general financial incremental path must cover income, balance sheet, cash flow, and financial indicators; the current V2 statement-specific workflow is not a general replacement.",
-    "Keep field-level historical minute quality masks. Without minute entitlement, daily references can detect aggregate inconsistencies but cannot reconstruct missing intraday extrema."
+    "Keep field-level historical minute quality masks. Use stk_mins as a targeted candidate source, but retain the mask when its aggregate shares the same missing extremum as the ZIP; never invent an intraday bar from the daily high or low."
   ],
   "formal_data_mutation": {
     "performed": false,
@@ -321,6 +460,13 @@
     "https://tushare.pro/document/2?doc_id=27",
     "https://tushare.pro/document/2?doc_id=370",
     "https://tushare.pro/document/1?doc_id=290",
+    "https://tushare.pro/document/2?doc_id=387",
+    "https://tushare.pro/document/2?doc_id=419",
+    "https://tushare.pro/document/2?doc_id=313",
+    "https://tushare.pro/document/2?doc_id=341",
+    "https://tushare.pro/document/2?doc_id=353",
+    "https://tushare.pro/document/2?doc_id=354",
+    "https://tushare.pro/document/2?doc_id=176",
     "https://tushare.pro/document/2?doc_id=28",
     "https://tushare.pro/document/2?doc_id=32",
     "https://tushare.pro/document/2?doc_id=214",

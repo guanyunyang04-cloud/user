@@ -37,11 +37,15 @@ The default incremental data path uses BaoStock for structured daily facts,
 MootDX for recent intraday/corporate-action detection, and CNInfo through
 AkShare for disclosure confirmation. A Tushare-compatible profile can be
 explicitly selected as a secondary repair and cross-validation source, but it
-is never the sole authority for installing QDP facts. Its current non-minute
-plan can validate daily aggregates and supply candidate daily, factor,
-valuation, PIT-financial, margin, report and corporate-action rows; it cannot
-directly repair one-minute bars. iQuant is treated as a runtime and execution
-source, not as the sole historical research store. A read-only adapter now
+is never the sole authority for installing QDP facts. The current weekly token
+has been verified against `stk_mins` and supplies A-share stock history at
+1/5/15/30/60-minute frequencies from at least 2009, in addition to candidate
+daily, factor, valuation, PIT-financial, margin, report and corporate-action
+rows. ETF, index, futures and options minute interfaces remain separately
+unauthorized. Minute rows are repair candidates rather than blanket
+replacements because sampled historical anomalies often match the existing ZIP
+source. iQuant is treated as a runtime and execution source, not as the sole
+historical research store. A read-only adapter now
 decodes its local daily/one-minute K-line files and compares them with QDP
 without an RPC or trading connection. The 2026-08-21 parity snapshot found
 excellent recent agreement but only 60 one-minute files matching the 3,416
