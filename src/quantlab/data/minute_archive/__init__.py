@@ -6,7 +6,12 @@ from quantlab.data.minute_archive.contracts import (
     ArchiveMember,
     MinuteArchiveError,
 )
-from quantlab.data.minute_archive.importer import import_year
+from quantlab.data.minute_archive.importer import (
+    import_year,
+    import_years,
+    resume_staged_import,
+    stage_years,
+)
 from quantlab.data.minute_archive.reader import (
     extract_to_parquet,
     list_members,
@@ -21,7 +26,10 @@ __all__ = [
     "OUTPUT_COLUMNS",
     "extract_to_parquet",
     "import_year",
+    "import_years",
     "list_members",
     "normalize_member_name",
+    "resume_staged_import",
     "standardize_frame",
+    "stage_years",
 ]

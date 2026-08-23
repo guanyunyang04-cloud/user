@@ -49,6 +49,7 @@ CONTINUOUS_TIMES = frozenset(
     + [f"{hour:02d}{minute:02d}00000" for hour, minute in [(14, value) for value in range(60)]]
     + ["150000000"]
 )
+BAR_TIME_BY_HHMM = {int(value[:4]): value for value in CONTINUOUS_TIMES | {AUCTION_TIME}}
 BAR_SCHEMA = pa.schema(
     [
         pa.field("symbol", pa.string()),

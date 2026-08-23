@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
-from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile, ZipInfo
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 
 from quantlab.core.io import write_json
 from quantlab.data.minute_archive.contracts import (
     AUCTION_TIME,
     BAR_SCHEMA,
+    BAR_TIME_BY_HHMM,
     CORE_COLUMNS,
     OUTPUT_COLUMNS,
     PERIOD_PATTERN,
@@ -113,15 +113,57 @@ def read_member(zipped: ZipFile, info: ZipInfo, *, symbol: str) -> pd.DataFrame:
     return frame
 
 
-@lru_cache(maxsize=32)
-def _later_year_pattern(year: int) -> re.Pattern[bytes]:
-    later = b"|".join(str(value).encode("ascii") for value in range(int(year) + 1, 2100))
-    return re.compile(rb"\n(?:" + later + rb")-")
+def _find_selected_year_start(data: bytes, *, years: tuple[int, ...]) -> int:
+    positions = [position for year in years if (position := data.find(f"\n{year:04d}-".encode("ascii"))) >= 0]
+    for year in years:
+        if data.startswith(f"{year:04d}-".encode("ascii")):
+            positions.append(0)
+            break
+    return min(positions) if positions else -1
 
 
 def _find_year_end(data: bytes, *, year: int) -> int:
-    match = _later_year_pattern(int(year)).search(data)
-    return -1 if match is None else int(match.start()) + 1
+    position = data.find(f"\n{int(year) + 1:04d}-".encode("ascii"))
+    return -1 if position < 0 else position + 1
+
+
+def _parse_selected_rows(payload: bytes) -> pd.DataFrame:
+    column_types = {
+        "timestamp": pa.timestamp("s"),
+        **{column: pa.float64() for column in RAW_COLUMNS[1:]},
+    }
+    try:
+        table = pacsv.read_csv(
+            BytesIO(payload),
+            read_options=pacsv.ReadOptions(
+                column_names=list(RAW_COLUMNS),
+                block_size=8 << 20,
+                use_threads=True,
+            ),
+            convert_options=pacsv.ConvertOptions(
+                column_types=column_types,
+                null_values=["", "nan", "NaN", "None", "null", "NULL", "--"],
+                strings_can_be_null=True,
+            ),
+        )
+        frame = table.to_pandas()
+    except pa.ArrowInvalid as exc:
+        message = str(exc)
+        marker = "Expected 12 columns, got "
+        try:
+            observed_columns = int(message.split(marker, 1)[1].split(":", 1)[0])
+        except (IndexError, ValueError):
+            observed_columns = 0
+        if not 7 <= observed_columns < len(RAW_COLUMNS):
+            raise
+        frame = pd.read_csv(
+            BytesIO(payload),
+            header=None,
+            names=list(RAW_COLUMNS),
+            low_memory=False,
+        )
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
+    return frame
 
 
 def read_member_year(
@@ -133,8 +175,27 @@ def read_member_year(
 ) -> pd.DataFrame:
     """Read exactly one sorted source year and stop before later rows."""
 
-    marker = f"{int(year):04d}-".encode("ascii")
-    newline_marker = b"\n" + marker
+    return read_member_years(
+        zipped,
+        info,
+        symbol=symbol,
+        years=[int(year)],
+    )
+
+
+def read_member_years(
+    zipped: ZipFile,
+    info: ZipInfo,
+    *,
+    symbol: str,
+    years: Iterable[int],
+) -> pd.DataFrame:
+    """Read selected sorted source years with one pass through a ZIP member."""
+
+    selected_years = tuple(sorted({int(value) for value in years}))
+    if not selected_years:
+        raise MinuteArchiveError("member_years_empty")
+    end_year = selected_years[-1]
     found = False
     finished = False
     tail = b""
@@ -145,7 +206,7 @@ def read_member_year(
         while block := stream.read(8 << 20):
             data = tail + block
             if not found:
-                start = 0 if data.startswith(marker) else data.find(newline_marker)
+                start = _find_selected_year_start(data, years=selected_years)
                 if start < 0:
                     tail = data[-keep:]
                     continue
@@ -153,7 +214,7 @@ def read_member_year(
                     start += 1
                 data = data[start:]
                 found = True
-            end = _find_year_end(data, year=int(year))
+            end = _find_year_end(data, year=end_year)
             if end >= 0:
                 selected.append(data[:end])
                 finished = True
@@ -167,9 +228,11 @@ def read_member_year(
         selected.append(tail)
     if not selected:
         return pd.DataFrame(columns=[*RAW_COLUMNS, "symbol"])
-    frame = pd.read_csv(BytesIO(b"".join(selected)), header=None, names=list(RAW_COLUMNS), low_memory=False)
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], errors="coerce")
-    frame = frame.loc[frame["timestamp"].dt.year.eq(int(year))].copy()
+    try:
+        frame = _parse_selected_rows(b"".join(selected))
+    except (pa.ArrowInvalid, pa.ArrowNotImplementedError) as exc:
+        raise MinuteArchiveError(f"member_parse_failed:{symbol}:{info.filename}:{exc}") from exc
+    frame = frame.loc[frame["timestamp"].dt.year.isin(selected_years)].copy()
     frame["symbol"] = symbol
     return frame
 
@@ -195,12 +258,15 @@ def standardize_frame(
     output = frame.copy()
     output["timestamp"] = pd.to_datetime(output["timestamp"], errors="coerce")
     output = output.loc[output["timestamp"].notna()].copy()
-    output["trade_date"] = output["timestamp"].dt.strftime("%Y-%m-%d")
+    if "trade_date" not in output:
+        output["trade_date"] = output["timestamp"].to_numpy(dtype="datetime64[D]").astype(str)
     if start_date:
         output = output.loc[output["trade_date"] >= str(start_date)]
     if end_date:
         output = output.loc[output["trade_date"] <= str(end_date)]
-    output["bar_time"] = output["timestamp"].dt.strftime("%H%M00000")
+    if "bar_time" not in output:
+        clock = output["timestamp"].dt.hour * 100 + output["timestamp"].dt.minute
+        output["bar_time"] = clock.map(BAR_TIME_BY_HHMM)
     if exclude_0930:
         output = output.loc[output["bar_time"] != AUCTION_TIME].copy()
     if start_bar:
@@ -301,5 +367,6 @@ __all__ = [
     "list_members",
     "normalize_member_name",
     "read_member_year",
+    "read_member_years",
     "standardize_frame",
 ]
