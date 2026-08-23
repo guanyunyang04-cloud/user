@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-23T23:20:00+08:00",
+  "purpose": "Evaluate the restored Tushare-compatible source as a QDP repair and cross-validation source without mutating active QDP datasets.",
+  "provider": {
+    "api_url": "https://ts.gyzcloud.top/api",
+    "documentation_url": "https://ts.gyzcloud.top/docs",
+    "key_status_url": "https://ts.gyzcloud.top/key",
+    "plan": "week_7d_tier_15000",
+    "expires_at": "2026-08-30T16:46:00+08:00",
+    "advertised_rate_limit_per_minute": 150,
+    "project_rate_limit_per_minute": 96,
+    "profile_path": "data/qdp/qdp_private/provider_profiles.json",
+    "token_recorded_here": false
+  },
+  "decision": {
+    "trust_role": "secondary_candidate_source_with_mandatory_cross_validation",
+    "approved_uses": [
+      "daily OHLCV tail validation and candidate repair",
+      "adjustment-factor and daily-basic candidate updates",
+      "point-in-time financial-statement and indicator candidate updates",
+      "margin and analyst-report candidate updates through each endpoint's observed cutoff",
+      "per-symbol dividend and name-history checks"
+    ],
+    "rejected_uses": [
+      "direct one-minute repair under the current plan",
+      "sole-source overwrite of QDP facts",
+      "bulk name-change history ingestion",
+      "announcement replacement for the CNInfo primary path",
+      "blind replay of date-frozen one-time backfill workflows"
+    ]
+  },
+  "integration": {
+    "transport": "Existing direct HTTP _TushareClient",
+    "implementation_path": "src/quantlab/data/qdp_v2/auxiliary_update/context.py",
+    "accept_encoding": "gzip",
+    "timeout_seconds": 45,
+    "workers": 3,
+    "rate_limiter": "one shared lock-serialized minute limiter",
+    "sdk_compatibility": "The provider accepts Tushare Pro request envelopes at the exact /api URL. pro_bar requires api=pro according to the provider documentation."
+  },
+  "reference_daily_checks": [
+    {
+      "ts_code": "000425.SZ",
+      "trade_date": "2015-01-05",
+      "open": 15.0,
+      "high": 15.2,
+      "low": 14.12,
+      "close": 14.91,
+      "matches_qdp_daily": true,
+      "matches_previous_compatible_source": true
+    },
+    {
+      "ts_code": "002082.SZ",
+      "trade_date": "2020-01-02",
+      "open": 9.49,
+      "high": 10.3,
+      "low": 9.37,
+      "close": 9.95,
+      "matches_qdp_daily": true,
+      "matches_previous_compatible_source": true
+    },
+    {
+      "ts_code": "001217.SZ",
+      "trade_date": "2024-01-02",
+      "open": 13.5,
+      "high": 15.53,
+      "low": 13.36,
+      "close": 15.53,
+      "matches_qdp_daily": true,
+      "matches_previous_compatible_source": true
+    },
+    {
+      "ts_code": "002336.SZ",
+      "trade_date": "2025-01-03",
+      "open": 6.28,
+      "high": 6.4,
+      "low": 5.99,
+      "close": 5.99,
+      "matches_qdp_daily": true,
+      "matches_previous_compatible_source": true
+    },
+    {
+      "ts_code": "603388.SH",
+      "trade_date": "2025-03-14",
+      "open": 3.72,
+      "high": 3.78,
+      "low": 3.52,
+      "close": 3.6,
+      "matches_qdp_daily": true,
+      "matches_previous_compatible_source": true
+    },
+    {
+      "ts_code": "001390.SZ",
+      "trade_date": "2025-06-23",
+      "open": 21.8,
+      "high": 22.22,
+      "low": 21.5,
+      "close": 22.2,
+      "matches_qdp_daily": true,
+      "matches_previous_compatible_source": true
+    },
+    {
+      "ts_code": "605081.SH",
+      "trade_date": "2026-02-09",
+      "open": 9.95,
+      "high": 10.1,
+      "low": 9.85,
+      "close": 9.95,
+      "matches_qdp_daily": true,
+      "matches_previous_compatible_source": true
+    }
+  ],
+  "endpoint_probes": [
+    {
+      "api_name": "daily",
+      "params": "trade_date=20260821",
+      "rows": 5543,
+      "status": "available"
+    },
+    {
+      "api_name": "adj_factor",
+      "params": "trade_date=20260821",
+      "rows": 5563,
+      "status": "available"
+    },
+    {
+      "api_name": "daily_basic",
+      "params": "trade_date=20260821",
+      "rows": 5543,
+      "status": "available"
+    },
+    {
+      "api_name": "stock_basic",
+      "params": "list_status=L",
+      "rows": 5549,
+      "status": "available"
+    },
+    {
+      "api_name": "stock_basic",
+      "params": "list_status=D",
+      "rows": 339,
+      "status": "available"
+    },
+    {
+      "api_name": "suspend_d",
+      "params": "trade_date=20260821",
+      "rows": 7,
+      "status": "available"
+    },
+    {
+      "api_name": "stk_limit",
+      "params": "trade_date=20260821",
+      "rows": 7756,
+      "status": "available_but_requires_universe_filter"
+    },
+    {
+      "api_name": "income_vip",
+      "params": "period=20260630",
+      "rows": 1840,
+      "status": "available_partial_disclosure_season"
+    },
+    {
+      "api_name": "balancesheet_vip",
+      "params": "period=20260630",
+      "rows": 1738,
+      "status": "available_partial_disclosure_season"
+    },
+    {
+      "api_name": "cashflow_vip",
+      "params": "period=20260630",
+      "rows": 1775,
+      "status": "available_partial_disclosure_season"
+    },
+    {
+      "api_name": "fina_indicator_vip",
+      "params": "period=20260630",
+      "rows": 1432,
+      "status": "available_partial_disclosure_season"
+    },
+    {
+      "api_name": "forecast_vip",
+      "params": "period=20260630",
+      "rows": 1854,
+      "status": "available_ann_date_can_precede_period_end"
+    },
+    {
+      "api_name": "margin",
+      "params": "trade_date=20260820",
+      "rows": 3,
+      "status": "available_observed_one_trading_day_lag"
+    },
+    {
+      "api_name": "margin_detail",
+      "params": "trade_date=20260820",
+      "rows": 4434,
+      "status": "available_observed_one_trading_day_lag"
+    },
+    {
+      "api_name": "report_rc",
+      "params": "report_date=20260820",
+      "rows": 455,
+      "status": "available_observed_one_trading_day_lag"
+    },
+    {
+      "api_name": "namechange",
+      "params": "start_date=20260721",
+      "rows": 10000,
+      "status": "bulk_query_filter_unsafe_and_truncated"
+    },
+    {
+      "api_name": "namechange",
+      "params": "ts_code=000001.SZ",
+      "rows": 3,
+      "status": "per_symbol_available"
+    },
+    {
+      "api_name": "dividend",
+      "params": "ts_code=000001.SZ",
+      "rows": 96,
+      "status": "per_symbol_available"
+    },
+    {
+      "api_name": "stk_mins",
+      "params": "not_called",
+      "rows": null,
+      "status": "not_entitled_by_tier_15000_separate_minute_permission_required"
+    }
+  ],
+  "repeatability_checks": [
+    {
+      "api_name": "daily",
+      "params": "trade_date=20260821",
+      "repeats": 5,
+      "rows_each": 5543,
+      "canonical_sha256_prefix_each": "df4685",
+      "stable": true
+    },
+    {
+      "api_name": "income_vip",
+      "params": "period=20260630",
+      "repeats": 3,
+      "rows_each": 1840,
+      "canonical_sha256_prefix_each": "38767",
+      "stable": true
+    }
+  ],
+  "minute_tail_reconciliation": {
+    "date_start": "2026-07-22",
+    "date_end": "2026-08-21",
+    "trading_days": 23,
+    "provider_all_market_daily_rows": 127263,
+    "common_mainboard_stock_days": 73364,
+    "daily_only_stock_days": 0,
+    "minute_only_stock_days": 56,
+    "all_common_stock_days_have_241_rows": true,
+    "exact_ohlc_stock_days": 73359,
+    "normal_non_exact_stock_days": 4,
+    "warning_stock_days": 1,
+    "unreliable_stock_days": 0,
+    "severe_stock_days": 0,
+    "only_warning": {
+      "ts_code": "605259.SH",
+      "trade_date": "2026-08-20",
+      "field": "open",
+      "minute_aggregate": 17.76,
+      "daily_reference": 17.7,
+      "absolute_error": 0.06,
+      "relative_error": 0.003328
+    },
+    "volume_relative_error": {
+      "median": 0.000000627,
+      "p99": 0.0000269,
+      "count_above_0_1_percent": 0
+    },
+    "amount_relative_error": {
+      "p99": 0.0000000189,
+      "count_above_0_1_percent": 0
+    },
+    "zero_flow_0930_rows": 265,
+    "aggregation_rule": "Use first/high/low/last trade-bearing bars where volume>0 or amount>0, with the existing all-zero-day fallback."
+  },
+  "integrity_and_freshness_risks": [
+    {
+      "finding": "The public provider frontend exposes an administrative poison control described as randomly polluting a marked user's API data, plus deprioritization/throttling controls.",
+      "severity": "high",
+      "confidence": "high_for_capability_low_for_current_token_impact",
+      "current_token_evidence": "No instability was observed in eight repeated canonical-response checks, seven historical daily references, or the 23-trading-day minute-tail reconciliation.",
+      "required_control": "Never accept this provider as the sole truth; require repeated hashes, schema/grain checks, endpoint freshness checks, and an independent source or QDP parity gate before installation.",
+      "source": "https://ts.gyzcloud.top/assets/index-W4SGkP2q.js"
+    },
+    {
+      "finding": "Margin, margin-detail, and report-research probes were populated through 2026-08-20 but empty for 2026-08-21 on 2026-08-23.",
+      "severity": "medium",
+      "confidence": "high",
+      "required_control": "Record an endpoint-specific observed cutoff and do not infer freshness from the daily endpoint."
+    },
+    {
+      "finding": "A bulk namechange query ignored or did not honor the requested start date reliably and hit exactly 10,000 rows, including records back to 2006.",
+      "severity": "high",
+      "confidence": "high",
+      "required_control": "Retain the existing per-symbol name-history workflow and deduplicate by the point-in-time business key."
+    }
+  ],
+  "workflow_corrections": [
+    "Advance and validate market_daily before planning auxiliary updates; the current planner correctly rejects an auxiliary target later than the active daily cutoff.",
+    "Do not run the legacy general updater as a minute repair: it centers on a legacy 5-minute path and does not update the canonical one-minute domain.",
+    "Replace hard-coded 2025/2026 one-time backfill cutoffs with an explicit as-of date and an endpoint-specific observed cutoff.",
+    "Treat 2026-Q2 financial data as a point-in-time partial disclosure set until the disclosure season closes; preserve ann_date/f_ann_date, next-open-day availability lag, and restatements.",
+    "A general financial incremental path must cover income, balance sheet, cash flow, and financial indicators; the current V2 statement-specific workflow is not a general replacement.",
+    "Keep field-level historical minute quality masks. Without minute entitlement, daily references can detect aggregate inconsistencies but cannot reconstruct missing intraday extrema."
+  ],
+  "formal_data_mutation": {
+    "performed": false,
+    "reason": "This probe configured the private provider profile and ran read-only validation. Candidate rows must pass raw-capture and cross-source gates before active QDP installation."
+  },
+  "sources": [
+    "https://ts.gyzcloud.top/docs",
+    "https://ts.gyzcloud.top/key",
+    "https://ts.gyzcloud.top/assets/index-W4SGkP2q.js",
+    "https://tushare.pro/document/2?doc_id=27",
+    "https://tushare.pro/document/2?doc_id=370",
+    "https://tushare.pro/document/1?doc_id=290",
+    "https://tushare.pro/document/2?doc_id=28",
+    "https://tushare.pro/document/2?doc_id=32",
+    "https://tushare.pro/document/2?doc_id=214",
+    "https://tushare.pro/document/2?doc_id=100",
+    "https://tushare.pro/document/2?doc_id=25"
+  ]
+}

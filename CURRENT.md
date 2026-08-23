@@ -231,22 +231,72 @@ dedicated producer code has been retired.
   Retained historical research-report metadata is separate from the deleted
   forecast panel.
 
+## Temporary Tushare-compatible repair source (2026-08-23)
+
+- The private provider profile at
+  `data/qdp/qdp_private/provider_profiles.json` now points to the restored
+  `ts.gyzcloud.top/api` source. The tier-15000 weekly entitlement expires at
+  2026-08-30 16:46 Asia/Shanghai and advertises 150 requests/minute. The
+  existing direct-HTTP client remains capped at 96 requests/minute with three
+  workers and one shared lock-serialized limiter; no active code or tracked
+  evidence contains the token.
+- This provider is approved only as a candidate repair and cross-validation
+  source. Its public client bundle exposes an administrative control described
+  as randomly polluting a marked user's API responses, as well as throttling
+  controls. Repeated hashes, seven historical daily references and the recent
+  tail reconciliation found no evidence that the current account is affected,
+  but every formal install still requires schema/grain, repeatability,
+  endpoint-freshness and independent-source/QDP gates.
+- Read-only probes succeeded for daily prices, adjustment factors, daily basic,
+  stock status, limits, four financial-statement/indicator families, forecast,
+  margin, research reports, per-symbol name history and dividends. Margin,
+  margin-detail and research-report data were populated through 2026-08-20 but
+  empty for 2026-08-21, so freshness is endpoint-specific. A bulk name-history
+  request returned exactly 10,000 rows and historical records outside the
+  requested window; the existing per-symbol implementation must be retained.
+- The current tier does not include the provider's separate stock-minute
+  permission. It therefore cannot reconstruct missing intraday highs/lows or
+  directly repair the canonical one-minute table. Daily references remain
+  useful for aggregate validation, and the historical field-level quality
+  masks remain authoritative rather than synthesizing minute extrema.
+- The 2026-07-22 through 2026-08-21 cross-check joined 73,364 common main-board
+  stock-days. All had 241 source rows; 73,359 matched daily OHLC exactly, four
+  stayed inside the normal absolute tolerance, one open was warning-only, and
+  none were unreliable or severe. No volume or amount row exceeded 0.1%
+  relative error. This independently confirms that the recent 2026 minute ZIP
+  is high quality and that the much older minute anomalies are genuine source
+  defects rather than bad daily references.
+- Reuse the client, normalizers and PIT contracts, not the old one-time command
+  dates. The active daily cutoff is still 2026-07-21, so the auxiliary planner
+  correctly rejects a 2026-08-21 target until market daily is advanced first.
+  Several statement, research and margin workflows still freeze 2025 dates;
+  they need explicit as-of and observed-cutoff inputs before a 2026 incremental
+  run. No formal QDP rows were installed during this provider probe. Full
+  evidence is in
+  `research/records/tushare_compatible_provider_probe_20260823/result.json`.
+
 ## Immediate next action
 
-1. Finish the QDP storage migration before starting another large model run.
+1. While the weekly provider entitlement remains valid, add a compact,
+   resumable raw-capture path for the missing daily/factor/daily-basic tail and
+   PIT financial, margin and research-report increments. Advance market daily
+   first, record each endpoint's observed cutoff, cross-check candidate rows
+   against BaoStock/iQuant/QDP, and install only validated partitions. Do not
+   rerun the legacy 5-minute updater or bulk name-history query.
+2. Finish the QDP storage migration before starting another large model run.
    Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
    up one level without copying the 42-GiB store, flatten each active domain to
    one canonical directory, and remove generation pointers and cross-generation
    shard references. Keep a compact domain manifest and atomic file replacement
    so PIT contracts, row counts, schemas, source identity, and crash safety are
    not lost.
-2. During that migration, convert durable provenance to workspace-relative
+3. During that migration, convert durable provenance to workspace-relative
    paths, discard stale prepared-runtime paths, classify rather than blindly
    delete old Tushare-derived historical facts, and retire the permanent 5m
    fact table only after its remaining consumers use deterministic 1m
    resampling. Runtime and archive directories require a reference/provenance
    audit before deletion.
-3. After the migrated store passes physical, PIT, and research-contract checks,
+4. After the migrated store passes physical, PIT, and research-contract checks,
    build the first full-market hybrid view from prior-close daily context plus
    the causal minute sequence available at each decision time. Use 2010-2011
    only for warm-up, begin formal samples in 2012, apply the new field-level

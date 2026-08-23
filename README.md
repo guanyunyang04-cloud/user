@@ -35,16 +35,21 @@ atomic installation; it does not retain parallel `v1/v2/v3` stores.
 
 The default incremental data path uses BaoStock for structured daily facts,
 MootDX for recent intraday/corporate-action detection, and CNInfo through
-AkShare for disclosure confirmation. Tushare-compatible code is retained only
-as an explicitly selected legacy repair path. iQuant is treated as a runtime
-and execution source, not as the sole historical research store. A read-only
-adapter now decodes its local daily/one-minute K-line files and compares them
-with QDP without an RPC or trading connection. The 2026-08-21 parity snapshot
-found excellent recent agreement but only 60 one-minute files matching the
-3,416 symbols with QDP daily bars; the download was still active. The cache is
+AkShare for disclosure confirmation. A Tushare-compatible profile can be
+explicitly selected as a secondary repair and cross-validation source, but it
+is never the sole authority for installing QDP facts. Its current non-minute
+plan can validate daily aggregates and supply candidate daily, factor,
+valuation, PIT-financial, margin, report and corporate-action rows; it cannot
+directly repair one-minute bars. iQuant is treated as a runtime and execution
+source, not as the sole historical research store. A read-only adapter now
+decodes its local daily/one-minute K-line files and compares them with QDP
+without an RPC or trading connection. The 2026-08-21 parity snapshot found
+excellent recent agreement but only 60 one-minute files matching the 3,416
+symbols with QDP daily bars; the download was still active. The cache is
 therefore a recent/live supplement and independent validator, not a historical
 replacement. Compact evidence is retained in
-`research/records/iquant_cache_parity_20260821/result.json`.
+`research/records/iquant_cache_parity_20260821/result.json` and
+`research/records/tushare_compatible_provider_probe_20260823/result.json`.
 
 PIT restore provenance in the active QDP manifest is stored relative to the
 workspace (`path_base=workspace_root`), so moving the project does not leave
