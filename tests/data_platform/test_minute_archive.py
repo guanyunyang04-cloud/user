@@ -17,6 +17,7 @@ from quantlab.data.minute_archive import (
     standardize_frame,
 )
 from quantlab.data.minute_archive.quality import (
+    parity_audit,
     repair_mislabeled_1300_as_1130,
     repair_zero_price_placeholders,
 )
@@ -366,6 +367,61 @@ def test_formal_import_separates_auction_and_daily_share_evidence(tmp_path: Path
         / "minute_feature_exclusions.parquet"
     )
     assert exclusions.empty
+
+
+def test_parity_audit_uses_five_cent_relative_and_field_level_price_policy(tmp_path: Path) -> None:
+    dates = [f"2025-01-0{day}" for day in range(2, 6)]
+    bars_path = tmp_path / "bars.parquet"
+    daily_path = tmp_path / "daily.parquet"
+    output_dir = tmp_path / "quality"
+    final_quality_dir = tmp_path / "installed-quality"
+    output_dir.mkdir()
+    pd.DataFrame(
+        {
+            "symbol": ["600000.SH"] * 4,
+            "trade_date": dates,
+            "bar_time": ["093100000"] * 4,
+            "open": [10.0, 100.0, 10.0, 10.0],
+            "high": [10.05, 100.06, 10.06, 10.11],
+            "low": [10.0, 100.0, 10.0, 10.0],
+            "close": [10.0, 100.0, 10.0, 10.0],
+            "volume": [100.0] * 4,
+            "amount": [1000.0, 10_000.0, 1000.0, 1000.0],
+        }
+    ).to_parquet(bars_path, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["600000.SH"] * 4,
+            "trade_date": dates,
+            "open": [10.0, 100.0, 10.0, 10.0],
+            "high": [10.0, 100.0, 10.0, 10.0],
+            "low": [10.0, 100.0, 10.0, 10.0],
+            "close": [10.0, 100.0, 10.0, 10.0],
+            "volume": [100.0] * 4,
+            "amount": [1000.0, 10_000.0, 1000.0, 1000.0],
+        }
+    ).to_parquet(daily_path, index=False)
+
+    result = parity_audit(
+        continuous_paths=[bars_path],
+        auction_paths=[],
+        daily_paths=[daily_path],
+        year=2025,
+        output_dir=output_dir,
+        final_quality_dir=final_quality_dir,
+    )
+
+    assert result["price_over_five_cent_rows"] == 3
+    assert result["price_warning_rows"] == 1
+    assert result["price_unreliable_rows"] == 2
+    assert result["price_severe_rows"] == 1
+    assert result["minute_feature_exclusion_rows"] == 2
+    mismatches = pd.read_parquet(output_dir / "daily_parity_material_mismatches.parquet")
+    assert mismatches["price_quality_class"].tolist() == ["warning", "unreliable", "severe"]
+    exclusions = pd.read_parquet(output_dir / "minute_feature_exclusions.parquet")
+    assert exclusions["exclude_high"].all()
+    assert not exclusions[["exclude_open", "exclude_low", "exclude_close"]].any(axis=None)
+    assert exclusions["severity"].tolist() == ["unreliable", "severe"]
 
 
 def test_formal_import_appends_only_absent_year_partitions(tmp_path: Path) -> None:

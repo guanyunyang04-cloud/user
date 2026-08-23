@@ -27,6 +27,15 @@ from quantlab.data.qdp_v2.manifest import (
 )
 
 PRICE_COLUMNS = ["open", "high", "low", "close"]
+PRICE_ABSOLUTE_TOLERANCE = 0.05
+PRICE_COMPARISON_EPSILON = 1e-7
+PRICE_RELATIVE_UNRELIABLE_THRESHOLD = 0.005
+PRICE_RELATIVE_SEVERE_THRESHOLD = 0.01
+FLOW_RELATIVE_TOLERANCE = 0.001
+
+
+def _sql_number(value: float) -> str:
+    return format(value, ".10g")
 
 
 def repair_mislabeled_1300_as_1130(frame: pd.DataFrame, *, symbol: str) -> pd.DataFrame:
@@ -246,16 +255,48 @@ def _create_daily_comparison(
         WHERE trade_date BETWEEN '{year}-01-01' AND '{year}-12-31'
         """
     )
+    absolute_limit = _sql_number(PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON)
+    unreliable_limit = _sql_number(PRICE_RELATIVE_UNRELIABLE_THRESHOLD)
+    severe_limit = _sql_number(PRICE_RELATIVE_SEVERE_THRESHOLD)
     connection.execute(
-        """
+        f"""
         CREATE TEMP TABLE compared AS
-        SELECT a.*,d.open d_open,d.high d_high,d.low d_low,d.close d_close,
-               d.volume d_volume,d.amount d_amount,
-               greatest(abs(agg_open-d_open),abs(agg_high-d_high),
-                        abs(agg_low-d_low),abs(agg_close-d_close)) price_max_abs_error,
-               abs(agg_volume-d_volume)/greatest(abs(d_volume),1.0) volume_relative_error,
-               abs(agg_amount-d_amount)/greatest(abs(d_amount),1.0) amount_relative_error
-        FROM aggregate a JOIN daily_year d USING(symbol,trade_date)
+        WITH errors AS (
+            SELECT a.*,d.open d_open,d.high d_high,d.low d_low,d.close d_close,
+                   d.volume d_volume,d.amount d_amount,
+                   abs(agg_open-d_open) open_abs_error,
+                   abs(agg_high-d_high) high_abs_error,
+                   abs(agg_low-d_low) low_abs_error,
+                   abs(agg_close-d_close) close_abs_error,
+                   greatest(abs(d.open),abs(d.high),abs(d.low),abs(d.close),1e-12)
+                       price_reference_scale,
+                   abs(agg_volume-d_volume)/greatest(abs(d_volume),1.0) volume_relative_error,
+                   abs(agg_amount-d_amount)/greatest(abs(d_amount),1.0) amount_relative_error
+            FROM aggregate a JOIN daily_year d USING(symbol,trade_date)
+        ), scaled AS (
+            SELECT *,
+                   greatest(open_abs_error,high_abs_error,low_abs_error,close_abs_error)
+                       price_max_abs_error,
+                   greatest(open_abs_error,high_abs_error,low_abs_error,close_abs_error)
+                       / price_reference_scale AS price_max_relative_error
+            FROM errors
+        )
+        SELECT *,
+               CASE
+                   WHEN price_max_abs_error<={absolute_limit} THEN 'normal'
+                   WHEN price_max_relative_error>{severe_limit} THEN 'severe'
+                   WHEN price_max_relative_error>{unreliable_limit} THEN 'unreliable'
+                   ELSE 'warning'
+               END AS price_quality_class,
+               open_abs_error>{absolute_limit}
+                   AND open_abs_error/price_reference_scale>{unreliable_limit} AS exclude_open,
+               high_abs_error>{absolute_limit}
+                   AND high_abs_error/price_reference_scale>{unreliable_limit} AS exclude_high,
+               low_abs_error>{absolute_limit}
+                   AND low_abs_error/price_reference_scale>{unreliable_limit} AS exclude_low,
+               close_abs_error>{absolute_limit}
+                   AND close_abs_error/price_reference_scale>{unreliable_limit} AS exclude_close
+        FROM scaled
         """
     )
 
@@ -267,16 +308,21 @@ def _write_sparse_parity_evidence(
     exclusions_path: Path,
     missing_path: Path,
 ) -> None:
+    absolute_limit = _sql_number(PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON)
+    unreliable_limit = _sql_number(PRICE_RELATIVE_UNRELIABLE_THRESHOLD)
+    flow_limit = _sql_number(FLOW_RELATIVE_TOLERANCE)
     connection.execute(
-        f"COPY (SELECT * FROM compared WHERE price_max_abs_error>0.0100001 "
-        "OR volume_relative_error>0.001 OR amount_relative_error>0.001 "
+        f"COPY (SELECT * FROM compared WHERE price_max_abs_error>{absolute_limit} "
+        f"OR volume_relative_error>{flow_limit} OR amount_relative_error>{flow_limit} "
         f"ORDER BY trade_date,symbol) TO '{material_path.as_posix()}' "
         "(FORMAT PARQUET, COMPRESSION ZSTD)"
     )
     connection.execute(
-        f"COPY (SELECT symbol,trade_date,price_max_abs_error,"
-        "'daily_ohlc_mismatch_over_one_cent' AS exclusion_reason FROM compared "
-        "WHERE price_max_abs_error>0.0100001 ORDER BY trade_date,symbol) "
+        "COPY (SELECT symbol,trade_date,price_max_abs_error,price_max_relative_error,"
+        "exclude_open,exclude_high,exclude_low,exclude_close,price_quality_class AS severity,"
+        "'daily_ohlc_mismatch_over_five_cents_and_half_percent' AS exclusion_reason "
+        f"FROM compared WHERE price_max_abs_error>{absolute_limit} "
+        f"AND price_max_relative_error>{unreliable_limit} ORDER BY trade_date,symbol) "
         f"TO '{exclusions_path.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)"
     )
     connection.execute(
@@ -303,19 +349,29 @@ def parity_audit(
     missing_path = output_dir / "daily_reference_missing_minute.parquet"
     for path in (material_path, exclusions_path, missing_path):
         path.unlink(missing_ok=True)
+    absolute_limit = _sql_number(PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON)
+    unreliable_limit = _sql_number(PRICE_RELATIVE_UNRELIABLE_THRESHOLD)
+    severe_limit = _sql_number(PRICE_RELATIVE_SEVERE_THRESHOLD)
+    flow_limit = _sql_number(FLOW_RELATIVE_TOLERANCE)
     with duckdb.connect() as connection:
         _create_daily_comparison(connection, bars=bars, daily=daily, year=int(year))
         row = connection.execute(
-            """
+            f"""
             SELECT count(*),
                    avg((abs(agg_open-d_open)<1e-8)::INT),avg((abs(agg_high-d_high)<1e-8)::INT),
                    avg((abs(agg_low-d_low)<1e-8)::INT),avg((abs(agg_close-d_close)<1e-8)::INT),
                    quantile_cont(volume_relative_error,0.5),quantile_cont(volume_relative_error,0.95),
                    quantile_cont(amount_relative_error,0.5),quantile_cont(amount_relative_error,0.95),
-                   count(*) FILTER(WHERE price_max_abs_error>0.0100001),
-                   count(*) FILTER(WHERE price_max_abs_error>0.0100001
-                                          OR volume_relative_error>0.001
-                                          OR amount_relative_error>0.001)
+                   count(*) FILTER(WHERE price_max_abs_error>{absolute_limit}),
+                   count(*) FILTER(WHERE price_max_abs_error>{absolute_limit}
+                                          AND price_max_relative_error<={unreliable_limit}),
+                   count(*) FILTER(WHERE price_max_abs_error>{absolute_limit}
+                                          AND price_max_relative_error>{unreliable_limit}),
+                   count(*) FILTER(WHERE price_max_abs_error>{absolute_limit}
+                                          AND price_max_relative_error>{severe_limit}),
+                   count(*) FILTER(WHERE price_max_abs_error>{absolute_limit}
+                                          OR volume_relative_error>{flow_limit}
+                                          OR amount_relative_error>{flow_limit})
             FROM compared
             """
         ).fetchone()
@@ -357,9 +413,16 @@ def parity_audit(
         "volume_relative_error_p95": float(row[6] or 0),
         "amount_relative_error_median": float(row[7] or 0),
         "amount_relative_error_p95": float(row[8] or 0),
-        "price_over_one_cent_rows": int(row[9] or 0),
-        "material_daily_mismatch_rows": int(row[10] or 0),
-        "minute_feature_exclusion_rows": int(row[9] or 0),
+        "price_absolute_tolerance": PRICE_ABSOLUTE_TOLERANCE,
+        "price_relative_unreliable_threshold": PRICE_RELATIVE_UNRELIABLE_THRESHOLD,
+        "price_relative_severe_threshold": PRICE_RELATIVE_SEVERE_THRESHOLD,
+        "price_relative_error_denominator": "maximum_absolute_daily_ohlc",
+        "price_over_five_cent_rows": int(row[9] or 0),
+        "price_warning_rows": int(row[10] or 0),
+        "price_unreliable_rows": int(row[11] or 0),
+        "price_severe_rows": int(row[12] or 0),
+        "material_daily_mismatch_rows": int(row[13] or 0),
+        "minute_feature_exclusion_rows": int(row[11] or 0),
         "minute_feature_exclusions_path": str((final_quality_dir / exclusions_path.name).resolve()),
         "duplicate_primary_keys": duplicate,
     }

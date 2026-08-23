@@ -27,6 +27,12 @@ the execution path and current data products are under `data/`.
 - `runs`: reproducible model and evaluation outputs.
 - `tools`: one-off migration and maintenance utilities.
 
+The `qdp_v2` names describe the current legacy layout, not a second supported
+data generation. Its physical data is healthy, but the namespace, active
+generation pointer, and hashed directories are scheduled for an in-place
+flattening migration. The target retains one compact manifest per domain and
+atomic installation; it does not retain parallel `v1/v2/v3` stores.
+
 The default incremental data path uses BaoStock for structured daily facts,
 MootDX for recent intraday/corporate-action detection, and CNInfo through
 AkShare for disclosure confirmation. Tushare-compatible code is retained only

@@ -29,6 +29,9 @@ from quantlab.data.minute_archive.contracts import (
     MinuteArchiveError,
 )
 from quantlab.data.minute_archive.quality import (
+    PRICE_ABSOLUTE_TOLERANCE,
+    PRICE_RELATIVE_SEVERE_THRESHOLD,
+    PRICE_RELATIVE_UNRELIABLE_THRESHOLD,
     daily_evidence,
     member_frame_audit,
     parity_audit,
@@ -805,6 +808,10 @@ def _quality_rollup(
         for year in years
         if "daily_reference_coverage_rate" in qualities[year]
     ]
+
+    def total(key: str) -> int:
+        return sum(int(qualities[year].get(key, 0) or 0) for year in years)
+
     return {
         "primary_key_unique": all(int(qualities[year].get("duplicate_primary_keys", 0) or 0) == 0 for year in years),
         "imported_years": years,
@@ -823,6 +830,19 @@ def _quality_rollup(
             )
             for year in years
         ),
+        "price_over_five_cent_rows": total("price_over_five_cent_rows"),
+        "price_warning_rows": total("price_warning_rows"),
+        "price_unreliable_rows": total("price_unreliable_rows"),
+        "price_severe_rows": total("price_severe_rows"),
+        "session_feature_exclusion_rows": total("session_feature_exclusion_rows"),
+        "price_quality_policy": {
+            "absolute_tolerance": PRICE_ABSOLUTE_TOLERANCE,
+            "relative_unreliable_threshold": PRICE_RELATIVE_UNRELIABLE_THRESHOLD,
+            "relative_severe_threshold": PRICE_RELATIVE_SEVERE_THRESHOLD,
+            "relative_error_denominator": "maximum_absolute_daily_ohlc",
+            "mask_scope": "affected_ohlc_fields_only",
+            "same_day_intraday_use": "forbidden_before_session_close",
+        },
         "daily_reference_coverage_rate_min": min(coverage) if coverage else None,
         "append_contract": "transactional_year_partition_v1",
     }

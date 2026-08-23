@@ -32,12 +32,30 @@ is not used as a hidden eligibility filter.
 
 ## Refactor status
 
-The repository-wide refactor is complete to the agreed standard: legacy large
-modules were not merely moved; their mixed internals were divided into focused
-packages and helpers. Provider transport, normalization, retry, preparation,
+The source-tree consolidation and large-module split are complete, but the QDP
+storage refactor is not. Legacy large modules were divided into focused
+packages and helpers, and provider transport, normalization, preparation,
 installation, auditing, workflow state, model evaluation, and account replay
-now have explicit owners. Former module import paths remain available through
-small package facades, so callers did not need a migration.
+now have explicit owners. QDP still uses the `qdp_v2` Python namespace and
+physical root, an `active.json` generation pointer, hashed dataset directories,
+and some cross-generation shard references.
+
+This is architecture debt, not evidence of damaged data. The current 26 active
+domains pass verified physical status and the quick database check with zero
+errors and warnings. The migration must therefore preserve current files and
+PIT behavior while simplifying the layout. The intended end state is one
+canonical directory per domain and one compact per-domain contract, with
+atomic temporary installation retained for crash safety. Removing every
+manifest or renaming directories without a transactional migration would be a
+regression, not simplification.
+
+The latest inventory found 42 physical dataset-generation directories for 26
+active domains, including 16 inactive generations. The active 5-minute
+manifest still references 81 shards stored in an earlier generation. Active
+metadata contains 150 absolute path strings; 111 no longer exist and 110 point
+at the removed `quant_data_platform` tree. These stale prepared-source paths
+do not invalidate active Parquet shards, but they must be removed or converted
+to durable workspace-relative provenance during the QDP migration.
 
 Shared SHA-256 and atomic file installation live in `quantlab.core.io`.
 Production code has no mixed-responsibility function of 100 lines or more. The
@@ -50,8 +68,10 @@ The project `brain/` directory and the user-level `workspace-brain` skill were
 deleted. This file is the sole concise cross-session handoff; detailed evidence
 belongs in `research/records/` and code behavior belongs in tests.
 
-The refactor is validated by the complete suite (`165 passed`), whole-repository Ruff checks,
-bytecode compilation, and the physical QDP/research checks. The canonical
+The completed source refactor and current minute-quality policy are validated
+by the complete suite (`166 passed`),
+whole-repository Ruff checks, bytecode compilation, and the physical
+QDP/research checks. The canonical
 curation record contains explicit machine-checkable assertions for industry,
 share capital, valuation, source archives and retired domains. Older specialty
 records that contain provenance but no explicit assertions are reported as
@@ -118,16 +138,21 @@ dedicated producer code has been retired.
   retained but excluded from session features. No missing minute is silently
   interpolated.
 - The older 2000-2025 ZIP is not uniformly exchange-grade for intraminute
-  extremes. Against the trusted QDP daily bars, 1,587,530 stock-days exceed the
-  one-cent OHLC tolerance, predominantly because the minute aggregate high is
-  below the daily high or its low is above the daily low. Median maximum error
-  among flagged rows is about 0.03 currency units; a much smaller tail contains
-  obvious decimal or extreme omissions. Open, close, volume and amount are
-  materially more consistent. These rows remain immutable and are listed in
-  annual `minute_feature_exclusions.parquet`; the model must not treat their
-  high/low-derived features as trusted observations.
-- Recent source quality is much stronger. In 2025 only 57 stock-days exceed the
-  one-cent price tolerance; in the available 2026 tail only five do. The 2026
+  prices. Against 9,732,494 trusted daily-reference stock-days, 431,803 exceed
+  the agreed absolute tolerance of 0.05 currency units. Of these, 246,912 stay
+  as warnings because the maximum error is at most 0.5% of the maximum absolute
+  daily OHLC; 184,891 are field-level unreliable observations, including
+  61,100 above 1%. The former one-cent exclusion rule is retired.
+- Price evidence is field-level rather than a stock-day deletion. Among the
+  184,891 unreliable rows, 126,639 affect only high/low, 51,740 affect only
+  open/close (almost entirely open), and 6,512 affect both groups. Annual
+  `minute_feature_exclusions.parquet` files now carry explicit
+  `exclude_open/high/low/close` masks. Volume and amount retain independent
+  relative-error audits. A full-session parity outcome is not causal before
+  the close and must never be supplied to a same-day intraday model.
+- Recent source quality is much stronger. Under the new policy, 2025 has five
+  rows above 0.05 (three field-level unreliable), and the available 2026 tail
+  has two (one unreliable). The 2026
   comparison covers every QDP daily reference row, with open/high/low/close
   exact rates of 99.9995%/100%/99.9998%/99.9976%. Its volume and amount p95
   relative errors are approximately 0.00108% and 0.000077%.
@@ -175,7 +200,10 @@ dedicated producer code has been retired.
 - H: filesystem repair is complete. `chkdsk H: /f` verified 543,565 files,
   found no problems and no bad sectors; the volume now reports
   `HealthStatus=Healthy`, `OperationalStatus=OK`, and `fsutil dirty query H:`
-  returns `NOT Dirty`.
+  returns `NOT Dirty`. The 2026-08-23 takeover check found 784.73 GiB free.
+  H: is exFAT, so the QDP migration cannot rely on NTFS hard links or metadata
+  journaling. It needs a resumable move journal and per-domain validation before
+  each commit point, especially because no full duplicate data backup is planned.
 - At the frozen parity snapshot, iQuant was running and actively writing. The installed
   `xtdata.get_local_data` is an empty compatibility stub, so the project now has
   a tested read-only DAT adapter. It decodes the fixed 64-byte K-line records as
@@ -205,15 +233,21 @@ dedicated producer code has been retired.
 
 ## Immediate next action
 
-1. Build the first full-market hybrid research view directly from canonical 1m:
-   prior-close daily context plus the minute sequence available at each decision
-   time. Use 2010-2011 only for warm-up and begin formal samples in 2012.
-2. Treat daily-parity failures as field-level quality masks, not as a reason to
-   delete a stock-day or redefine the historical universe. Start with the more
-   reliable close/volume/amount path; use minute high/low only where certified,
-   with trusted daily range available as prior-day context.
-3. Resample multi-scale views on demand rather than materializing permanent
-   5/15/30/60-minute copies. First establish a simple sequence baseline and an
-   executable T+1 target, then test whether intraday timing adds value over the
-   current daily score. iQuant remains the eventual current-day/ordering layer;
-   QDP remains the reproducible historical store.
+1. Finish the QDP storage migration before starting another large model run.
+   Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
+   up one level without copying the 42-GiB store, flatten each active domain to
+   one canonical directory, and remove generation pointers and cross-generation
+   shard references. Keep a compact domain manifest and atomic file replacement
+   so PIT contracts, row counts, schemas, source identity, and crash safety are
+   not lost.
+2. During that migration, convert durable provenance to workspace-relative
+   paths, discard stale prepared-runtime paths, classify rather than blindly
+   delete old Tushare-derived historical facts, and retire the permanent 5m
+   fact table only after its remaining consumers use deterministic 1m
+   resampling. Runtime and archive directories require a reference/provenance
+   audit before deletion.
+3. After the migrated store passes physical, PIT, and research-contract checks,
+   build the first full-market hybrid view from prior-close daily context plus
+   the causal minute sequence available at each decision time. Use 2010-2011
+   only for warm-up, begin formal samples in 2012, apply the new field-level
+   quality masks causally, and keep iQuant as the current-day execution layer.
