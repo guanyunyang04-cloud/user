@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-22
+Updated: 2026-08-23
 
 ## Objective
 
@@ -50,7 +50,7 @@ The project `brain/` directory and the user-level `workspace-brain` skill were
 deleted. This file is the sole concise cross-session handoff; detailed evidence
 belongs in `research/records/` and code behavior belongs in tests.
 
-The refactor is validated by the complete suite (`157 passed`), whole-repository Ruff checks,
+The refactor is validated by the complete suite (`165 passed`), whole-repository Ruff checks,
 bytecode compilation, and the physical QDP/research checks. The canonical
 curation record contains explicit machine-checkable assertions for industry,
 share capital, valuation, source archives and retired domains. Older specialty
@@ -97,38 +97,53 @@ dedicated producer code has been retired.
   must be PIT- and age-aware and prove residual value over the technical
   baseline.
 
-## Local minute research (2026-08-22)
+## Local minute research (2026-08-23)
 
 - The immutable archives now live inside QDP source management at
   `data/qdp/source_archives/minute/`. The 2000-2025 one-minute ZIP is
   71,942,482,275 bytes and the 2026 multi-period ZIP is 7,464,393,924 bytes.
   They are streamed directly and are neither unpacked into a 400-GiB CSV tree
   nor copied into the iQuant private cache.
-- The completed 2025 pilot installed 315,421,721 continuous one-minute bars and
-  1,314,298 separate 09:30 rows. All 5,485 source members contributed data.
-  Exactly 1,314,257 stock-days contain 240 continuous bars; the other 41 are
-  zero-flow suspension placeholders for `920680.BJ`, leaving zero unexplained
-  incomplete active sessions. Primary keys are unique and no stock-day has
-  inconsistent repeated share fields.
+- The formal append is complete for 2010-2025 plus the available 2026 tail. The
+  active store covers 2010-01-04 through 2026-08-21 with 3,301,495,126
+  continuous bars and 13,756,395 separate 09:30 rows. Each domain has 200
+  year/month shards and one schema; Parquet footer totals, manifest totals,
+  file sizes and active-manifest bindings all agree. The compressed canonical
+  bars occupy 35.03 GiB and the annual evidence occupies another 0.56 GiB.
+- Every annual primary-key audit reports zero duplicates and zero unexplained
+  incomplete active sessions. The importer repaired 194,394 all-zero,
+  zero-flow price placeholders using a deterministic neighboring close and
+  recorded every changed row. The 2026 archive also required 46,177 explicit
+  `13:00` to `11:30` label repairs. Its 125 one-row suspension placeholders are
+  retained but excluded from session features. No missing minute is silently
+  interpolated.
+- The older 2000-2025 ZIP is not uniformly exchange-grade for intraminute
+  extremes. Against the trusted QDP daily bars, 1,587,530 stock-days exceed the
+  one-cent OHLC tolerance, predominantly because the minute aggregate high is
+  below the daily high or its low is above the daily low. Median maximum error
+  among flagged rows is about 0.03 currency units; a much smaller tail contains
+  obvious decimal or extreme omissions. Open, close, volume and amount are
+  materially more consistent. These rows remain immutable and are listed in
+  annual `minute_feature_exclusions.parquet`; the model must not treat their
+  high/low-derived features as trusted observations.
+- Recent source quality is much stronger. In 2025 only 57 stock-days exceed the
+  one-cent price tolerance; in the available 2026 tail only five do. The 2026
+  comparison covers every QDP daily reference row, with open/high/low/close
+  exact rates of 99.9995%/100%/99.9998%/99.9976%. Its volume and amount p95
+  relative errors are approximately 0.00108% and 0.000077%.
 - A zero-volume 09:30 source row is a pre-open placeholder, not proof of an
-  auction transaction. Daily parity therefore uses the first/high/low/last
-  trade-bearing bar, with an all-zero-day fallback. Across 770,074 common QDP
-  stock-days, 99.9971% of opens match exactly and every OHLC field is within one
-  cent on at least 99.9968% of rows. Volume and amount p95 relative errors are
-  about 0.00105% and 0.000103%.
-- Fifty-seven stock-days differ from the trusted daily sources by more than one
-  cent. Available iQuant daily files confirm QDP rather than the ZIP on all 15
-  affected rows they cover. The raw minute rows remain immutable, while those
-  57 stock-days are excluded from minute-derived features until an exact
-  independent minute source is available. Evidence is under
-  `data/qdp/source_archives/minute/quality/year=2025/`.
+  auction transaction. Daily parity therefore uses first/high/low/last
+  trade-bearing bars with an all-zero-day fallback. The opening row stays in a
+  separate domain so a model can choose its treatment explicitly.
 - Earlier 64/256-symbol staging Parquets and parity extracts were deleted after
   the formal import; they are reproducible from the ZIP and no active manifest
   referenced them. The failed model result and compact research record remain
   as evidence, not as a second market-data source.
-- The two frozen, one-off 5-minute repair producers were removed from active
-  code. Their audit record and current legacy 5-minute dataset remain until the
-  complete canonical 1-minute history can replace that dataset deterministically.
+- The one-minute table is the only canonical intraday fact table. A model may
+  resample 5/15/30/60-minute views in a query or data loader, but QDP will not
+  retain four duplicate long-term truths. The importer performs one ZIP member
+  pass for all requested years, uses PyArrow parsing and monthly buffered
+  Parquet writes, and now sizes/flushes those buffers from live available RAM.
 - The executable minute contract is now explicit: use information through
   10:00, rank candidates before seeing the fill window, enter at the
   10:01-10:10 VWAP, and begin exits in the same window on the next market day.
@@ -190,13 +205,15 @@ dedicated producer code has been retired.
 
 ## Immediate next action
 
-1. Extend the audited importer with partition-safe append semantics and ingest
-   2010-2024 plus the available 2026 tail. The 2000-2009 archive remains source
-   evidence until a matching PIT universe is available.
-2. Derive 5/15/30/60-minute bars and daily intraday features from canonical 1m;
-   then rerun the fixed 158-versus-183 comparison without using minute
-   availability to redefine the historical stock universe.
-3. If minute features add value, compare a prior-close daily score with one
-   predeclared hybrid using only information available at the decision time.
-   iQuant should provide current-day supplementation and execution, while QDP
-   remains the reproducible historical store.
+1. Build the first full-market hybrid research view directly from canonical 1m:
+   prior-close daily context plus the minute sequence available at each decision
+   time. Use 2010-2011 only for warm-up and begin formal samples in 2012.
+2. Treat daily-parity failures as field-level quality masks, not as a reason to
+   delete a stock-day or redefine the historical universe. Start with the more
+   reliable close/volume/amount path; use minute high/low only where certified,
+   with trusted daily range available as prior-day context.
+3. Resample multi-scale views on demand rather than materializing permanent
+   5/15/30/60-minute copies. First establish a simple sequence baseline and an
+   executable T+1 target, then test whether intraday timing adds value over the
+   current daily score. iQuant remains the eventual current-day/ordering layer;
+   QDP remains the reproducible historical store.

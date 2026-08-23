@@ -93,20 +93,31 @@ and the manifests beside each data product.
 Downloaded minute archives are managed as immutable QDP sources under
 `data/qdp/source_archives/minute/`; they are never unpacked into a second CSV
 tree or written into a broker cache. `quantlab.data.minute_archive` can create
-short-lived research extracts, but its formal path streams a complete year
-directly from ZIP into the canonical one-minute store.
+short-lived research extracts, while its formal path streams selected years
+directly from ZIP into transactionally appended year/month Parquet partitions.
+For large imports, streaming and auditing are deliberately split across two
+processes so Windows releases every Arrow file handle before validation.
 
 ```powershell
 $env:PYTHONPATH='H:\quant_project\src'
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.data.minute_archive import-year `
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.data.minute_archive stage-years `
   --archive 'H:\quant_project\data\qdp\source_archives\minute\1分钟(2000-2025).zip' `
-  --year 2025 `
+  --start-year 2010 `
+  --end-year 2025 `
+  --workspace-root 'H:\quant_project'
+
+# Pass the returned staging path to a fresh process.
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.data.minute_archive resume-staged `
+  --staging '<returned staging path>' `
   --workspace-root 'H:\quant_project'
 ```
 
-The completed 2025 pilot stores 09:30 rows in `market_opening_auction` and the
-240 continuous bars in `market_intraday_1m`. Repeated share fields are retained
-once per stock-day as audit evidence, not duplicated into every minute. The
-quality directory records member CRCs, session completeness, daily parity and
-the sparse stock-day exclusion list. See [`CURRENT.md`](CURRENT.md) for the
-measured quality and research findings.
+The canonical store now covers 2010-01-04 through 2026-08-21: 3,301,495,126
+continuous bars and 13,756,395 separate 09:30 rows in 200 monthly shards per
+domain. Repeated share fields are retained once per stock-day as audit evidence,
+not duplicated into every minute. Annual quality records cover member parsing,
+session completeness, primary keys, deterministic repairs, daily parity, and
+sparse stock-day exclusion lists. The importer sizes its buffers from currently
+available physical memory, reserves at least 25% of RAM (and at least 3 GiB) for
+the operating system, and flushes early if free memory falls below that reserve.
+See [`CURRENT.md`](CURRENT.md) for the measured quality and known source limits.

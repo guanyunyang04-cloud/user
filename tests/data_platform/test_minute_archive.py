@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from zipfile import ZipFile
 
 import pandas as pd
@@ -198,6 +199,78 @@ def test_member_year_reader_accepts_missing_trailing_share_fields(tmp_path: Path
         )
     assert len(frame) == 1
     assert frame[["float_shares", "total_shares"]].isna().all().all()
+
+
+def test_import_memory_policy_preserves_headroom_and_scales_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    total = 16 * 1024**3
+    monkeypatch.setattr(
+        minute_importer.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=total, available=8 * 1024**3),
+    )
+    normal = minute_importer._import_memory_policy()
+    monkeypatch.setattr(
+        minute_importer.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=total, available=3 * 1024**3),
+    )
+    constrained = minute_importer._import_memory_policy()
+
+    assert normal.reserve_bytes == 4 * 1024**3
+    assert normal.continuous_max_buffered_rows == 2_000_000
+    assert constrained.writer_budget_bytes == 128 * 1024**2
+    assert constrained.continuous_max_buffered_rows < normal.continuous_max_buffered_rows
+    assert constrained.auction_max_buffered_rows < normal.auction_max_buffered_rows
+
+
+def test_memory_pressure_flushes_buffered_months(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer = minute_importer.MonthlyWriters(
+        tmp_path / "minute",
+        flush_rows=10_000,
+        max_buffered_rows=20_000,
+    )
+    frame = pd.DataFrame(
+        {
+            "symbol": ["600000.SH"],
+            "trade_date": ["2025-01-02"],
+            "bar_time": ["093100000"],
+            "open": [10.0],
+            "high": [10.0],
+            "low": [10.0],
+            "close": [10.0],
+            "volume": [100.0],
+            "amount": [1000.0],
+            "source": ["fixture"],
+            "adjusted_flag": ["raw_unadjusted"],
+        }
+    )
+    writer.write(frame)
+    policy = minute_importer.ImportMemoryPolicy(
+        total_bytes=16 * 1024**3,
+        available_at_start_bytes=8 * 1024**3,
+        reserve_bytes=4 * 1024**3,
+        writer_budget_bytes=1024**3,
+        pressure_threshold_bytes=4 * 1024**3,
+        continuous_flush_rows=10_000,
+        continuous_max_buffered_rows=20_000,
+        auction_flush_rows=10_000,
+        auction_max_buffered_rows=20_000,
+    )
+    monkeypatch.setattr(
+        minute_importer.psutil,
+        "virtual_memory",
+        lambda: SimpleNamespace(total=16 * 1024**3, available=2 * 1024**3),
+    )
+
+    assert minute_importer._flush_if_memory_pressure(policy, writer)
+    assert writer.total_buffered_rows == 0
+    writer.close()
+    assert next((tmp_path / "minute" / "shards").rglob("*.parquet")).is_file()
 
 
 def _write_daily_fixture(workspace: Path, years: tuple[int, ...]) -> Path:

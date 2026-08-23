@@ -7,13 +7,14 @@ import json
 import os
 import shutil
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
+import psutil
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -49,6 +50,58 @@ from quantlab.data.qdp_v2.manifest import (
 
 CONTINUOUS_DOMAIN = "market_intraday_1m"
 AUCTION_DOMAIN = "market_opening_auction"
+_MIB = 1024**2
+_GIB = 1024**3
+
+
+@dataclass(frozen=True)
+class ImportMemoryPolicy:
+    """A conservative RAM budget that still allows large Parquet row groups."""
+
+    total_bytes: int
+    available_at_start_bytes: int
+    reserve_bytes: int
+    writer_budget_bytes: int
+    pressure_threshold_bytes: int
+    continuous_flush_rows: int
+    continuous_max_buffered_rows: int
+    auction_flush_rows: int
+    auction_max_buffered_rows: int
+
+    def to_dict(self) -> dict[str, int]:
+        return {str(key): int(value) for key, value in asdict(self).items()}
+
+
+def _import_memory_policy() -> ImportMemoryPolicy:
+    memory = psutil.virtual_memory()
+    total = int(memory.total)
+    available = int(memory.available)
+    reserve = max(3 * _GIB, total // 4)
+    free_headroom = max(0, available - reserve)
+    writer_budget = min(_GIB, max(128 * _MIB, int(free_headroom * 0.35)))
+
+    # Pandas object/string columns dominate the in-memory footprint. These row
+    # estimates deliberately overstate the compact Parquet representation.
+    estimated_row_bytes = 384
+    continuous_max = min(
+        2_000_000,
+        max(100_000, int(writer_budget * 0.85) // estimated_row_bytes),
+    )
+    auction_max = min(
+        500_000,
+        max(25_000, int(writer_budget * 0.15) // estimated_row_bytes),
+    )
+    return ImportMemoryPolicy(
+        total_bytes=total,
+        available_at_start_bytes=available,
+        reserve_bytes=reserve,
+        writer_budget_bytes=writer_budget,
+        pressure_threshold_bytes=reserve,
+        continuous_flush_rows=min(250_000, max(50_000, continuous_max // 4)),
+        continuous_max_buffered_rows=continuous_max,
+        auction_flush_rows=min(100_000, max(10_000, auction_max // 4)),
+        auction_max_buffered_rows=auction_max,
+    )
 
 
 class MonthlyWriters:
@@ -104,6 +157,14 @@ class MonthlyWriters:
             total -= self.buffered_rows[key]
             self._flush(key)
 
+    @property
+    def total_buffered_rows(self) -> int:
+        return sum(self.buffered_rows.values())
+
+    def flush_all(self) -> None:
+        for key in list(self.buffers):
+            self._flush(key)
+
     def write(self, frame: pd.DataFrame) -> None:
         if frame.empty:
             return
@@ -118,8 +179,7 @@ class MonthlyWriters:
         self._enforce_memory_limit()
 
     def close(self) -> None:
-        for key in list(self.buffers):
-            self._flush(key)
+        self.flush_all()
         for writer in self.writers.values():
             writer.close()
         self.writers.clear()
@@ -241,6 +301,8 @@ class StreamedBatch:
     member_audits: dict[int, list[dict[str, Any]]]
     source_member_count: int
     share_inconsistent_days: dict[int, int]
+    memory_policy: dict[str, int]
+    memory_pressure_flushes: int
 
 
 def _normalize_years(years: Sequence[int]) -> tuple[int, ...]:
@@ -401,27 +463,47 @@ def _canonical_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return core
 
 
+def _flush_if_memory_pressure(
+    policy: ImportMemoryPolicy,
+    *writers: MonthlyWriters,
+) -> bool:
+    if int(psutil.virtual_memory().available) >= policy.pressure_threshold_bytes:
+        return False
+    if not any(writer.total_buffered_rows for writer in writers):
+        return False
+    for writer in writers:
+        writer.flush_all()
+    pa.default_memory_pool().release_unused()
+    gc.collect()
+    return True
+
+
 def _stream_years(layout: ImportLayout) -> StreamedBatch:
     members = list_members([layout.archive])
     if not members:
         raise MinuteArchiveError("archive_has_no_1m_members")
+    memory_policy = _import_memory_policy()
     continuous = MonthlyWriters(
         layout.staged_continuous,
-        flush_rows=250_000,
-        max_buffered_rows=2_000_000,
+        flush_rows=memory_policy.continuous_flush_rows,
+        max_buffered_rows=memory_policy.continuous_max_buffered_rows,
     )
     auction = MonthlyWriters(
         layout.staged_auction,
-        flush_rows=100_000,
-        max_buffered_rows=500_000,
+        flush_rows=memory_policy.auction_flush_rows,
+        max_buffered_rows=memory_policy.auction_max_buffered_rows,
     )
     evidence = AnnualEvidenceWriters(layout.staged_quality, layout.years)
     member_audits: dict[int, list[dict[str, Any]]] = {year: [] for year in layout.years}
     inconsistent = {year: 0 for year in layout.years}
+    memory_pressure_flushes = 0
     empty = _empty_member_frame()
     try:
         with ZipFile(layout.archive) as zipped:
             for member in members:
+                memory_pressure_flushes += int(
+                    _flush_if_memory_pressure(memory_policy, continuous, auction)
+                )
                 raw = read_member_years(
                     zipped,
                     zipped.getinfo(member.member),
@@ -431,6 +513,7 @@ def _stream_years(layout: ImportLayout) -> StreamedBatch:
                 if raw.empty:
                     for year in layout.years:
                         member_audits[year].append(member_frame_audit(empty, member=member, year=year))
+                    del raw
                     continue
                 time_repairs = repair_mislabeled_1300_as_1130(raw, symbol=member.symbol)
                 repairs = repair_zero_price_placeholders(raw, symbol=member.symbol)
@@ -464,6 +547,23 @@ def _stream_years(layout: ImportLayout) -> StreamedBatch:
                 core = _canonical_frame(raw)
                 continuous.write(core.loc[core["bar_time"].isin(CONTINUOUS_TIMES)])
                 auction.write(core.loc[core["bar_time"].eq(AUCTION_TIME)])
+                del (
+                    core,
+                    counts,
+                    frame,
+                    inconsistent_dates,
+                    raw,
+                    repairs,
+                    shares,
+                    time_repairs,
+                    variation,
+                    year_counts,
+                    year_keys,
+                    year_shares,
+                )
+                memory_pressure_flushes += int(
+                    _flush_if_memory_pressure(memory_policy, continuous, auction)
+                )
     finally:
         continuous.close()
         auction.close()
@@ -485,6 +585,8 @@ def _stream_years(layout: ImportLayout) -> StreamedBatch:
         member_audits=member_audits,
         source_member_count=len(members),
         share_inconsistent_days=inconsistent,
+        memory_policy=memory_policy.to_dict(),
+        memory_pressure_flushes=memory_pressure_flushes,
     )
 
 
@@ -898,6 +1000,8 @@ def _write_stream_checkpoint(layout: ImportLayout, streamed: StreamedBatch) -> P
         "years": list(layout.years),
         "source_member_count": streamed.source_member_count,
         "share_inconsistent_days": {str(year): int(value) for year, value in streamed.share_inconsistent_days.items()},
+        "memory_policy": streamed.memory_policy,
+        "memory_pressure_flushes": streamed.memory_pressure_flushes,
         "continuous": _monthly_checkpoint(
             streamed.continuous,
             staging=layout.staging,
@@ -1036,6 +1140,10 @@ def _restore_streamed_batch(
         share_inconsistent_days={
             int(year): int(value) for year, value in dict(checkpoint.get("share_inconsistent_days", {}) or {}).items()
         },
+        memory_policy={
+            str(key): int(value) for key, value in dict(checkpoint.get("memory_policy", {}) or {}).items()
+        },
+        memory_pressure_flushes=int(checkpoint.get("memory_pressure_flushes", 0) or 0),
     )
 
 
@@ -1133,6 +1241,10 @@ def _complete_staged_import(
         },
         "continuous": continuous_manifest.to_dict(),
         "opening_auction": auction_manifest.to_dict(),
+        "runtime": {
+            "memory_policy": streamed.memory_policy,
+            "memory_pressure_flushes": streamed.memory_pressure_flushes,
+        },
     }
 
 
