@@ -30,6 +30,12 @@ from quantlab.data.qdp_v2.minute_repair.install import (
     finish_existing_reaudits,
     stage_active_shard_replacements,
 )
+from quantlab.data.qdp_v2.minute_repair.local_source import (
+    LOCAL_SOURCE_TAG,
+    capture_local_candidate_batches,
+    local_source_inventory,
+    prefilter_local_candidates,
+)
 
 
 def _session(symbol: str = "600000.SH", trade_date: str = "2010-05-17") -> pd.DataFrame:
@@ -68,6 +74,10 @@ def _target(**updates: object) -> dict[str, object]:
         "d_high": 10.0,
         "d_low": 10.0,
         "d_close": 10.0,
+        "agg_open": 10.0,
+        "agg_high": 10.0,
+        "agg_low": 10.0,
+        "agg_close": 10.0,
         "price_reference_scale": 10.0,
         "exclude_open": False,
         "exclude_high": True,
@@ -429,6 +439,161 @@ def test_load_priority_targets_can_bound_open_relative_error(tmp_path: Path) -> 
     )
 
     assert result["symbol"].tolist() == ["600002.SH", "600003.SH"]
+
+
+def test_load_priority_targets_can_select_high_low_masks(tmp_path: Path) -> None:
+    quality = tmp_path / "data" / "qdp" / "source_archives" / "minute" / "quality" / "year=2010"
+    quality.mkdir(parents=True)
+    high = _quality_row("600001.SH", "2010-01-04", high=11.0, daily_high=10.0, relative=0.10)
+    low = _quality_row("600002.SH", "2010-01-05", high=10.0, daily_high=10.0, relative=0.10)
+    low.update(
+        {
+            "agg_low": 8.0,
+            "d_low": 9.0,
+            "low_abs_error": 1.0,
+            "price_max_abs_error": 1.0,
+            "exclude_high": False,
+            "exclude_low": True,
+        }
+    )
+    open_only = _quality_row("600003.SH", "2010-01-06", high=10.0, daily_high=10.0, relative=0.10)
+    open_only.update(
+        {
+            "agg_open": 9.0,
+            "d_open": 10.0,
+            "open_abs_error": 1.0,
+            "price_max_abs_error": 1.0,
+            "exclude_open": True,
+            "exclude_high": False,
+        }
+    )
+    pd.DataFrame([high, low, open_only]).to_parquet(
+        quality / "daily_parity_material_mismatches.parquet", index=False
+    )
+
+    result = load_priority_targets(
+        tmp_path,
+        include_known_probes=False,
+        selection_mode="high-low",
+    )
+
+    assert result[["symbol", "selection_reason"]].to_dict("records") == [
+        {"symbol": "600001.SH", "selection_reason": "high_quality_mask"},
+        {"symbol": "600002.SH", "selection_reason": "low_quality_mask"},
+    ]
+
+
+def test_local_source_inventory_ignores_parenthesized_duplicates(tmp_path: Path) -> None:
+    source = tmp_path / "stock_1min"
+    source.mkdir()
+    pd.DataFrame({"value": [1]}).to_parquet(source / "600000.SH.parquet", index=False)
+    pd.DataFrame({"value": [1]}).to_parquet(source / "600000.SH(1).parquet", index=False)
+
+    files, inventory = local_source_inventory(source)
+
+    assert files == {"600000.SH": source / "600000.SH.parquet"}
+    assert inventory["base_file_count"] == 1
+    assert inventory["ignored_duplicate_files"] == ["600000.SH(1).parquet"]
+
+
+def test_prefilter_local_candidates_rejects_missing_and_accepts_improving_open() -> None:
+    targets = pd.DataFrame(
+        [
+            {
+                **_target(
+                    agg_open=9.0,
+                    d_open=10.0,
+                    exclude_open=True,
+                    exclude_high=False,
+                ),
+                "selection_reason": "fixture",
+            },
+            {
+                **_target(
+                    symbol="600001.SH",
+                    trade_date="2010-05-18",
+                    agg_open=9.0,
+                    d_open=10.0,
+                    exclude_open=True,
+                    exclude_high=False,
+                ),
+                "selection_reason": "fixture",
+            },
+        ]
+    )
+    aggregates = pd.DataFrame(
+        {
+            "symbol": ["600000.SH"],
+            "trade_date": ["2010-05-17"],
+            "row_count": [241],
+            "unique_time_count": [241],
+            "bad_time_count": [0],
+            "bad_price_row_count": [0],
+            "ext_open": [10.0],
+            "ext_high": [10.0],
+            "ext_low": [10.0],
+            "ext_close": [10.0],
+            "ext_volume": [100.0],
+            "ext_amount": [1000.0],
+        }
+    )
+
+    candidates, rejected, evidence = prefilter_local_candidates(targets, aggregates)
+
+    assert candidates[["symbol", "trade_date"]].to_dict("records") == [
+        {"symbol": "600000.SH", "trade_date": "2010-05-17"}
+    ]
+    assert rejected[["symbol", "reason"]].to_dict("records") == [
+        {"symbol": "600001.SH", "reason": "local_source_target_day_missing"}
+    ]
+    assert evidence["status"].tolist() == ["candidate", "rejected"]
+
+
+def test_capture_local_candidate_batch_and_custom_source_tag(tmp_path: Path) -> None:
+    source = tmp_path / "stock_1min"
+    source.mkdir()
+    local = _session()
+    raw = pd.DataFrame(
+        {
+            "ts_code": local["symbol"],
+            "open": local["open"],
+            "high": local["high"],
+            "low": local["low"],
+            "close": local["close"],
+            "vol": local["volume"],
+            "amount": local["amount"],
+            "trade_date": pd.to_datetime(local["trade_date"]),
+            "trade_time": pd.to_datetime(
+                local["trade_date"] + " " + local["bar_time"].str[:6],
+                format="%Y-%m-%d %H%M%S",
+            ),
+        }
+    )
+    raw.to_parquet(source / "600000.SH.parquet", index=False)
+    targets = pd.DataFrame(
+        {"symbol": ["600000.SH"], "trade_date": ["2010-05-17"]}
+    )
+
+    batches, capture = capture_local_candidate_batches(
+        targets,
+        source_root=source,
+        raw_dir=tmp_path / "capture",
+    )
+    provider, _ = load_provider_target_minutes(batches)
+    broken = local.copy()
+    row = broken.index[broken["bar_time"].eq("150000000")].item()
+    broken.loc[row, ["open", "high"]] = 100.0
+    decision, changes = evaluate_target_day(
+        _target(),
+        broken,
+        provider,
+        source_tag=LOCAL_SOURCE_TAG,
+    )
+
+    assert capture["new_batches"] == 1
+    assert capture["raw_rows"] == 241
+    assert decision["status"] == "accepted"
+    assert changes["source"].unique().tolist() == [LOCAL_SOURCE_TAG]
 
 
 def test_stage_active_shard_replacement_preserves_keys_flow_and_schema(tmp_path: Path) -> None:

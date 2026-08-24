@@ -180,6 +180,8 @@ def load_priority_targets(
             if float(maximum_relative_error) <= float(minimum_relative_error):
                 raise ValueError("minute_repair_maximum_relative_error_must_exceed_minimum")
             selected_mask &= open_relative_error.le(float(maximum_relative_error))
+    elif mode == "high-low":
+        selected_mask = audited_anomaly & (material["exclude_high"] | material["exclude_low"])
     else:
         raise ValueError(f"minute_repair_selection_mode_invalid:{selection_mode}")
     selected = material.loc[selected_mask].copy()
@@ -190,6 +192,14 @@ def load_priority_targets(
     for index in selected.index:
         if mode == "open":
             reasons.append("open_relative_error_above_threshold")
+            continue
+        if mode == "high-low":
+            labels = []
+            if bool(material.at[index, "exclude_high"]):
+                labels.append("high_quality_mask")
+            if bool(material.at[index, "exclude_low"]):
+                labels.append("low_quality_mask")
+            reasons.append("+".join(labels))
             continue
         labels: list[str] = []
         if bool(high_overshoot.loc[index]) or bool(low_overshoot.loc[index]):
@@ -880,6 +890,7 @@ def _proposal_for_fields(
     fields: Iterable[str],
     *,
     daily: Mapping[str, float],
+    source_tag: str,
 ) -> tuple[pd.DataFrame, set[str]]:
     proposed = local.copy()
     selected_by_field: dict[str, set[str]] = {}
@@ -922,7 +933,7 @@ def _proposal_for_fields(
             changed_fields.add(companion)
 
     actually_changed = proposed.loc[:, PRICE_COLUMNS].ne(local.loc[:, PRICE_COLUMNS]).any(axis=1)
-    proposed.loc[actually_changed, "source"] = SOURCE_REPAIR_TAG
+    proposed.loc[actually_changed, "source"] = str(source_tag)
     return proposed, set(proposed.loc[actually_changed, "bar_time"].astype(str))
 
 
@@ -965,6 +976,8 @@ def evaluate_target_day(
     target: Mapping[str, Any],
     local_day: pd.DataFrame,
     provider_day: pd.DataFrame,
+    *,
+    source_tag: str = SOURCE_REPAIR_TAG,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     """Return one decision and the minimal accepted row-level price overlay."""
 
@@ -1020,6 +1033,7 @@ def evaluate_target_day(
         provider,
         candidate_fields,
         daily=daily,
+        source_tag=source_tag,
     )
     valid, post, repaired, error = _proposal_valid(
         proposed,
@@ -1037,6 +1051,7 @@ def evaluate_target_day(
                 provider,
                 {field},
                 daily=daily,
+                source_tag=source_tag,
             )
             ok, _, fixed, _ = _proposal_valid(
                 trial,
@@ -1098,6 +1113,8 @@ def evaluate_target_set(
     local: pd.DataFrame,
     provider: pd.DataFrame,
     provider_sources: pd.DataFrame,
+    *,
+    source_tag: str = SOURCE_REPAIR_TAG,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     local_groups = {(str(key[0]), str(key[1])): value for key, value in local.groupby(["symbol", "trade_date"])}
     provider_groups = {
@@ -1121,7 +1138,12 @@ def evaluate_target_set(
             }
             changed = pd.DataFrame()
         else:
-            decision, changed = evaluate_target_day(target, local_day, provider_day)
+            decision, changed = evaluate_target_day(
+                target,
+                local_day,
+                provider_day,
+                source_tag=source_tag,
+            )
         source = sources.get(key, {})
         decision.update(
             {

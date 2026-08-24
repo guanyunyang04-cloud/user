@@ -62,6 +62,23 @@ replacement. Compact evidence is retained in
 `research/records/iquant_cache_parity_20260821/result.json` and
 `research/records/tushare_compatible_provider_probe_20260823/result.json`.
 
+The purchased local archive at `H:\BaiduNetdiskDownload\量化数据\stock_1min`
+is used only as a historical minute-repair source. Its inventory contains
+5,826 canonical per-symbol Parquet files; 43 parenthesized duplicate files are
+explicitly excluded. The adapter reads each symbol once, normalizes the source
+schema, extracts only audited stock-days, and reuses the existing 241-row,
+daily-parity, OHLC, flow-preservation, backup, CAS-install and annual re-audit
+gates. Two sequential local-source batches installed 6,172 open-row repairs
+and 108,161 high/low row-level repairs. They removed 109,935 stock-days from
+the unreliable set, leaving 70,078 price-unreliable days, of which 25,867 are
+severe. Volume and amount were not replaced. The high/low timing gate passed:
+the local one-minute source reproduced the trusted daily extreme on 261/263
+samples, and 52/53 independently reliable BaoStock sessions placed it in the
+same five-minute bucket. Evidence is under
+`data/qdp/source_archives/external_quant_data/minute_repair/`; 53,121 remaining
+stock-days are preserved as a future Tushare-compatible fallback queue and
+16,957 retain their existing masks outside that queue.
+
 PIT restore provenance in the active QDP manifest is stored relative to the
 workspace (`path_base=workspace_root`), so moving the project does not leave
 stale machine-specific paths. The semantic audit distinguishes explicit
@@ -160,4 +177,7 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab data minute-repair `
 ```
 
 Omit `--apply` for candidate evaluation. Add it only after reviewing the
-generated `result.json`; valid raw captures make the command resumable.
+generated `result.json`; valid raw captures make the command resumable. A
+local Parquet candidate run uses the same command with `--local-minute-root`;
+it never updates daily data and high/low installation additionally requires
+independent extreme-timing evidence.

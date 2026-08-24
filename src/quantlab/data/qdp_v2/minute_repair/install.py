@@ -46,6 +46,8 @@ _QUALITY_COUNT_KEYS = (
     "minute_feature_exclusion_rows",
     "total_minute_feature_exclusion_rows",
 )
+DEFAULT_REPAIR_PROVIDER = "tushare_compatible_stk_mins"
+DEFAULT_REPAIR_REASON = "targeted Tushare-compatible historical minute price repair"
 
 
 def _utc_now() -> str:
@@ -286,6 +288,7 @@ def install_staged_replacements(
     staged: Sequence[Mapping[str, Any]],
     *,
     workspace_root: str | Path | None = None,
+    repair_reason: str = DEFAULT_REPAIR_REASON,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     by_domain: dict[str, list[tuple[str, str]]] = {}
@@ -298,7 +301,7 @@ def install_staged_replacements(
             mutate_active_shards_from_parquet(
                 domain,
                 replacements=replacements,
-                reason="targeted Tushare-compatible historical minute price repair",
+                reason=str(repair_reason),
                 workspace_root=workspace_root,
                 primary_keys_prevalidated=True,
             )
@@ -606,11 +609,12 @@ def update_minute_manifests_after_repair(
     changes: pd.DataFrame,
     run_dir: str | Path,
     workspace_root: str | Path | None = None,
+    provider: str = DEFAULT_REPAIR_PROVIDER,
 ) -> list[dict[str, Any]]:
     quality = _aggregate_quality(workspace_root)
     accepted = decisions.loc[decisions["status"].eq("accepted")]
     repair_record = {
-        "provider": "tushare_compatible_stk_mins",
+        "provider": str(provider),
         "record_path": str(Path(run_dir).resolve() / "result.json"),
         "price_only": True,
         "volume_amount_policy": "retained_from_active_qdp",
@@ -652,6 +656,7 @@ def verify_installed_changes(
     staged: Sequence[Mapping[str, Any]],
     *,
     workspace_root: str | Path | None = None,
+    repair_reason: str = DEFAULT_REPAIR_REASON,
 ) -> list[dict[str, Any]]:
     """Verify that every staged shard and accepted row is active after interruption."""
 
@@ -663,7 +668,7 @@ def verify_installed_changes(
             resolve_manifest_path(item.path, root=root)
             for item in manifest.shards
             if str(dict(item.metadata or {}).get("reason", ""))
-            == "targeted Tushare-compatible historical minute price repair"
+            == str(repair_reason)
         ]
         active_by_hash: dict[str, list[Path]] = {}
         for path in repair_paths:
@@ -738,6 +743,8 @@ def resume_interrupted_install(
     *,
     run_dir: str | Path,
     workspace_root: str | Path | None = None,
+    provider: str = DEFAULT_REPAIR_PROVIDER,
+    repair_reason: str = DEFAULT_REPAIR_REASON,
 ) -> dict[str, Any]:
     """Resume after active shards were installed but final audits were interrupted."""
 
@@ -747,7 +754,12 @@ def resume_interrupted_install(
     if not staged:
         raise MinuteRepairError("minute_repair_staged_replacements_missing")
     backup_payload = _read_json(output / "backup_pre_repair" / "backup_manifest.json")
-    installed = verify_installed_changes(changes, staged, workspace_root=workspace_root)
+    installed = verify_installed_changes(
+        changes,
+        staged,
+        workspace_root=workspace_root,
+        repair_reason=repair_reason,
+    )
     reaudits = finish_existing_reaudits(
         changes,
         decisions,
@@ -759,6 +771,7 @@ def resume_interrupted_install(
         changes=changes,
         run_dir=output,
         workspace_root=workspace_root,
+        provider=provider,
     )
     return {
         "resume_status": "completed",
@@ -776,6 +789,8 @@ def install_accepted_changes(
     *,
     run_dir: str | Path,
     workspace_root: str | Path | None = None,
+    provider: str = DEFAULT_REPAIR_PROVIDER,
+    repair_reason: str = DEFAULT_REPAIR_REASON,
 ) -> dict[str, Any]:
     staged = stage_active_shard_replacements(
         changes,
@@ -783,7 +798,11 @@ def install_accepted_changes(
         workspace_root=workspace_root,
     )
     backups = backup_active_state(staged, run_dir=run_dir, workspace_root=workspace_root)
-    mutations = install_staged_replacements(staged, workspace_root=workspace_root)
+    mutations = install_staged_replacements(
+        staged,
+        workspace_root=workspace_root,
+        repair_reason=repair_reason,
+    )
     reaudits = re_audit_affected_years(
         changes,
         run_dir=run_dir,
@@ -794,6 +813,7 @@ def install_accepted_changes(
         changes=changes,
         run_dir=run_dir,
         workspace_root=workspace_root,
+        provider=provider,
     )
     return {
         "staged_replacements": staged,
@@ -805,6 +825,8 @@ def install_accepted_changes(
 
 
 __all__ = [
+    "DEFAULT_REPAIR_PROVIDER",
+    "DEFAULT_REPAIR_REASON",
     "backup_active_state",
     "install_accepted_changes",
     "install_staged_replacements",

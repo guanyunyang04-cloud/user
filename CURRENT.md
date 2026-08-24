@@ -303,16 +303,47 @@ dedicated producer code has been retired.
   installed minute-repair evidence is under
   `data/qdp/source_archives/tushare_compatible/minute_repair/`.
 
+## Purchased local historical minute repair (2026-08-25)
+
+- `H:\BaiduNetdiskDownload\量化数据\stock_1min` contains 5,826 canonical
+  per-symbol Parquet files. The 43 parenthesized `(1)` files are duplicate
+  copies and are explicitly excluded. The new adapter is read-only against
+  that directory and reuses the existing minute-repair evaluator and
+  installer; it does not create a second mutation path.
+- The `(0.5%, 1%]` open run checked 34,642 audited stock-days. Exact session
+  validation accepted 6,172 and installed 6,172 row repairs. The high/low run
+  skipped 2019-01-01 through 2021-03-31 for later fallback, checked 113,630
+  stock-days, accepted 107,467 stock-days and installed 108,161 row-level
+  repairs. Only prices were overlaid; QDP volume and amount were retained.
+- High/low installation was gated by timing evidence rather than daily extrema
+  alone. The local source reproduced the trusted daily high/low on 261/263
+  stratified samples. BaoStock supplied 83 complete five-minute sessions; on
+  the 53 sessions where BaoStock itself reproduced the trusted daily extreme,
+  52 used the same five-minute bucket as the local source. The combined gate
+  passed.
+- The two local runs removed 109,935 stock-days from the unreliable set. The
+  post-repair audit has 70,078 price-unreliable days and 25,867 severe days;
+  including 125 session exclusions, the total minute-feature exclusion count
+  is 70,203. Continuous and auction domains remain at 3,301,495,126 and
+  13,756,395 rows with 200 shards each. Verified status and the quick QDP check
+  are both `ok`.
+- The original all-target scan is now retained with the fallback evidence: 41
+  stock-days are absent from the local archive and 14 contain an invalid price
+  row. A consolidated 53,121-stock-day queue is ready for later targeted
+  `stk_mins` repair; the other 16,957 unresolved days retain their current
+  masks. Evidence and hashes are under
+  `data/qdp/source_archives/external_quant_data/minute_repair/`. This purchased
+  archive is minute-only for QDP purposes. It was not used to extend or repair
+  the daily, factor, status, limit or valuation domains.
+
 ## Immediate next action
 
-1. Resume `open_d38bfb1ac3abe97a` after the provider's daily `stk_mins` quota
-   resets. The `(0.5%, 1%]` open band contains 34,642 target stock-days; 2,448
-   current-run batches are already cached and 960 earlier range captures can be
-   reused. Trading-calendar batching leaves 19,485 new calls. Run candidates
-   first, install only complete field-level improvements, then repeat annual and
-   QDP checks. Do not mirror all 3.3 billion minute rows. Daily/factor/basic and
-   PIT auxiliary tails remain separate work and require advancing market daily
-   before dependent domains.
+1. Do not resume the slow bulk `open_d38bfb1ac3abe97a` download. Keep its valid
+   captures for reuse, and later feed the consolidated local-source fallback
+   queue to the Tushare-compatible `stk_mins` workflow in quota-sized batches.
+   Install only complete field-level improvements and keep every unresolved
+   quality mask. Daily/factor/basic and PIT auxiliary tails remain separate and
+   must continue through the existing local/free-source update path.
 2. Finish the QDP storage migration before starting another large model run.
    Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
    up one level without copying the 42-GiB store, flatten each active domain to
