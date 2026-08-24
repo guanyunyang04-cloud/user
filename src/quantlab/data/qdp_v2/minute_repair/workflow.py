@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,7 @@ from .candidate import (
     download_target_batches,
     evaluate_target_set,
     load_cached_target_batches,
+    load_explicit_targets,
     load_local_target_minutes,
     load_open_trade_dates,
     load_priority_targets,
@@ -113,6 +115,11 @@ def _result_payload(
     artifacts: dict[str, str],
     installation: dict[str, Any],
     capture_breakdown: dict[str, int] | None = None,
+    target_file: str | Path | None = None,
+    target_reasons: Sequence[str] = (),
+    target_severities: Sequence[str] = (),
+    target_fields: Sequence[str] = (),
+    maximum_targets: int | None = None,
 ) -> dict[str, Any]:
     accepted = decisions.loc[decisions["status"].eq("accepted")]
     return {
@@ -125,11 +132,15 @@ def _result_payload(
             "id": run_dir.name,
             "mode": str(selection_mode),
             "policy": (
-                "audited open-field anomalies above the configured open-relative-error threshold"
-                if str(selection_mode) == "open"
+                "current audited anomalies intersected with an explicit resumable target queue"
+                if str(selection_mode) == "explicit"
                 else (
-                    "all audited daily-envelope overshoots, all audited anomalies above the configured "
-                    "relative-error threshold, and previously probed cases"
+                    "audited open-field anomalies above the configured open-relative-error threshold"
+                    if str(selection_mode) == "open"
+                    else (
+                        "all audited daily-envelope overshoots, all audited anomalies above the configured "
+                        "relative-error threshold, and previously probed cases"
+                    )
                 )
             ),
             "minimum_relative_error": float(minimum_relative_error),
@@ -139,6 +150,11 @@ def _result_payload(
             "target_stock_days": int(len(targets)),
             "target_symbols": int(targets["symbol"].nunique()),
             "target_years": sorted({int(value) for value in targets["year"]}),
+            "target_file": str(Path(target_file).resolve()) if target_file else "",
+            "target_reasons": list(target_reasons),
+            "target_severities": list(target_severities),
+            "target_fields": list(target_fields),
+            "maximum_targets": maximum_targets,
         },
         "download": {
             "batch_count": int(batch_count),
@@ -174,23 +190,39 @@ def run_targeted_minute_repair(
     rpm: int = 96,
     workers: int = 3,
     selection_mode: str = "priority",
+    target_file: str | Path | None = None,
+    target_reasons: Sequence[str] = (),
+    target_severities: Sequence[str] = (),
+    target_fields: Sequence[str] = (),
+    maximum_targets: int | None = None,
     apply: bool = False,
 ) -> dict[str, Any]:
     """Download, evaluate, and optionally install the audited priority set."""
 
     workspace = qdp_paths(workspace_root).workspace_root
-    targets = load_priority_targets(
-        workspace,
-        minimum_relative_error=float(minimum_relative_error),
-        maximum_relative_error=maximum_relative_error,
-        include_known_probes=True,
-        selection_mode=selection_mode,
-    )
+    effective_mode = "explicit" if target_file else str(selection_mode)
+    if target_file:
+        targets = load_explicit_targets(
+            target_file,
+            workspace,
+            include_reasons=target_reasons,
+            include_severities=target_severities,
+            include_fields=target_fields,
+            maximum_targets=maximum_targets,
+        )
+    else:
+        targets = load_priority_targets(
+            workspace,
+            minimum_relative_error=float(minimum_relative_error),
+            maximum_relative_error=maximum_relative_error,
+            include_known_probes=True,
+            selection_mode=selection_mode,
+        )
     selection_id = target_set_id(
         targets,
         minimum_relative_error=float(minimum_relative_error),
         maximum_relative_error=maximum_relative_error,
-        selection_mode=selection_mode,
+        selection_mode=effective_mode,
     )
     run_dir = (
         qdp_paths(workspace).source_archives_dir
@@ -259,7 +291,7 @@ def run_targeted_minute_repair(
         run_dir=run_dir,
         minimum_relative_error=float(minimum_relative_error),
         maximum_relative_error=maximum_relative_error,
-        selection_mode=selection_mode,
+        selection_mode=effective_mode,
         max_calendar_days=int(max_calendar_days),
         max_trading_days=int(max_trading_days),
         rpm=int(rpm),
@@ -276,6 +308,11 @@ def run_targeted_minute_repair(
             "reused_prior_run_batches": len(reused),
             "new_provider_request_batches": len(downloaded),
         },
+        target_file=target_file,
+        target_reasons=target_reasons,
+        target_severities=target_severities,
+        target_fields=target_fields,
+        maximum_targets=maximum_targets,
     )
     write_json(run_dir / "result.json", json_safe(result))
     return result
@@ -292,6 +329,11 @@ def resume_targeted_minute_repair(
     rpm: int = 96,
     workers: int = 3,
     selection_mode: str = "priority",
+    target_file: str | Path | None = None,
+    target_reasons: Sequence[str] = (),
+    target_severities: Sequence[str] = (),
+    target_fields: Sequence[str] = (),
+    maximum_targets: int | None = None,
 ) -> dict[str, Any]:
     """Finish a run whose active shards were committed before audit completion."""
 
@@ -319,7 +361,7 @@ def resume_targeted_minute_repair(
         run_dir=output,
         minimum_relative_error=float(minimum_relative_error),
         maximum_relative_error=maximum_relative_error,
-        selection_mode=selection_mode,
+        selection_mode="explicit" if target_file else selection_mode,
         max_calendar_days=int(max_calendar_days),
         max_trading_days=int(max_trading_days),
         rpm=int(rpm),
@@ -331,6 +373,11 @@ def resume_targeted_minute_repair(
         changes=changes,
         artifacts=artifacts,
         installation=installation,
+        target_file=target_file,
+        target_reasons=target_reasons,
+        target_severities=target_severities,
+        target_fields=target_fields,
+        maximum_targets=maximum_targets,
     )
     write_json(output / "result.json", json_safe(result))
     return result

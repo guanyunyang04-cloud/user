@@ -44,6 +44,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-minute-root", type=Path)
     parser.add_argument("--local-aggregate-seed", type=Path)
     parser.add_argument("--exclude-date-range", action="append", type=_date_range, default=[])
+    parser.add_argument("--target-file", type=Path)
+    parser.add_argument("--target-reason", action="append", default=[])
+    parser.add_argument("--target-severity", action="append", default=[])
+    parser.add_argument("--target-field", action="append", default=[])
+    parser.add_argument("--maximum-targets", type=int)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser
@@ -51,6 +56,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    if args.local_minute_root and args.target_file:
+        raise ValueError("minute_repair_local_and_remote_target_sources_conflict")
+    if (
+        args.target_reason
+        or args.target_severity
+        or args.target_field
+        or args.maximum_targets is not None
+    ) and not args.target_file:
+        raise ValueError("minute_repair_target_filter_requires_target_file")
     if args.resume_run_dir:
         if not args.apply:
             raise ValueError("minute_repair_resume_requires_apply")
@@ -82,6 +96,11 @@ def main(argv: list[str] | None = None) -> int:
                 max_trading_days=int(args.max_trading_days),
                 rpm=int(args.rpm),
                 workers=int(args.workers),
+                target_file=args.target_file,
+                target_reasons=tuple(args.target_reason),
+                target_severities=tuple(args.target_severity),
+                target_fields=tuple(args.target_field),
+                maximum_targets=args.maximum_targets,
             )
     elif args.local_minute_root:
         from .local_workflow import run_local_parquet_minute_repair
@@ -106,6 +125,11 @@ def main(argv: list[str] | None = None) -> int:
             max_trading_days=int(args.max_trading_days),
             rpm=int(args.rpm),
             workers=int(args.workers),
+            target_file=args.target_file,
+            target_reasons=tuple(args.target_reason),
+            target_severities=tuple(args.target_severity),
+            target_fields=tuple(args.target_field),
+            maximum_targets=args.maximum_targets,
             apply=bool(args.apply),
         )
     print(json.dumps(json_safe(result), ensure_ascii=False, indent=2))

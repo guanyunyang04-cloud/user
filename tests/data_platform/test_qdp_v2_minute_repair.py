@@ -20,6 +20,7 @@ from quantlab.data.qdp_v2.minute_repair.candidate import (
     TargetBatch,
     _download_one_batch,
     evaluate_target_day,
+    load_explicit_targets,
     load_priority_targets,
     load_provider_target_minutes,
     load_reusable_prior_batches,
@@ -145,6 +146,14 @@ def test_evaluate_target_day_requires_a_complete_exact_session() -> None:
 
     assert decision["status"] == "rejected"
     assert decision["reason"] == "provider_session_row_count:240"
+    assert changes.empty
+
+
+def test_evaluate_target_day_rejects_an_empty_provider_session() -> None:
+    decision, changes = evaluate_target_day(_target(), _session(), pd.DataFrame())
+
+    assert decision["status"] == "rejected"
+    assert decision["reason"] == "provider_session_row_count:0"
     assert changes.empty
 
 
@@ -439,6 +448,92 @@ def test_load_priority_targets_can_bound_open_relative_error(tmp_path: Path) -> 
     )
 
     assert result["symbol"].tolist() == ["600002.SH", "600003.SH"]
+
+
+def test_load_explicit_targets_filters_queue_and_uses_current_audit(tmp_path: Path) -> None:
+    quality = tmp_path / "data" / "qdp" / "source_archives" / "minute" / "quality" / "year=2010"
+    quality.mkdir(parents=True)
+    pd.DataFrame(
+        [
+            {
+                **_quality_row(
+                    "600001.SH", "2010-01-04", high=11.0, daily_high=10.0, relative=0.10
+                ),
+                "exclude_open": True,
+            },
+            _quality_row("600002.SH", "2010-01-05", high=11.0, daily_high=10.0, relative=0.10),
+        ]
+    ).to_parquet(quality / "daily_parity_material_mismatches.parquet", index=False)
+    queue = tmp_path / "fallback.parquet"
+    pd.DataFrame(
+        [
+            {
+                "symbol": "600001.SH",
+                "trade_date": "2010-01-04",
+                "fallback_reasons": "local_source_target_day_missing",
+                "severity": "severe",
+            },
+            {
+                "symbol": "600002.SH",
+                "trade_date": "2010-01-05",
+                "fallback_reasons": "local_source_prices_nonpositive_or_invalid_ohlc",
+                "severity": "unreliable",
+            },
+            {
+                "symbol": "600003.SH",
+                "trade_date": "2010-01-06",
+                "fallback_reasons": "local_source_target_day_missing",
+                "severity": "severe",
+            },
+        ]
+    ).to_parquet(queue, index=False)
+
+    result = load_explicit_targets(
+        queue,
+        tmp_path,
+        include_reasons=("local_source_target_day_missing",),
+        include_severities=("severe",),
+        include_fields=("open",),
+    )
+
+    assert result[["symbol", "selection_reason"]].to_dict("records") == [
+        {
+            "symbol": "600001.SH",
+            "selection_reason": "explicit_fallback:local_source_target_day_missing",
+        }
+    ]
+
+
+def test_load_explicit_targets_ignores_flow_only_current_mismatches(tmp_path: Path) -> None:
+    quality = tmp_path / "data" / "qdp" / "source_archives" / "minute" / "quality" / "year=2010"
+    quality.mkdir(parents=True)
+    price_row = _quality_row(
+        "600001.SH", "2010-01-04", high=11.0, daily_high=10.0, relative=0.10
+    )
+    flow_only_row = _quality_row(
+        "600002.SH", "2010-01-05", high=10.0, daily_high=10.0, relative=0.0
+    )
+    flow_only_row.update(
+        {
+            "volume_relative_error": 0.25,
+            "price_quality_class": "reliable",
+            "exclude_high": False,
+        }
+    )
+    pd.DataFrame([price_row, flow_only_row]).to_parquet(
+        quality / "daily_parity_material_mismatches.parquet", index=False
+    )
+    queue = tmp_path / "fallback.parquet"
+    pd.DataFrame(
+        [
+            {"symbol": "600001.SH", "trade_date": "2010-01-04"},
+            {"symbol": "600002.SH", "trade_date": "2010-01-05"},
+        ]
+    ).to_parquet(queue, index=False)
+
+    result = load_explicit_targets(queue, tmp_path)
+
+    assert result["symbol"].tolist() == ["600001.SH"]
 
 
 def test_load_priority_targets_can_select_high_low_masks(tmp_path: Path) -> None:

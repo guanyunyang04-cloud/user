@@ -6,6 +6,7 @@ from .candidate import (
     MinuteRepairError,
     aggregate_day_prices,
     evaluate_target_day,
+    load_explicit_targets,
     load_priority_targets,
     plan_target_batches,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "combine_extreme_timing_validation",
     "aggregate_day_prices",
     "evaluate_target_day",
+    "load_explicit_targets",
     "load_priority_targets",
     "plan_target_batches",
     "refresh_local_extreme_timing_validation",

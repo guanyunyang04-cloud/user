@@ -286,6 +286,15 @@ dedicated producer code has been retired.
   amount were retained from QDP. Continuous and auction row counts remain
   3,301,495,126 and 13,756,395, with 200 shards in each domain; verified status
   and the quick QDP check are both `ok`.
+- Five explicit fallback runs on 2026-08-25 then evaluated 32,518 unique
+  stock-days from the purchased archive's unresolved queue. Four installable
+  runs changed another 1,607 price rows; 1,578 stock-days fully left the
+  current quality mask and 29 retained a different flagged price field. The
+  cumulative Tushare-compatible repair count is therefore 6,655 minute rows.
+  The useful hits were almost entirely open repairs: a deferred 19,254-day
+  high/low-era batch accepted only 19 open changes, while a severe 874-day
+  sample accepted none. Do not spend another daily quota on a bulk high/low
+  retry against this provider.
 - The 2026-07-22 through 2026-08-21 cross-check joined 73,364 common main-board
   stock-days. All had 241 source rows; 73,359 matched daily OHLC exactly, four
   stayed inside the normal absolute tolerance, one open was warning-only, and
@@ -322,12 +331,13 @@ dedicated producer code has been retired.
   52 used the same five-minute bucket as the local source. The combined gate
   passed.
 - The two local runs removed 109,935 stock-days from the unreliable set. The
-  post-repair audit has 70,078 price-unreliable days and 25,867 severe days;
+  immediate post-local audit had 70,078 price-unreliable days and 25,867
+  severe days;
   including 125 session exclusions, the total minute-feature exclusion count
   is 70,203. Continuous and auction domains remain at 3,301,495,126 and
   13,756,395 rows with 200 shards each. Verified status and the quick QDP check
   are both `ok`.
-- The original all-target scan is now retained with the fallback evidence: 41
+- The original all-target scan is retained with the fallback evidence: 41
   stock-days are absent from the local archive and 14 contain an invalid price
   row. A consolidated 53,121-stock-day queue is ready for later targeted
   `stk_mins` repair; the other 16,957 unresolved days retain their current
@@ -335,15 +345,26 @@ dedicated producer code has been retired.
   `data/qdp/source_archives/external_quant_data/minute_repair/`. This purchased
   archive is minute-only for QDP purposes. It was not used to extend or repair
   the daily, factor, status, limit or valuation domains.
+- The 2026-08-25 Tushare fallback reduced the consolidated queue from 53,121
+  to 51,543 current stock-days and reduced the global price-unreliable count
+  to 68,500. Severe remains 25,867; with 125 session exclusions, the total
+  minute-feature exclusion count is 68,625. Of the remaining queue, 20,603
+  stock-days are unattempted, 30,911 were tried without an accepted
+  improvement, and 29 accepted partial repairs retain another field mask.
+  Resumable queue files and run accounting are under
+  `data/qdp/source_archives/external_quant_data/minute_repair/tushare_fallback_after_local_20260825/`.
 
 ## Immediate next action
 
-1. Do not resume the slow bulk `open_d38bfb1ac3abe97a` download. Keep its valid
-   captures for reuse, and later feed the consolidated local-source fallback
-   queue to the Tushare-compatible `stk_mins` workflow in quota-sized batches.
-   Install only complete field-level improvements and keep every unresolved
-   quality mask. Daily/factor/basic and PIT auxiliary tails remain separate and
-   must continue through the existing local/free-source update path.
+1. Do not resume the slow bulk `open_d38bfb1ac3abe97a` download. At the next
+   provider quota window, continue from
+   `unattempted_after_tushare_20260825.parquet` in quota-sized batches and
+   prioritize rows whose current mask includes open. Do not bulk retry
+   high/low-only rows: the measured compatible-source hit rate was effectively
+   zero. Install only complete field-level improvements and keep every
+   unresolved quality mask. Daily/factor/basic and PIT auxiliary tails remain
+   separate and must continue through the existing local/free-source update
+   path.
 2. Finish the QDP storage migration before starting another large model run.
    Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
    up one level without copying the 42-GiB store, flatten each active domain to

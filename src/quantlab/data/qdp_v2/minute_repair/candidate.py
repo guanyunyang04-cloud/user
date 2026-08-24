@@ -118,6 +118,31 @@ def _target_columns() -> list[str]:
     ]
 
 
+def _load_material_quality(
+    workspace_root: str | Path | None = None,
+) -> pd.DataFrame:
+    paths = sorted(
+        _quality_root(workspace_root).glob(
+            "year=*/daily_parity_material_mismatches.parquet"
+        )
+    )
+    if not paths:
+        raise MinuteRepairError("minute_repair_quality_evidence_missing")
+    parts: list[pd.DataFrame] = []
+    for path in paths:
+        frame = pd.read_parquet(path)
+        frame["year"] = int(path.parent.name.split("=", 1)[1])
+        parts.append(frame)
+    material = pd.concat(parts, ignore_index=True)
+    for column in ("trade_date", "symbol"):
+        material[column] = material[column].astype(str)
+    for column in ("exclude_open", "exclude_high", "exclude_low", "exclude_close"):
+        material[column] = material[column].fillna(False).astype(bool)
+    if material.duplicated(["symbol", "trade_date"]).any():
+        raise MinuteRepairError("minute_repair_quality_evidence_duplicate")
+    return material
+
+
 def load_priority_targets(
     workspace_root: str | Path | None = None,
     *,
@@ -134,19 +159,7 @@ def load_priority_targets(
     in scope even when they fall below that threshold.
     """
 
-    paths = sorted(_quality_root(workspace_root).glob("year=*/daily_parity_material_mismatches.parquet"))
-    if not paths:
-        raise MinuteRepairError("minute_repair_quality_evidence_missing")
-    parts: list[pd.DataFrame] = []
-    for path in paths:
-        frame = pd.read_parquet(path)
-        frame["year"] = int(path.parent.name.split("=", 1)[1])
-        parts.append(frame)
-    material = pd.concat(parts, ignore_index=True)
-    for column in ("trade_date", "symbol"):
-        material[column] = material[column].astype(str)
-    for column in ("exclude_open", "exclude_high", "exclude_low", "exclude_close"):
-        material[column] = material[column].fillna(False).astype(bool)
+    material = _load_material_quality(workspace_root)
 
     audited_anomaly = (
         material["price_max_abs_error"].gt(PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON)
@@ -214,6 +227,118 @@ def load_priority_targets(
     if selected.duplicated(["symbol", "trade_date"]).any():
         raise MinuteRepairError("minute_repair_priority_target_duplicate")
     return selected.reset_index(drop=True)
+
+
+def load_explicit_targets(
+    target_file: str | Path,
+    workspace_root: str | Path | None = None,
+    *,
+    include_reasons: Sequence[str] = (),
+    include_severities: Sequence[str] = (),
+    include_fields: Sequence[str] = (),
+    maximum_targets: int | None = None,
+) -> pd.DataFrame:
+    """Join an explicit queue to the current audited minute-quality evidence.
+
+    Queue rows already repaired since the queue snapshot are intentionally
+    ignored. This makes a large target file safe to reuse after each installed
+    batch while preserving the current audit as the authority for fields and
+    daily references.
+    """
+
+    path = Path(target_file).resolve()
+    if not path.is_file():
+        raise MinuteRepairError(f"minute_repair_explicit_target_file_missing:{path}")
+    requested = pd.read_parquet(path)
+    required = {"symbol", "trade_date"}
+    missing = sorted(required.difference(requested.columns))
+    if missing:
+        raise MinuteRepairError(
+            f"minute_repair_explicit_target_columns_missing:{','.join(missing)}"
+        )
+    requested = requested.copy()
+    requested["symbol"] = requested["symbol"].astype(str)
+    requested["trade_date"] = pd.to_datetime(
+        requested["trade_date"], errors="raise"
+    ).dt.strftime("%Y-%m-%d")
+    if requested.duplicated(["symbol", "trade_date"]).any():
+        raise MinuteRepairError("minute_repair_explicit_target_duplicate")
+
+    reasons = tuple(
+        dict.fromkeys(str(value).strip() for value in include_reasons if str(value).strip())
+    )
+    if reasons:
+        if "fallback_reasons" not in requested.columns:
+            raise MinuteRepairError(
+                "minute_repair_explicit_target_fallback_reasons_missing"
+            )
+        reason_sets = requested["fallback_reasons"].fillna("").astype(str).map(
+            lambda value: set(filter(None, value.split(";")))
+        )
+        requested = requested.loc[
+            reason_sets.map(lambda values: bool(values.intersection(reasons)))
+        ].copy()
+    severities = tuple(
+        dict.fromkeys(
+            str(value).strip().lower()
+            for value in include_severities
+            if str(value).strip()
+        )
+    )
+    if severities:
+        if "severity" not in requested.columns:
+            raise MinuteRepairError("minute_repair_explicit_target_severity_missing")
+        requested = requested.loc[
+            requested["severity"].fillna("").astype(str).str.lower().isin(severities)
+        ].copy()
+    if requested.empty:
+        raise MinuteRepairError("minute_repair_explicit_targets_empty_after_reason_filter")
+
+    reason_column = (
+        requested["fallback_reasons"].fillna("").astype(str)
+        if "fallback_reasons" in requested.columns
+        else pd.Series("explicit_target_file", index=requested.index)
+    )
+    queue = requested.loc[:, ["symbol", "trade_date"]].copy()
+    queue["selection_reason"] = reason_column.map(
+        lambda value: f"explicit_fallback:{value}" if value else "explicit_target_file"
+    )
+    material = _load_material_quality(workspace_root)
+    selected = material.merge(
+        queue,
+        on=["symbol", "trade_date"],
+        how="inner",
+        validate="one_to_one",
+    )
+    current_price_mask = selected[
+        ["exclude_open", "exclude_high", "exclude_low", "exclude_close"]
+    ].fillna(False).astype(bool).any(axis=1)
+    selected = selected.loc[current_price_mask].copy()
+    fields = tuple(
+        dict.fromkeys(str(value).strip().lower() for value in include_fields if str(value).strip())
+    )
+    invalid_fields = sorted(set(fields).difference(PRICE_COLUMNS))
+    if invalid_fields:
+        raise ValueError(
+            f"minute_repair_explicit_target_fields_invalid:{','.join(invalid_fields)}"
+        )
+    if fields:
+        field_mask = pd.Series(False, index=selected.index)
+        for field in fields:
+            field_mask |= selected[f"exclude_{field}"].fillna(False).astype(bool)
+        selected = selected.loc[field_mask].copy()
+    if selected.empty:
+        raise MinuteRepairError("minute_repair_explicit_targets_no_longer_audited")
+    selected = selected.loc[:, _target_columns()].sort_values(
+        ["trade_date", "symbol"], kind="stable"
+    )
+    if maximum_targets is not None:
+        if int(maximum_targets) < 1:
+            raise ValueError("minute_repair_maximum_targets_must_be_positive")
+        selected = selected.head(int(maximum_targets))
+    return selected.sort_values(["symbol", "trade_date"], kind="stable").reset_index(
+        drop=True
+    )
 
 
 def target_set_id(
@@ -983,8 +1108,6 @@ def evaluate_target_day(
 
     symbol = str(target["symbol"])
     trade_date = str(target["trade_date"])
-    local = local_day.sort_values("bar_time", kind="stable").reset_index(drop=True).copy()
-    provider = provider_day.sort_values("bar_time", kind="stable").reset_index(drop=True).copy()
     decision: dict[str, Any] = {
         "symbol": symbol,
         "trade_date": trade_date,
@@ -993,6 +1116,18 @@ def evaluate_target_day(
         "repaired_fields": "",
         "changed_row_count": 0,
     }
+    if provider_day.empty:
+        decision["reason"] = "provider_session_row_count:0"
+        return decision, pd.DataFrame()
+    provider_required = set(KEY_COLUMNS) | set(PRICE_COLUMNS)
+    provider_missing = sorted(provider_required.difference(provider_day.columns))
+    if provider_missing:
+        decision["reason"] = (
+            f"provider_session_columns_missing:{','.join(provider_missing)}"
+        )
+        return decision, pd.DataFrame()
+    local = local_day.sort_values("bar_time", kind="stable").reset_index(drop=True).copy()
+    provider = provider_day.sort_values("bar_time", kind="stable").reset_index(drop=True).copy()
     session_error = _candidate_session_error(local, provider)
     if session_error:
         decision["reason"] = session_error
@@ -1215,6 +1350,7 @@ __all__ = [
     "evaluate_target_day",
     "evaluate_target_set",
     "load_cached_target_batches",
+    "load_explicit_targets",
     "load_local_target_minutes",
     "load_open_trade_dates",
     "load_priority_targets",
