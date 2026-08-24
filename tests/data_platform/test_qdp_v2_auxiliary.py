@@ -20,6 +20,7 @@ from quantlab.data.qdp_v2.auxiliary_tail_update import (
 )
 from quantlab.data.qdp_v2.auxiliary_tail_update import index as auxiliary_tail_index
 from quantlab.data.qdp_v2.auxiliary_update import (
+    TushareRateLimitError,
     _baostock_snapshot_worker,
     _normalize_cninfo_dividend,
     _normalize_cninfo_industry_history,
@@ -28,6 +29,7 @@ from quantlab.data.qdp_v2.auxiliary_update import (
     _normalize_dividend,
     _normalize_industry_comparison,
     _normalize_name_intervals,
+    _TushareClient,
     _valuation_secondary_policy,
 )
 from quantlab.data.qdp_v2.baostock_update import _valuation_frame
@@ -51,6 +53,44 @@ from quantlab.data.qdp_v2.repair import (
 
 def _workspace(tmp_path: Path) -> Path:
     return tmp_path / "workspace"
+
+
+def test_tushare_client_stops_immediately_on_http_429(monkeypatch) -> None:
+    class FakeResponse:
+        status_code = 429
+
+        @staticmethod
+        def json() -> dict[str, object]:
+            return {"code": -2001, "msg": "daily quota exhausted"}
+
+        @staticmethod
+        def raise_for_status() -> None:
+            raise AssertionError("429 should be handled before raise_for_status")
+
+    calls = 0
+
+    def fake_post(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "quantlab.data.qdp_v2.auxiliary_update.context._resolve_tushare_api_url",
+        lambda workspace_root: "https://example.invalid/api",
+    )
+    monkeypatch.setattr(
+        "quantlab.data.qdp_v2.auxiliary_update.context.requests.post",
+        fake_post,
+    )
+    client = _TushareClient("fixture", rpm=150)
+
+    try:
+        client.fetch("stk_mins", params={}, fields=(), retries=4)
+    except TushareRateLimitError as exc:
+        assert "code=-2001" in str(exc)
+    else:
+        raise AssertionError("expected TushareRateLimitError")
+    assert calls == 1
 
 
 def test_auxiliary_repair_defaults_to_free_source_tail(

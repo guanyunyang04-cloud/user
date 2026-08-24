@@ -91,6 +91,10 @@ class AuxiliaryUpdateError(RuntimeError):
     pass
 
 
+class TushareRateLimitError(AuxiliaryUpdateError):
+    pass
+
+
 @dataclass(frozen=True)
 class AuxiliaryContext:
     workspace: Path
@@ -154,6 +158,15 @@ class _TushareClient:
                     headers={"Accept-Encoding": "gzip"},
                     timeout=45,
                 )
+                if response.status_code == 429:
+                    try:
+                        rate_payload = dict(response.json() or {})
+                    except (TypeError, ValueError):
+                        rate_payload = {}
+                    raise TushareRateLimitError(
+                        f"tushare_rate_limited:{api_name}:status=429:"
+                        f"code={rate_payload.get('code')}:{str(rate_payload.get('msg', ''))[:300]}"
+                    )
                 response.raise_for_status()
                 payload = response.json()
                 if int(payload.get("code", -1)) != 0:
@@ -162,6 +175,8 @@ class _TushareClient:
                 names = [str(item) for item in list(data.get("fields", []) or [])]
                 rows = list(data.get("items", []) or [])
                 return pd.DataFrame(rows, columns=names or list(fields))
+            except TushareRateLimitError:
+                raise
             except Exception as exc:
                 last_error = f"{type(exc).__name__}:{str(exc)[:300]}"
                 if attempt + 1 >= max(1, int(retries)):

@@ -354,6 +354,7 @@ def parity_audit(
     severe_limit = _sql_number(PRICE_RELATIVE_SEVERE_THRESHOLD)
     flow_limit = _sql_number(FLOW_RELATIVE_TOLERANCE)
     with duckdb.connect() as connection:
+        connection.execute("SET enable_progress_bar=false")
         _create_daily_comparison(connection, bars=bars, daily=daily, year=int(year))
         row = connection.execute(
             f"""

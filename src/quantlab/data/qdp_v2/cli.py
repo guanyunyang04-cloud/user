@@ -20,6 +20,7 @@ commands:
   update                  Add recent market data in place.
   iquant-parity           Compare a small local iQuant cache sample with QDP.
   minute-parity           Compare a selected minute ZIP extract with QDP/iQuant.
+  minute-repair           Repair only previously audited historical 1-minute anomalies.
   compact                 Merge the 5-minute table into yearly files.
   repair                  Repair active shards with explicit CAS protection.
   gc                      Remove unreferenced files.
@@ -38,6 +39,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("update",): "quantlab.data.qdp_v2.update",
     ("iquant-parity",): "quantlab.data.iquant_parity",
     ("minute-parity",): "quantlab.data.minute_parity",
+    ("minute-repair",): "quantlab.data.qdp_v2.minute_repair.cli",
     ("compact",): "quantlab.data.qdp_v2.compact",
     ("repair",): "quantlab.data.qdp_v2.repair",
 }
@@ -90,6 +92,8 @@ def _split_workspace_option(args: list[str]) -> tuple[list[str], list[str]]:
 
 def _requires_yolos(prefix: tuple[str, ...], args: list[str]) -> bool:
     if prefix == ("repair",):
+        return True
+    if prefix == ("minute-repair",):
         return True
     if prefix == ("check",):
         return True

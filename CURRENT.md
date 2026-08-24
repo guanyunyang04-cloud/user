@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-23
+Updated: 2026-08-24
 
 ## Objective
 
@@ -138,14 +138,14 @@ dedicated producer code has been retired.
   retained but excluded from session features. No missing minute is silently
   interpolated.
 - The older 2000-2025 ZIP is not uniformly exchange-grade for intraminute
-  prices. Against 9,732,494 trusted daily-reference stock-days, 431,803 exceed
-  the agreed absolute tolerance of 0.05 currency units. Of these, 246,912 stay
-  as warnings because the maximum error is at most 0.5% of the maximum absolute
-  daily OHLC; 184,891 are field-level unreliable observations, including
-  61,100 above 1%. The former one-cent exclusion rule is retired.
+  prices. After three evidence-gated repairs, 427,727 stock-days exceed the
+  agreed absolute tolerance of 0.05 currency units. Of these, 247,714 stay as
+  warnings because the maximum error is at most 0.5% of the maximum absolute
+  daily OHLC; 180,013 are field-level unreliable observations, including
+  56,122 above 1%. The former one-cent exclusion rule is retired.
 - Price evidence is field-level rather than a stock-day deletion. Among the
-  184,891 unreliable rows, 126,639 affect only high/low, 51,740 affect only
-  open/close (almost entirely open), and 6,512 affect both groups. Annual
+  180,013 unreliable rows, 126,805 affect only high/low, 46,863 affect only
+  open/close (almost entirely open), and 6,345 affect both groups. Annual
   `minute_feature_exclusions.parquet` files now carry explicit
   `exclude_open/high/low/close` masks. Volume and amount retain independent
   relative-error audits. A full-session parity outcome is not causal before
@@ -231,15 +231,17 @@ dedicated producer code has been retired.
   Retained historical research-report metadata is separate from the deleted
   forecast panel.
 
-## Temporary Tushare-compatible repair source (2026-08-23)
+## Temporary Tushare-compatible repair source (2026-08-24)
 
 - The private provider profile at
   `data/qdp/qdp_private/provider_profiles.json` now points to the restored
   `ts.gyzcloud.top/api` source. The tier-15000 weekly entitlement expires at
-  2026-08-30 16:46 Asia/Shanghai and advertises 150 requests/minute. The
-  existing direct-HTTP client remains capped at 96 requests/minute with three
-  workers and one shared lock-serialized limiter; no active code or tracked
-  evidence contains the token.
+  2026-08-30 16:46 Asia/Shanghai and advertises 150 requests/minute. The source
+  separately enforces 20,000 `stk_mins` calls per calendar day. The direct-HTTP
+  client defaults to 96 requests/minute with three workers and one shared
+  lock-serialized limiter; targeted repair may explicitly use 140. HTTP 429 now
+  stops the queued run immediately instead of retrying every pending batch. No
+  active code or tracked evidence contains the token.
 - This provider is approved only as a candidate repair and cross-validation
   source. Its public client bundle exposes an administrative control described
   as randomly polluting a marked user's API responses, as well as throttling
@@ -275,6 +277,15 @@ dedicated producer code has been retired.
   the same missing open/high/low extremum. Repairs must therefore be accepted
   per field only when the proxy improves daily reconciliation without
   regressing another price or flow field; existing quality masks stay active.
+- The repair workflow is now implemented and has formally installed three
+  price-only batches: 45 priority stock-days, 653 open errors above 2%, and
+  4,350 open errors in `(1%, 2%]`. In total it changed 5,048 minute rows and
+  removed 4,878 stock-days from the unreliable set. Every accepted row has a
+  captured provider response and SHA-256, a complete 241-row session, daily
+  parity evidence, a pre-install backup and an annual re-audit. Volume and
+  amount were retained from QDP. Continuous and auction row counts remain
+  3,301,495,126 and 13,756,395, with 200 shards in each domain; verified status
+  and the quick QDP check are both `ok`.
 - The 2026-07-22 through 2026-08-21 cross-check joined 73,364 common main-board
   stock-days. All had 241 source rows; 73,359 matched daily OHLC exactly, four
   stayed inside the normal absolute tolerance, one open was warning-only, and
@@ -287,21 +298,21 @@ dedicated producer code has been retired.
   correctly rejects a 2026-08-21 target until market daily is advanced first.
   Several statement, research and margin workflows still freeze 2025 dates;
   they need explicit as-of and observed-cutoff inputs before a 2026 incremental
-  run. No formal QDP rows were installed during this provider probe. Full
-  evidence is in
-  `research/records/tushare_compatible_provider_probe_20260823/result.json`.
+  run. Provider capability evidence remains in
+  `research/records/tushare_compatible_provider_probe_20260823/result.json`;
+  installed minute-repair evidence is under
+  `data/qdp/source_archives/tushare_compatible/minute_repair/`.
 
 ## Immediate next action
 
-1. While the weekly provider entitlement remains valid, add a compact,
-   resumable raw-capture path for `stk_mins` on already flagged minute
-   stock-days, plus the missing daily/factor/daily-basic tail and PIT financial,
-   margin and research-report increments. Do not mirror all 3.3 billion minute
-   rows. First pilot the exclusion records and accept only field-level repairs
-   that improve daily reconciliation without a new price/flow regression.
-   Advance market daily before auxiliary domains, record each endpoint's
-   observed cutoff, and do not rerun the legacy 5-minute updater or bulk
-   name-history query.
+1. Resume `open_d38bfb1ac3abe97a` after the provider's daily `stk_mins` quota
+   resets. The `(0.5%, 1%]` open band contains 34,642 target stock-days; 2,448
+   current-run batches are already cached and 960 earlier range captures can be
+   reused. Trading-calendar batching leaves 19,485 new calls. Run candidates
+   first, install only complete field-level improvements, then repeat annual and
+   QDP checks. Do not mirror all 3.3 billion minute rows. Daily/factor/basic and
+   PIT auxiliary tails remain separate work and require advancing market daily
+   before dependent domains.
 2. Finish the QDP storage migration before starting another large model run.
    Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
    up one level without copying the 42-GiB store, flatten each active domain to

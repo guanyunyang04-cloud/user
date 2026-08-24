@@ -44,7 +44,14 @@ daily, factor, valuation, PIT-financial, margin, report and corporate-action
 rows. ETF, index, futures and options minute interfaces remain separately
 unauthorized. Minute rows are repair candidates rather than blanket
 replacements because sampled historical anomalies often match the existing ZIP
-source. iQuant is treated as a runtime and execution source, not as the sole
+source. Three audited price-only repair batches have installed 5,048 targeted
+minute rows while retaining QDP volume and amount; the continuous/auction row
+counts and primary keys are unchanged. Raw responses, hashes, decisions,
+backups, and annual re-audits live under
+`data/qdp/source_archives/tushare_compatible/minute_repair/`. The provider also
+enforces a separate 20,000-call daily limit for `stk_mins`, and HTTP 429 is a
+terminal, resumable condition rather than an item-by-item retry. iQuant is
+treated as a runtime and execution source, not as the sole
 historical research store. A read-only adapter now
 decodes its local daily/one-minute K-line files and compares them with QDP
 without an RPC or trading connection. The 2026-08-21 parity snapshot found
@@ -136,3 +143,21 @@ sparse stock-day exclusion lists. The importer sizes its buffers from currently
 available physical memory, reserves at least 25% of RAM (and at least 3 GiB) for
 the operating system, and flushes early if free memory falls below that reserve.
 See [`CURRENT.md`](CURRENT.md) for the measured quality and known source limits.
+
+Targeted repairs operate only on stock-days already flagged by the annual
+minute audit. The workflow reuses valid raw captures, caps each range at 33
+actual trading days (7,953 possible rows), requires an exact 241-row session,
+and overlays accepted price fields without replacing volume or amount:
+
+```powershell
+$env:PYTHONPATH='H:\quant_project\src'
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab data minute-repair `
+  --selection-mode open `
+  --minimum-relative-error 0.005 `
+  --maximum-relative-error 0.01 `
+  --max-trading-days 33 `
+  --workspace-root 'H:\quant_project'
+```
+
+Omit `--apply` for candidate evaluation. Add it only after reviewing the
+generated `result.json`; valid raw captures make the command resumable.

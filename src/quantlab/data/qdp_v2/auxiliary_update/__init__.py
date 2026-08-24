@@ -28,6 +28,7 @@ from .context import (
     TUSHARE_WORKERS,
     AuxiliaryContext,
     AuxiliaryUpdateError,
+    TushareRateLimitError,
     _context,
     _copy_query,
     _date_text,
