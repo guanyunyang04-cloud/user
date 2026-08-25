@@ -591,6 +591,102 @@ def test_local_source_inventory_ignores_parenthesized_duplicates(tmp_path: Path)
     assert inventory["ignored_duplicate_files"] == ["600000.SH(1).parquet"]
 
 
+def test_cli_routes_explicit_target_filters_to_local_workflow(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from quantlab.data.qdp_v2.minute_repair import cli, local_workflow
+
+    captured: dict[str, object] = {}
+
+    def fake_run_local_parquet_minute_repair(**kwargs):
+        captured.update(kwargs)
+        return {"status": "would_apply"}
+
+    monkeypatch.setattr(
+        local_workflow,
+        "run_local_parquet_minute_repair",
+        fake_run_local_parquet_minute_repair,
+    )
+    source = tmp_path / "stock_1min"
+    source.mkdir()
+    target = tmp_path / "targets.parquet"
+    target.touch()
+
+    result = cli.main(
+        [
+            "--local-minute-root",
+            str(source),
+            "--target-file",
+            str(target),
+            "--target-reason",
+            "local_source_low_value_date_range_deferred",
+            "--target-field",
+            "high",
+            "--target-field",
+            "low",
+            "--selection-mode",
+            "high-low",
+        ]
+    )
+
+    assert result == 0
+    assert captured["target_file"] == target
+    assert captured["target_reasons"] == (
+        "local_source_low_value_date_range_deferred",
+    )
+    assert captured["target_fields"] == ("high", "low")
+    assert captured["selection_mode"] == "high-low"
+    assert json.loads(capsys.readouterr().out)["status"] == "would_apply"
+
+
+def test_high_low_exact_gate_rejects_tolerance_only_repairs() -> None:
+    from quantlab.data.qdp_v2.minute_repair.local_workflow import (
+        _enforce_exact_extreme_repairs,
+    )
+
+    decisions = pd.DataFrame(
+        [
+            {
+                "symbol": "600000.SH",
+                "trade_date": "2020-01-02",
+                "status": "accepted",
+                "reason": "",
+                "repaired_fields": "high",
+                "changed_row_count": 1,
+                "provider_high": 10.0,
+                "daily_high": 10.0,
+            },
+            {
+                "symbol": "600001.SH",
+                "trade_date": "2020-01-02",
+                "status": "accepted",
+                "reason": "",
+                "repaired_fields": "low",
+                "changed_row_count": 1,
+                "provider_low": 9.01,
+                "daily_low": 9.0,
+            },
+        ]
+    )
+    changes = pd.DataFrame(
+        {
+            "symbol": ["600000.SH", "600001.SH"],
+            "trade_date": ["2020-01-02", "2020-01-02"],
+            "bar_time": ["100000000", "100000000"],
+        }
+    )
+
+    checked, retained = _enforce_exact_extreme_repairs(decisions, changes)
+
+    assert checked["status"].tolist() == ["accepted", "rejected"]
+    assert checked.loc[1, "reason"] == "provider_extreme_not_exact_daily_reference"
+    assert checked.loc[1, "repaired_fields"] == ""
+    assert checked.loc[1, "changed_row_count"] == 0
+    assert retained[["symbol", "trade_date"]].to_dict("records") == [
+        {"symbol": "600000.SH", "trade_date": "2020-01-02"}
+    ]
+
+
 def test_prefilter_local_candidates_rejects_missing_and_accepts_improving_open() -> None:
     targets = pd.DataFrame(
         [

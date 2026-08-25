@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from .candidate import (
     PRICE_COLUMNS,
     MinuteRepairError,
     TargetBatch,
+    load_explicit_targets,
     load_priority_targets,
     write_candidate_artifacts,
 )
@@ -54,6 +56,40 @@ def _field_counts(decisions: pd.DataFrame) -> dict[str, int]:
 def _reason_counts(decisions: pd.DataFrame) -> dict[str, int]:
     rejected = decisions.loc[decisions["status"].eq("rejected")]
     return {str(key): int(value) for key, value in rejected["reason"].value_counts().items()}
+
+
+def _enforce_exact_extreme_repairs(
+    decisions: pd.DataFrame,
+    changes: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Retain high/low repairs only when every repaired extreme equals daily exactly."""
+
+    checked = decisions.copy()
+    retained_keys: set[tuple[str, str]] = set()
+    for index, row in checked.loc[checked["status"].eq("accepted")].iterrows():
+        fields = tuple(filter(None, str(row["repaired_fields"]).split(",")))
+        exact = bool(fields) and all(
+            pd.notna(row.get(f"provider_{field}"))
+            and pd.notna(row.get(f"daily_{field}"))
+            and float(row[f"provider_{field}"]) == float(row[f"daily_{field}"])
+            for field in fields
+        )
+        if exact:
+            retained_keys.add((str(row["symbol"]), str(row["trade_date"])))
+            continue
+        checked.at[index, "status"] = "rejected"
+        checked.at[index, "reason"] = "provider_extreme_not_exact_daily_reference"
+        checked.at[index, "repaired_fields"] = ""
+        checked.at[index, "changed_row_count"] = 0
+    if changes.empty:
+        return checked, changes.copy()
+    keep = [
+        (str(symbol), str(trade_date)) in retained_keys
+        for symbol, trade_date in zip(
+            changes["symbol"], changes["trade_date"], strict=True
+        )
+    ]
+    return checked, changes.loc[keep].copy().reset_index(drop=True)
 
 
 def _artifact_hashes(paths: dict[str, str]) -> dict[str, str]:
@@ -188,6 +224,11 @@ def _result_payload(
     timing: dict[str, Any],
     artifacts: dict[str, str],
     installation: dict[str, Any],
+    target_file: str | Path | None = None,
+    target_reasons: Sequence[str] = (),
+    target_severities: Sequence[str] = (),
+    target_fields: Sequence[str] = (),
+    maximum_targets: int | None = None,
 ) -> dict[str, Any]:
     accepted = decisions.loc[decisions["status"].eq("accepted")]
     return {
@@ -215,6 +256,11 @@ def _result_payload(
             "date_range_deferred_stock_days": int(len(range_deferred)),
             "target_symbols": int(targets["symbol"].nunique()),
             "target_years": sorted({int(value) for value in targets["year"]}),
+            "target_file": str(Path(target_file).resolve()) if target_file else "",
+            "target_reasons": list(target_reasons),
+            "target_severities": list(target_severities),
+            "target_fields": list(target_fields),
+            "maximum_targets": maximum_targets,
         },
         "prefilter": {
             "candidate_stock_days": int(prefilter["status"].eq("candidate").sum()),
@@ -251,6 +297,11 @@ def run_local_parquet_minute_repair(
     selection_mode: str = "open",
     excluded_date_ranges: tuple[tuple[str, str], ...] | list[tuple[str, str]] | None = None,
     aggregate_seed_path: str | Path | None = None,
+    target_file: str | Path | None = None,
+    target_reasons: Sequence[str] = (),
+    target_severities: Sequence[str] = (),
+    target_fields: Sequence[str] = (),
+    maximum_targets: int | None = None,
     apply: bool = False,
 ) -> dict[str, Any]:
     """Evaluate and optionally install local-source historical minute repairs."""
@@ -261,13 +312,23 @@ def run_local_parquet_minute_repair(
     workspace = qdp_paths(workspace_root).workspace_root
     source_root = Path(local_minute_root).resolve()
     _, inventory = local_source_inventory(source_root)
-    all_targets = load_priority_targets(
-        workspace,
-        minimum_relative_error=float(minimum_relative_error),
-        maximum_relative_error=maximum_relative_error,
-        include_known_probes=False,
-        selection_mode=mode,
-    )
+    if target_file:
+        all_targets = load_explicit_targets(
+            target_file,
+            workspace,
+            include_reasons=target_reasons,
+            include_severities=target_severities,
+            include_fields=target_fields,
+            maximum_targets=maximum_targets,
+        )
+    else:
+        all_targets = load_priority_targets(
+            workspace,
+            minimum_relative_error=float(minimum_relative_error),
+            maximum_relative_error=maximum_relative_error,
+            include_known_probes=False,
+            selection_mode=mode,
+        )
     all_targets = _restrict_fields(all_targets, mode)
     ranges = _normalize_excluded_ranges(excluded_date_ranges)
     targets, range_deferred = _split_excluded_ranges(all_targets, ranges)
@@ -308,6 +369,8 @@ def run_local_parquet_minute_repair(
         workspace_root=workspace,
     )
     decisions = pd.concat([prefilter_rejected, evaluated], ignore_index=True)
+    if mode == "high-low":
+        decisions, changes = _enforce_exact_extreme_repairs(decisions, changes)
     decisions = decisions.sort_values(["trade_date", "symbol"], kind="stable").reset_index(drop=True)
     if len(decisions) != len(targets):
         raise MinuteRepairError(
@@ -351,6 +414,16 @@ def run_local_parquet_minute_repair(
         "minimum_relative_error": float(minimum_relative_error),
         "maximum_relative_error": maximum_relative_error,
         "excluded_date_ranges": [list(value) for value in ranges],
+        "target_file": str(Path(target_file).resolve()) if target_file else "",
+        "target_reasons": list(target_reasons),
+        "target_severities": list(target_severities),
+        "target_fields": list(target_fields),
+        "maximum_targets": maximum_targets,
+        "high_low_daily_extreme_policy": (
+            "provider_extreme_must_equal_daily_reference_exactly"
+            if mode == "high-low"
+            else "not_applicable"
+        ),
     }
     config_path = run_dir / "run_config.json"
     write_json(config_path, config)
@@ -392,6 +465,11 @@ def run_local_parquet_minute_repair(
         timing=timing,
         artifacts=artifacts,
         installation=installation,
+        target_file=target_file,
+        target_reasons=target_reasons,
+        target_severities=target_severities,
+        target_fields=target_fields,
+        maximum_targets=maximum_targets,
     )
     write_json(run_dir / "result.json", json_safe(result))
     return result

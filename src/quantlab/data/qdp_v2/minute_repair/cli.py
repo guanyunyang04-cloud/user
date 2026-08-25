@@ -56,8 +56,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    if args.local_minute_root and args.target_file:
-        raise ValueError("minute_repair_local_and_remote_target_sources_conflict")
     if (
         args.target_reason
         or args.target_severity
@@ -113,6 +111,11 @@ def main(argv: list[str] | None = None) -> int:
             selection_mode=str(args.selection_mode),
             excluded_date_ranges=tuple(args.exclude_date_range),
             aggregate_seed_path=args.local_aggregate_seed,
+            target_file=args.target_file,
+            target_reasons=tuple(args.target_reason),
+            target_severities=tuple(args.target_severity),
+            target_fields=tuple(args.target_field),
+            maximum_targets=args.maximum_targets,
             apply=bool(args.apply),
         )
     else:

@@ -667,7 +667,7 @@ def validate_extreme_timing_sample(
     batches: Sequence[TargetBatch],
     *,
     workspace_root: str | Path | None = None,
-    samples_per_field_year: int = 10,
+    samples_per_field_year: int = 25,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Compare external 1m high/low buckets with the independent active 5m archive."""
 
