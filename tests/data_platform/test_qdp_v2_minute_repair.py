@@ -757,7 +757,7 @@ def test_finish_existing_reaudit_is_idempotent_and_run_scoped(tmp_path: Path) ->
     live = tmp_path / "data" / "qdp" / "source_archives" / "minute" / "quality" / f"year={year}"
     backup = run / "backup_pre_repair" / "quality" / f"year={year}"
     temporary = run / "reaudit" / f"year={year}"
-    for directory in (live, backup, temporary):
+    for directory in (live, temporary):
         directory.mkdir(parents=True)
     audit = {
         "quality": {
@@ -772,8 +772,7 @@ def test_finish_existing_reaudit_is_idempotent_and_run_scoped(tmp_path: Path) ->
             "total_minute_feature_exclusion_rows": 3,
         }
     }
-    for path in (live / "audit.json", backup / "audit.json"):
-        path.write_text(__import__("json").dumps(audit), encoding="utf-8")
+    (live / "audit.json").write_text(__import__("json").dumps(audit), encoding="utf-8")
     material = pd.DataFrame(
         {
             "symbol": ["600000.SH"],
@@ -793,7 +792,6 @@ def test_finish_existing_reaudit_is_idempotent_and_run_scoped(tmp_path: Path) ->
     }
     for name, frame in artifacts.items():
         frame.to_parquet(live / name, index=False)
-        frame.to_parquet(backup / name, index=False)
         frame.to_parquet(temporary / name, index=False)
     changes = pd.DataFrame({"trade_date": ["2010-01-04"]})
     decisions = pd.DataFrame(
@@ -825,3 +823,5 @@ def test_finish_existing_reaudit_is_idempotent_and_run_scoped(tmp_path: Path) ->
     assert updated["quality"]["price_unreliable_rows"] == 1
     assert updated["quality"]["total_minute_feature_exclusion_rows"] == 2
     assert updated["quality"]["open_exact_rate"] == 1.0
+    assert (backup / "audit.json").is_file()
+    assert all((backup / name).is_file() for name in artifacts)

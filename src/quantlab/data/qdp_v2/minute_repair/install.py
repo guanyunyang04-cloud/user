@@ -524,10 +524,25 @@ def finish_existing_reaudits(
         quality_dir = _quality_directory(workspace_root, year)
         temporary_dir = output / "reaudit" / f"year={year}"
         backup_dir = output / "backup_pre_repair" / "quality" / f"year={year}"
-        backup_audit = _read_json(backup_dir / "audit.json")
         audit_path = quality_dir / "audit.json"
         audit = _read_json(audit_path)
         complete = str(audit.get("last_targeted_minute_repair_run", "")) == output.name
+        backup_names = ("audit.json", *_PARITY_ARTIFACT_NAMES)
+        missing_backup_names = [
+            name for name in backup_names if not (backup_dir / name).is_file()
+        ]
+        if missing_backup_names:
+            if complete:
+                raise MinuteRepairError(
+                    "minute_repair_completed_reaudit_backup_missing:"
+                    f"{year}:{','.join(missing_backup_names)}"
+                )
+            _backup_quality_year(
+                year,
+                run_dir=output,
+                workspace_root=workspace_root,
+            )
+        backup_audit = _read_json(backup_dir / "audit.json")
         if complete:
             _validate_reaudit_artifacts(temporary_dir)
             for name in _PARITY_ARTIFACT_NAMES:

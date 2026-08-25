@@ -290,11 +290,21 @@ dedicated producer code has been retired.
   stock-days from the purchased archive's unresolved queue. Four installable
   runs changed another 1,607 price rows; 1,578 stock-days fully left the
   current quality mask and 29 retained a different flagged price field. The
-  cumulative Tushare-compatible repair count is therefore 6,655 minute rows.
+  cumulative Tushare-compatible repair count was then 6,655 minute rows.
   The useful hits were almost entirely open repairs: a deferred 19,254-day
   high/low-era batch accepted only 19 open changes, while a severe 874-day
   sample accepted none. Do not spend another daily quota on a bulk high/low
   retry against this provider.
+- On 2026-08-26 the remaining 19,049 unattempted open stock-days were queried
+  with a five-trading-day range cap instead of 33. The run captured 17,124 new
+  response batches and 4,725,768 raw rows, versus about 20.3 million rows under
+  the old 33-day plan. It reused 723 prior captures, accepted and installed
+  6,631 open rows, and rejected 12,415 same-source errors plus three incomplete
+  provider sessions. It fully cleared 6,625 stock-days; six accepted rows retain
+  another field mask. The cumulative Tushare-compatible repair count is now
+  13,286 minute rows. An interrupted Windows/DuckDB annual audit was safely
+  resumed without another download; the recovery path now creates untouched
+  years' missing pre-audit backups and has a focused regression test.
 - The 2026-07-22 through 2026-08-21 cross-check joined 73,364 common main-board
   stock-days. All had 241 source rows; 73,359 matched daily OHLC exactly, four
   stayed inside the normal absolute tolerance, one open was warning-only, and
@@ -332,9 +342,9 @@ dedicated producer code has been retired.
   passed.
 - The two local runs removed 109,935 stock-days from the unreliable set. The
   immediate post-local audit had 70,078 price-unreliable days and 25,867
-  severe days;
-  including 125 session exclusions, the total minute-feature exclusion count
-  is 70,203. Continuous and auction domains remain at 3,301,495,126 and
+  severe days; including 125 session exclusions, the total minute-feature
+  exclusion count is 70,203. Continuous and auction domains remain at
+  3,301,495,126 and
   13,756,395 rows with 200 shards each. Verified status and the quick QDP check
   are both `ok`.
 - The original all-target scan is retained with the fallback evidence: 41
@@ -345,26 +355,25 @@ dedicated producer code has been retired.
   `data/qdp/source_archives/external_quant_data/minute_repair/`. This purchased
   archive is minute-only for QDP purposes. It was not used to extend or repair
   the daily, factor, status, limit or valuation domains.
-- The 2026-08-25 Tushare fallback reduced the consolidated queue from 53,121
-  to 51,543 current stock-days and reduced the global price-unreliable count
-  to 68,500. Severe remains 25,867; with 125 session exclusions, the total
-  minute-feature exclusion count is 68,625. Of the remaining queue, 20,603
-  stock-days are unattempted, 30,911 were tried without an accepted
-  improvement, and 29 accepted partial repairs retain another field mask.
+- The 2026-08-25/26 Tushare fallback reduced the consolidated queue from
+  53,121 to 44,918 current stock-days and reduced the global
+  price-unreliable count to 61,875. Severe remains 25,867; with 125 session
+  exclusions, the total minute-feature exclusion count is 62,000. Of the
+  remaining queue, 1,554 high/low-only stock-days are unattempted, 43,329 were
+  tried without an accepted improvement, and 35 accepted partial repairs
+  retain another field mask.
   Resumable queue files and run accounting are under
   `data/qdp/source_archives/external_quant_data/minute_repair/tushare_fallback_after_local_20260825/`.
 
 ## Immediate next action
 
-1. Do not resume the slow bulk `open_d38bfb1ac3abe97a` download. At the next
-   provider quota window, continue from
-   `unattempted_after_tushare_20260825.parquet` in quota-sized batches and
-   prioritize rows whose current mask includes open. Do not bulk retry
-   high/low-only rows: the measured compatible-source hit rate was effectively
-   zero. Install only complete field-level improvements and keep every
-   unresolved quality mask. Daily/factor/basic and PIT auxiliary tails remain
-   separate and must continue through the existing local/free-source update
-   path.
+1. Do not resume the slow bulk `open_d38bfb1ac3abe97a` download and do not issue
+   another bulk Tushare minute run. Every remaining unattempted fallback row is
+   high/low-only, where this compatible source's measured hit rate was
+   effectively zero. Keep the 44,918 unresolved queue masks until a genuinely
+   independent historical source is available. Daily/factor/basic and PIT
+   auxiliary tails remain separate and must continue through the existing
+   local/free-source update path.
 2. Finish the QDP storage migration before starting another large model run.
    Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
    up one level without copying the 42-GiB store, flatten each active domain to

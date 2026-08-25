@@ -45,7 +45,7 @@ PROVIDER_FIELDS = ("ts_code", "trade_time", "open", "high", "low", "close", "vol
 SOURCE_REPAIR_TAG = "local_minute_zip+tushare_compatible_price_repair"
 DEFAULT_PRIORITY_RELATIVE_ERROR = 0.05
 DEFAULT_BATCH_CALENDAR_DAYS = 44
-DEFAULT_BATCH_TRADING_DAYS = 33
+DEFAULT_BATCH_TRADING_DAYS = 5
 EXPECTED_SESSION_TIMES = frozenset(CONTINUOUS_TIMES | {AUCTION_TIME})
 KNOWN_PROBE_TARGETS = frozenset(
     {
