@@ -7,6 +7,7 @@ from typing import Any
 from .data import verify_current_data
 from .ensemble import evaluate as evaluate_ensemble
 from .minute import DEFAULT_PARTICIPATION_RATE, run_minute_baseline, run_minute_walk_forward
+from .minute_v2.cli import main as minute_v2_main
 from .sequence import evaluate as evaluate_sequence
 from .sequence import train_all as train_all_sequence
 from .sequence import train_fold as train_sequence_fold
@@ -49,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     walk.add_argument("--output-dir", required=True)
     walk.add_argument("--top-k", type=int, default=5)
     walk.add_argument("--maximum-participation-rate", type=float, default=DEFAULT_PARTICIPATION_RATE)
+    minute_v2 = subparsers.add_parser("minute-v2")
+    minute_v2.add_argument("args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
 
     if args.command == "verify":
@@ -98,6 +101,8 @@ def main(argv: list[str] | None = None) -> int:
                 maximum_participation_rate=args.maximum_participation_rate,
             )
         )
+    elif args.command == "minute-v2":
+        return int(minute_v2_main(list(args.args)) or 0)
     else:
         _print(verify_current_data())
         for feature_count in (158, 183):

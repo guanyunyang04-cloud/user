@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-24
+Updated: 2026-08-27
 
 ## Objective
 
@@ -16,6 +16,9 @@ manifest.
 - QDP data: `data/qdp/qdp_v2/active/active.json`.
 - Research contract: `data/research/daily/manifest.json`.
 - Model outputs: `runs/daily/`.
+- Minute-v2 pilot: `data/research/minute_v2/`.
+- Minute-v2 development data: `data/research/minute_v2_dev/`.
+- Minute-v2 model outputs: `runs/minute_v2_v1/`.
 - Durable evidence: `research/records/` and `research/studies/`.
 
 The former `daily_research` and `quant_data_platform` trees were removed from
@@ -174,7 +177,7 @@ dedicated producer code has been retired.
   retain four duplicate long-term truths. The importer performs one ZIP member
   pass for all requested years, uses PyArrow parsing and monthly buffered
   Parquet writes, and now sizes/flushes those buffers from live available RAM.
-- The executable minute contract is now explicit: use information through
+- The legacy fixed-10:00 executable minute contract is explicit: use information through
   10:00, rank candidates before seeing the fill window, enter at the
   10:01-10:10 VWAP, and begin exits in the same window on the next market day.
   Prices are adjusted across days with the QDP factor. Entries and each partial
@@ -199,6 +202,58 @@ dedicated producer code has been retired.
   context or raw minute sequence, and it does not model Level-2 queue position.
   The failed baseline is not a paper- or live-trading candidate and remains
   separate from the 158/raw-60 daily benchmark.
+
+## Causal minute-v2 research (2026-08-27)
+
+- `src/quantlab/research/minute_v2/` is the active minute research path. It
+  evaluates every causal decision bar from 09:31-11:29 and 13:01-14:55 rather
+  than reducing the day to a fixed 10:00 summary. A signal uses bars only
+  through its own timestamp, enters on the next one-minute VWAP, and starts a
+  fixed 09:35-10:00 exit window on the next market day. Ordinary-share T+1,
+  fees, stamp tax, slippage, one-price bars, suspension/delisting state,
+  volume capacity, finite cash, overlap and up to five delayed exit days are
+  explicit.
+- The input contract joins dated main-board membership, status, industry,
+  adjustment factor, prior daily context, opening-auction context and the
+  annual field-level minute masks. High-derived features are nulled only by a
+  high mask, close-derived features only by a close mask, and so on. Feature
+  artifacts contain no entry, exit or outcome columns; labels are stored in a
+  separate Parquet file. The implementation uses guarded DuckDB connections,
+  two threads, a 4-GiB available-memory floor, daily checkpoints and atomic
+  final files.
+- The retained 2022-06 correctness pilot contains 61,565 complete stock-days
+  and 14,406,210 decision rows. It retains the full 2.38-GB causal base plus
+  1,897,645 event rows and matching labels. Keys are unique, 92.65% of entries
+  are executable, 99.735% of observed exits occur on the planned next market
+  day, and a real-value future-mutation probe changed all raw bars after 10:00
+  without changing any feature through 10:00 beyond `3.47e-18` floating-point
+  roundoff. `pilot_audit.json` explicitly performs data checks without looking
+  at strategy returns.
+- The bounded 2012-2022 development set takes two evenly spaced whole trading
+  days from every month while retaining the full market and complete minute
+  cross-section on those days. Its 132 month manifests cover 264 dates,
+  139,073,688 decision rows, 17,192,165 deterministic events and 14,899,717
+  observed T+1 labels. The 264 Parquet artifacts occupy 4,236,787,675 bytes;
+  all stored hashes, row totals and month manifests pass
+  `verify-dataset`. This is a development sample, not a substitute for a
+  full-trading-day final backtest.
+- Two expanding folds are complete. Fold 1 trains on 2012-2017, validates on
+  2018 and tests on 2019-2020; fold 2 trains on 2012-2019, validates on 2020
+  and tests on 2021-2022. Sampling keeps whole `(trade_date, bar_time)` groups,
+  never individual stocks. The fixed rule is contrarian in both tests. Ridge
+  is the strongest ranker with Rank IC `0.14135/0.11213`; LightGBM reaches
+  `0.03893/0.04274` and early-stops after 12/7 trees. Ridge Top-3 improves on
+  its contemporaneous event universe by `+0.2404%/+0.0960%`, but its absolute
+  after-cost Top-3 return is still `-0.2799%/-0.4284%`. The model currently
+  learns relative loss avoidance, not a profitable entry rule, and is not a
+  paper- or live-trading candidate.
+- The first-fold-only constrained formula search evaluated 120 auditable
+  transforms and retained 12 without reading either final test period. Stable
+  findings penalize large intraday range, absolute residual moves, large
+  auction gaps and amount-curve extremes. The strongest ridge terms are also
+  stable across folds: cumulative range, rebound from the day low and drawdown
+  from the day high. These are discovered features, not five hard-coded
+  expert-vote modules.
 
 ## Operational status
 
@@ -387,21 +442,20 @@ dedicated producer code has been retired.
    every mask unless the current field-level gates pass. Daily/factor/basic and
    PIT auxiliary tails remain separate and continue through the existing local
    or free-source update path.
-2. Finish the QDP storage migration before starting another large model run.
-   Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
-   up one level without copying the 42-GiB store, flatten each active domain to
-   one canonical directory, and remove generation pointers and cross-generation
-   shard references. Keep a compact domain manifest and atomic file replacement
-   so PIT contracts, row counts, schemas, source identity, and crash safety are
-   not lost.
-3. During that migration, convert durable provenance to workspace-relative
-   paths, discard stale prepared-runtime paths, classify rather than blindly
-   delete old Tushare-derived historical facts, and retire the permanent 5m
-   fact table only after its remaining consumers use deterministic 1m
-   resampling. Runtime and archive directories require a reference/provenance
-   audit before deletion.
-4. After the migrated store passes physical, PIT, and research-contract checks,
-   build the first full-market hybrid view from prior-close daily context plus
-   the causal minute sequence available at each decision time. Use 2010-2011
-   only for warm-up, begin formal samples in 2012, apply the new field-level
-   quality masks causally, and keep iQuant as the current-day execution layer.
+2. Treat minute-v2 v1 as a completed baseline, not a trading candidate. Next
+   diagnose the persistent negative absolute target by decision-time bucket,
+   event family, market regime, holding window and estimated cost. Calibrate a
+   validation-only no-trade threshold and compare raw-return, market-residual
+   and cost-hurdle targets. Expand from two dates per month to every trading day
+   only after a specification is positive in both held-out folds.
+3. Keep the QDP flattening migration as maintenance rather than a blocker for
+   minute research. The active physical/latest-key quick check and the new
+   minute-v2 artifact verification are green. Preserve atomic manifests,
+   workspace-relative provenance and crash-safe moves whenever the namespace
+   and physical layout are simplified.
+4. iQuant is no longer the planned execution platform because the available
+   installation lacks the required MiniQMT access. Broker integration is
+   deferred until a supported QMT terminal is installed, provisionally Guojin
+   QMT. Reuse the event/replay contract for that adapter, but do not connect
+   orders until a full-day out-of-sample model, paper run and broker-state
+   reconciliation all pass.

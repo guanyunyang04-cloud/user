@@ -54,8 +54,8 @@ Compact targets, hashes, decisions and annual re-audit results live under
 captures and full pre-install copies may be discarded after verification. The provider also
 enforces a separate 20,000-call daily limit for `stk_mins`, and HTTP 429 is a
 terminal, resumable condition rather than an item-by-item retry. iQuant is
-treated as a runtime and execution source, not as the sole
-historical research store. A read-only adapter now
+retained only as a read-only recent-data validator, not as the planned
+execution platform. A read-only adapter now
 decodes its local daily/one-minute K-line files and compares them with QDP
 without an RPC or trading connection. The 2026-08-21 parity snapshot found
 excellent recent agreement but only 60 one-minute files matching the 3,416
@@ -64,6 +64,8 @@ therefore a recent/live supplement and independent validator, not a historical
 replacement. Compact evidence is retained in
 `research/records/iquant_cache_parity_20260821/result.json` and
 `research/records/tushare_compatible_provider_probe_20260823/result.json`.
+Future execution integration is deferred until a broker QMT terminal with the
+required API entitlement is installed; Guojin QMT is the provisional target.
 
 The purchased local archive at `H:\BaiduNetdiskDownload\量化数据\stock_1min`
 is used only as a historical minute-repair source. Its inventory contains
@@ -121,6 +123,28 @@ $env:PYTHONPATH='H:\quant_project\src'
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab data status --verify-files
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab data check --quick --json
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research verify
+```
+
+The active minute research pipeline is `quantlab.research.minute_v2`. It uses
+causal features at every eligible minute, next-bar entry, ordinary-share T+1,
+field-level QDP quality masks and physically separate outcome labels. The
+retained 2022-06 pilot and the 2012-2022 two-date-per-month development set are
+already built. The two-fold baseline is useful for feature ranking but remains
+after-cost negative, so it is not a paper- or live-trading candidate.
+
+```powershell
+$env:PYTHONPATH='H:\quant_project\src'
+
+# Recheck the immutable development artifacts.
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
+  --workspace-root H:/quant_project verify-dataset `
+  --manifest H:/quant_project/data/research/minute_v2_dev/manifest.json
+
+# Reproduce the two expanding baseline folds.
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
+  --workspace-root H:/quant_project train-baselines `
+  --dataset-root H:/quant_project/data/research/minute_v2_dev `
+  --output-root H:/quant_project/runs/minute_v2_v1
 ```
 
 Local iQuant K-line files can be sampled without a trading connection. The
