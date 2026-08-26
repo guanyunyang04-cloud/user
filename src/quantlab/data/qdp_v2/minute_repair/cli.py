@@ -34,7 +34,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--minimum-relative-error", type=float, default=DEFAULT_PRIORITY_RELATIVE_ERROR)
     parser.add_argument("--maximum-relative-error", type=float)
     parser.add_argument(
-        "--selection-mode", choices=("priority", "open", "high-low"), default="priority"
+        "--selection-mode", choices=("priority", "open", "high-low", "all"), default="priority"
     )
     parser.add_argument("--max-calendar-days", type=int, default=DEFAULT_BATCH_CALENDAR_DAYS)
     parser.add_argument("--max-trading-days", type=int, default=DEFAULT_BATCH_TRADING_DAYS)

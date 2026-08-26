@@ -46,6 +46,8 @@ SOURCE_REPAIR_TAG = "local_minute_zip+tushare_compatible_price_repair"
 DEFAULT_PRIORITY_RELATIVE_ERROR = 0.05
 DEFAULT_BATCH_CALENDAR_DAYS = 44
 DEFAULT_BATCH_TRADING_DAYS = 5
+MATERIAL_IMPROVEMENT_MIN_REDUCTION = 0.90
+MATERIAL_IMPROVEMENT_MAX_FINAL_RELATIVE_ERROR = 0.01
 EXPECTED_SESSION_TIMES = frozenset(CONTINUOUS_TIMES | {AUCTION_TIME})
 KNOWN_PROBE_TARGETS = frozenset(
     {
@@ -105,10 +107,34 @@ def _target_columns() -> list[str]:
         "high_abs_error",
         "low_abs_error",
         "close_abs_error",
+        "open_relative_error",
+        "high_relative_error",
+        "low_relative_error",
+        "close_relative_error",
+        "all_open",
+        "all_high",
+        "all_low",
+        "all_close",
+        "all_open_abs_error",
+        "all_high_abs_error",
+        "all_low_abs_error",
+        "all_close_abs_error",
+        "all_open_relative_error",
+        "all_high_relative_error",
+        "all_low_relative_error",
+        "all_close_relative_error",
         "price_reference_scale",
         "price_max_abs_error",
         "price_max_relative_error",
+        "price_effective_max_abs_error",
+        "price_effective_max_relative_error",
         "price_quality_class",
+        "price_relative_severity",
+        "resolution_class",
+        "semantic_conflict_open",
+        "semantic_conflict_high",
+        "semantic_conflict_low",
+        "semantic_conflict_close",
         "exclude_open",
         "exclude_high",
         "exclude_low",
@@ -138,6 +164,54 @@ def _load_material_quality(
         material[column] = material[column].astype(str)
     for column in ("exclude_open", "exclude_high", "exclude_low", "exclude_close"):
         material[column] = material[column].fillna(False).astype(bool)
+    for field in PRICE_COLUMNS:
+        relative = f"{field}_relative_error"
+        if relative not in material.columns:
+            material[relative] = material[f"{field}_abs_error"].div(
+                material[f"d_{field}"].abs().clip(lower=1e-12)
+            )
+        all_value = f"all_{field}"
+        if all_value not in material.columns:
+            material[all_value] = material[f"agg_{field}"]
+        all_abs = f"all_{field}_abs_error"
+        if all_abs not in material.columns:
+            material[all_abs] = material[all_value].sub(material[f"d_{field}"]).abs()
+        all_relative = f"all_{field}_relative_error"
+        if all_relative not in material.columns:
+            material[all_relative] = material[all_abs].div(
+                material[f"d_{field}"].abs().clip(lower=1e-12)
+            )
+        semantic = f"semantic_conflict_{field}"
+        if semantic not in material.columns:
+            material[semantic] = False
+        material[semantic] = material[semantic].fillna(False).astype(bool)
+    if "price_effective_max_abs_error" not in material.columns:
+        material["price_effective_max_abs_error"] = material["price_max_abs_error"]
+    if "price_effective_max_relative_error" not in material.columns:
+        material["price_effective_max_relative_error"] = material["price_max_relative_error"]
+    if "price_relative_severity" not in material.columns:
+        material["price_relative_severity"] = material["price_quality_class"]
+    resolution_path = _quality_root(workspace_root) / "minute_cross_source_resolution.parquet"
+    if resolution_path.is_file():
+        resolution = pd.read_parquet(
+            resolution_path,
+            columns=["symbol", "trade_date", "resolution_class"],
+        )
+        resolution["symbol"] = resolution["symbol"].astype(str)
+        resolution["trade_date"] = pd.to_datetime(
+            resolution["trade_date"], errors="raise"
+        ).dt.strftime("%Y-%m-%d")
+        material = material.merge(
+            resolution,
+            on=["symbol", "trade_date"],
+            how="left",
+            validate="one_to_one",
+        )
+    if "resolution_class" not in material.columns:
+        material["resolution_class"] = "unclassified"
+    material["resolution_class"] = material["resolution_class"].fillna(
+        "unclassified"
+    )
     if material.duplicated(["symbol", "trade_date"]).any():
         raise MinuteRepairError("minute_repair_quality_evidence_duplicate")
     return material
@@ -149,6 +223,7 @@ def load_priority_targets(
     minimum_relative_error: float = DEFAULT_PRIORITY_RELATIVE_ERROR,
     maximum_relative_error: float | None = None,
     include_known_probes: bool = True,
+    include_shared_source_conflicts: bool = False,
     selection_mode: str = "priority",
 ) -> pd.DataFrame:
     """Load the small, high-value subset of already audited minute anomalies.
@@ -161,17 +236,27 @@ def load_priority_targets(
 
     material = _load_material_quality(workspace_root)
 
-    audited_anomaly = (
-        material["price_max_abs_error"].gt(PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON)
-        & material["price_max_relative_error"].gt(PRICE_RELATIVE_UNRELIABLE_THRESHOLD)
-    )
+    audited_anomaly = material[
+        ["exclude_open", "exclude_high", "exclude_low", "exclude_close"]
+    ].any(axis=1)
+    if not include_shared_source_conflicts:
+        audited_anomaly &= material["resolution_class"].ne(
+            "three_source_minute_agreement_daily_conflict"
+        )
     high_overshoot = material["agg_high"].sub(material["d_high"]).gt(
         PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON
     )
     low_overshoot = material["d_low"].sub(material["agg_low"]).gt(
         PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON
     )
-    large_error = material["price_max_relative_error"].gt(float(minimum_relative_error))
+    flagged_relative_errors = pd.concat(
+        [
+            material[f"{field}_relative_error"].where(material[f"exclude_{field}"], 0.0)
+            for field in PRICE_COLUMNS
+        ],
+        axis=1,
+    )
+    large_error = flagged_relative_errors.max(axis=1).gt(float(minimum_relative_error))
     known = pd.Series(False, index=material.index)
     if include_known_probes:
         known = pd.Series(
@@ -184,8 +269,10 @@ def load_priority_targets(
     mode = str(selection_mode).strip().lower()
     if mode == "priority":
         selected_mask = audited_anomaly & (high_overshoot | low_overshoot | large_error | known)
+    elif mode == "all":
+        selected_mask = audited_anomaly & (large_error | known)
     elif mode == "open":
-        open_relative_error = material["open_abs_error"].div(material["price_reference_scale"].clip(lower=1e-12))
+        open_relative_error = material["open_relative_error"]
         selected_mask = audited_anomaly & material["exclude_open"] & open_relative_error.gt(
             float(minimum_relative_error)
         )
@@ -919,14 +1006,26 @@ def load_provider_target_minutes(
     return data.sort_values(list(KEY_COLUMNS), kind="stable").reset_index(drop=True), sources
 
 
-def aggregate_day_prices(frame: pd.DataFrame) -> dict[str, float]:
-    """Aggregate prices exactly like the canonical daily parity audit."""
+def aggregate_day_prices(
+    frame: pd.DataFrame,
+    *,
+    use_all_rows: bool = False,
+) -> dict[str, float]:
+    """Aggregate either positive-flow or all-row official daily OHLC."""
 
     if frame.empty:
         raise MinuteRepairError("minute_repair_day_empty")
     ordered = frame.sort_values("bar_time", kind="stable")
-    flow = ordered["volume"].gt(0) | ordered["amount"].gt(0)
-    eligible = ordered.loc[flow] if bool(flow.any()) else ordered
+    if use_all_rows:
+        eligible = ordered
+    else:
+        if set(FLOW_COLUMNS).issubset(ordered.columns):
+            flow = ordered["volume"].gt(0) | ordered["amount"].gt(0)
+        elif {"provider_volume", "provider_amount"}.issubset(ordered.columns):
+            flow = ordered["provider_volume"].gt(0) | ordered["provider_amount"].gt(0)
+        else:
+            raise MinuteRepairError("minute_repair_flow_columns_missing")
+        eligible = ordered.loc[flow] if bool(flow.any()) else ordered
     return {
         "open": float(eligible.iloc[0]["open"]),
         "high": float(eligible["high"].max()),
@@ -935,12 +1034,41 @@ def aggregate_day_prices(frame: pd.DataFrame) -> dict[str, float]:
     }
 
 
-def _field_excluded(value: float, reference: float, scale: float) -> bool:
+def field_relative_error(value: float, reference: float) -> float:
+    return abs(float(value) - float(reference)) / max(abs(float(reference)), 1e-12)
+
+
+def _field_excluded(value: float, reference: float, scale: float | None = None) -> bool:
     error = abs(float(value) - float(reference))
     return bool(
         error > PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON
-        and error / max(abs(float(scale)), 1e-12) > PRICE_RELATIVE_UNRELIABLE_THRESHOLD
+        and field_relative_error(value, reference) > PRICE_RELATIVE_UNRELIABLE_THRESHOLD
     )
+
+
+def field_repair_outcome(
+    before_value: float,
+    after_value: float,
+    reference: float,
+) -> str:
+    """Classify a clearing or large-but-still-masked relative-error improvement."""
+
+    if not _field_excluded(before_value, reference):
+        return ""
+    before_error = field_relative_error(before_value, reference)
+    after_error = field_relative_error(after_value, reference)
+    if after_error + PRICE_COMPARISON_EPSILON >= before_error:
+        return ""
+    if not _field_excluded(after_value, reference):
+        return "cleared"
+    reduction = 1.0 - after_error / max(before_error, 1e-12)
+    if (
+        reduction + PRICE_COMPARISON_EPSILON >= MATERIAL_IMPROVEMENT_MIN_REDUCTION
+        and after_error <= MATERIAL_IMPROVEMENT_MAX_FINAL_RELATIVE_ERROR
+        + PRICE_COMPARISON_EPSILON
+    ):
+        return "materially_improved_mask_retained"
+    return ""
 
 
 def _candidate_session_error(local: pd.DataFrame, candidate: pd.DataFrame) -> str:
@@ -973,23 +1101,66 @@ def _rows_for_field(
     candidate: pd.DataFrame,
     *,
     daily_value: float,
+    provider_uses_own_flow: bool,
 ) -> set[str]:
-    flow = local["volume"].gt(0) | local["amount"].gt(0)
-    eligible = local.index[flow] if bool(flow.any()) else local.index
+    local_flow = local["volume"].gt(0) | local["amount"].gt(0)
+    local_eligible = local.index[local_flow] if bool(local_flow.any()) else local.index
+    if provider_uses_own_flow and {
+        "provider_volume",
+        "provider_amount",
+    }.issubset(candidate.columns):
+        provider_flow = (
+            candidate["provider_volume"].gt(0)
+            | candidate["provider_amount"].gt(0)
+        )
+        provider_eligible = (
+            candidate.index[provider_flow] if bool(provider_flow.any()) else candidate.index
+        )
+    else:
+        provider_eligible = local_eligible
     if field == "open":
-        return {str(local.loc[eligible].sort_values("bar_time", kind="stable").iloc[0]["bar_time"])}
+        result = {
+            str(
+                local.loc[local_eligible]
+                .sort_values("bar_time", kind="stable")
+                .iloc[0]["bar_time"]
+            )
+        }
+        result.add(
+            str(
+                candidate.loc[provider_eligible]
+                .sort_values("bar_time", kind="stable")
+                .iloc[0]["bar_time"]
+            )
+        )
+        return result
     if field == "close":
-        return {str(local.loc[eligible].sort_values("bar_time", kind="stable").iloc[-1]["bar_time"])}
+        result = {
+            str(
+                local.loc[local_eligible]
+                .sort_values("bar_time", kind="stable")
+                .iloc[-1]["bar_time"]
+            )
+        }
+        result.add(
+            str(
+                candidate.loc[provider_eligible]
+                .sort_values("bar_time", kind="stable")
+                .iloc[-1]["bar_time"]
+            )
+        )
+        return result
 
-    local_values = local.loc[eligible, field]
-    candidate_values = candidate.loc[eligible, field]
+    local_values = local[field]
+    candidate_values = candidate.loc[provider_eligible, field]
     result: set[str] = set()
     if field == "high":
         candidate_extreme = float(candidate_values.max())
         if float(local_values.max()) > float(daily_value) + PRICE_ABSOLUTE_TOLERANCE:
             result.update(
                 local.loc[
-                    eligible[local_values.gt(float(daily_value) + PRICE_ABSOLUTE_TOLERANCE)], "bar_time"
+                    local_values.gt(float(daily_value) + PRICE_ABSOLUTE_TOLERANCE),
+                    "bar_time",
                 ].astype(str)
             )
         elif float(local_values.max()) < float(daily_value) - PRICE_ABSOLUTE_TOLERANCE:
@@ -1000,7 +1171,8 @@ def _rows_for_field(
         if float(local_values.min()) < float(daily_value) - PRICE_ABSOLUTE_TOLERANCE:
             result.update(
                 local.loc[
-                    eligible[local_values.lt(float(daily_value) - PRICE_ABSOLUTE_TOLERANCE)], "bar_time"
+                    local_values.lt(float(daily_value) - PRICE_ABSOLUTE_TOLERANCE),
+                    "bar_time",
                 ].astype(str)
             )
         elif float(local_values.min()) > float(daily_value) + PRICE_ABSOLUTE_TOLERANCE:
@@ -1016,6 +1188,7 @@ def _proposal_for_fields(
     *,
     daily: Mapping[str, float],
     source_tag: str,
+    provider_uses_own_flow: bool,
 ) -> tuple[pd.DataFrame, set[str]]:
     proposed = local.copy()
     selected_by_field: dict[str, set[str]] = {}
@@ -1025,6 +1198,7 @@ def _proposal_for_fields(
             local,
             candidate,
             daily_value=float(daily[field]),
+            provider_uses_own_flow=provider_uses_own_flow,
         )
     changed_times = set().union(*selected_by_field.values()) if selected_by_field else set()
     if not changed_times:
@@ -1066,8 +1240,8 @@ def _proposal_valid(
     proposed: pd.DataFrame,
     *,
     baseline_aggregate: Mapping[str, float],
+    baseline_all_aggregate: Mapping[str, float],
     daily: Mapping[str, float],
-    scale: float,
     candidate_fields: set[str],
 ) -> tuple[bool, dict[str, float], set[str], str]:
     values = proposed.loc[:, PRICE_COLUMNS].to_numpy(dtype="float64", copy=False)
@@ -1081,20 +1255,38 @@ def _proposal_valid(
     if bool(invalid.any()):
         return False, {}, set(), "post_patch_ohlc_invariant_failed"
     aggregate = aggregate_day_prices(proposed)
+    all_aggregate = aggregate_day_prices(proposed, use_all_rows=True)
+    effective_baseline = {
+        field: min(
+            (float(baseline_aggregate[field]), float(baseline_all_aggregate[field])),
+            key=lambda value: abs(value - float(daily[field])),
+        )
+        for field in PRICE_COLUMNS
+    }
+    effective_aggregate = {
+        field: min(
+            (float(aggregate[field]), float(all_aggregate[field])),
+            key=lambda value: abs(value - float(daily[field])),
+        )
+        for field in PRICE_COLUMNS
+    }
     repaired: set[str] = set()
     for field in PRICE_COLUMNS:
-        before_error = abs(float(baseline_aggregate[field]) - float(daily[field]))
-        after_error = abs(float(aggregate[field]) - float(daily[field]))
+        before_error = abs(float(effective_baseline[field]) - float(daily[field]))
+        after_error = abs(float(effective_aggregate[field]) - float(daily[field]))
         if after_error > before_error + PRICE_COMPARISON_EPSILON:
-            return False, aggregate, set(), f"post_patch_daily_{field}_regressed"
+            return False, effective_aggregate, set(), f"post_patch_daily_{field}_regressed"
         if field in candidate_fields:
-            before_excluded = _field_excluded(baseline_aggregate[field], daily[field], scale)
-            after_excluded = _field_excluded(aggregate[field], daily[field], scale)
-            if before_excluded and not after_excluded and after_error + PRICE_COMPARISON_EPSILON < before_error:
+            outcome = field_repair_outcome(
+                effective_baseline[field],
+                effective_aggregate[field],
+                daily[field],
+            )
+            if outcome:
                 repaired.add(field)
     if not repaired:
-        return False, aggregate, set(), "no_flagged_field_repaired"
-    return True, aggregate, repaired, ""
+        return False, effective_aggregate, set(), "no_flagged_field_repaired"
+    return True, effective_aggregate, repaired, ""
 
 
 def evaluate_target_day(
@@ -1103,6 +1295,7 @@ def evaluate_target_day(
     provider_day: pd.DataFrame,
     *,
     source_tag: str = SOURCE_REPAIR_TAG,
+    provider_uses_own_flow: bool = False,
 ) -> tuple[dict[str, Any], pd.DataFrame]:
     """Return one decision and the minimal accepted row-level price overlay."""
 
@@ -1120,6 +1313,8 @@ def evaluate_target_day(
         decision["reason"] = "provider_session_row_count:0"
         return decision, pd.DataFrame()
     provider_required = set(KEY_COLUMNS) | set(PRICE_COLUMNS)
+    if provider_uses_own_flow:
+        provider_required.update(("provider_volume", "provider_amount"))
     provider_missing = sorted(provider_required.difference(provider_day.columns))
     if provider_missing:
         decision["reason"] = (
@@ -1137,23 +1332,35 @@ def evaluate_target_day(
         return decision, pd.DataFrame()
 
     baseline = aggregate_day_prices(local)
-    scale = float(target["price_reference_scale"])
+    baseline_all = aggregate_day_prices(local, use_all_rows=True)
     daily = {field: float(target[f"d_{field}"]) for field in PRICE_COLUMNS}
+    effective_baseline = {
+        field: min(
+            (baseline[field], baseline_all[field]),
+            key=lambda value: abs(float(value) - daily[field]),
+        )
+        for field in PRICE_COLUMNS
+    }
     flagged = {field for field in PRICE_COLUMNS if bool(target[f"exclude_{field}"])}
     if not flagged:
         decision["reason"] = "target_has_no_flagged_price_field"
         return decision, pd.DataFrame()
 
-    full_provider = local.copy()
-    for column in PRICE_COLUMNS:
-        full_provider[column] = provider[column].to_numpy()
-    provider_aggregate = aggregate_day_prices(full_provider)
+    if provider_uses_own_flow:
+        provider_aggregate = aggregate_day_prices(provider)
+    else:
+        full_provider = local.copy()
+        for column in PRICE_COLUMNS:
+            full_provider[column] = provider[column].to_numpy()
+        provider_aggregate = aggregate_day_prices(full_provider)
     candidate_fields = {
         field
         for field in flagged
-        if not _field_excluded(provider_aggregate[field], daily[field], scale)
-        and abs(provider_aggregate[field] - daily[field]) + PRICE_COMPARISON_EPSILON
-        < abs(baseline[field] - daily[field])
+        if field_repair_outcome(
+            effective_baseline[field],
+            provider_aggregate[field],
+            daily[field],
+        )
     }
     if not candidate_fields:
         decision["reason"] = "provider_does_not_clear_any_flagged_field"
@@ -1169,12 +1376,13 @@ def evaluate_target_day(
         candidate_fields,
         daily=daily,
         source_tag=source_tag,
+        provider_uses_own_flow=provider_uses_own_flow,
     )
     valid, post, repaired, error = _proposal_valid(
         proposed,
         baseline_aggregate=baseline,
+        baseline_all_aggregate=baseline_all,
         daily=daily,
-        scale=scale,
         candidate_fields=candidate_fields,
     )
     if not valid and len(candidate_fields) > 1:
@@ -1187,19 +1395,30 @@ def evaluate_target_day(
                 {field},
                 daily=daily,
                 source_tag=source_tag,
+                provider_uses_own_flow=provider_uses_own_flow,
             )
+            accepted_flow = aggregate_day_prices(accepted)
+            accepted_all = aggregate_day_prices(accepted, use_all_rows=True)
             ok, _, fixed, _ = _proposal_valid(
                 trial,
-                baseline_aggregate=aggregate_day_prices(accepted),
+                baseline_aggregate=accepted_flow,
+                baseline_all_aggregate=accepted_all,
                 daily=daily,
-                scale=scale,
                 candidate_fields={field},
             )
             if ok:
                 accepted = trial
                 repaired.update(fixed)
         proposed = accepted
-        post = aggregate_day_prices(proposed)
+        post_flow = aggregate_day_prices(proposed)
+        post_all = aggregate_day_prices(proposed, use_all_rows=True)
+        post = {
+            field: min(
+                (post_flow[field], post_all[field]),
+                key=lambda value: abs(float(value) - daily[field]),
+            )
+            for field in PRICE_COLUMNS
+        }
         changed_times = set(
             proposed.loc[
                 proposed.loc[:, PRICE_COLUMNS].ne(local.loc[:, PRICE_COLUMNS]).any(axis=1), "bar_time"
@@ -1227,19 +1446,39 @@ def evaluate_target_day(
     changed["provider_close"] = changed["bar_time"].map(provider_index["close"])
     changed["repaired_fields"] = ",".join(sorted(repaired))
 
+    cleared = {
+        field
+        for field in repaired
+        if not _field_excluded(post[field], daily[field])
+    }
+    masked = repaired.difference(cleared)
     decision.update(
         {
             "status": "accepted",
-            "reason": "provider_price_overlay_clears_daily_quality_mask",
+            "reason": (
+                "provider_price_overlay_clears_daily_quality_mask"
+                if not masked
+                else "provider_price_overlay_materially_reduces_relative_error"
+            ),
             "repaired_fields": ",".join(sorted(repaired)),
+            "cleared_fields": ",".join(sorted(cleared)),
+            "improved_masked_fields": ",".join(sorted(masked)),
             "changed_row_count": int(len(changed)),
         }
     )
     for field in PRICE_COLUMNS:
         decision[f"baseline_{field}"] = baseline[field]
+        decision[f"baseline_all_{field}"] = baseline_all[field]
         decision[f"provider_{field}"] = provider_aggregate[field]
         decision[f"post_{field}"] = post[field]
         decision[f"daily_{field}"] = daily[field]
+        before_relative = field_relative_error(effective_baseline[field], daily[field])
+        after_relative = field_relative_error(post[field], daily[field])
+        decision[f"baseline_{field}_relative_error"] = before_relative
+        decision[f"post_{field}_relative_error"] = after_relative
+        decision[f"{field}_relative_error_reduction"] = (
+            1.0 - after_relative / max(before_relative, 1e-12)
+        )
     return decision, changed.reset_index(drop=True)
 
 
@@ -1250,6 +1489,7 @@ def evaluate_target_set(
     provider_sources: pd.DataFrame,
     *,
     source_tag: str = SOURCE_REPAIR_TAG,
+    provider_uses_own_flow: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     local_groups = {(str(key[0]), str(key[1])): value for key, value in local.groupby(["symbol", "trade_date"])}
     provider_groups = {
@@ -1278,6 +1518,7 @@ def evaluate_target_set(
                 local_day,
                 provider_day,
                 source_tag=source_tag,
+                provider_uses_own_flow=provider_uses_own_flow,
             )
         source = sources.get(key, {})
         decision.update(
@@ -1349,6 +1590,8 @@ __all__ = [
     "download_target_batches",
     "evaluate_target_day",
     "evaluate_target_set",
+    "field_relative_error",
+    "field_repair_outcome",
     "load_cached_target_batches",
     "load_explicit_targets",
     "load_local_target_minutes",

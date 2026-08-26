@@ -424,6 +424,55 @@ def test_parity_audit_uses_five_cent_relative_and_field_level_price_policy(tmp_p
     assert exclusions["severity"].tolist() == ["unreliable", "severe"]
 
 
+def test_parity_audit_reclassifies_zero_flow_official_ohlc_as_semantic(tmp_path: Path) -> None:
+    bars_path = tmp_path / "bars.parquet"
+    daily_path = tmp_path / "daily.parquet"
+    output_dir = tmp_path / "quality"
+    output_dir.mkdir()
+    pd.DataFrame(
+        {
+            "symbol": ["600000.SH", "600000.SH"],
+            "trade_date": ["2025-01-02", "2025-01-02"],
+            "bar_time": ["093000000", "093100000"],
+            "open": [10.0, 12.0],
+            "high": [12.0, 12.0],
+            "low": [10.0, 12.0],
+            "close": [12.0, 12.0],
+            "volume": [0.0, 100.0],
+            "amount": [0.0, 1200.0],
+        }
+    ).to_parquet(bars_path, index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["600000.SH"],
+            "trade_date": ["2025-01-02"],
+            "open": [10.0],
+            "high": [12.0],
+            "low": [10.0],
+            "close": [12.0],
+            "volume": [100.0],
+            "amount": [1200.0],
+        }
+    ).to_parquet(daily_path, index=False)
+
+    result = parity_audit(
+        continuous_paths=[bars_path],
+        auction_paths=[],
+        daily_paths=[daily_path],
+        year=2025,
+        output_dir=output_dir,
+        final_quality_dir=output_dir,
+    )
+
+    assert result["minute_feature_exclusion_rows"] == 0
+    assert result["minute_semantic_conflict_rows"] == 1
+    semantic = pd.read_parquet(output_dir / "minute_semantic_conflicts.parquet")
+    assert semantic.loc[0, "semantic_conflict_open"]
+    assert semantic.loc[0, "semantic_conflict_low"]
+    assert not semantic.loc[0, "semantic_conflict_high"]
+    assert not semantic.loc[0, "semantic_conflict_close"]
+
+
 def test_formal_import_appends_only_absent_year_partitions(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     root = _write_daily_fixture(workspace, (2024, 2025))

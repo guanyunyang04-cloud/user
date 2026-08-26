@@ -17,6 +17,8 @@ from quantlab.data.core.paths import qdp_paths
 from quantlab.data.minute_archive.quality import (
     PRICE_ABSOLUTE_TOLERANCE,
     PRICE_COMPARISON_EPSILON,
+    PRICE_RELATIVE_SEVERE_THRESHOLD,
+    PRICE_RELATIVE_UNRELIABLE_THRESHOLD,
     parity_audit,
     qdp_daily_paths,
 )
@@ -37,6 +39,7 @@ _PARITY_ARTIFACT_NAMES = (
     "daily_parity_material_mismatches.parquet",
     "minute_feature_exclusions.parquet",
     "daily_reference_missing_minute.parquet",
+    "minute_semantic_conflicts.parquet",
 )
 _QUALITY_COUNT_KEYS = (
     "price_over_five_cent_rows",
@@ -45,6 +48,12 @@ _QUALITY_COUNT_KEYS = (
     "price_severe_rows",
     "minute_feature_exclusion_rows",
     "total_minute_feature_exclusion_rows",
+    "minute_semantic_conflict_rows",
+    "price_soft_warning_rows",
+    "price_medium_rows",
+    "price_high_rows",
+    "price_priority_rows",
+    "price_critical_rows",
 )
 DEFAULT_REPAIR_PROVIDER = "tushare_compatible_stk_mins"
 DEFAULT_REPAIR_REASON = "targeted Tushare-compatible historical minute price repair"
@@ -348,7 +357,11 @@ def _backup_quality_year(
     source_dir = _quality_directory(workspace_root, year)
     target_dir = run_dir / "backup_pre_repair" / "quality" / f"year={int(year)}"
     names = ("audit.json", *_PARITY_ARTIFACT_NAMES)
-    return [_backup_file(source_dir / name, target_dir / name) for name in names]
+    return [
+        _backup_file(source_dir / name, target_dir / name)
+        for name in names
+        if (source_dir / name).is_file()
+    ]
 
 
 def _quality_counts(quality: Mapping[str, Any]) -> dict[str, Any]:
@@ -402,6 +415,7 @@ def re_audit_affected_years(
             year=year,
             output_dir=temporary_dir,
             final_quality_dir=quality_dir,
+            check_primary_key_duplicates=False,
         )
         for name in _PARITY_ARTIFACT_NAMES:
             atomic_copy_file(temporary_dir / name, quality_dir / name)
@@ -444,7 +458,30 @@ def _validate_reaudit_artifacts(directory: Path) -> None:
             raise MinuteRepairError(f"minute_repair_reaudit_artifact_invalid:{path}:{exc}") from exc
 
 
+def _ensure_legacy_semantic_artifact(directory: Path) -> None:
+    """Upgrade a completed pre-semantic reaudit cache without rescanning shards."""
+
+    path = directory / "minute_semantic_conflicts.parquet"
+    if path.is_file():
+        return
+    pd.DataFrame(
+        columns=[
+            "symbol",
+            "trade_date",
+            "semantic_conflict_open",
+            "semantic_conflict_high",
+            "semantic_conflict_low",
+            "semantic_conflict_close",
+            "semantic_reason",
+        ]
+    ).to_parquet(path, index=False, engine="pyarrow", compression="zstd")
+
+
 def _reaudit_artifacts_valid(directory: Path) -> bool:
+    legacy_required = _PARITY_ARTIFACT_NAMES[:3]
+    if not all((directory / name).is_file() for name in legacy_required):
+        return False
+    _ensure_legacy_semantic_artifact(directory)
     try:
         _validate_reaudit_artifacts(directory)
     except MinuteRepairError:
@@ -481,12 +518,21 @@ def _metrics_from_reaudit_artifacts(
     *,
     final_quality_dir: Path,
 ) -> dict[str, Any]:
+    _ensure_legacy_semantic_artifact(directory)
     _validate_reaudit_artifacts(directory)
     material = pd.read_parquet(directory / "daily_parity_material_mismatches.parquet")
     exclusions = pd.read_parquet(directory / "minute_feature_exclusions.parquet")
     missing = pd.read_parquet(directory / "daily_reference_missing_minute.parquet")
+    semantic = pd.read_parquet(directory / "minute_semantic_conflicts.parquet")
+    max_abs_column = (
+        "price_effective_max_abs_error"
+        if "price_effective_max_abs_error" in material.columns
+        else "price_max_abs_error"
+    )
     price_over = int(
-        material["price_max_abs_error"].gt(PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON).sum()
+        material[max_abs_column]
+        .gt(PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON)
+        .sum()
     )
     severe = int(exclusions["severity"].astype(str).eq("severe").sum())
     unreliable = int(len(exclusions))
@@ -500,6 +546,27 @@ def _metrics_from_reaudit_artifacts(
         "minute_feature_exclusions_path": str(
             (final_quality_dir / "minute_feature_exclusions.parquet").resolve()
         ),
+        "price_absolute_tolerance": PRICE_ABSOLUTE_TOLERANCE,
+        "price_relative_unreliable_threshold": PRICE_RELATIVE_UNRELIABLE_THRESHOLD,
+        "price_relative_severe_threshold": PRICE_RELATIVE_SEVERE_THRESHOLD,
+        "price_relative_error_denominator": "matching_absolute_daily_ohlc_field",
+        "price_aggregation_policy": (
+            "tradeable OHLC uses positive-flow rows; a field is price-unreliable only when "
+            "both positive-flow and all-row official OHLC exceed tolerance"
+        ),
+        "minute_semantic_conflict_rows": int(len(semantic)),
+        "minute_semantic_conflicts_path": str(
+            (final_quality_dir / "minute_semantic_conflicts.parquet").resolve()
+        ),
+        **{
+            f"price_{label}_rows": int(
+                material.get("price_relative_severity", pd.Series(dtype=str))
+                .astype(str)
+                .eq(label)
+                .sum()
+            )
+            for label in ("soft_warning", "medium", "high", "priority", "critical")
+        },
         "daily_reference_missing_minute_rows": int(len(missing)),
         "daily_reference_missing_minute_path": str(
             (final_quality_dir / "daily_reference_missing_minute.parquet").resolve()
@@ -527,9 +594,13 @@ def finish_existing_reaudits(
         audit_path = quality_dir / "audit.json"
         audit = _read_json(audit_path)
         complete = str(audit.get("last_targeted_minute_repair_run", "")) == output.name
-        backup_names = ("audit.json", *_PARITY_ARTIFACT_NAMES)
+        # The semantic artifact was introduced after the original archive; it
+        # cannot be required in backups created before the first policy refresh.
+        backup_names = ("audit.json", *_PARITY_ARTIFACT_NAMES[:3])
         missing_backup_names = [
-            name for name in backup_names if not (backup_dir / name).is_file()
+            name
+            for name in backup_names
+            if (quality_dir / name).is_file() and not (backup_dir / name).is_file()
         ]
         if missing_backup_names:
             if complete:
@@ -563,6 +634,7 @@ def finish_existing_reaudits(
                     year=year,
                     output_dir=temporary_dir,
                     final_quality_dir=quality_dir,
+                    check_primary_key_duplicates=False,
                 )
             for name in _PARITY_ARTIFACT_NAMES:
                 atomic_copy_file(temporary_dir / name, quality_dir / name)
@@ -612,6 +684,12 @@ def _aggregate_quality(workspace_root: str | Path | None) -> dict[str, Any]:
         "price_warning_rows": total("price_warning_rows"),
         "price_unreliable_rows": total("price_unreliable_rows"),
         "price_severe_rows": total("price_severe_rows"),
+        "minute_semantic_conflict_rows": total("minute_semantic_conflict_rows"),
+        "price_soft_warning_rows": total("price_soft_warning_rows"),
+        "price_medium_rows": total("price_medium_rows"),
+        "price_high_rows": total("price_high_rows"),
+        "price_priority_rows": total("price_priority_rows"),
+        "price_critical_rows": total("price_critical_rows"),
         "session_feature_exclusion_rows": total("session_feature_exclusion_rows"),
         "stock_day_count": total("stock_day_count"),
         "unexplained_incomplete_stock_days": total("unexplained_incomplete_stock_days"),

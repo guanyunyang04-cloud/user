@@ -138,18 +138,23 @@ dedicated producer code has been retired.
   retained but excluded from session features. No missing minute is silently
   interpolated.
 - The older 2000-2025 ZIP is not uniformly exchange-grade for intraminute
-  prices. After three evidence-gated repairs, 427,727 stock-days exceed the
-  agreed absolute tolerance of 0.05 currency units. Of these, 247,714 stay as
-  warnings because the maximum error is at most 0.5% of the maximum absolute
-  daily OHLC; 180,013 are field-level unreliable observations, including
-  56,122 above 1%. The former one-cent exclusion rule is retired.
-- Price evidence is field-level rather than a stock-day deletion. Among the
-  180,013 unreliable rows, 126,805 affect only high/low, 46,863 affect only
-  open/close (almost entirely open), and 6,345 affect both groups. Annual
-  `minute_feature_exclusions.parquet` files now carry explicit
-  `exclude_open/high/low/close` masks. Volume and amount retain independent
-  relative-error audits. A full-session parity outcome is not causal before
-  the close and must never be supplied to a same-day intraday model.
+  prices. After the evidence-gated Tushare and purchased-local repairs, 302,765
+  stock-days still exceed the 0.05-currency-unit comparison tolerance. Of
+  these, 247,661 are at or below 0.5% and remain warnings; 55,104 carry at
+  least one field-level exclusion. That is 0.4006% of the 13,756,395 audited
+  stock-days. The remaining relative-error tiers are 35,548 in `(0.5%, 1%]`,
+  15,429 in `(1%, 2%]`, 3,693 in `(2%, 5%]`, 402 in `(5%, 10%]`, and 32 above
+  10%. The former one-cent and absolute-only exclusion rules are retired.
+- Price evidence is field-level rather than a stock-day deletion. The current
+  exclusions affect open on 28,560 stock-days, high on 9,038, low on 18,069,
+  and close on 51; fields may overlap on one day. Annual
+  `minute_feature_exclusions.parquet` files carry explicit
+  `exclude_open/high/low/close` masks. Another 11,233 stock-days are recorded
+  separately as zero-flow/09:30 semantic conflicts because the official
+  all-row OHLC agrees with the daily reference even though the positive-flow
+  aggregation does not. Volume and amount retain independent relative-error
+  audits. A full-session parity outcome is not causal before the close and
+  must never be supplied to a same-day intraday model.
 - Recent source quality is much stronger. Under the new policy, 2025 has five
   rows above 0.05 (three field-level unreliable), and the available 2026 tail
   has two (one unreliable). The 2026
@@ -201,6 +206,9 @@ dedicated producer code has been retired.
   found no problems and no bad sectors; the volume now reports
   `HealthStatus=Healthy`, `OperationalStatus=OK`, and `fsutil dirty query H:`
   returns `NOT Dirty`. The 2026-08-23 takeover check found 784.73 GiB free.
+  After the 2026-08-26 verified minute-repair cleanup, H: has approximately
+  824.85 GiB free: 5,341 reproducible raw/prepared/backup/re-audit files with
+  43.94 GiB logical size released 51.11 GiB of allocated space.
   H: is exFAT, so the QDP migration cannot rely on NTFS hard links or metadata
   journaling. It needs a resumable move journal and per-domain validation before
   each commit point, especially because no full duplicate data backup is planned.
@@ -282,8 +290,9 @@ dedicated producer code has been retired.
   4,350 open errors in `(1%, 2%]`. In total it changed 5,048 minute rows and
   removed 4,878 stock-days from the unreliable set. Every accepted row has a
   captured provider response and SHA-256, a complete 241-row session, daily
-  parity evidence, a pre-install backup and an annual re-audit. Volume and
-  amount were retained from QDP. Continuous and auction row counts remain
+  parity evidence and an annual re-audit. Runtime captures, prepared shards
+  and full pre-install copies may be discarded after installed-value and QDP
+  checks pass. Volume and amount were retained from QDP. Continuous and auction row counts remain
   3,301,495,126 and 13,756,395, with 200 shards in each domain; verified status
   and the quick QDP check are both `ok`.
 - Five explicit fallback runs on 2026-08-25 then evaluated 32,518 unique
@@ -340,40 +349,44 @@ dedicated producer code has been retired.
   the 53 sessions where BaoStock itself reproduced the trusted daily extreme,
   52 used the same five-minute bucket as the local source. The combined gate
   passed.
-- The two local runs removed 109,935 stock-days from the unreliable set. The
-  immediate post-local audit had 70,078 price-unreliable days and 25,867
-  severe days; including 125 session exclusions, the total minute-feature
-  exclusion count is 70,203. Continuous and auction domains remain at
-  3,301,495,126 and
-  13,756,395 rows with 200 shards each. Verified status and the quick QDP check
-  are both `ok`.
-- The original all-target scan is retained with the fallback evidence: 41
-  stock-days are absent from the local archive and 14 contain an invalid price
-  row. A consolidated 53,121-stock-day queue is ready for later targeted
-  `stk_mins` repair; the other 16,957 unresolved days retain their current
-  masks. Evidence and hashes are under
-  `data/qdp/source_archives/external_quant_data/minute_repair/`. This purchased
-  archive is minute-only for QDP purposes. It was not used to extend or repair
-  the daily, factor, status, limit or valuation domains.
-- The 2026-08-25/26 Tushare fallback reduced the consolidated queue from
-  53,121 to 44,918 current stock-days and reduced the global
-  price-unreliable count to 61,875. Severe remains 25,867; with 125 session
-  exclusions, the total minute-feature exclusion count is 62,000. Of the
-  remaining queue, 1,554 high/low-only stock-days are unattempted, 43,329 were
-  tried without an accepted improvement, and 35 accepted partial repairs
-  retain another field mask.
-  Resumable queue files and run accounting are under
-  `data/qdp/source_archives/external_quant_data/minute_repair/tushare_fallback_after_local_20260825/`.
+- On 2026-08-26 the audit policy was tightened around per-field relative error
+  and all-row versus positive-flow semantics. A first local pass considered
+  582 current errors above roughly 5%, accepted 152 stock-days and changed 231
+  minute rows; 142 cleared their selected mask and ten were retained as
+  materially improved because error fell by at least 90% to at most 1%. A
+  second queue required a complete 241-row source session and purchased-source
+  volume/amount aggregation within 0.1% of the daily reference. It evaluated
+  12,205 stock-days, accepted 11,934 and changed 17,743 minute rows; 271 failed
+  the non-regression gates. Across all purchased-local runs, 132,307 minute
+  rows have now been installed. QDP volume and amount were never replaced.
+- The final audit has 55,104 price-excluded stock-days plus 125 independent
+  session exclusions. Continuous and auction domains remain at 3,301,495,126
+  and 13,756,395 rows with 200 shards each. Installed-value verification and
+  the quick QDP check are both `ok`; no primary key, row count or shard count
+  changed.
+- Current cross-source classification covers all 55,104 excluded stock-days:
+  QDP, the purchased archive and the latest reusable Tushare evidence agree to
+  the cent on every flagged field for 35,275, so those rows default to
+  `three_source_minute_agreement_daily_conflict` and are not downloaded or
+  overwritten again. Another 10,698 have mixed source evidence, 8,175 lack
+  complete three-source coverage, 950 still look clearable from the purchased
+  source, and six look clearable from Tushare. These are evidence classes, not
+  automatic install authorization; the 241-row, daily-parity and non-regression
+  gates still apply. Evidence is under
+  `data/qdp/source_archives/external_quant_data/minute_repair/` and
+  `data/qdp/source_archives/minute/quality/minute_cross_source_resolution.parquet`.
+  The purchased archive remains minute-only and was not used for daily, factor,
+  status, limit or valuation domains.
 
 ## Immediate next action
 
-1. Do not resume the slow bulk `open_d38bfb1ac3abe97a` download and do not issue
-   another bulk Tushare minute run. Every remaining unattempted fallback row is
-   high/low-only, where this compatible source's measured hit rate was
-   effectively zero. Keep the 44,918 unresolved queue masks until a genuinely
-   independent historical source is available. Daily/factor/basic and PIT
-   auxiliary tails remain separate and must continue through the existing
-   local/free-source update path.
+1. Do not resume the obsolete slow bulk `open_d38bfb1ac3abe97a` download. The
+   default target loader now skips the 35,275 exact three-source agreements.
+   If minute repair is revisited, start only with the 950 purchased-source and
+   six Tushare clear-candidate classes, then the 10,698 mixed cases, and retain
+   every mask unless the current field-level gates pass. Daily/factor/basic and
+   PIT auxiliary tails remain separate and continue through the existing local
+   or free-source update path.
 2. Finish the QDP storage migration before starting another large model run.
    Rename the code namespace to `quantlab.data.qdp`, move the physical QDP root
    up one level without copying the 42-GiB store, flatten each active domain to

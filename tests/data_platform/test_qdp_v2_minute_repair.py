@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 import pyarrow.parquet as pq
+import pytest
 
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
@@ -136,6 +137,75 @@ def test_evaluate_target_day_can_repair_one_field_and_keep_another_masked() -> N
     assert decision["post_high"] == 11.0
     assert decision["post_low"] == 10.0
     assert changes["bar_time"].tolist() == ["141000000"]
+
+
+def test_evaluate_target_day_accepts_material_improvement_and_retains_mask() -> None:
+    local = _session()
+    row = local.index[local["bar_time"].eq("150000000")].item()
+    local.loc[row, ["open", "high"]] = 110.0
+    provider = _provider(local)
+    provider.loc[row, ["open", "high", "low", "close"]] = [10.0, 10.08, 10.0, 10.0]
+
+    decision, changes = evaluate_target_day(_target(), local, provider)
+
+    assert decision["status"] == "accepted"
+    assert decision["reason"] == "provider_price_overlay_materially_reduces_relative_error"
+    assert decision["cleared_fields"] == ""
+    assert decision["improved_masked_fields"] == "high"
+    assert decision["post_high_relative_error"] == pytest.approx(0.008)
+    assert decision["high_relative_error_reduction"] > 0.99
+    assert changes["bar_time"].tolist() == ["150000000"]
+
+
+def test_evaluate_target_day_can_use_provider_own_flow_for_price_eligibility() -> None:
+    local = _session()
+    auction = local.index[local["bar_time"].eq("093000000")].item()
+    first_trade = local.index[local["bar_time"].eq("093100000")].item()
+    local.loc[:, ["open", "high", "low", "close"]] = 20.0
+    local.loc[auction, ["volume", "amount"]] = 0.0
+    provider = local.loc[
+        :, ["symbol", "trade_date", "bar_time", "open", "high", "low", "close", "volume", "amount"]
+    ].copy()
+    provider = provider.rename(
+        columns={"volume": "provider_volume", "amount": "provider_amount"}
+    )
+    provider.loc[
+        auction,
+        ["open", "high", "low", "close", "provider_volume", "provider_amount"],
+    ] = [
+        10.0,
+        10.0,
+        10.0,
+        10.0,
+        1.0,
+        10.0,
+    ]
+    provider.loc[first_trade, ["open", "high", "low", "close"]] = 20.0
+    target = _target(
+        d_open=10.0,
+        d_high=20.0,
+        d_low=10.0,
+        d_close=20.0,
+        agg_open=20.0,
+        agg_high=20.0,
+        agg_low=20.0,
+        agg_close=20.0,
+        exclude_open=True,
+        exclude_high=False,
+    )
+
+    rejected, _ = evaluate_target_day(target, local, provider)
+    accepted, changes = evaluate_target_day(
+        target,
+        local,
+        provider,
+        provider_uses_own_flow=True,
+    )
+
+    assert rejected["status"] == "rejected"
+    assert accepted["status"] == "accepted"
+    assert accepted["cleared_fields"] == "open"
+    assert changes["bar_time"].tolist() == ["093000000"]
 
 
 def test_evaluate_target_day_requires_a_complete_exact_session() -> None:
@@ -377,6 +447,59 @@ def test_load_priority_targets_selects_envelope_and_large_errors(tmp_path: Path)
         "600001.SH": "outside_daily_price_envelope",
         "600002.SH": "relative_error_above_priority_threshold",
     }
+
+
+def test_load_priority_targets_skips_three_source_agreement_by_default(
+    tmp_path: Path,
+) -> None:
+    quality_root = (
+        tmp_path / "data" / "qdp" / "source_archives" / "minute" / "quality"
+    )
+    quality = quality_root / "year=2010"
+    quality.mkdir(parents=True)
+    rows = pd.DataFrame(
+        [
+            _quality_row(
+                "600001.SH", "2010-01-04", high=11.0, daily_high=10.0, relative=0.10
+            ),
+            _quality_row(
+                "600002.SH", "2010-01-05", high=11.0, daily_high=10.0, relative=0.10
+            ),
+        ]
+    )
+    rows.to_parquet(quality / "daily_parity_material_mismatches.parquet", index=False)
+    pd.DataFrame(
+        [
+            {
+                "symbol": "600001.SH",
+                "trade_date": "2010-01-04",
+                "resolution_class": "three_source_minute_agreement_daily_conflict",
+            },
+            {
+                "symbol": "600002.SH",
+                "trade_date": "2010-01-05",
+                "resolution_class": "mixed_sources_require_arbitration",
+            },
+        ]
+    ).to_parquet(
+        quality_root / "minute_cross_source_resolution.parquet",
+        index=False,
+    )
+
+    default = load_priority_targets(
+        tmp_path,
+        minimum_relative_error=0.05,
+        include_known_probes=False,
+    )
+    including_agreement = load_priority_targets(
+        tmp_path,
+        minimum_relative_error=0.05,
+        include_known_probes=False,
+        include_shared_source_conflicts=True,
+    )
+
+    assert default["symbol"].tolist() == ["600002.SH"]
+    assert including_agreement["symbol"].tolist() == ["600001.SH", "600002.SH"]
 
 
 def test_load_priority_targets_can_select_only_open_field_errors(tmp_path: Path) -> None:

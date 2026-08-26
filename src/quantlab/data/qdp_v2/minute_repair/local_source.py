@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import re
@@ -19,7 +20,6 @@ from quantlab.core.io import sha256_file, stable_hash, write_json
 from quantlab.data.minute_archive.quality import (
     PRICE_ABSOLUTE_TOLERANCE,
     PRICE_COMPARISON_EPSILON,
-    PRICE_RELATIVE_UNRELIABLE_THRESHOLD,
 )
 
 from .candidate import (
@@ -32,6 +32,7 @@ from .candidate import (
     _domain_shards,
     _saved_batch_valid,
     evaluate_target_set,
+    field_repair_outcome,
     load_local_target_minutes,
     load_provider_target_minutes,
 )
@@ -330,15 +331,6 @@ def prepare_local_aggregate_evidence(
     }
 
 
-def _field_excluded(value: float, reference: float, scale: float) -> bool:
-    error = abs(float(value) - float(reference))
-    return bool(
-        error > PRICE_ABSOLUTE_TOLERANCE + PRICE_COMPARISON_EPSILON
-        and error / max(abs(float(scale)), 1e-12)
-        > PRICE_RELATIVE_UNRELIABLE_THRESHOLD
-    )
-
-
 def prefilter_local_candidates(
     targets: pd.DataFrame,
     aggregates: pd.DataFrame,
@@ -374,11 +366,10 @@ def prefilter_local_candidates(
                 provider_value = float(row[f"ext_{field}"])
                 daily_value = float(row[f"d_{field}"])
                 baseline_value = float(row[f"agg_{field}"])
-                scale = float(row["price_reference_scale"])
-                if (
-                    not _field_excluded(provider_value, daily_value, scale)
-                    and abs(provider_value - daily_value) + PRICE_COMPARISON_EPSILON
-                    < abs(baseline_value - daily_value)
+                if field_repair_outcome(
+                    baseline_value,
+                    provider_value,
+                    daily_value,
                 ):
                     candidate_fields.append(field)
             if not candidate_fields:
@@ -592,7 +583,7 @@ def evaluate_local_candidates(
     batches: Sequence[TargetBatch],
     *,
     workspace_root: str | Path | None = None,
-    chunk_stock_days: int = 5000,
+    chunk_stock_days: int = 1000,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run the existing exact-session evaluator in bounded-memory chunks."""
 
@@ -610,10 +601,13 @@ def evaluate_local_candidates(
             provider,
             sources,
             source_tag=LOCAL_SOURCE_TAG,
+            provider_uses_own_flow=True,
         )
         decision_parts.append(decisions)
         if not changes.empty:
             change_parts.append(changes)
+        del local, provider, sources, decisions, changes, selected, narrowed
+        gc.collect()
     decisions = pd.concat(decision_parts, ignore_index=True) if decision_parts else pd.DataFrame()
     changes = pd.concat(change_parts, ignore_index=True) if change_parts else pd.DataFrame()
     if not changes.empty and changes.duplicated(list(KEY_COLUMNS)).any():

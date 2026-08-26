@@ -49,8 +49,9 @@ targeted minute rows. Six later explicit fallback runs evaluated the local
 archive's unresolved queue and installed another 8,238 rows, bringing the
 cumulative Tushare-compatible total to 13,286. QDP volume and amount were
 retained; the continuous/auction row counts and primary keys are unchanged.
-Raw responses, hashes, decisions, backups, and annual re-audits live under
-`data/qdp/source_archives/tushare_compatible/minute_repair/`. The provider also
+Compact targets, hashes, decisions and annual re-audit results live under
+`data/qdp/source_archives/tushare_compatible/minute_repair/`; bulky runtime
+captures and full pre-install copies may be discarded after verification. The provider also
 enforces a separate 20,000-call daily limit for `stk_mins`, and HTTP 429 is a
 terminal, resumable condition rather than an item-by-item retry. iQuant is
 treated as a runtime and execution source, not as the sole
@@ -69,22 +70,25 @@ is used only as a historical minute-repair source. Its inventory contains
 5,826 canonical per-symbol Parquet files; 43 parenthesized duplicate files are
 explicitly excluded. The adapter reads each symbol once, normalizes the source
 schema, extracts only audited stock-days, and reuses the existing 241-row,
-daily-parity, OHLC, flow-preservation, backup, CAS-install and annual re-audit
+daily-parity, OHLC, flow-preservation, CAS-install and annual re-audit
 gates. Two sequential local-source batches installed 6,172 open-row repairs
-and 108,161 high/low row-level repairs. They removed 109,935 stock-days from
-the unreliable set, initially leaving 70,078 price-unreliable days, of which
-25,867 were severe. The subsequent targeted Tushare fallback cleared another
-8,203 stock-days, leaving 61,875 price-unreliable days and the same 25,867
-severe days. Volume and amount were not replaced. The high/low timing gate
+and 108,161 high/low row-level repairs. Two later relative-error/own-flow runs
+installed another 17,974 rows, bringing the purchased-source total to 132,307.
+The final audit has 55,104 field-level price-excluded stock-days, 0.4006% of
+the 13,756,395 audited stock-days, plus 125 independent session exclusions.
+The relative-error tiers are 35,548 in `(0.5%, 1%]`, 15,429 in `(1%, 2%]`,
+3,693 in `(2%, 5%]`, 402 in `(5%, 10%]`, and 32 above 10%. Volume and amount
+were not replaced. The high/low timing gate
 passed: the local one-minute source reproduced the trusted daily extreme on
 261/263 samples. Independently reliable BaoStock sessions placed it in the
 same five-minute bucket in 52/53 cases. Evidence is under
-`data/qdp/source_archives/external_quant_data/minute_repair/`. The original
-53,121-stock-day Tushare fallback snapshot now has 44,918 current members:
-1,554 high/low-only rows have not been attempted, 43,329 were attempted
-without an accepted improvement, and 35 accepted partial repairs retain
-another price mask. A further 16,957 unreliable stock-days remain outside that
-queue.
+`data/qdp/source_archives/external_quant_data/minute_repair/`. The cross-source
+resolution artifact classifies every remaining excluded stock-day: 35,275 are
+exact three-source minute agreements against a conflicting daily aggregate,
+10,698 need mixed-source arbitration, 8,175 lack complete source coverage, 950
+remain purchased-source clear candidates, and six remain Tushare clear
+candidates. Exact three-source agreements are skipped by default instead of
+being repeatedly downloaded or blindly overwritten.
 
 PIT restore provenance in the active QDP manifest is stored relative to the
 workspace (`path_base=workspace_root`), so moving the project does not leave

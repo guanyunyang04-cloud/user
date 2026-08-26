@@ -132,6 +132,8 @@ def _restrict_fields(targets: pd.DataFrame, selection_mode: str) -> pd.DataFrame
     elif mode == "high-low":
         selected["exclude_open"] = False
         selected["exclude_close"] = False
+    elif mode == "all":
+        pass
     else:
         raise ValueError(f"minute_repair_local_selection_mode_invalid:{selection_mode}")
     return selected
@@ -307,7 +309,7 @@ def run_local_parquet_minute_repair(
     """Evaluate and optionally install local-source historical minute repairs."""
 
     mode = str(selection_mode).strip().lower()
-    if mode not in {"open", "high-low"}:
+    if mode not in {"open", "high-low", "all"}:
         raise ValueError(f"minute_repair_local_selection_mode_invalid:{selection_mode}")
     workspace = qdp_paths(workspace_root).workspace_root
     source_root = Path(local_minute_root).resolve()
@@ -422,8 +424,14 @@ def run_local_parquet_minute_repair(
         "high_low_daily_extreme_policy": (
             "provider_extreme_must_equal_daily_reference_exactly"
             if mode == "high-low"
-            else "not_applicable"
+            else (
+                "relative_error_reduction_at_least_90_percent_and_final_at_most_1_percent"
+                if mode == "all"
+                else "not_applicable"
+            )
         ),
+        "provider_price_eligibility": "external_source_positive_volume_or_amount",
+        "installed_flow_policy": "retain_existing_qdp_volume_and_amount",
     }
     config_path = run_dir / "run_config.json"
     write_json(config_path, config)
