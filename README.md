@@ -129,10 +129,11 @@ The active minute research pipeline is `quantlab.research.minute_v2`. It uses
 causal features at every eligible minute, next-bar entry, ordinary-share T+1,
 field-level QDP quality masks and physically separate outcome labels. The
 retained 2022-06 pilot now enforces 60 completed daily observations, carries
-optional 120/240-day context, computes causal 5/10/20/30/60/120-minute features,
-and stores 5/15/30/60-minute plus 1/3/5/10-day outcomes. Training rows are
-complete market cross-sections selected from measured row width and RAM, not
-individual event rows.
+optional 120/240-day context, computes causal 1-minute and fixed-boundary
+60-minute features with 5/10/20/30/60/120/240 moving-average periods, and stores
+5/15/30/60-minute plus 1/3/5/10-day outcomes. The base artifact keeps every
+234 decision minute for every eligible stock; the causal candidate gate then
+retains the stocks that merit full label/model work at each minute.
 
 ```powershell
 $env:PYTHONPATH='H:\quant_project\src'
@@ -143,9 +144,9 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
   --manifest H:/quant_project/data/research/minute_v2/months/year=2022/month=06/manifest.json
 ```
 
-`data/research/minute_v2_dev` and `runs/minute_v2_v1` were built under the old
-event-gated feature contract. They are retained only as historical evidence and
-must be rebuilt before the current training code is used.
+The old derived `data/research/minute_v2_dev` and `runs/minute_v2_v1` trees were
+removed before this rebuild because they were reproducible products under an
+obsolete contract. QDP source data and repair evidence were not touched.
 
 Local iQuant K-line files can be sampled without a trading connection. The
 adapter validates the binary layout and records all inferred units before

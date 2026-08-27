@@ -1,4 +1,4 @@
-"""Future outcomes kept physically separate from causal minute features."""
+"""Physically separate continuous-minute, same-session, and holding labels."""
 
 from __future__ import annotations
 
@@ -9,10 +9,14 @@ import duckdb
 import pandas as pd
 
 from .contracts import (
+    AFTERNOON_DECISION_END,
+    AFTERNOON_DECISION_START,
     EXIT_WINDOW_END,
     EXIT_WINDOW_START,
     KEY_COLUMNS,
     MAXIMUM_DAILY_LABEL_HORIZON,
+    MORNING_DECISION_END,
+    MORNING_DECISION_START,
     MinuteV2Config,
     MinuteV2Error,
 )
@@ -47,11 +51,31 @@ MINUTE_HORIZON_LABEL_COLUMNS = tuple(
     name
     for horizon in MINUTE_LABEL_HORIZONS
     for name in (
+        f"label_end_date_{horizon}m",
         f"label_end_bar_time_{horizon}m",
         f"label_return_{horizon}m",
         f"label_mfe_{horizon}m",
         f"label_mae_{horizon}m",
         f"label_{horizon}m_observed",
+        f"label_{horizon}m_crossed_overnight",
+        f"label_{horizon}m_crossed_lunch",
+        f"label_{horizon}m_elapsed_calendar_days",
+        f"label_{horizon}m_invalid_reason",
+        f"label_{horizon}m_mfe_invalid_reason",
+        f"label_{horizon}m_mae_invalid_reason",
+    )
+)
+
+SESSION_HORIZON_LABEL_COLUMNS = tuple(
+    name
+    for horizon in MINUTE_LABEL_HORIZONS
+    for name in (
+        f"label_session_end_bar_time_{horizon}m",
+        f"label_session_return_{horizon}m",
+        f"label_session_mfe_{horizon}m",
+        f"label_session_mae_{horizon}m",
+        f"label_session_{horizon}m_observed",
+        f"label_session_{horizon}m_invalid_reason",
     )
 )
 
@@ -65,10 +89,16 @@ DAILY_HORIZON_LABEL_COLUMNS = tuple(
         f"label_mae_{horizon}d",
         f"label_action_count_{horizon}d",
         f"label_{horizon}d_observed",
+        f"label_{horizon}d_invalid_reason",
     )
 )
 
-LABEL_COLUMNS = LEGACY_LABEL_COLUMNS + MINUTE_HORIZON_LABEL_COLUMNS + DAILY_HORIZON_LABEL_COLUMNS
+LABEL_COLUMNS = (
+    LEGACY_LABEL_COLUMNS
+    + MINUTE_HORIZON_LABEL_COLUMNS
+    + SESSION_HORIZON_LABEL_COLUMNS
+    + DAILY_HORIZON_LABEL_COLUMNS
+)
 
 
 def _literal(value: str) -> str:
@@ -76,7 +106,7 @@ def _literal(value: str) -> str:
 
 
 def label_stock_day_query(*, start_date: str, end_date: str) -> str:
-    """Return future daily support; adjustment factors make outcomes continuous."""
+    """Return daily outcome support with field-specific quality state."""
 
     warmup = (date.fromisoformat(str(start_date)) - timedelta(days=30)).isoformat()
     return f"""
@@ -149,19 +179,45 @@ def calendar_query(*, start_date: str, end_date: str) -> str:
     """
 
 
-def _minute_ordered_expressions() -> str:
+def _decision_ordered_expressions() -> str:
     values: list[str] = []
     for horizon in MINUTE_LABEL_HORIZONS:
+        frame = (
+            "PARTITION BY symbol ORDER BY trade_date, bar_time "
+            f"ROWS BETWEEN 1 FOLLOWING AND {horizon} FOLLOWING"
+        )
         values.extend(
             [
-                f"LEAD(bar_time, {horizon}) OVER w AS endpoint_bar_time_{horizon}m",
-                f"LEAD(CAST(close AS DOUBLE), {horizon}) OVER w AS endpoint_close_{horizon}m",
-                f"MAX(CAST(high AS DOUBLE)) OVER (PARTITION BY symbol, trade_date ORDER BY bar_time "
-                f"ROWS BETWEEN 1 FOLLOWING AND {horizon} FOLLOWING) AS future_high_{horizon}m",
-                f"MIN(CAST(low AS DOUBLE)) OVER (PARTITION BY symbol, trade_date ORDER BY bar_time "
-                f"ROWS BETWEEN 1 FOLLOWING AND {horizon} FOLLOWING) AS future_low_{horizon}m",
-                f"COUNT(*) OVER (PARTITION BY symbol, trade_date ORDER BY bar_time "
-                f"ROWS BETWEEN 1 FOLLOWING AND {horizon} FOLLOWING) AS future_count_{horizon}m",
+                f"LEAD(trade_date, {horizon}) OVER w AS continuous_end_date_{horizon}m",
+                f"LEAD(bar_time, {horizon}) OVER w AS continuous_end_time_{horizon}m",
+                f"LEAD(decision_ordinal, {horizon}) OVER w AS continuous_end_ordinal_{horizon}m",
+                f"LEAD(adjusted_close, {horizon}) OVER w AS continuous_end_close_{horizon}m",
+                f"MAX(adjusted_high) OVER ({frame}) AS continuous_high_{horizon}m",
+                f"MIN(adjusted_low) OVER ({frame}) AS continuous_low_{horizon}m",
+                f"COUNT(*) OVER ({frame}) AS continuous_count_{horizon}m",
+                f"COUNT(adjusted_high) OVER ({frame}) AS continuous_high_count_{horizon}m",
+                f"COUNT(adjusted_low) OVER ({frame}) AS continuous_low_count_{horizon}m",
+            ]
+        )
+    return ",\n                ".join(values)
+
+
+def _session_ordered_expressions() -> str:
+    values: list[str] = []
+    for horizon in MINUTE_LABEL_HORIZONS:
+        frame = (
+            "PARTITION BY symbol, trade_date ORDER BY bar_time "
+            f"ROWS BETWEEN 1 FOLLOWING AND {horizon} FOLLOWING"
+        )
+        values.extend(
+            [
+                f"LEAD(bar_time, {horizon}) OVER w AS session_end_time_{horizon}m",
+                f"LEAD(adjusted_close, {horizon}) OVER w AS session_end_close_{horizon}m",
+                f"MAX(adjusted_high) OVER ({frame}) AS session_high_{horizon}m",
+                f"MIN(adjusted_low) OVER ({frame}) AS session_low_{horizon}m",
+                f"COUNT(*) OVER ({frame}) AS session_count_{horizon}m",
+                f"COUNT(adjusted_high) OVER ({frame}) AS session_high_count_{horizon}m",
+                f"COUNT(adjusted_low) OVER ({frame}) AS session_low_count_{horizon}m",
             ]
         )
     return ",\n                ".join(values)
@@ -195,23 +251,92 @@ def _daily_aggregate_expressions() -> str:
     return ",\n                ".join(values)
 
 
-def _minute_final_expressions() -> str:
+def _continuous_final_expressions() -> str:
     values: list[str] = []
     for horizon in MINUTE_LABEL_HORIZONS:
         observed = (
-            f"entry_executable AND valid_close AND future_count_{horizon}m = {horizon} "
-            f"AND endpoint_bar_time_{horizon}m IS NOT NULL AND endpoint_close_{horizon}m > 0"
+            "continuous_entry_executable "
+            "AND continuous_entry_ordinal = signal_decision_ordinal + 1 "
+            f"AND continuous_end_ordinal_{horizon}m = signal_decision_ordinal + {horizon} "
+            f"AND continuous_count_{horizon}m = {horizon} "
+            f"AND continuous_end_close_{horizon}m > 0 "
+            "AND continuous_entry_adjusted_price > 0"
+        )
+        reason = (
+            "CASE "
+            "WHEN continuous_entry_ordinal IS NULL "
+            "OR continuous_entry_ordinal <> signal_decision_ordinal + 1 "
+            "THEN 'next_decision_bar_missing_or_untradable' "
+            "WHEN NOT continuous_entry_executable THEN continuous_entry_unfilled_reason "
+            f"WHEN continuous_end_ordinal_{horizon}m IS NULL "
+            f"OR continuous_end_ordinal_{horizon}m <> signal_decision_ordinal + {horizon} "
+            "THEN 'future_decision_bar_missing_or_untradable' "
+            f"WHEN continuous_count_{horizon}m <> {horizon} THEN 'future_window_incomplete' "
+            f"WHEN continuous_end_close_{horizon}m IS NULL "
+            "THEN 'endpoint_close_excluded' ELSE '' END"
         )
         values.extend(
             [
-                f"endpoint_bar_time_{horizon}m AS label_end_bar_time_{horizon}m",
-                f"CASE WHEN {observed} THEN endpoint_close_{horizon}m / entry_price - 1.0 "
-                f"END AS label_return_{horizon}m",
-                f"CASE WHEN {observed} AND valid_high THEN future_high_{horizon}m / entry_price - 1.0 "
-                f"END AS label_mfe_{horizon}m",
-                f"CASE WHEN {observed} AND valid_low THEN future_low_{horizon}m / entry_price - 1.0 "
-                f"END AS label_mae_{horizon}m",
+                f"continuous_end_date_{horizon}m AS label_end_date_{horizon}m",
+                f"continuous_end_time_{horizon}m AS label_end_bar_time_{horizon}m",
+                f"CASE WHEN {observed} THEN continuous_end_close_{horizon}m "
+                f"/ continuous_entry_adjusted_price - 1.0 END AS label_return_{horizon}m",
+                f"CASE WHEN {observed} AND continuous_high_count_{horizon}m = {horizon} "
+                f"THEN continuous_high_{horizon}m / continuous_entry_adjusted_price - 1.0 END "
+                f"AS label_mfe_{horizon}m",
+                f"CASE WHEN {observed} AND continuous_low_count_{horizon}m = {horizon} "
+                f"THEN continuous_low_{horizon}m / continuous_entry_adjusted_price - 1.0 END "
+                f"AS label_mae_{horizon}m",
                 f"({observed}) AS label_{horizon}m_observed",
+                f"COALESCE(continuous_end_date_{horizon}m <> trade_date, FALSE) "
+                f"AS label_{horizon}m_crossed_overnight",
+                f"COALESCE(continuous_end_date_{horizon}m = trade_date "
+                f"AND bar_time <= '{MORNING_DECISION_END}' "
+                f"AND continuous_end_time_{horizon}m >= '{AFTERNOON_DECISION_START}', FALSE) "
+                f"AS label_{horizon}m_crossed_lunch",
+                f"CASE WHEN continuous_end_date_{horizon}m IS NOT NULL "
+                f"THEN DATE_DIFF('day', CAST(trade_date AS DATE), "
+                f"CAST(continuous_end_date_{horizon}m AS DATE)) END "
+                f"AS label_{horizon}m_elapsed_calendar_days",
+                f"{reason} AS label_{horizon}m_invalid_reason",
+                f"CASE WHEN NOT ({observed}) THEN {reason} "
+                f"WHEN continuous_high_count_{horizon}m <> {horizon} "
+                f"THEN 'future_high_excluded' ELSE '' END AS label_{horizon}m_mfe_invalid_reason",
+                f"CASE WHEN NOT ({observed}) THEN {reason} "
+                f"WHEN continuous_low_count_{horizon}m <> {horizon} "
+                f"THEN 'future_low_excluded' ELSE '' END AS label_{horizon}m_mae_invalid_reason",
+            ]
+        )
+    return ",\n            ".join(values)
+
+
+def _session_final_expressions() -> str:
+    values: list[str] = []
+    for horizon in MINUTE_LABEL_HORIZONS:
+        observed = (
+            "entry_executable "
+            f"AND session_count_{horizon}m = {horizon} "
+            f"AND session_end_close_{horizon}m > 0 AND entry_adjusted_price > 0"
+        )
+        reason = (
+            "CASE WHEN NOT entry_executable THEN entry_unfilled_reason "
+            f"WHEN session_count_{horizon}m <> {horizon} THEN 'same_session_window_incomplete' "
+            f"WHEN session_end_close_{horizon}m IS NULL THEN 'endpoint_close_excluded' "
+            "ELSE '' END"
+        )
+        values.extend(
+            [
+                f"session_end_time_{horizon}m AS label_session_end_bar_time_{horizon}m",
+                f"CASE WHEN {observed} THEN session_end_close_{horizon}m / entry_adjusted_price "
+                f"- 1.0 END AS label_session_return_{horizon}m",
+                f"CASE WHEN {observed} AND session_high_count_{horizon}m = {horizon} "
+                f"THEN session_high_{horizon}m / entry_adjusted_price - 1.0 END "
+                f"AS label_session_mfe_{horizon}m",
+                f"CASE WHEN {observed} AND session_low_count_{horizon}m = {horizon} "
+                f"THEN session_low_{horizon}m / entry_adjusted_price - 1.0 END "
+                f"AS label_session_mae_{horizon}m",
+                f"({observed}) AS label_session_{horizon}m_observed",
+                f"{reason} AS label_session_{horizon}m_invalid_reason",
             ]
         )
     return ",\n            ".join(values)
@@ -239,6 +364,10 @@ def _daily_final_expressions() -> str:
                 f"END AS label_mae_{horizon}d",
                 f"action_count_{horizon}d AS label_action_count_{horizon}d",
                 f"({observed}) AS label_{horizon}d_observed",
+                f"CASE WHEN NOT entry_executable THEN entry_unfilled_reason "
+                f"WHEN endpoint_date_{horizon}d IS NULL THEN 'future_market_day_missing' "
+                f"WHEN endpoint_price_{horizon}d IS NULL THEN 'future_close_missing_or_untradable' "
+                f"ELSE '' END AS label_{horizon}d_invalid_reason",
             ]
         )
     return ",\n            ".join(values)
@@ -251,8 +380,11 @@ def label_query(
     extended_bars_view: str = "minute_bars_extended",
     stock_days_view: str = "label_stock_days",
     calendar_view: str = "calendar_dates",
+    factor_view: str = "adjust_factor",
+    quality_view: str = "minute_feature_exclusions",
     config: MinuteV2Config,
 ) -> str:
+    del target_bars_view  # the event keys bound the target period; extended bars supply future paths
     config.validate()
     delayed = int(config.maximum_delayed_exit_days)
     buy_cost = (
@@ -263,53 +395,168 @@ def label_query(
     sell_common = buy_cost
     stamp_before = float(config.stamp_tax_bps_before_20230828) / 10_000.0
     stamp_after = float(config.stamp_tax_bps_after_20230828) / 10_000.0
+    decision_filter = (
+        f"(bar_time BETWEEN '{MORNING_DECISION_START}' AND '{MORNING_DECISION_END}') "
+        f"OR (bar_time BETWEEN '{AFTERNOON_DECISION_START}' AND '{AFTERNOON_DECISION_END}')"
+    )
     return f"""
-        WITH ordered_entries AS (
+        WITH factors AS (
+            SELECT symbol, trade_date, ANY_VALUE(CAST(adjust_factor AS DOUBLE)) AS adjust_factor
+            FROM {factor_view}
+            GROUP BY symbol, trade_date
+        ),
+        quality AS (
             SELECT
                 symbol,
                 trade_date,
+                BOOL_OR(COALESCE(exclude_high, FALSE)) AS exclude_high,
+                BOOL_OR(COALESCE(exclude_low, FALSE)) AS exclude_low,
+                BOOL_OR(COALESCE(exclude_close, FALSE)) AS exclude_close
+            FROM {quality_view}
+            GROUP BY symbol, trade_date
+        ),
+        bar_context AS (
+            SELECT
+                CAST(b.symbol AS VARCHAR) AS symbol,
+                CAST(b.trade_date AS VARCHAR) AS trade_date,
+                CAST(b.bar_time AS VARCHAR) AS bar_time,
+                CAST(b.high AS DOUBLE) AS high,
+                CAST(b.low AS DOUBLE) AS low,
+                CAST(b.close AS DOUBLE) AS close,
+                GREATEST(CAST(b.volume AS DOUBLE), 0.0) AS volume,
+                GREATEST(CAST(b.amount AS DOUBLE), 0.0) AS amount,
+                f.adjust_factor,
+                CASE WHEN NOT COALESCE(q.exclude_high, FALSE)
+                     THEN CAST(b.high AS DOUBLE) * f.adjust_factor END AS adjusted_high,
+                CASE WHEN NOT COALESCE(q.exclude_low, FALSE)
+                     THEN CAST(b.low AS DOUBLE) * f.adjust_factor END AS adjusted_low,
+                CASE WHEN NOT COALESCE(q.exclude_close, FALSE)
+                     THEN CAST(b.close AS DOUBLE) * f.adjust_factor END AS adjusted_close
+            FROM {extended_bars_view} b
+            JOIN factors f USING(symbol, trade_date)
+            LEFT JOIN quality q USING(symbol, trade_date)
+        ),
+        market_decision_grid AS (
+            SELECT
+                trade_date,
                 bar_time,
-                LEAD(bar_time) OVER w AS entry_bar_time,
-                LEAD(CAST(high AS DOUBLE)) OVER w AS entry_high,
-                LEAD(CAST(low AS DOUBLE)) OVER w AS entry_low,
-                LEAD(CAST(volume AS DOUBLE)) OVER w AS entry_volume,
-                LEAD(CAST(amount AS DOUBLE)) OVER w AS entry_amount,
-                {_minute_ordered_expressions()}
-            FROM {target_bars_view}
+                ROW_NUMBER() OVER (ORDER BY trade_date, bar_time) AS decision_ordinal
+            FROM (
+                SELECT DISTINCT trade_date, bar_time
+                FROM bar_context
+                WHERE {decision_filter}
+            )
+        ),
+        decision_bars AS (
+            SELECT b.*, g.decision_ordinal
+            FROM bar_context b
+            JOIN market_decision_grid g USING(trade_date, bar_time)
+        ),
+        decision_ordered AS (
+            SELECT
+                *,
+                LEAD(trade_date) OVER w AS continuous_entry_date,
+                LEAD(bar_time) OVER w AS continuous_entry_time,
+                LEAD(decision_ordinal) OVER w AS continuous_entry_ordinal,
+                LEAD(high) OVER w AS continuous_entry_high,
+                LEAD(low) OVER w AS continuous_entry_low,
+                LEAD(volume) OVER w AS continuous_entry_volume,
+                LEAD(amount) OVER w AS continuous_entry_amount,
+                LEAD(adjust_factor) OVER w AS continuous_entry_factor,
+                {_decision_ordered_expressions()}
+            FROM decision_bars
+            WINDOW w AS (PARTITION BY symbol ORDER BY trade_date, bar_time)
+        ),
+        session_ordered AS (
+            SELECT
+                *,
+                LEAD(bar_time) OVER w AS raw_entry_time,
+                LEAD(high) OVER w AS raw_entry_high,
+                LEAD(low) OVER w AS raw_entry_low,
+                LEAD(volume) OVER w AS raw_entry_volume,
+                LEAD(amount) OVER w AS raw_entry_amount,
+                LEAD(adjust_factor) OVER w AS raw_entry_factor,
+                {_session_ordered_expressions()}
+            FROM bar_context
             WINDOW w AS (PARTITION BY symbol, trade_date ORDER BY bar_time)
+        ),
+        entries_raw AS (
+            SELECT
+                e.symbol,
+                CAST(e.trade_date AS VARCHAR) AS trade_date,
+                CAST(e.bar_time AS VARCHAR) AS bar_time,
+                c.next_trade_date AS planned_exit_date,
+                c.calendar_index AS signal_calendar_index,
+                d.decision_ordinal AS signal_decision_ordinal,
+                r.raw_entry_time AS entry_bar_time,
+                r.raw_entry_volume AS entry_volume,
+                r.raw_entry_amount AS entry_amount,
+                r.raw_entry_factor AS entry_adjust_factor,
+                CASE WHEN r.raw_entry_volume > 0
+                     THEN r.raw_entry_amount / r.raw_entry_volume END AS entry_price,
+                d.continuous_entry_date,
+                d.continuous_entry_time,
+                d.continuous_entry_ordinal,
+                d.continuous_entry_volume,
+                d.continuous_entry_amount,
+                d.continuous_entry_factor,
+                CASE WHEN d.continuous_entry_volume > 0
+                     THEN d.continuous_entry_amount / d.continuous_entry_volume END
+                    AS continuous_entry_price,
+                r.raw_entry_high,
+                r.raw_entry_low,
+                d.continuous_entry_high,
+                d.continuous_entry_low,
+                d.* EXCLUDE(
+                    symbol, trade_date, bar_time, decision_ordinal,
+                    continuous_entry_date, continuous_entry_time, continuous_entry_ordinal,
+                    continuous_entry_high, continuous_entry_low, continuous_entry_volume,
+                    continuous_entry_amount, continuous_entry_factor
+                ),
+                r.* EXCLUDE(
+                    symbol, trade_date, bar_time, high, low, close, volume, amount,
+                    adjust_factor, adjusted_high, adjusted_low, adjusted_close,
+                    raw_entry_time, raw_entry_high, raw_entry_low, raw_entry_volume,
+                    raw_entry_amount, raw_entry_factor
+                )
+            FROM {event_view} e
+            JOIN decision_ordered d USING(symbol, trade_date, bar_time)
+            JOIN session_ordered r USING(symbol, trade_date, bar_time)
+            JOIN {calendar_view} c USING(trade_date)
         ),
         entries AS (
             SELECT
-                e.symbol,
-                e.trade_date,
-                e.bar_time,
-                e.adjust_factor AS entry_adjust_factor,
-                e.valid_high,
-                e.valid_low,
-                e.valid_close,
-                c.next_trade_date AS planned_exit_date,
-                c.calendar_index AS signal_calendar_index,
-                o.* EXCLUDE(symbol, trade_date, bar_time),
-                CASE WHEN o.entry_volume > 0 THEN o.entry_amount / o.entry_volume END AS entry_price,
+                *,
                 (
-                    o.entry_bar_time IS NOT NULL
-                    AND o.entry_volume > 0
-                    AND o.entry_amount > 0
-                    AND NOT (
-                        e.valid_high AND e.valid_low
-                        AND ABS(o.entry_high - o.entry_low) <= 1.0e-12
-                    )
+                    entry_bar_time IS NOT NULL
+                    AND entry_volume > 0
+                    AND entry_amount > 0
+                    AND NOT (ABS(raw_entry_high - raw_entry_low) <= 1.0e-12)
                 ) AS entry_executable,
                 CASE
-                    WHEN o.entry_bar_time IS NULL THEN 'next_bar_missing'
-                    WHEN o.entry_volume <= 0 OR o.entry_amount <= 0 THEN 'zero_flow'
-                    WHEN e.valid_high AND e.valid_low
-                         AND ABS(o.entry_high - o.entry_low) <= 1.0e-12 THEN 'one_price'
+                    WHEN entry_bar_time IS NULL THEN 'next_raw_bar_missing'
+                    WHEN entry_volume <= 0 OR entry_amount <= 0 THEN 'zero_flow'
+                    WHEN ABS(raw_entry_high - raw_entry_low) <= 1.0e-12 THEN 'one_price'
                     ELSE ''
-                END AS entry_unfilled_reason
-            FROM {event_view} e
-            JOIN ordered_entries o USING(symbol, trade_date, bar_time)
-            JOIN {calendar_view} c USING(trade_date)
+                END AS entry_unfilled_reason,
+                (
+                    continuous_entry_time IS NOT NULL
+                    AND continuous_entry_volume > 0
+                    AND continuous_entry_amount > 0
+                    AND NOT (ABS(continuous_entry_high - continuous_entry_low) <= 1.0e-12)
+                ) AS continuous_entry_executable,
+                CASE
+                    WHEN continuous_entry_time IS NULL THEN 'next_decision_bar_missing'
+                    WHEN continuous_entry_volume <= 0 OR continuous_entry_amount <= 0
+                        THEN 'continuous_zero_flow'
+                    WHEN ABS(continuous_entry_high - continuous_entry_low) <= 1.0e-12
+                        THEN 'continuous_one_price'
+                    ELSE ''
+                END AS continuous_entry_unfilled_reason,
+                entry_price * entry_adjust_factor AS entry_adjusted_price,
+                continuous_entry_price * continuous_entry_factor
+                    AS continuous_entry_adjusted_price
+            FROM entries_raw
         ),
         exit_windows AS (
             SELECT
@@ -406,7 +653,6 @@ def label_query(
                 x.exit_volume,
                 x.exit_amount,
                 x.exit_adjust_factor,
-                e.entry_price * e.entry_adjust_factor AS entry_adjusted_price,
                 x.exit_price * x.exit_adjust_factor AS exit_adjusted_price,
                 x.exit_low * x.exit_adjust_factor AS exit_adjusted_low,
                 x.exit_high * x.exit_adjust_factor AS exit_adjusted_high,
@@ -448,11 +694,60 @@ def label_query(
             CASE WHEN entry_executable AND exit_adjusted_high > 0 AND entry_adjusted_price > 0
                  THEN exit_adjusted_high / entry_adjusted_price - 1.0 END AS label_favorable_return,
             entry_executable AND actual_exit_date IS NOT NULL AS label_observed,
-            {_minute_final_expressions()},
+            {_continuous_final_expressions()},
+            {_session_final_expressions()},
             {_daily_final_expressions()}
         FROM attached
         ORDER BY trade_date, bar_time, symbol
     """
+
+
+def _fixture_factor_quality(
+    events: pd.DataFrame,
+    extended_bars: pd.DataFrame,
+    label_stock_days: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    keys = extended_bars.loc[:, ["symbol", "trade_date"]].drop_duplicates().copy()
+    event_context = events.loc[:, ["symbol", "trade_date", "adjust_factor"]].drop_duplicates(
+        ["symbol", "trade_date"]
+    )
+    daily_factor = (
+        label_stock_days.loc[:, ["symbol", "trade_date", "adjust_factor"]]
+        if "adjust_factor" in label_stock_days
+        else pd.DataFrame(columns=["symbol", "trade_date", "adjust_factor"])
+    )
+    factors = keys.merge(daily_factor, how="left", on=["symbol", "trade_date"])
+    factors = factors.merge(
+        event_context.rename(columns={"adjust_factor": "event_adjust_factor"}),
+        how="left",
+        on=["symbol", "trade_date"],
+    )
+    factors["adjust_factor"] = pd.to_numeric(
+        factors["adjust_factor"], errors="coerce"
+    ).fillna(pd.to_numeric(factors["event_adjust_factor"], errors="coerce")).fillna(1.0)
+    factors = factors.loc[:, ["symbol", "trade_date", "adjust_factor"]]
+    quality_columns = ["exclude_high", "exclude_low", "exclude_close"]
+    daily_quality = (
+        label_stock_days.loc[:, ["symbol", "trade_date", *quality_columns]]
+        if set(quality_columns).issubset(label_stock_days.columns)
+        else pd.DataFrame(columns=["symbol", "trade_date", *quality_columns])
+    )
+    quality = keys.merge(daily_quality, how="left", on=["symbol", "trade_date"])
+    event_quality = events.loc[:, ["symbol", "trade_date", "valid_high", "valid_low", "valid_close"]].drop_duplicates(
+        ["symbol", "trade_date"]
+    )
+    quality = quality.merge(event_quality, how="left", on=["symbol", "trade_date"])
+    for name in ("high", "low", "close"):
+        excluded = f"exclude_{name}"
+        valid = f"valid_{name}"
+        valid_values = quality[valid].astype("boolean").fillna(True)
+        quality[excluded] = (
+            quality[excluded]
+            .astype("boolean")
+            .fillna(~valid_values)
+            .astype(bool)
+        )
+    return factors, quality.loc[:, ["symbol", "trade_date", *quality_columns]]
 
 
 def build_label_frame(
@@ -466,6 +761,7 @@ def build_label_frame(
     connection: Any | None = None,
 ) -> pd.DataFrame:
     current = config or MinuteV2Config()
+    factors, quality = _fixture_factor_quality(events, extended_bars, label_stock_days)
     owned = connection is None
     con = duckdb.connect(":memory:") if owned else connection
     try:
@@ -474,6 +770,8 @@ def build_label_frame(
         con.register("minute_bars_extended", extended_bars)
         con.register("label_stock_days", label_stock_days)
         con.register("calendar_dates", calendar_dates)
+        con.register("adjust_factor", factors)
+        con.register("minute_feature_exclusions", quality)
         result = con.execute(label_query(config=current)).fetchdf()
     finally:
         if owned:
@@ -488,8 +786,11 @@ def build_label_frame(
 
 __all__ = [
     "DAILY_LABEL_HORIZONS",
+    "DAILY_HORIZON_LABEL_COLUMNS",
     "LABEL_COLUMNS",
+    "MINUTE_HORIZON_LABEL_COLUMNS",
     "MINUTE_LABEL_HORIZONS",
+    "SESSION_HORIZON_LABEL_COLUMNS",
     "build_label_frame",
     "calendar_query",
     "label_query",

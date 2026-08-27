@@ -67,6 +67,39 @@ def month_bounds(year: int, month: int) -> tuple[str, str]:
     return start.isoformat(), (following - timedelta(days=1)).isoformat()
 
 
+def prior_open_date(
+    snapshot: SourceSnapshot,
+    *,
+    start_date: str,
+    open_days: int,
+) -> str:
+    """Return a bounded market-calendar warm-up date without assuming weekdays are open."""
+
+    frames = [
+        pd.read_parquet(path, columns=["trade_date", "is_open"])
+        for path in snapshot.shard_paths["trading_calendar"]
+    ]
+    calendar = pd.concat(frames, ignore_index=True)
+    values = sorted(
+        calendar.loc[
+            calendar["is_open"].fillna(False)
+            & calendar["trade_date"].astype(str).lt(str(start_date)),
+            "trade_date",
+        ]
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+    required = int(open_days)
+    if required <= 0:
+        return str(start_date)
+    if len(values) < required:
+        raise MinuteV2Error(
+            f"minute_v2_history_calendar_incomplete:{start_date}:{len(values)}:{required}"
+        )
+    return str(values[-required])
+
+
 def overlapping_minute_paths(
     snapshot: SourceSnapshot,
     *,
@@ -169,15 +202,23 @@ def register_source_views(
     *,
     start_date: str,
     end_date: str,
+    minute_history_start_date: str | None = None,
     minute_end_date: str | None = None,
 ) -> None:
     """Register bounded minute views and lazy auxiliary-domain views."""
 
     start = _date_literal(start_date)
     end = _date_literal(end_date)
+    history_start_value = str(minute_history_start_date or start_date)
+    history_start = _date_literal(history_start_value)
     extended_end_value = str(minute_end_date or end_date)
     extended_end = _date_literal(extended_end_value)
     target_paths = overlapping_minute_paths(snapshot, start_date=start_date, end_date=end_date)
+    history_paths = overlapping_minute_paths(
+        snapshot,
+        start_date=history_start_value,
+        end_date=end_date,
+    )
     extended_paths = overlapping_minute_paths(
         snapshot,
         start_date=start_date,
@@ -186,6 +227,11 @@ def register_source_views(
     connection.execute(
         f"CREATE OR REPLACE TEMP VIEW minute_bars AS SELECT * FROM {_scan(target_paths)} "
         f"WHERE trade_date BETWEEN {start} AND {end}"
+    )
+    connection.execute(
+        f"CREATE OR REPLACE TEMP VIEW minute_bars_history AS "
+        f"SELECT * FROM {_scan(history_paths)} "
+        f"WHERE trade_date BETWEEN {history_start} AND {end}"
     )
     connection.execute(
         f"CREATE OR REPLACE TEMP VIEW minute_bars_extended AS SELECT * FROM {_scan(extended_paths)} "
@@ -208,7 +254,7 @@ def register_source_views(
         )
     minute_quality, session_quality = _quality_frames(
         snapshot,
-        start_date=start_date,
+        start_date=history_start_value,
         end_date=extended_end_value,
     )
     connection.register("minute_feature_exclusions_frame", minute_quality)
@@ -485,6 +531,7 @@ __all__ = [
     "materialize_stock_days",
     "month_bounds",
     "overlapping_minute_paths",
+    "prior_open_date",
     "register_source_views",
     "resolve_source_snapshot",
     "stock_day_query",

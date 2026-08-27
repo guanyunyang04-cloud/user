@@ -18,12 +18,13 @@ from .builder import verify_month
 from .contracts import (
     DAILY_WINDOWS,
     EXPECTED_DECISION_BARS,
-    MINUTE_WINDOWS,
     MODEL_FEATURE_COLUMNS,
+    SIXTY_MINUTE_WINDOWS,
     MinuteV2Error,
 )
-from .features import BAR_COLUMNS, STOCK_DAY_COLUMNS, build_feature_frame
+from .features import STOCK_DAY_COLUMNS, build_feature_frame
 from .labels import DAILY_LABEL_HORIZONS, MINUTE_LABEL_HORIZONS
+from .source import overlapping_minute_paths, resolve_source_snapshot
 
 
 def _literal(value: str | Path) -> str:
@@ -34,7 +35,12 @@ def _scan(path: Path) -> str:
     return f"read_parquet({_literal(path)})"
 
 
-def _real_mutation_probe(connection: Any, base_path: Path) -> dict[str, Any]:
+def _real_mutation_probe(
+    connection: Any,
+    base_path: Path,
+    *,
+    workspace_root: Path,
+) -> dict[str, Any]:
     scan = _scan(base_path)
     first_date = connection.execute(
         f"SELECT trade_date FROM {scan} GROUP BY trade_date ORDER BY trade_date LIMIT 1"
@@ -61,7 +67,36 @@ def _real_mutation_probe(connection: Any, base_path: Path) -> dict[str, Any]:
     ).fetchdf()
     frame["trade_date"] = frame["trade_date"].astype(str).str[:10]
     frame["bar_time"] = frame["bar_time"].astype(str).str.zfill(9)
-    bars = frame.loc[:, list(BAR_COLUMNS)].copy()
+    snapshot = resolve_source_snapshot(workspace_root)
+    calendar_frames = [
+        pd.read_parquet(path, columns=["trade_date", "is_open"])
+        for path in snapshot.shard_paths["trading_calendar"]
+    ]
+    calendar = pd.concat(calendar_frames, ignore_index=True)
+    prior_dates = sorted(
+        calendar.loc[
+            calendar["is_open"].fillna(False)
+            & calendar["trade_date"].astype(str).lt(trade_date),
+            "trade_date",
+        ]
+        .astype(str)
+        .unique()
+        .tolist()
+    )[-2:]
+    raw_dates = [*prior_dates, trade_date]
+    minute_paths = overlapping_minute_paths(
+        snapshot,
+        start_date=raw_dates[0],
+        end_date=trade_date,
+    )
+    path_values = ",".join(_literal(path) for path in minute_paths)
+    date_values = ",".join(_literal(value) for value in raw_dates)
+    bars = connection.execute(
+        "SELECT symbol,trade_date,bar_time,open,high,low,close,volume,amount "
+        f"FROM read_parquet([{path_values}],union_by_name=true) "
+        f"WHERE symbol IN ({symbol_values}) AND trade_date IN ({date_values}) "
+        "ORDER BY symbol,trade_date,bar_time"
+    ).fetchdf()
     first = frame.drop_duplicates(["symbol", "trade_date"], keep="first").copy()
     previous_close = pd.to_numeric(first["close"], errors="coerce") / (
         1.0 + pd.to_numeric(first["return_from_previous_close"], errors="coerce")
@@ -112,17 +147,19 @@ def _real_mutation_probe(connection: Any, base_path: Path) -> dict[str, Any]:
     original = build_feature_frame(
         bars,
         stock_days,
-        expected_session_bars=EXPECTED_DECISION_BARS,
+        expected_session_bars=240,
     )
     mutated_bars = bars.copy()
-    future = mutated_bars["bar_time"].astype(str) > "100000000"
+    future = mutated_bars["trade_date"].astype(str).eq(trade_date) & mutated_bars[
+        "bar_time"
+    ].astype(str).gt("100000000")
     mutated_bars.loc[future, ["open", "high", "low", "close"]] *= 1.7
     mutated_bars.loc[future, "volume"] *= 2.0
     mutated_bars.loc[future, "amount"] *= 3.4
     mutated = build_feature_frame(
         mutated_bars,
         stock_days,
-        expected_session_bars=EXPECTED_DECISION_BARS,
+        expected_session_bars=240,
     )
     columns = ["symbol", "trade_date", "bar_time", *MODEL_FEATURE_COLUMNS]
     before = original.loc[original["bar_time"] <= "100000000", columns].reset_index(drop=True)
@@ -141,6 +178,7 @@ def _real_mutation_probe(connection: Any, base_path: Path) -> dict[str, Any]:
         "trade_date": trade_date,
         "symbol_count": len(symbols),
         "input_rows": int(len(bars)),
+        "input_dates": raw_dates,
         "compared_rows": int(len(before)),
         "maximum_absolute_difference": maximum_absolute_difference,
         "numeric_tolerance": {"relative": 1.0e-12, "absolute": 1.0e-14},
@@ -188,12 +226,12 @@ def audit_pilot_month(
             }
             event_row = connection.execute(
                 "SELECT count(*),"
-                "count(*) FILTER(WHERE event_periodic),"
                 "count(*) FILTER(WHERE event_extreme_return),"
                 "count(*) FILTER(WHERE event_volume_shock),"
                 "count(*) FILTER(WHERE event_industry_leadership),"
                 "count(*) FILTER(WHERE event_vwap_cross),"
-                "count(*) FILTER(WHERE event_random_negative) "
+                "count(*) FILTER(WHERE event_liquidity_anchor),"
+                "count(*) FILTER(WHERE event_background_control) "
                 f"FROM {_scan(event_path)}"
             ).fetchone()
             group_row = connection.execute(
@@ -201,8 +239,8 @@ def audit_pilot_month(
                 f"FROM {base_scan} GROUP BY trade_date,bar_time),"
                 "event_groups AS (SELECT trade_date,bar_time,count(*) AS rows "
                 f"FROM {_scan(event_path)} GROUP BY trade_date,bar_time) "
-                "SELECT count(*),count(*) FILTER(WHERE b.rows=e.rows),"
-                "min(e.rows),max(e.rows) FROM event_groups e JOIN base_groups b "
+                "SELECT count(*),count(e.rows),count(*) FILTER(WHERE e.rows IS NULL),"
+                "min(e.rows),max(e.rows) FROM base_groups b LEFT JOIN event_groups e "
                 "USING(trade_date,bar_time)"
             ).fetchone()
             label_row = connection.execute(
@@ -222,6 +260,15 @@ def audit_pilot_month(
                         f"count(label_mae_{horizon}m)",
                     ]
                 )
+            for horizon in MINUTE_LABEL_HORIZONS:
+                label_coverage_expressions.extend(
+                    [
+                        f"count(*) FILTER(WHERE label_session_{horizon}m_observed)",
+                        f"count(label_session_return_{horizon}m)",
+                        f"count(label_session_mfe_{horizon}m)",
+                        f"count(label_session_mae_{horizon}m)",
+                    ]
+                )
             for horizon in DAILY_LABEL_HORIZONS:
                 label_coverage_expressions.extend(
                     [
@@ -234,28 +281,43 @@ def audit_pilot_month(
             label_coverage_row = connection.execute(
                 "SELECT " + ",".join(label_coverage_expressions) + f" FROM {_scan(label_path)}"
             ).fetchone()
+            high_mask_violation = " OR ".join(
+                f"(l.label_mfe_{horizon}m IS NOT NULL "
+                f"AND l.label_{horizon}m_mfe_invalid_reason <> '')"
+                for horizon in MINUTE_LABEL_HORIZONS
+            )
+            low_mask_violation = " OR ".join(
+                f"(l.label_mae_{horizon}m IS NOT NULL "
+                f"AND l.label_{horizon}m_mae_invalid_reason <> '')"
+                for horizon in MINUTE_LABEL_HORIZONS
+            )
+            close_mask_violation = " OR ".join(
+                f"(l.label_return_{horizon}m IS NOT NULL "
+                f"AND l.label_{horizon}m_invalid_reason = 'endpoint_close_excluded')"
+                for horizon in MINUTE_LABEL_HORIZONS
+            )
             quality_row = connection.execute(
                 "SELECT "
-                "count(*) FILTER(WHERE NOT e.valid_high AND l.label_mfe_5m IS NOT NULL),"
-                "count(*) FILTER(WHERE NOT e.valid_low AND l.label_mae_5m IS NOT NULL),"
-                "count(*) FILTER(WHERE NOT e.valid_close AND l.label_return_5m IS NOT NULL),"
+                f"count(*) FILTER(WHERE {high_mask_violation}),"
+                f"count(*) FILTER(WHERE {low_mask_violation}),"
+                f"count(*) FILTER(WHERE {close_mask_violation}),"
                 "count(*) FILTER(WHERE NOT e.valid_high AND e.valid_close "
                 "AND l.entry_executable AND l.label_return_5m IS NOT NULL) "
                 f"FROM {_scan(event_path)} e JOIN {_scan(label_path)} l "
                 "USING(symbol,trade_date,bar_time)"
             ).fetchone()
             boundary_expressions = [
-                "count(*) FILTER(WHERE minute_index % "
-                f"{window} <> 0 AND bar_time <> '130100000' "
-                f"AND completed_kline_return_{window}m IS DISTINCT FROM "
-                f"previous_completed_{window})"
-                for window in MINUTE_WINDOWS
+                "count(*) FILTER(WHERE minute_index % 60 <> 0 "
+                "AND bar_time <> '130100000' "
+                f"AND previous_m60_{window} IS NOT NULL "
+                f"AND m60_close_to_sma_{window}bar IS DISTINCT FROM previous_m60_{window})"
+                for window in SIXTY_MINUTE_WINDOWS
             ]
             boundary_projection = ",".join(
-                f"LAG(completed_kline_return_{window}m) OVER ("
+                f"LAG(m60_close_to_sma_{window}bar) OVER ("
                 "PARTITION BY symbol,trade_date ORDER BY bar_time) "
-                f"AS previous_completed_{window}"
-                for window in MINUTE_WINDOWS
+                f"AS previous_m60_{window}"
+                for window in SIXTY_MINUTE_WINDOWS
             )
             boundary_row = connection.execute(
                 "SELECT "
@@ -264,7 +326,19 @@ def audit_pilot_month(
                 + boundary_projection
                 + f" FROM {base_scan})"
             ).fetchone()
-            mutation = _real_mutation_probe(connection, base_path)
+            crossnight_row = connection.execute(
+                "SELECT count(*) FILTER(WHERE bar_time='145500000'),"
+                "count(*) FILTER(WHERE bar_time='145500000' AND label_5m_observed "
+                "AND label_5m_crossed_overnight AND label_end_bar_time_5m='093500000'),"
+                "count(*) FILTER(WHERE bar_time='145500000' "
+                "AND label_session_5m_observed) "
+                f"FROM {_scan(label_path)}"
+            ).fetchone()
+            mutation = _real_mutation_probe(
+                connection,
+                base_path,
+                workspace_root=Path(str(manifest["source"]["workspace_root"])),
+            )
         finally:
             connection.close()
     event_total = int(event_row[0])
@@ -272,16 +346,17 @@ def audit_pilot_month(
     label_coverage: dict[str, dict[str, float | int]] = {}
     coverage_index = 0
     for suffix, horizons in (
-        ("minute", MINUTE_LABEL_HORIZONS),
-        ("daily", DAILY_LABEL_HORIZONS),
+        ("continuous", MINUTE_LABEL_HORIZONS),
+        ("session", MINUTE_LABEL_HORIZONS),
+        ("holding", DAILY_LABEL_HORIZONS),
     ):
-        unit = "m" if suffix == "minute" else "d"
+        unit = "m" if suffix in {"continuous", "session"} else "d"
         for horizon in horizons:
             observed, returns, mfe, mae = (
                 int(label_coverage_row[coverage_index + offset]) for offset in range(4)
             )
             coverage_index += 4
-            label_coverage[f"{horizon}{unit}"] = {
+            label_coverage[f"{suffix}_{horizon}{unit}"] = {
                 "observed_rows": observed,
                 "observed_fraction": observed / label_total,
                 "return_rows": returns,
@@ -289,7 +364,7 @@ def audit_pilot_month(
                 "mae_rows": mae,
             }
     result = {
-        "schema": "quantlab.minute_v2_pilot_audit/1",
+        "schema": "quantlab.minute_v2_pilot_audit/2",
         "status": "ok",
         "manifest": str(manifest_file),
         "scope": "data correctness only; no strategy score or return was inspected",
@@ -298,27 +373,28 @@ def audit_pilot_month(
             "row_count": total_rows,
             "feature_finite_fraction": finite_fraction,
             "minimum_feature_finite_fraction": min(finite_fraction.values()),
-            "fixed_kline_non_boundary_change_violations": {
-                f"{window}m": int(boundary_row[index])
-                for index, window in enumerate(MINUTE_WINDOWS)
+            "sixty_minute_non_boundary_change_violations": {
+                f"{window}bar": int(boundary_row[index])
+                for index, window in enumerate(SIXTY_MINUTE_WINDOWS)
             },
         },
         "events": {
             "row_count": event_total,
             "fraction_of_decision_rows": event_total / total_rows,
             "flag_counts": {
-                "periodic": int(event_row[1]),
-                "extreme_return": int(event_row[2]),
-                "volume_shock": int(event_row[3]),
-                "industry_leadership": int(event_row[4]),
-                "vwap_cross": int(event_row[5]),
-                "random_negative": int(event_row[6]),
+                "extreme_return": int(event_row[1]),
+                "volume_shock": int(event_row[2]),
+                "industry_leadership": int(event_row[3]),
+                "vwap_cross": int(event_row[4]),
+                "liquidity_anchor": int(event_row[5]),
+                "background_control": int(event_row[6]),
             },
-            "complete_cross_sections": {
-                "group_count": int(group_row[0]),
-                "matching_base_group_count": int(group_row[1]),
-                "minimum_rows": int(group_row[2]),
-                "maximum_rows": int(group_row[3]),
+            "all_decision_minutes": {
+                "base_group_count": int(group_row[0]),
+                "candidate_group_count": int(group_row[1]),
+                "missing_group_count": int(group_row[2]),
+                "minimum_candidate_rows": int(group_row[3]),
+                "maximum_candidate_rows": int(group_row[4]),
             },
         },
         "labels": {
@@ -334,11 +410,26 @@ def audit_pilot_month(
                 "close_mask_with_return": int(quality_row[2]),
             },
             "high_masked_but_return_still_observed_rows": int(quality_row[3]),
+            "crossnight_1455_contract": {
+                "candidate_rows": int(crossnight_row[0]),
+                "continuous_5m_to_next_0935_rows": int(crossnight_row[1]),
+                "same_session_5m_rows": int(crossnight_row[2]),
+            },
         },
         "future_mutation_probe": mutation,
     }
     if not all(math.isfinite(float(value)) for value in finite_fraction.values()):
         raise MinuteV2Error("minute_v2_pilot_finite_fraction_invalid")
+    if int(group_row[0]) != int(group_row[1]) or int(group_row[2]) != 0:
+        raise MinuteV2Error("minute_v2_pilot_decision_minutes_missing")
+    if any(int(value) != 0 for value in boundary_row):
+        raise MinuteV2Error("minute_v2_pilot_sixty_minute_boundary_violation")
+    if int(crossnight_row[1]) <= 0:
+        raise MinuteV2Error("minute_v2_pilot_crossnight_1455_missing")
+    resource_limit = int(manifest.get("effective_duckdb_memory_limit_bytes", 0))
+    configured_limit = int(float(manifest["config"]["duckdb_memory_limit_gib"]) * GIB)
+    if resource_limit <= 0 or resource_limit > configured_limit:
+        raise MinuteV2Error("minute_v2_pilot_memory_limit_invalid")
     target = Path(output_path).resolve() if output_path is not None else month_directory / "pilot_audit.json"
     write_json(target, result)
     return result

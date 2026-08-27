@@ -24,7 +24,6 @@ def _config(args: argparse.Namespace) -> MinuteV2Config:
         duckdb_threads=int(args.duckdb_threads),
         memory_floor_gib=float(args.memory_floor_gib),
         duckdb_memory_limit_gib=float(args.duckdb_memory_limit_gib),
-        training_sample_memory_fraction=float(args.training_sample_memory_fraction),
     )
 
 
@@ -40,10 +39,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     month.add_argument("--force", action="store_true")
     month.add_argument("--maximum-trading-days-per-month", type=int, default=0)
     month.add_argument("--processing-days-per-chunk", type=int, default=1)
-    month.add_argument("--duckdb-threads", type=int, default=2)
-    month.add_argument("--memory-floor-gib", type=float, default=4.0)
-    month.add_argument("--duckdb-memory-limit-gib", type=float, default=1.0)
-    month.add_argument("--training-sample-memory-fraction", type=float, default=0.125)
+    month.add_argument("--duckdb-threads", type=int, default=4)
+    month.add_argument("--memory-floor-gib", type=float, default=0.5)
+    month.add_argument("--duckdb-memory-limit-gib", type=float, default=4.0)
     range_parser = subparsers.add_parser("build-range")
     range_parser.add_argument("--start-year", type=int, required=True)
     range_parser.add_argument("--end-year", type=int, required=True)
@@ -51,10 +49,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     range_parser.add_argument("--force", action="store_true")
     range_parser.add_argument("--maximum-trading-days-per-month", type=int, default=0)
     range_parser.add_argument("--processing-days-per-chunk", type=int, default=1)
-    range_parser.add_argument("--duckdb-threads", type=int, default=2)
-    range_parser.add_argument("--memory-floor-gib", type=float, default=4.0)
-    range_parser.add_argument("--duckdb-memory-limit-gib", type=float, default=1.0)
-    range_parser.add_argument("--training-sample-memory-fraction", type=float, default=0.125)
+    range_parser.add_argument("--duckdb-threads", type=int, default=4)
+    range_parser.add_argument("--memory-floor-gib", type=float, default=0.5)
+    range_parser.add_argument("--duckdb-memory-limit-gib", type=float, default=4.0)
     audit = subparsers.add_parser("audit-pilot")
     audit.add_argument("--manifest", required=True)
     audit.add_argument("--output", default="")
@@ -65,8 +62,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     train = subparsers.add_parser("train-baselines")
     train.add_argument("--dataset-root", required=True)
     train.add_argument("--output-root", required=True)
-    train.add_argument("--train-sample-basis-points", type=int, default=500)
-    train.add_argument("--evaluation-sample-basis-points", type=int, default=1000)
     return parser
 
 
@@ -108,8 +103,6 @@ def main(argv: list[str] | None = None) -> int:
             run_two_fold_baselines(
                 args.dataset_root,
                 output_root=args.output_root,
-                train_sample_basis_points=args.train_sample_basis_points,
-                evaluation_sample_basis_points=args.evaluation_sample_basis_points,
             )
         )
     return 0

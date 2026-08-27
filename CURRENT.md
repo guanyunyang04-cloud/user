@@ -17,8 +17,6 @@ manifest.
 - Research contract: `data/research/daily/manifest.json`.
 - Model outputs: `runs/daily/`.
 - Minute-v2 pilot: `data/research/minute_v2/`.
-- Legacy minute-v2 development data: `data/research/minute_v2_dev/`.
-- Legacy minute-v2 model outputs: `runs/minute_v2_v1/`.
 - Durable evidence: `research/records/` and `research/studies/`.
 
 The former `daily_research` and `quant_data_platform` trees were removed from
@@ -225,35 +223,24 @@ dedicated producer code has been retired.
   labels separately store 5/15/30/60-minute and 1/3/5/10-market-day returns,
   MFE and MAE. High, low and close masks affect only their corresponding
   outcomes.
-- The rebuilt 2022-06 correctness pilot contains 61,375 complete stock-days
-  and 14,361,750 decision rows. Its measured 565.1 uncompressed bytes per row
-  and the machine RAM budget select 44 complete minute cross-sections per day:
-  924 groups and 2,700,500 rows. All groups match the full base, all keys are
-  unique, fixed K-line boundaries have zero violations, every field-mask
-  violation count is zero, and the future-mutation probe is invariant through
-  10:00 within `6.94e-18` roundoff.
-- The older 2012-2022 two-date-per-month dataset and its two-fold outputs were
-  built under the former event-gated feature contract. They remain historical
-  evidence only and are not compatible with the current feature list. Rebuild
-  them before any new baseline training; their old after-cost conclusion is not
-  evidence for or against the expanded minute model.
-- Two expanding folds are complete. Fold 1 trains on 2012-2017, validates on
-  2018 and tests on 2019-2020; fold 2 trains on 2012-2019, validates on 2020
-  and tests on 2021-2022. Sampling keeps whole `(trade_date, bar_time)` groups,
-  never individual stocks. The fixed rule is contrarian in both tests. Ridge
-  is the strongest ranker with Rank IC `0.14135/0.11213`; LightGBM reaches
-  `0.03893/0.04274` and early-stops after 12/7 trees. Ridge Top-3 improves on
-  its contemporaneous event universe by `+0.2404%/+0.0960%`, but its absolute
-  after-cost Top-3 return is still `-0.2799%/-0.4284%`. The model currently
-  learns relative loss avoidance, not a profitable entry rule, and is not a
-  paper- or live-trading candidate.
-- The first-fold-only constrained formula search evaluated 120 auditable
-  transforms and retained 12 without reading either final test period. Stable
-  findings penalize large intraday range, absolute residual moves, large
-  auction gaps and amount-curve extremes. The strongest ridge terms are also
-  stable across folds: cumulative range, rebound from the day low and drawdown
-  from the day high. These are discovered features, not five hard-coded
-  expert-vote modules.
+- The rebuilt 2022-06 correctness pilot contains 61,375 complete stock-days,
+  14,361,750 full-base rows (all 234 decision minutes), 5,302,856 causal
+  candidate events, and the same number of labels. Candidate coverage is
+  36.9235% of base rows; no decision-time group is missing. Its 16-bucket
+  label-support pass took 403.5 seconds and avoided the former repeated
+  full-range scan. All keys are unique, fixed 60-minute boundaries have zero
+  violations, all field-mask checks are zero, and the future-mutation probe is
+  invariant through 10:00 within `4.44e-16` absolute roundoff. This is a
+  data-contract pilot only; no model return was evaluated.
+- The deleted `minute_v2_dev` and `runs/minute_v2_v1` products were derived
+  under the former contract and are reproducible. They are not part of the
+  active dataset; QDP source data and repair evidence remain intact.
+- No model has been trained from this rebuilt contract yet. The deleted model
+  outputs belonged to a different feature/label definition and are not evidence
+  for the current minute research. The next model run must use the full-base
+  causal timestamps for data checks, the candidate gate for efficient fitting,
+  and an explicit held-position path during replay. This pilot alone does not
+  authorize paper or live trading.
 
 ## Operational status
 
@@ -442,12 +429,11 @@ dedicated producer code has been retired.
    every mask unless the current field-level gates pass. Daily/factor/basic and
    PIT auxiliary tails remain separate and continue through the existing local
    or free-source update path.
-2. Treat minute-v2 v1 as a completed baseline, not a trading candidate. Next
-   diagnose the persistent negative absolute target by decision-time bucket,
-   event family, market regime, holding window and estimated cost. Calibrate a
-   validation-only no-trade threshold and compare raw-return, market-residual
-   and cost-hurdle targets. Expand from two dates per month to every trading day
-   only after a specification is positive in both held-out folds.
+2. Use the rebuilt pilot only to validate the data contract. Before training,
+   generate the same causal artifacts for the selected development years, then
+   compare candidate-only training with a full-base scan and explicitly force
+   current holdings through the gate during replay. No model or broker decision
+   is authorized by this pilot alone.
 3. Keep the QDP flattening migration as maintenance rather than a blocker for
    minute research. The active physical/latest-key quick check and the new
    minute-v2 artifact verification are green. Preserve atomic manifests,

@@ -89,12 +89,9 @@ def _load_period(
     *,
     start_year: int,
     end_year: int,
-    sample_basis_points: int,
     include_execution: bool,
     temp_directory: Path,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
-    if not 1 <= int(sample_basis_points) <= 10_000:
-        raise MinuteV2Error("minute_v2_training_sample_basis_points_invalid")
     event_paths, label_paths = _period_paths(dataset_root, start_year, end_year)
     event_scan = _scan(event_paths)
     label_scan = _scan(label_paths)
@@ -121,8 +118,6 @@ def _load_period(
             FROM {event_scan} e
             JOIN {label_scan} l USING(symbol,trade_date,bar_time)
             WHERE l.label_observed
-              AND HASH(CAST(e.trade_date AS VARCHAR),CAST(e.bar_time AS VARCHAR)) % 10000
-                  < {int(sample_basis_points)}
             ORDER BY e.trade_date,e.bar_time,e.symbol
         """
         frame = connection.execute(query).fetchdf()
@@ -130,7 +125,7 @@ def _load_period(
         connection.close()
     if frame.empty:
         raise MinuteV2Error(
-            f"minute_v2_training_period_empty:{start_year}:{end_year}:{sample_basis_points}"
+            f"minute_v2_training_period_empty:{start_year}:{end_year}"
         )
     if frame.duplicated(list(KEY_COLUMNS)).any():
         raise MinuteV2Error("minute_v2_training_duplicate_keys")
@@ -140,31 +135,13 @@ def _load_period(
     metadata = {
         "start_year": int(start_year),
         "end_year": int(end_year),
-        "sample_basis_points": int(sample_basis_points),
-        "sampling_unit": "complete (trade_date, bar_time) cross-sectional groups",
+        "sampling_policy": "all causal candidate rows at all decision minutes",
         "row_count": int(len(frame)),
         "group_count": int(frame.groupby(["trade_date", "bar_time"]).ngroups),
         "event_file_count": len(event_paths),
         "label_file_count": len(label_paths),
     }
     return frame, metadata
-
-
-def _bounded_group_sample(frame: pd.DataFrame, maximum_rows: int) -> pd.DataFrame:
-    sizes = (
-        frame.groupby(["trade_date", "bar_time"], sort=False)
-        .size()
-        .rename("rows")
-        .reset_index()
-    )
-    sizes["hash"] = pd.util.hash_pandas_object(
-        sizes[["trade_date", "bar_time"]], index=False
-    ).astype("uint64")
-    sizes = sizes.sort_values(["hash", "trade_date", "bar_time"], kind="stable")
-    selected = sizes.loc[sizes["rows"].cumsum() <= int(maximum_rows), ["trade_date", "bar_time"]]
-    if selected.empty:
-        selected = sizes.head(1)[["trade_date", "bar_time"]]
-    return frame.merge(selected, on=["trade_date", "bar_time"], how="inner", validate="many_to_one")
 
 
 def _evaluate_and_replay(
@@ -191,8 +168,6 @@ def _run_fold(
     output_root: Path,
     spec: FoldSpec,
     *,
-    train_sample_basis_points: int,
-    evaluation_sample_basis_points: int,
     mining_result: dict[str, Any] | None,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     directory = output_root / f"fold_{spec.fold}"
@@ -203,7 +178,6 @@ def _run_fold(
             dataset_root,
             start_year=spec.train_start_year,
             end_year=spec.train_end_year,
-            sample_basis_points=train_sample_basis_points,
             include_execution=False,
             temp_directory=temp,
         )
@@ -211,7 +185,6 @@ def _run_fold(
             dataset_root,
             start_year=spec.validation_year,
             end_year=spec.validation_year,
-            sample_basis_points=evaluation_sample_basis_points,
             include_execution=False,
             temp_directory=temp,
         )
@@ -219,22 +192,19 @@ def _run_fold(
             dataset_root,
             start_year=spec.test_start_year,
             end_year=spec.test_end_year,
-            sample_basis_points=evaluation_sample_basis_points,
             include_execution=True,
             temp_directory=temp,
         )
         if spec.fold == 1 and mining_result is None:
-            mining_train = _bounded_group_sample(train, 120_000)
-            mining_validation = _bounded_group_sample(validation, 80_000)
             mining_result = mine_formula_features(
-                mining_train,
-                mining_validation,
+                train,
+                validation,
                 maximum_candidates=120,
                 maximum_selected=12,
                 minimum_coverage=0.85,
             )
-            mining_result["bounded_train_rows"] = int(len(mining_train))
-            mining_result["bounded_validation_rows"] = int(len(mining_validation))
+            mining_result["train_rows"] = int(len(train))
+            mining_result["validation_rows"] = int(len(validation))
             write_mining_result(mining_result, output_root / "formula_mining_fold_1.json")
         ridge = fit_ridge(train, alpha=10.0)
         ridge.save(directory / "ridge.json")
@@ -284,8 +254,6 @@ def run_two_fold_baselines(
     dataset_root: str | Path,
     *,
     output_root: str | Path,
-    train_sample_basis_points: int = 500,
-    evaluation_sample_basis_points: int = 1000,
 ) -> dict[str, Any]:
     dataset = Path(dataset_root).resolve()
     output = Path(output_root).resolve()
@@ -299,8 +267,6 @@ def run_two_fold_baselines(
             dataset,
             output,
             spec,
-            train_sample_basis_points=train_sample_basis_points,
-            evaluation_sample_basis_points=evaluation_sample_basis_points,
             mining_result=mining_result,
         )
         results.append(result)
@@ -309,9 +275,7 @@ def run_two_fold_baselines(
         "status": "ok",
         "dataset_root": str(dataset),
         "fold_count": len(results),
-        "train_sample_basis_points": int(train_sample_basis_points),
-        "evaluation_sample_basis_points": int(evaluation_sample_basis_points),
-        "sampling_note": "sampling keeps whole minute cross-sections; it never samples individual stocks",
+        "sampling_policy": "all causal candidate rows at all decision minutes",
         "formula_mining": {
             "path": str(output / "formula_mining_fold_1.json"),
             "selected_count": int((mining_result or {}).get("selected_count", 0)),

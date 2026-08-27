@@ -1,164 +1,109 @@
-"""Deterministic sampling of complete minute cross-sections for training."""
+"""Causal stock-attention gate evaluated at every decision minute."""
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import duckdb
 import pandas as pd
 
-from .contracts import EXPECTED_DECISION_BARS, KEY_COLUMNS, MinuteV2Config, MinuteV2Error
+from .contracts import KEY_COLUMNS, MinuteV2Config, MinuteV2Error
 
 EVENT_FLAG_COLUMNS = (
-    "event_periodic",
     "event_extreme_return",
     "event_volume_shock",
     "event_industry_leadership",
     "event_vwap_cross",
-    "event_random_negative",
+    "event_liquidity_anchor",
+    "event_background_control",
 )
 
-
-def calibrate_groups_per_day(
-    *,
-    base_rows: int,
-    complete_group_count: int,
-    selected_trading_days: int,
-    uncompressed_bytes: int,
-    total_memory_bytes: int,
-    memory_floor_bytes: int,
-    memory_fraction: float,
-    maximum_groups_per_day: int = EXPECTED_DECISION_BARS,
-) -> dict[str, float | int | str]:
-    """Choose a group count from measured row width and a machine memory budget."""
-
-    if min(base_rows, complete_group_count, selected_trading_days, uncompressed_bytes) <= 0:
-        raise MinuteV2Error("minute_v2_sampling_calibration_input_invalid")
-    usable_memory = max(int(total_memory_bytes) - int(memory_floor_bytes), 1)
-    target_bytes = max(1, int(usable_memory * float(memory_fraction)))
-    bytes_per_row = float(uncompressed_bytes) / int(base_rows)
-    rows_per_group = float(base_rows) / int(complete_group_count)
-    bytes_per_group = bytes_per_row * rows_per_group
-    raw_groups = math.floor(target_bytes / (bytes_per_group * int(selected_trading_days)))
-    groups_per_day = max(1, min(int(maximum_groups_per_day), int(raw_groups)))
-    expected_rows = round(rows_per_group * groups_per_day * int(selected_trading_days))
-    return {
-        "policy": "measured complete-cross-section groups under a fixed fraction of usable RAM",
-        "base_rows": int(base_rows),
-        "complete_group_count": int(complete_group_count),
-        "selected_trading_days": int(selected_trading_days),
-        "uncompressed_bytes": int(uncompressed_bytes),
-        "bytes_per_row": bytes_per_row,
-        "mean_rows_per_group": rows_per_group,
-        "estimated_uncompressed_bytes_per_group": bytes_per_group,
-        "total_memory_bytes": int(total_memory_bytes),
-        "memory_floor_bytes": int(memory_floor_bytes),
-        "memory_fraction": float(memory_fraction),
-        "target_sample_bytes": target_bytes,
-        "groups_per_day": groups_per_day,
-        "expected_sample_rows": int(expected_rows),
-    }
+CANDIDATE_COLUMNS = (
+    "candidate_attention",
+    "candidate_background_control",
+    "candidate_selected",
+    "candidate_reason_mask",
+)
 
 
 def event_query(
     *,
     feature_view: str = "minute_features",
     config: MinuteV2Config,
-    groups_per_day: int | None = None,
 ) -> str:
-    """Keep whole market snapshots; event ideas remain features instead of row gates."""
+    """Keep causal stock candidates while preserving every decision-time group."""
 
     config.validate()
-    periodic = int(config.periodic_sample_every)
-    random_percent = int(config.random_negative_percent)
-    group_limit = EXPECTED_DECISION_BARS if groups_per_day is None else int(groups_per_day)
-    if not 1 <= group_limit <= EXPECTED_DECISION_BARS:
-        raise MinuteV2Error("minute_v2_groups_per_day_invalid")
-    if group_limit == 1:
-        session_expression = "0"
-        morning_groups = 1
-        afternoon_groups = 1
-    else:
-        session_expression = "CASE WHEN bar_time < '130000000' THEN 0 ELSE 1 END"
-        morning_groups = round(group_limit * 119 / EXPECTED_DECISION_BARS)
-        morning_groups = max(1, min(119, morning_groups))
-        morning_groups = max(morning_groups, group_limit - 115)
-        afternoon_groups = group_limit - morning_groups
+    background_percent = int(config.candidate_background_percent)
+    liquidity = float(config.minimum_daily_liquidity_rank)
+    stock_floor = float(config.candidate_stock_rank_floor)
+    industry_floor = float(config.candidate_industry_rank_floor)
+    industry_stock_floor = float(config.candidate_industry_stock_rank_floor)
+    volume_floor = float(config.candidate_volume_rank_floor)
     return f"""
         WITH flags AS (
             SELECT
                 *,
-                minute_index % {periodic} = 0 AS event_periodic,
-                (stock_return_5m_rank >= 0.97 OR stock_return_5m_rank <= 0.03)
-                    AS event_extreme_return,
                 (
-                    stock_volume_acceleration_rank >= 0.97
-                    AND ABS(COALESCE(return_from_previous_close, 0.0)) >= 0.003
+                    stock_return_rank >= {stock_floor}
+                    OR stock_return_5m_rank >= {stock_floor}
+                ) AS event_extreme_return,
+                (
+                    stock_volume_acceleration_rank >= {volume_floor}
+                    AND stock_amount_rank >= 0.50
+                    AND ABS(COALESCE(return_from_previous_close, 0.0)) >= 0.001
                 ) AS event_volume_shock,
                 (
-                    industry_strength_rank >= 0.90
-                    AND industry_stock_return_rank >= 0.80
+                    industry_strength_rank >= {industry_floor}
+                    AND industry_stock_return_rank >= {industry_stock_floor}
                     AND COALESCE(industry_return_mean, 0.0) > 0.0
                 ) AS event_industry_leadership,
                 (
                     previous_vwap_deviation IS NOT NULL
                     AND vwap_deviation IS NOT NULL
                     AND SIGN(previous_vwap_deviation) <> SIGN(vwap_deviation)
-                    AND ABS(return_5m) >= 0.002
+                    AND ABS(COALESCE(return_5m, 0.0)) >= 0.001
                 ) AS event_vwap_cross,
-                (HASH(symbol, trade_date, bar_time) % 100) < {random_percent}
-                    AS event_random_negative
+                stock_amount_rank >= 0.90 AS event_liquidity_anchor,
+                (HASH(symbol, trade_date, bar_time) % 100) < {background_percent}
+                    AS event_background_control
             FROM {feature_view}
         ),
-        group_sessions AS (
-            SELECT
-                trade_date,
-                bar_time,
-                {session_expression} AS sampling_session
-            FROM (SELECT DISTINCT trade_date, bar_time FROM flags)
-        ),
-        stratified_groups AS (
-            SELECT
-                trade_date,
-                bar_time,
-                sampling_session,
-                NTILE(CASE WHEN sampling_session = 0 THEN {morning_groups}
-                           ELSE {afternoon_groups} END) OVER (
-                    PARTITION BY trade_date, sampling_session ORDER BY bar_time
-                )
-                    AS time_stratum
-            FROM group_sessions
-        ),
-        ranked_groups AS (
+        candidates AS (
             SELECT
                 *,
-                ROW_NUMBER() OVER (
-                    PARTITION BY trade_date, sampling_session, time_stratum
-                    ORDER BY HASH(CAST(trade_date AS VARCHAR), CAST(bar_time AS VARCHAR)), bar_time
-                ) AS stratum_rank
-            FROM stratified_groups
+                (
+                    daily_liquidity_rank >= {liquidity}
+                    AND (
+                        event_extreme_return
+                        OR event_volume_shock
+                        OR event_industry_leadership
+                        OR event_vwap_cross
+                        OR event_liquidity_anchor
+                    )
+                ) AS candidate_attention,
+                (
+                    daily_liquidity_rank >= {liquidity}
+                    AND event_background_control
+                ) AS candidate_background_control
+            FROM flags
         ),
-        selected_groups AS (
+        encoded AS (
             SELECT
-                trade_date,
-                bar_time,
-                time_stratum + CASE WHEN sampling_session = 0 THEN 0 ELSE {morning_groups} END
-                    AS sampled_group_rank
-            FROM ranked_groups
-            WHERE stratum_rank = 1
+                *,
+                candidate_attention OR candidate_background_control AS candidate_selected,
+                CAST(event_extreme_return AS INTEGER)
+                    + 2 * CAST(event_volume_shock AS INTEGER)
+                    + 4 * CAST(event_industry_leadership AS INTEGER)
+                    + 8 * CAST(event_vwap_cross AS INTEGER)
+                    + 16 * CAST(event_liquidity_anchor AS INTEGER)
+                    + 32 * CAST(event_background_control AS INTEGER)
+                    AS candidate_reason_mask
+            FROM candidates
         )
-        SELECT
-            f.*,
-            CAST(event_periodic AS INTEGER)
-                + 2 * CAST(event_extreme_return AS INTEGER)
-                + 4 * CAST(event_volume_shock AS INTEGER)
-                + 8 * CAST(event_industry_leadership AS INTEGER)
-                + 16 * CAST(event_vwap_cross AS INTEGER)
-                + 32 * CAST(event_random_negative AS INTEGER) AS event_mask,
-            g.sampled_group_rank
-        FROM flags f
-        JOIN selected_groups g USING(trade_date, bar_time)
+        SELECT *, candidate_reason_mask AS event_mask
+        FROM encoded
+        WHERE candidate_selected
         ORDER BY trade_date, bar_time, symbol
     """
 
@@ -167,7 +112,6 @@ def build_event_frame(
     features: pd.DataFrame,
     *,
     config: MinuteV2Config | None = None,
-    groups_per_day: int | None = None,
     connection: Any | None = None,
 ) -> pd.DataFrame:
     current = config or MinuteV2Config()
@@ -178,25 +122,29 @@ def build_event_frame(
     con = duckdb.connect(":memory:") if owned else connection
     try:
         con.register("minute_features", features)
-        result = con.execute(
-            event_query(config=current, groups_per_day=groups_per_day)
-        ).fetchdf()
+        result = con.execute(event_query(config=current)).fetchdf()
     finally:
         if owned:
             con.close()
+    if result.empty:
+        raise MinuteV2Error("minute_v2_candidate_gate_empty")
     if result.duplicated(list(KEY_COLUMNS)).any():
         raise MinuteV2Error("minute_v2_duplicate_event_keys")
     source_sizes = features.groupby(["trade_date", "bar_time"], sort=False).size()
     result_sizes = result.groupby(["trade_date", "bar_time"], sort=False).size()
+    if len(result_sizes) != len(source_sizes):
+        raise MinuteV2Error(
+            f"minute_v2_candidate_time_groups_missing:{len(result_sizes)}:{len(source_sizes)}"
+        )
     expected_sizes = source_sizes.reindex(result_sizes.index)
-    if not result_sizes.equals(expected_sizes):
-        raise MinuteV2Error("minute_v2_incomplete_cross_section_sample")
+    if result_sizes.gt(expected_sizes).any():
+        raise MinuteV2Error("minute_v2_candidate_group_exceeds_universe")
     return result
 
 
 __all__ = [
+    "CANDIDATE_COLUMNS",
     "EVENT_FLAG_COLUMNS",
     "build_event_frame",
-    "calibrate_groups_per_day",
     "event_query",
 ]

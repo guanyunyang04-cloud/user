@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from pandas.testing import assert_frame_equal
 
+from quantlab.research.minute_v2.builder import _checkpoint_specs_compatible
 from quantlab.research.minute_v2.contracts import (
     DAILY_WINDOWS,
     EXPECTED_DECISION_BARS,
@@ -17,15 +18,44 @@ from quantlab.research.minute_v2.labels import build_label_frame
 from quantlab.research.minute_v2.mining import mine_formula_features
 from quantlab.research.minute_v2.models import fit_ridge, rule_score
 from quantlab.research.minute_v2.replay import EventReplayConfig, replay_events
-from quantlab.research.minute_v2.sampling import build_event_frame, calibrate_groups_per_day
+from quantlab.research.minute_v2.sampling import build_event_frame
 from quantlab.research.minute_v2.source import stock_day_query
-from quantlab.research.minute_v2.training import _bounded_group_sample
 
 
 def _times() -> list[str]:
     morning = pd.date_range("2000-01-01 09:31", "2000-01-01 11:30", freq="min")
     afternoon = pd.date_range("2000-01-01 13:01", "2000-01-01 15:00", freq="min")
     return [*morning.strftime("%H%M00000"), *afternoon.strftime("%H%M00000")]
+
+
+def test_checkpoint_reuses_parts_when_only_resource_controls_change() -> None:
+    current = {
+        "schema": "quantlab.minute_v2_day_parts/3",
+        "source_dataset_ids": {"minute": "stable"},
+        "year": 2022,
+        "month": 6,
+        "keep_base": True,
+        "extended_end": "2022-07-08",
+        "config": {
+            "processing_days_per_chunk": 1,
+            "duckdb_threads": 2,
+            "memory_floor_gib": 4.0,
+            "duckdb_memory_limit_gib": 1.0,
+            "candidate_background_percent": 1,
+        },
+    }
+    requested = {
+        **current,
+        "config": {
+            **current["config"],
+            "duckdb_threads": 4,
+            "memory_floor_gib": 1.0,
+            "duckdb_memory_limit_gib": 2.0,
+        },
+    }
+    assert _checkpoint_specs_compatible(current, requested)
+    requested["config"]["candidate_background_percent"] = 2
+    assert not _checkpoint_specs_compatible(current, requested)
 
 
 def _bars(
@@ -246,11 +276,14 @@ def test_decision_grid_excludes_lunch_and_closing_auction() -> None:
 
 
 def test_features_are_causal_and_field_masks_are_specific() -> None:
-    bars = _bars()
+    dates = ("2022-05-30", "2022-05-31", "2022-06-01")
+    bars = _bars(dates=dates)
     stock_days = _stock_days()
     original = build_feature_frame(bars, stock_days)
     mutated_bars = bars.copy()
-    future = mutated_bars["bar_time"] > "100000000"
+    future = mutated_bars["trade_date"].eq("2022-06-01") & mutated_bars["bar_time"].gt(
+        "100000000"
+    )
     mutated_bars.loc[future, ["open", "high", "low", "close"]] *= 8.0
     mutated_bars.loc[future, ["volume", "amount"]] *= 5.0
     mutated = build_feature_frame(mutated_bars, stock_days)
@@ -263,33 +296,47 @@ def test_features_are_causal_and_field_masks_are_specific() -> None:
     assert masked["breakout_20m"].isna().all()
     assert masked["return_5m"].notna().sum() > 0
     assert masked["rolling_range_20m"].isna().all()
-    assert masked["completed_kline_range_5m"].isna().all()
     first = original.loc[original["symbol"] == "600000.SH"].set_index("bar_time")
-    assert first.loc["093500000", "completed_kline_return_5m"] == first.loc[
-        "093600000", "completed_kline_return_5m"
+    assert bool(first.loc["093100000", "crossed_overnight_from_previous_bar"])
+    assert np.isfinite(first.loc["093100000", "return_240m"])
+    assert first.loc["093100000", "m60_close_to_sma_5bar"] == first.loc[
+        "102900000", "m60_close_to_sma_5bar"
     ]
-    assert first.loc["093500000", "completed_kline_return_5m"] != first.loc[
-        "094000000", "completed_kline_return_5m"
+    assert first.loc["102900000", "m60_close_to_sma_5bar"] != first.loc[
+        "103000000", "m60_close_to_sma_5bar"
     ]
-    assert np.isnan(first.loc["112900000", "return_120m"])
+    assert np.isfinite(first.loc["093100000", "return_120m"])
     assert np.isfinite(first.loc["130100000", "return_120m"])
-    assert np.isfinite(first.loc["130100000", "completed_kline_return_120m"])
+    assert np.isnan(masked.set_index("bar_time").loc["103000000", "m60_range_5bar"])
+
+    prior_mutated = bars.copy()
+    prior_tail = prior_mutated["trade_date"].eq("2022-05-31") & prior_mutated[
+        "bar_time"
+    ].ge("145000000")
+    prior_mutated.loc[prior_tail, ["open", "high", "low", "close"]] *= 1.02
+    changed = build_feature_frame(prior_mutated, stock_days)
+    original_open = original.loc[
+        (original["symbol"] == "600000.SH") & (original["bar_time"] == "093100000"),
+        "moving_average_deviation_240m",
+    ].iloc[0]
+    changed_open = changed.loc[
+        (changed["symbol"] == "600000.SH") & (changed["bar_time"] == "093100000"),
+        "moving_average_deviation_240m",
+    ].iloc[0]
+    assert original_open != changed_open
 
 
-def test_event_sampling_is_deterministic_and_contains_no_outcomes() -> None:
+def test_candidate_gate_is_deterministic_and_keeps_every_decision_minute() -> None:
     features = build_feature_frame(_bars(), _stock_days())
     first = build_event_frame(features)
     second = build_event_frame(features)
     assert_frame_equal(first, second)
-    assert len(first) == len(features)
-    assert first.groupby(["trade_date", "bar_time"]).size().eq(2).all()
+    assert 0 < len(first) <= len(features)
+    assert first.groupby(["trade_date", "bar_time"]).ngroups == EXPECTED_DECISION_BARS
+    assert first.groupby(["trade_date", "bar_time"]).size().ge(1).all()
+    assert first["candidate_selected"].all()
     assert first["event_mask"].ge(0).all()
     assert not any(column.startswith(("label_", "entry_", "actual_exit")) for column in first.columns)
-    sampled = build_event_frame(features, groups_per_day=2)
-    sampled_times = sampled["bar_time"].drop_duplicates().sort_values().tolist()
-    assert len(sampled_times) == 2
-    assert sampled_times[0] < "113000000"
-    assert sampled_times[1] > "130000000"
 
 
 def test_labels_use_next_bar_and_next_market_day() -> None:
@@ -345,7 +392,7 @@ def test_labels_use_next_bar_and_next_market_day() -> None:
 
 
 def test_minute_labels_are_near_close_safe_and_masks_are_field_specific() -> None:
-    bars = _bars(symbols=("600000.SH",))
+    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
     stock_days = _stock_days(symbols=("600000.SH",))
     stock_days.loc[:, "exclude_high"] = True
     features = build_feature_frame(bars, stock_days)
@@ -371,7 +418,19 @@ def test_minute_labels_are_near_close_safe_and_masks_are_field_specific() -> Non
     calendar = pd.DataFrame(
         [{"trade_date": "2022-06-01", "calendar_index": 1, "next_trade_date": None}]
     )
-    labels = build_label_frame(events, bars, bars, empty_daily, calendar)
+    calendar = pd.DataFrame(
+        [
+            {"trade_date": "2022-06-01", "calendar_index": 1, "next_trade_date": "2022-06-02"},
+            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
+        ]
+    )
+    labels = build_label_frame(
+        events,
+        bars.loc[bars["trade_date"] == "2022-06-01"],
+        bars,
+        empty_daily,
+        calendar,
+    )
     early = labels.loc[labels["bar_time"] == "093500000"].iloc[0]
     late = labels.loc[labels["bar_time"] == "145500000"].iloc[0]
     assert bool(early["entry_executable"])
@@ -379,8 +438,12 @@ def test_minute_labels_are_near_close_safe_and_masks_are_field_specific() -> Non
     assert np.isnan(early["label_mfe_5m"])
     assert np.isfinite(early["label_mae_5m"])
     assert bool(late["label_5m_observed"])
-    assert not bool(late["label_15m_observed"])
-    assert np.isnan(late["label_return_15m"])
+    assert bool(late["label_5m_crossed_overnight"])
+    assert late["label_end_date_5m"] == "2022-06-02"
+    assert late["label_end_bar_time_5m"] == "093500000"
+    assert bool(late["label_session_5m_observed"])
+    assert not bool(late["label_session_15m_observed"])
+    assert late["label_session_15m_invalid_reason"] == "same_session_window_incomplete"
 
 
 def test_daily_labels_cross_holidays_and_adjust_for_corporate_actions() -> None:
@@ -537,38 +600,3 @@ def test_rule_ridge_and_formula_mining_have_small_deterministic_contracts() -> N
     )
     assert mining["candidate_count"] == 9
     assert mining["selected_count"] > 0
-
-
-def test_bounded_training_sample_keeps_complete_cross_sections() -> None:
-    rows = []
-    for day in range(10):
-        for minute in ("093500000", "100000000"):
-            for symbol in range(20):
-                rows.append(
-                    {
-                        "trade_date": f"2022-06-{day + 1:02d}",
-                        "bar_time": minute,
-                        "symbol": f"{600000 + symbol}.SH",
-                    }
-                )
-    frame = pd.DataFrame(rows)
-    selected = _bounded_group_sample(frame, maximum_rows=125)
-    sizes = selected.groupby(["trade_date", "bar_time"]).size()
-    assert not selected.empty
-    assert sizes.eq(20).all()
-    assert len(selected) <= 125
-
-
-def test_sampling_group_count_comes_from_measured_row_width_and_memory() -> None:
-    result = calibrate_groups_per_day(
-        base_rows=1000,
-        complete_group_count=100,
-        selected_trading_days=10,
-        uncompressed_bytes=1_000_000,
-        total_memory_bytes=1_000_000,
-        memory_floor_bytes=0,
-        memory_fraction=0.5,
-    )
-    assert result["estimated_uncompressed_bytes_per_group"] == 10_000.0
-    assert result["groups_per_day"] == 5
-    assert result["expected_sample_rows"] == 500
