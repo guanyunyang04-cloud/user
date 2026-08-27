@@ -17,8 +17,8 @@ manifest.
 - Research contract: `data/research/daily/manifest.json`.
 - Model outputs: `runs/daily/`.
 - Minute-v2 pilot: `data/research/minute_v2/`.
-- Minute-v2 development data: `data/research/minute_v2_dev/`.
-- Minute-v2 model outputs: `runs/minute_v2_v1/`.
+- Legacy minute-v2 development data: `data/research/minute_v2_dev/`.
+- Legacy minute-v2 model outputs: `runs/minute_v2_v1/`.
 - Durable evidence: `research/records/` and `research/studies/`.
 
 The former `daily_research` and `quant_data_platform` trees were removed from
@@ -214,29 +214,29 @@ dedicated producer code has been retired.
   volume capacity, finite cash, overlap and up to five delayed exit days are
   explicit.
 - The input contract joins dated main-board membership, status, industry,
-  adjustment factor, prior daily context, opening-auction context and the
-  annual field-level minute masks. High-derived features are nulled only by a
-  high mask, close-derived features only by a close mask, and so on. Feature
-  artifacts contain no entry, exit or outcome columns; labels are stored in a
-  separate Parquet file. The implementation uses guarded DuckDB connections,
-  two threads, a 4-GiB available-memory floor, daily checkpoints and atomic
-  final files.
-- The retained 2022-06 correctness pilot contains 61,565 complete stock-days
-  and 14,406,210 decision rows. It retains the full 2.38-GB causal base plus
-  1,897,645 event rows and matching labels. Keys are unique, 92.65% of entries
-  are executable, 99.735% of observed exits occur on the planned next market
-  day, and a real-value future-mutation probe changed all raw bars after 10:00
-  without changing any feature through 10:00 beyond `3.47e-18` floating-point
-  roundoff. `pilot_audit.json` explicitly performs data checks without looking
-  at strategy returns.
-- The bounded 2012-2022 development set takes two evenly spaced whole trading
-  days from every month while retaining the full market and complete minute
-  cross-section on those days. Its 132 month manifests cover 264 dates,
-  139,073,688 decision rows, 17,192,165 deterministic events and 14,899,717
-  observed T+1 labels. The 264 Parquet artifacts occupy 4,236,787,675 bytes;
-  all stored hashes, row totals and month manifests pass
-  `verify-dataset`. This is a development sample, not a substitute for a
-  full-trading-day final backtest.
+  adjustment factors, opening auction, share capital, valuation, corporate
+  actions and field-level minute masks. A stock needs 60 completed valid daily
+  observations; 120/240-day context is optional and explicitly marked. Daily,
+  capital and valuation inputs are lagged, while known ex-date actions and the
+  current adjustment factor prevent false ex-right gaps.
+- The feature contract now includes rolling and fixed-boundary
+  5/10/20/30/60/120-minute state, 5/10/20/30/60/120/240-day context, liquidity,
+  market/industry cross-sections and a small set of scale interactions. The
+  labels separately store 5/15/30/60-minute and 1/3/5/10-market-day returns,
+  MFE and MAE. High, low and close masks affect only their corresponding
+  outcomes.
+- The rebuilt 2022-06 correctness pilot contains 61,375 complete stock-days
+  and 14,361,750 decision rows. Its measured 565.1 uncompressed bytes per row
+  and the machine RAM budget select 44 complete minute cross-sections per day:
+  924 groups and 2,700,500 rows. All groups match the full base, all keys are
+  unique, fixed K-line boundaries have zero violations, every field-mask
+  violation count is zero, and the future-mutation probe is invariant through
+  10:00 within `6.94e-18` roundoff.
+- The older 2012-2022 two-date-per-month dataset and its two-fold outputs were
+  built under the former event-gated feature contract. They remain historical
+  evidence only and are not compatible with the current feature list. Rebuild
+  them before any new baseline training; their old after-cost conclusion is not
+  evidence for or against the expanded minute model.
 - Two expanding folds are complete. Fold 1 trains on 2012-2017, validates on
   2018 and tests on 2019-2020; fold 2 trains on 2012-2019, validates on 2020
   and tests on 2021-2022. Sampling keeps whole `(trade_date, bar_time)` groups,

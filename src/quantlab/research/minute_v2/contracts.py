@@ -13,20 +13,22 @@ EXIT_WINDOW_START = "093500000"
 EXIT_WINDOW_END = "100000000"
 EXPECTED_SESSION_BARS = 240
 EXPECTED_DECISION_BARS = 234
+MINIMUM_DAILY_HISTORY = 60
+DAILY_HISTORY_LOOKBACK_OPEN_DAYS = 260
+DAILY_WINDOWS = (5, 10, 20, 30, 60, 120, 240)
+MINUTE_WINDOWS = (5, 10, 20, 30, 60, 120)
+MAXIMUM_DAILY_LABEL_HORIZON = 10
 
 KEY_COLUMNS = ("symbol", "trade_date", "bar_time")
 
-BASE_FEATURE_COLUMNS = (
+CORE_BASE_FEATURE_COLUMNS = (
     "minute_index",
     "minute_fraction",
     "time_sin",
     "time_cos",
     "return_1m",
     "return_3m",
-    "return_5m",
     "return_15m",
-    "return_30m",
-    "return_60m",
     "return_from_previous_close",
     "return_from_open",
     "bar_range",
@@ -34,9 +36,7 @@ BASE_FEATURE_COLUMNS = (
     "cumulative_range",
     "cumulative_close_location",
     "vwap_deviation",
-    "realized_volatility_5m",
     "realized_volatility_15m",
-    "realized_volatility_30m",
     "downside_volatility_15m",
     "volume_acceleration_5_20",
     "amount_curve_surprise",
@@ -49,11 +49,65 @@ BASE_FEATURE_COLUMNS = (
     "auction_gap",
     "auction_amount_to_daily20",
     "previous_return_1d",
-    "previous_return_5d",
-    "previous_return_20d",
-    "previous_volatility_20d",
     "previous_log_amount_20d",
     "daily_liquidity_rank",
+    "history_120d_available",
+    "history_240d_available",
+    "previous_log_total_market_value",
+    "previous_log_circulating_market_value",
+    "previous_turnover_rate",
+    "previous_pe",
+    "previous_pb",
+    "intraday_float_turnover",
+    "intraday_log_circulating_market_value",
+    "corporate_action_today",
+    "cash_dividend_per_10",
+    "bonus_share_per_10",
+    "transfer_share_per_10",
+    "minute_daily_momentum_interaction_20",
+    "minute_daily_momentum_interaction_60",
+    "short_long_momentum_spread",
+)
+
+MULTISCALE_MINUTE_FEATURE_COLUMNS = tuple(
+    name
+    for window in MINUTE_WINDOWS
+    for name in (
+        f"return_{window}m",
+        f"moving_average_deviation_{window}m",
+        f"rolling_range_{window}m",
+        f"realized_volatility_{window}m",
+        f"volume_ratio_{window}m",
+    )
+)
+
+FIXED_KLINE_FEATURE_COLUMNS = tuple(
+    name
+    for window in MINUTE_WINDOWS
+    for name in (
+        f"completed_kline_return_{window}m",
+        f"completed_kline_range_{window}m",
+        f"completed_kline_close_location_{window}m",
+        f"completed_kline_log_amount_{window}m",
+    )
+)
+
+DAILY_MULTISCALE_FEATURE_COLUMNS = tuple(
+    name
+    for window in DAILY_WINDOWS
+    for name in (
+        f"previous_return_{window}d",
+        f"previous_close_to_sma_{window}d",
+        f"previous_volatility_{window}d",
+        f"previous_amount_ratio_{window}d",
+    )
+)
+
+BASE_FEATURE_COLUMNS = (
+    CORE_BASE_FEATURE_COLUMNS
+    + MULTISCALE_MINUTE_FEATURE_COLUMNS
+    + FIXED_KLINE_FEATURE_COLUMNS
+    + DAILY_MULTISCALE_FEATURE_COLUMNS
 )
 
 CROSS_SECTION_FEATURE_COLUMNS = (
@@ -113,6 +167,10 @@ class MinuteV2Config:
     processing_days_per_chunk: int = 1
     duckdb_threads: int = 2
     memory_floor_gib: float = 4.0
+    duckdb_memory_limit_gib: float = 1.0
+    minimum_daily_history: int = MINIMUM_DAILY_HISTORY
+    daily_history_lookback_open_days: int = DAILY_HISTORY_LOOKBACK_OPEN_DAYS
+    training_sample_memory_fraction: float = 0.125
 
     def validate(self) -> None:
         if self.board != "main":
@@ -131,10 +189,18 @@ class MinuteV2Config:
             raise MinuteV2Error("minute_v2_participation_rate_invalid")
         if float(self.memory_floor_gib) < 1.0:
             raise MinuteV2Error("minute_v2_memory_floor_too_small")
+        if not 0.25 <= float(self.duckdb_memory_limit_gib) <= 4.0:
+            raise MinuteV2Error("minute_v2_duckdb_memory_limit_invalid")
         if not 1 <= int(self.processing_days_per_chunk) <= 5:
             raise MinuteV2Error("minute_v2_processing_chunk_invalid")
         if not 0 <= int(self.maximum_trading_days_per_month) <= 23:
             raise MinuteV2Error("minute_v2_month_day_sample_invalid")
+        if int(self.minimum_daily_history) != MINIMUM_DAILY_HISTORY:
+            raise MinuteV2Error("minute_v2_minimum_daily_history_contract_invalid")
+        if int(self.daily_history_lookback_open_days) < max(DAILY_WINDOWS) + 2:
+            raise MinuteV2Error("minute_v2_daily_history_lookback_too_short")
+        if not 0.01 <= float(self.training_sample_memory_fraction) <= 0.50:
+            raise MinuteV2Error("minute_v2_training_memory_fraction_invalid")
 
     def as_dict(self) -> dict[str, Any]:
         self.validate()
@@ -153,13 +219,22 @@ __all__ = [
     "AFTERNOON_DECISION_END",
     "AFTERNOON_DECISION_START",
     "BASE_FEATURE_COLUMNS",
+    "CORE_BASE_FEATURE_COLUMNS",
     "CROSS_SECTION_FEATURE_COLUMNS",
+    "DAILY_HISTORY_LOOKBACK_OPEN_DAYS",
+    "DAILY_MULTISCALE_FEATURE_COLUMNS",
+    "DAILY_WINDOWS",
     "EXIT_WINDOW_END",
     "EXIT_WINDOW_START",
     "EXPECTED_DECISION_BARS",
     "EXPECTED_SESSION_BARS",
+    "FIXED_KLINE_FEATURE_COLUMNS",
     "KEY_COLUMNS",
     "MODEL_FEATURE_COLUMNS",
+    "MAXIMUM_DAILY_LABEL_HORIZON",
+    "MINIMUM_DAILY_HISTORY",
+    "MINUTE_WINDOWS",
+    "MULTISCALE_MINUTE_FEATURE_COLUMNS",
     "MORNING_DECISION_END",
     "MORNING_DECISION_START",
     "MinuteV2Config",

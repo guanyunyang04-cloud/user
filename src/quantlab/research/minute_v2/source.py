@@ -11,7 +11,7 @@ import pandas as pd
 
 from quantlab.data.qdp_v2 import resolve_active_domain
 
-from .contracts import MinuteV2Config, MinuteV2Error
+from .contracts import DAILY_WINDOWS, MinuteV2Config, MinuteV2Error
 
 DOMAIN_NAMES = (
     "market_intraday_1m",
@@ -22,6 +22,9 @@ DOMAIN_NAMES = (
     "adjust_factor",
     "industry_concept",
     "trading_calendar",
+    "share_capital",
+    "valuation",
+    "corporate_actions",
 )
 
 
@@ -196,6 +199,9 @@ def register_source_views(
         ("adjust_factor", "adjust_factor"),
         ("industry_concept", "industry_concept"),
         ("trading_calendar", "trading_calendar"),
+        ("share_capital", "share_capital"),
+        ("valuation", "valuation"),
+        ("corporate_actions", "corporate_actions"),
     ):
         connection.execute(
             f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT * FROM {_scan(snapshot.shard_paths[name])}"
@@ -224,17 +230,75 @@ def stock_day_query(
     config: MinuteV2Config,
 ) -> str:
     config.validate()
-    start = date.fromisoformat(str(start_date))
-    warmup = (start - timedelta(days=140)).isoformat()
     start_sql = _date_literal(start_date)
     end_sql = _date_literal(end_date)
-    warmup_sql = _date_literal(warmup)
     st_clause = "AND st.is_st = FALSE" if config.exclude_st else ""
+    lookback = int(config.daily_history_lookback_open_days)
+    minimum_history = int(config.minimum_daily_history)
+    daily_state_expressions: list[str] = []
+    for window in DAILY_WINDOWS:
+        daily_state_expressions.extend(
+            [
+                f"""CASE WHEN COUNT(*) OVER (PARTITION BY symbol ORDER BY trade_date
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) >= {window + 1}
+                     AND LAG(adjusted_close, {window + 1}) OVER w > 0
+                     THEN LAG(adjusted_close, 1) OVER w
+                          / LAG(adjusted_close, {window + 1}) OVER w - 1.0
+                END AS previous_return_{window}d""",
+                f"""CASE WHEN COUNT(*) OVER (PARTITION BY symbol ORDER BY trade_date
+                         ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) = {window}
+                     AND AVG(adjusted_close) OVER (PARTITION BY symbol ORDER BY trade_date
+                         ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) > 0
+                     THEN LAG(adjusted_close, 1) OVER w
+                          / AVG(adjusted_close) OVER (PARTITION BY symbol ORDER BY trade_date
+                              ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) - 1.0
+                END AS previous_close_to_sma_{window}d""",
+                f"""CASE WHEN COUNT(adjusted_log_return) OVER (
+                         PARTITION BY symbol ORDER BY trade_date
+                         ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) = {window}
+                     THEN STDDEV_SAMP(adjusted_log_return) OVER (
+                         PARTITION BY symbol ORDER BY trade_date
+                         ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING)
+                END AS previous_volatility_{window}d""",
+                f"""CASE WHEN COUNT(amount) OVER (PARTITION BY symbol ORDER BY trade_date
+                         ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) = {window}
+                     AND AVG(amount) OVER (PARTITION BY symbol ORDER BY trade_date
+                         ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) > 0
+                     THEN LAG(amount, 1) OVER w
+                          / AVG(amount) OVER (PARTITION BY symbol ORDER BY trade_date
+                              ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) - 1.0
+                END AS previous_amount_ratio_{window}d""",
+            ]
+        )
+    daily_state_sql = ",\n                ".join(daily_state_expressions)
+    daily_projection = ",\n                ".join(
+        name
+        for window in DAILY_WINDOWS
+        for name in (
+            f"d.previous_return_{window}d",
+            f"d.previous_close_to_sma_{window}d",
+            f"d.previous_volatility_{window}d",
+            f"d.previous_amount_ratio_{window}d",
+        )
+    )
     return f"""
-        WITH factors AS (
+        WITH prior_open_dates AS (
+            SELECT trade_date
+            FROM (
+                SELECT DISTINCT trade_date
+                FROM trading_calendar
+                WHERE is_open AND trade_date < {start_sql}
+                ORDER BY trade_date DESC
+                LIMIT {lookback}
+            )
+        ),
+        history_bounds AS (
+            SELECT MIN(trade_date) AS warmup_date FROM prior_open_dates
+        ),
+        factors AS (
             SELECT symbol, trade_date, ANY_VALUE(adjust_factor) AS adjust_factor
             FROM adjust_factor
-            WHERE trade_date BETWEEN {warmup_sql} AND {end_sql}
+            WHERE trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
             GROUP BY symbol, trade_date
         ),
         daily_joined AS (
@@ -247,7 +311,7 @@ def stock_day_query(
                 CAST(f.adjust_factor AS DOUBLE) AS adjust_factor
             FROM daily_raw d
             JOIN factors f USING(symbol, trade_date)
-            WHERE d.trade_date BETWEEN {warmup_sql} AND {end_sql}
+            WHERE d.trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
               AND d.close > 0
         ),
         daily_returns AS (
@@ -264,26 +328,62 @@ def stock_day_query(
                 trade_date,
                 adjust_factor,
                 LAG(close, 1) OVER w AS previous_close,
+                LAG(adjust_factor, 1) OVER w AS previous_adjust_factor,
                 CASE WHEN LAG(adjusted_close, 2) OVER w > 0
                      THEN LAG(adjusted_close, 1) OVER w / LAG(adjusted_close, 2) OVER w - 1.0
                 END AS previous_return_1d,
-                CASE WHEN LAG(adjusted_close, 6) OVER w > 0
-                     THEN LAG(adjusted_close, 1) OVER w / LAG(adjusted_close, 6) OVER w - 1.0
-                END AS previous_return_5d,
-                CASE WHEN LAG(adjusted_close, 21) OVER w > 0
-                     THEN LAG(adjusted_close, 1) OVER w / LAG(adjusted_close, 21) OVER w - 1.0
-                END AS previous_return_20d,
-                STDDEV_SAMP(adjusted_log_return) OVER (
+                CASE WHEN COUNT(amount) OVER (
                     PARTITION BY symbol ORDER BY trade_date ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
-                ) AS previous_volatility_20d,
-                AVG(amount) OVER (
+                ) = 20 THEN AVG(amount) OVER (
                     PARTITION BY symbol ORDER BY trade_date ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
-                ) AS previous_amount_20d,
+                ) END AS previous_amount_20d,
                 COUNT(*) OVER (
-                    PARTITION BY symbol ORDER BY trade_date ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
-                ) AS prior_history_count
+                    PARTITION BY symbol ORDER BY trade_date
+                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                ) AS prior_history_count,
+                {daily_state_sql}
             FROM daily_returns
             WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
+        ),
+        capital_state AS (
+            SELECT
+                symbol,
+                trade_date,
+                LAG(CAST(total_share AS DOUBLE), 1) OVER w AS previous_total_share,
+                LAG(CAST(float_share AS DOUBLE), 1) OVER w AS previous_float_share
+            FROM share_capital
+            WHERE trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
+            WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
+        ),
+        valuation_state AS (
+            SELECT
+                symbol,
+                trade_date,
+                LAG(CAST(total_mv AS DOUBLE), 1) OVER w AS previous_total_mv,
+                LAG(CAST(circ_mv AS DOUBLE), 1) OVER w AS previous_circ_mv,
+                LAG(CAST(turnover_rate AS DOUBLE), 1) OVER w AS previous_turnover_rate,
+                LAG(CAST(pe AS DOUBLE), 1) OVER w AS previous_pe,
+                LAG(CAST(pb AS DOUBLE), 1) OVER w AS previous_pb
+            FROM valuation
+            WHERE trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
+            WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
+        ),
+        actions AS (
+            SELECT
+                symbol,
+                COALESCE(NULLIF(ex_date, ''), trade_date) AS action_date,
+                TRUE AS corporate_action_today,
+                SUM(COALESCE(CAST(cash_dividend_per_10 AS DOUBLE), 0.0)) AS cash_dividend_per_10,
+                SUM(COALESCE(CAST(bonus_share_per_10 AS DOUBLE), 0.0)) AS bonus_share_per_10,
+                SUM(COALESCE(CAST(transfer_share_per_10 AS DOUBLE), 0.0)) AS transfer_share_per_10
+            FROM corporate_actions
+            WHERE COALESCE(NULLIF(ex_date, ''), trade_date) BETWEEN {start_sql} AND {end_sql}
+              AND (
+                  announcement_date IS NULL
+                  OR announcement_date = ''
+                  OR announcement_date < COALESCE(NULLIF(ex_date, ''), trade_date)
+              )
+            GROUP BY symbol, action_date
         ),
         auctions AS (
             SELECT
@@ -305,13 +405,25 @@ def stock_day_query(
                 COALESCE(NULLIF(i.industry_name, ''), NULLIF(i.industry, ''), 'UNKNOWN') AS industry_name,
                 d.adjust_factor,
                 d.previous_close,
+                d.previous_adjust_factor,
                 a.auction_price,
                 a.auction_amount,
                 d.previous_return_1d,
-                d.previous_return_5d,
-                d.previous_return_20d,
-                d.previous_volatility_20d,
+                {daily_projection},
                 d.previous_amount_20d,
+                d.prior_history_count >= 120 AS history_120d_available,
+                d.prior_history_count >= 240 AS history_240d_available,
+                c.previous_total_share,
+                c.previous_float_share,
+                v.previous_total_mv,
+                v.previous_circ_mv,
+                v.previous_turnover_rate,
+                v.previous_pe,
+                v.previous_pb,
+                COALESCE(ca.corporate_action_today, FALSE) AS corporate_action_today,
+                COALESCE(ca.cash_dividend_per_10, 0.0) AS cash_dividend_per_10,
+                COALESCE(ca.bonus_share_per_10, 0.0) AS bonus_share_per_10,
+                COALESCE(ca.transfer_share_per_10, 0.0) AS transfer_share_per_10,
                 COALESCE(q.exclude_open, FALSE) AS exclude_open,
                 COALESCE(q.exclude_high, FALSE) AS exclude_high,
                 COALESCE(q.exclude_low, FALSE) AS exclude_low,
@@ -319,6 +431,9 @@ def stock_day_query(
             FROM universe_snapshot u
             JOIN security_status st USING(symbol, trade_date)
             JOIN daily_state d USING(symbol, trade_date)
+            LEFT JOIN capital_state c USING(symbol, trade_date)
+            LEFT JOIN valuation_state v USING(symbol, trade_date)
+            LEFT JOIN actions ca ON ca.symbol = u.symbol AND ca.action_date = u.trade_date
             LEFT JOIN industry_concept i USING(symbol, trade_date)
             LEFT JOIN auctions a USING(symbol, trade_date)
             LEFT JOIN minute_feature_exclusions q USING(symbol, trade_date)
@@ -329,8 +444,9 @@ def stock_day_query(
               AND st.is_suspended = FALSE
               AND st.is_delisted = FALSE
               AND sx.symbol IS NULL
-              AND d.prior_history_count >= 20
+              AND d.prior_history_count >= {minimum_history}
               AND d.adjust_factor > 0
+              AND d.previous_adjust_factor > 0
               AND d.previous_close > 0
               AND d.previous_amount_20d > 0
         )

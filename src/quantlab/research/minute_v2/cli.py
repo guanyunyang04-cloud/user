@@ -23,6 +23,8 @@ def _config(args: argparse.Namespace) -> MinuteV2Config:
         processing_days_per_chunk=int(args.processing_days_per_chunk),
         duckdb_threads=int(args.duckdb_threads),
         memory_floor_gib=float(args.memory_floor_gib),
+        duckdb_memory_limit_gib=float(args.duckdb_memory_limit_gib),
+        training_sample_memory_fraction=float(args.training_sample_memory_fraction),
     )
 
 
@@ -40,15 +42,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     month.add_argument("--processing-days-per-chunk", type=int, default=1)
     month.add_argument("--duckdb-threads", type=int, default=2)
     month.add_argument("--memory-floor-gib", type=float, default=4.0)
+    month.add_argument("--duckdb-memory-limit-gib", type=float, default=1.0)
+    month.add_argument("--training-sample-memory-fraction", type=float, default=0.125)
     range_parser = subparsers.add_parser("build-range")
     range_parser.add_argument("--start-year", type=int, required=True)
     range_parser.add_argument("--end-year", type=int, required=True)
     range_parser.add_argument("--output-root", default="")
     range_parser.add_argument("--force", action="store_true")
-    range_parser.add_argument("--maximum-trading-days-per-month", type=int, default=2)
+    range_parser.add_argument("--maximum-trading-days-per-month", type=int, default=0)
     range_parser.add_argument("--processing-days-per-chunk", type=int, default=1)
     range_parser.add_argument("--duckdb-threads", type=int, default=2)
     range_parser.add_argument("--memory-floor-gib", type=float, default=4.0)
+    range_parser.add_argument("--duckdb-memory-limit-gib", type=float, default=1.0)
+    range_parser.add_argument("--training-sample-memory-fraction", type=float, default=0.125)
     audit = subparsers.add_parser("audit-pilot")
     audit.add_argument("--manifest", required=True)
     audit.add_argument("--output", default="")

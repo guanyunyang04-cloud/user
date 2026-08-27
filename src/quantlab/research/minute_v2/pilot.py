@@ -15,8 +15,15 @@ from quantlab.core.io import read_json, write_json
 from quantlab.data.qdp_v2.duckdb_resources import GIB, MIB, open_guarded_duckdb
 
 from .builder import verify_month
-from .contracts import EXPECTED_DECISION_BARS, MODEL_FEATURE_COLUMNS, MinuteV2Error
+from .contracts import (
+    DAILY_WINDOWS,
+    EXPECTED_DECISION_BARS,
+    MINUTE_WINDOWS,
+    MODEL_FEATURE_COLUMNS,
+    MinuteV2Error,
+)
 from .features import BAR_COLUMNS, STOCK_DAY_COLUMNS, build_feature_frame
+from .labels import DAILY_LABEL_HORIZONS, MINUTE_LABEL_HORIZONS
 
 
 def _literal(value: str | Path) -> str:
@@ -59,30 +66,49 @@ def _real_mutation_probe(connection: Any, base_path: Path) -> dict[str, Any]:
     previous_close = pd.to_numeric(first["close"], errors="coerce") / (
         1.0 + pd.to_numeric(first["return_from_previous_close"], errors="coerce")
     )
-    previous_amount = np.exp(pd.to_numeric(first["previous_log_amount_20d"], errors="coerce"))
+    previous_amount = np.expm1(pd.to_numeric(first["previous_log_amount_20d"], errors="coerce"))
     auction_gap = pd.to_numeric(first["auction_gap"], errors="coerce")
     auction_ratio = pd.to_numeric(first["auction_amount_to_daily20"], errors="coerce")
-    stock_days = pd.DataFrame(
-        {
+    stock_day_values: dict[str, Any] = {
             "symbol": first["symbol"].astype(str),
             "trade_date": first["trade_date"].astype(str),
             "industry_name": first["industry_name"].astype(str),
             "adjust_factor": first["adjust_factor"],
+            "previous_adjust_factor": first["adjust_factor"],
             "previous_close": previous_close,
             "auction_price": previous_close * (1.0 + auction_gap),
             "auction_amount": previous_amount * auction_ratio,
             "previous_return_1d": first["previous_return_1d"],
-            "previous_return_5d": first["previous_return_5d"],
-            "previous_return_20d": first["previous_return_20d"],
-            "previous_volatility_20d": first["previous_volatility_20d"],
             "previous_amount_20d": previous_amount,
+            "history_120d_available": first["history_120d_available"],
+            "history_240d_available": first["history_240d_available"],
+            "previous_total_share": 2_000_000_000.0,
+            "previous_float_share": 1_000_000_000.0,
+            "previous_total_mv": np.expm1(first["previous_log_total_market_value"]),
+            "previous_circ_mv": np.expm1(first["previous_log_circulating_market_value"]),
+            "previous_turnover_rate": first["previous_turnover_rate"],
+            "previous_pe": first["previous_pe"],
+            "previous_pb": first["previous_pb"],
+            "corporate_action_today": first["corporate_action_today"],
+            "cash_dividend_per_10": first["cash_dividend_per_10"],
+            "bonus_share_per_10": first["bonus_share_per_10"],
+            "transfer_share_per_10": first["transfer_share_per_10"],
             "daily_liquidity_rank": first["daily_liquidity_rank"],
             "exclude_open": ~first["valid_open"].astype(bool),
             "exclude_high": ~first["valid_high"].astype(bool),
             "exclude_low": ~first["valid_low"].astype(bool),
             "exclude_close": ~first["valid_close"].astype(bool),
         }
-    ).loc[:, list(STOCK_DAY_COLUMNS)]
+    for window in DAILY_WINDOWS:
+        for prefix in (
+            "previous_return",
+            "previous_close_to_sma",
+            "previous_volatility",
+            "previous_amount_ratio",
+        ):
+            name = f"{prefix}_{window}d"
+            stock_day_values[name] = first[name]
+    stock_days = pd.DataFrame(stock_day_values).loc[:, list(STOCK_DAY_COLUMNS)]
     original = build_feature_frame(
         bars,
         stock_days,
@@ -170,6 +196,15 @@ def audit_pilot_month(
                 "count(*) FILTER(WHERE event_random_negative) "
                 f"FROM {_scan(event_path)}"
             ).fetchone()
+            group_row = connection.execute(
+                "WITH base_groups AS (SELECT trade_date,bar_time,count(*) AS rows "
+                f"FROM {base_scan} GROUP BY trade_date,bar_time),"
+                "event_groups AS (SELECT trade_date,bar_time,count(*) AS rows "
+                f"FROM {_scan(event_path)} GROUP BY trade_date,bar_time) "
+                "SELECT count(*),count(*) FILTER(WHERE b.rows=e.rows),"
+                "min(e.rows),max(e.rows) FROM event_groups e JOIN base_groups b "
+                "USING(trade_date,bar_time)"
+            ).fetchone()
             label_row = connection.execute(
                 "SELECT count(*),count(*) FILTER(WHERE entry_executable),"
                 "count(*) FILTER(WHERE label_observed),"
@@ -177,11 +212,82 @@ def audit_pilot_month(
                 "count(*) FILTER(WHERE delayed_exit_days BETWEEN 1 AND 5) "
                 f"FROM {_scan(label_path)}"
             ).fetchone()
+            label_coverage_expressions = []
+            for horizon in MINUTE_LABEL_HORIZONS:
+                label_coverage_expressions.extend(
+                    [
+                        f"count(*) FILTER(WHERE label_{horizon}m_observed)",
+                        f"count(label_return_{horizon}m)",
+                        f"count(label_mfe_{horizon}m)",
+                        f"count(label_mae_{horizon}m)",
+                    ]
+                )
+            for horizon in DAILY_LABEL_HORIZONS:
+                label_coverage_expressions.extend(
+                    [
+                        f"count(*) FILTER(WHERE label_{horizon}d_observed)",
+                        f"count(label_return_{horizon}d)",
+                        f"count(label_mfe_{horizon}d)",
+                        f"count(label_mae_{horizon}d)",
+                    ]
+                )
+            label_coverage_row = connection.execute(
+                "SELECT " + ",".join(label_coverage_expressions) + f" FROM {_scan(label_path)}"
+            ).fetchone()
+            quality_row = connection.execute(
+                "SELECT "
+                "count(*) FILTER(WHERE NOT e.valid_high AND l.label_mfe_5m IS NOT NULL),"
+                "count(*) FILTER(WHERE NOT e.valid_low AND l.label_mae_5m IS NOT NULL),"
+                "count(*) FILTER(WHERE NOT e.valid_close AND l.label_return_5m IS NOT NULL),"
+                "count(*) FILTER(WHERE NOT e.valid_high AND e.valid_close "
+                "AND l.entry_executable AND l.label_return_5m IS NOT NULL) "
+                f"FROM {_scan(event_path)} e JOIN {_scan(label_path)} l "
+                "USING(symbol,trade_date,bar_time)"
+            ).fetchone()
+            boundary_expressions = [
+                "count(*) FILTER(WHERE minute_index % "
+                f"{window} <> 0 AND bar_time <> '130100000' "
+                f"AND completed_kline_return_{window}m IS DISTINCT FROM "
+                f"previous_completed_{window})"
+                for window in MINUTE_WINDOWS
+            ]
+            boundary_projection = ",".join(
+                f"LAG(completed_kline_return_{window}m) OVER ("
+                "PARTITION BY symbol,trade_date ORDER BY bar_time) "
+                f"AS previous_completed_{window}"
+                for window in MINUTE_WINDOWS
+            )
+            boundary_row = connection.execute(
+                "SELECT "
+                + ",".join(boundary_expressions)
+                + " FROM (SELECT *,"
+                + boundary_projection
+                + f" FROM {base_scan})"
+            ).fetchone()
             mutation = _real_mutation_probe(connection, base_path)
         finally:
             connection.close()
     event_total = int(event_row[0])
     label_total = int(label_row[0])
+    label_coverage: dict[str, dict[str, float | int]] = {}
+    coverage_index = 0
+    for suffix, horizons in (
+        ("minute", MINUTE_LABEL_HORIZONS),
+        ("daily", DAILY_LABEL_HORIZONS),
+    ):
+        unit = "m" if suffix == "minute" else "d"
+        for horizon in horizons:
+            observed, returns, mfe, mae = (
+                int(label_coverage_row[coverage_index + offset]) for offset in range(4)
+            )
+            coverage_index += 4
+            label_coverage[f"{horizon}{unit}"] = {
+                "observed_rows": observed,
+                "observed_fraction": observed / label_total,
+                "return_rows": returns,
+                "mfe_rows": mfe,
+                "mae_rows": mae,
+            }
     result = {
         "schema": "quantlab.minute_v2_pilot_audit/1",
         "status": "ok",
@@ -192,6 +298,10 @@ def audit_pilot_month(
             "row_count": total_rows,
             "feature_finite_fraction": finite_fraction,
             "minimum_feature_finite_fraction": min(finite_fraction.values()),
+            "fixed_kline_non_boundary_change_violations": {
+                f"{window}m": int(boundary_row[index])
+                for index, window in enumerate(MINUTE_WINDOWS)
+            },
         },
         "events": {
             "row_count": event_total,
@@ -204,6 +314,12 @@ def audit_pilot_month(
                 "vwap_cross": int(event_row[5]),
                 "random_negative": int(event_row[6]),
             },
+            "complete_cross_sections": {
+                "group_count": int(group_row[0]),
+                "matching_base_group_count": int(group_row[1]),
+                "minimum_rows": int(group_row[2]),
+                "maximum_rows": int(group_row[3]),
+            },
         },
         "labels": {
             "row_count": label_total,
@@ -211,6 +327,13 @@ def audit_pilot_month(
             "observed_fraction": int(label_row[2]) / label_total,
             "next_day_exit_fraction": int(label_row[3]) / label_total,
             "delayed_exit_fraction": int(label_row[4]) / label_total,
+            "horizon_coverage": label_coverage,
+            "field_mask_violations": {
+                "high_mask_with_mfe": int(quality_row[0]),
+                "low_mask_with_mae": int(quality_row[1]),
+                "close_mask_with_return": int(quality_row[2]),
+            },
+            "high_masked_but_return_still_observed_rows": int(quality_row[3]),
         },
         "future_mutation_probe": mutation,
     }

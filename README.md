@@ -128,24 +128,24 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research verify
 The active minute research pipeline is `quantlab.research.minute_v2`. It uses
 causal features at every eligible minute, next-bar entry, ordinary-share T+1,
 field-level QDP quality masks and physically separate outcome labels. The
-retained 2022-06 pilot and the 2012-2022 two-date-per-month development set are
-already built. The two-fold baseline is useful for feature ranking but remains
-after-cost negative, so it is not a paper- or live-trading candidate.
+retained 2022-06 pilot now enforces 60 completed daily observations, carries
+optional 120/240-day context, computes causal 5/10/20/30/60/120-minute features,
+and stores 5/15/30/60-minute plus 1/3/5/10-day outcomes. Training rows are
+complete market cross-sections selected from measured row width and RAM, not
+individual event rows.
 
 ```powershell
 $env:PYTHONPATH='H:\quant_project\src'
 
-# Recheck the immutable development artifacts.
+# Recheck the current full-month correctness pilot.
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
-  --workspace-root H:/quant_project verify-dataset `
-  --manifest H:/quant_project/data/research/minute_v2_dev/manifest.json
-
-# Reproduce the two expanding baseline folds.
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
-  --workspace-root H:/quant_project train-baselines `
-  --dataset-root H:/quant_project/data/research/minute_v2_dev `
-  --output-root H:/quant_project/runs/minute_v2_v1
+  --workspace-root H:/quant_project verify-month `
+  --manifest H:/quant_project/data/research/minute_v2/months/year=2022/month=06/manifest.json
 ```
+
+`data/research/minute_v2_dev` and `runs/minute_v2_v1` were built under the old
+event-gated feature contract. They are retained only as historical evidence and
+must be rebuilt before the current training code is used.
 
 Local iQuant K-line files can be sampled without a trading connection. The
 adapter validates the binary layout and records all inferred units before
