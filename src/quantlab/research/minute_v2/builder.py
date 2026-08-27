@@ -20,12 +20,18 @@ from quantlab.data.qdp_v2.duckdb_resources import GIB, MIB, open_guarded_duckdb
 from .contracts import (
     EXPECTED_DECISION_BARS,
     MAXIMUM_DAILY_LABEL_HORIZON,
+    MODEL_FEATURE_COLUMNS,
     MinuteV2Config,
     MinuteV2Error,
 )
 from .features import feature_query, sixty_state_query
 from .labels import calendar_query, label_query, label_stock_day_query
-from .sampling import event_query
+from .sampling import (
+    CANDIDATE_COLUMNS,
+    EVENT_CONTEXT_COLUMNS,
+    EVENT_FLAG_COLUMNS,
+    event_query,
+)
 from .source import (
     SourceSnapshot,
     month_bounds,
@@ -36,8 +42,10 @@ from .source import (
 )
 
 FORBIDDEN_FEATURE_PREFIXES = ("label_", "actual_exit", "planned_exit", "entry_")
-CHECKPOINT_SCHEMA = "quantlab.minute_v2_day_parts/3"
+CHECKPOINT_SCHEMA = "quantlab.minute_v2_day_parts/4"
 LABEL_CACHE_SCHEMA = "quantlab.minute_v2_all_event_labels/1"
+MONTH_SCHEMA = "quantlab.minute_v2_month/2"
+SUPPORT_CACHE_SCHEMA = "quantlab.minute_v2_support_cache/1"
 LABEL_BUCKET_COUNT = 16
 RUNTIME_ONLY_CONFIG_FIELDS = frozenset(
     {
@@ -86,25 +94,28 @@ def _copy_query(
     partial = target.with_suffix(target.suffix + ".partial")
     if partial.exists():
         partial.unlink()
-    connection.execute(
-        f"COPY ({query}) TO {_sql_literal(partial)} "
-        f"(FORMAT PARQUET, COMPRESSION {codec}, ROW_GROUP_SIZE 50000)"
-    )
-    if not partial.is_file():
-        raise MinuteV2Error(f"minute_v2_copy_missing:{partial}")
+    completed = False
+    try:
+        connection.execute(
+            f"COPY ({query}) TO {_sql_literal(partial)} "
+            f"(FORMAT PARQUET, COMPRESSION {codec}, ROW_GROUP_SIZE 50000)"
+        )
+        if not partial.is_file():
+            raise MinuteV2Error(f"minute_v2_copy_missing:{partial}")
+        completed = True
+    finally:
+        if not completed and partial.exists():
+            partial.unlink()
     os.replace(partial, target)
     return _artifact(target)
 
 
 def _combine_parts(connection: Any, parts: list[Path], target: Path) -> dict[str, Any]:
-    if len(parts) == 1:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        partial = target.with_suffix(target.suffix + ".partial")
-        if partial.exists():
-            partial.unlink()
-        shutil.copy2(parts[0], partial)
-        os.replace(partial, target)
-        return _artifact(target)
+    if not parts:
+        raise MinuteV2Error("minute_v2_parquet_parts_empty")
+    # Intermediate chunks use Snappy for faster writes. Re-encode the final
+    # artifact consistently so one-day development builds follow the same
+    # storage contract as multi-day production builds.
     return _copy_query(connection, f"SELECT * FROM {_parquet_scan(parts)}", target)
 
 
@@ -148,7 +159,7 @@ def _manifest_is_complete(path: Path, *, keep_base: bool) -> bool:
     if not path.is_file():
         return False
     value = read_json(path)
-    if value.get("status") != "ok":
+    if value.get("status") != "ok" or value.get("schema") != MONTH_SCHEMA:
         return False
     required = ["events", "labels"] + (["base"] if keep_base else [])
     artifacts = dict(value.get("artifacts", {}))
@@ -158,6 +169,23 @@ def _manifest_is_complete(path: Path, *, keep_base: bool) -> bool:
         if not target.is_file() or int(record.get("size", -1)) != target.stat().st_size:
             return False
     return True
+
+
+def _protect_existing_manifest(path: Path, *, force: bool) -> None:
+    """Refuse to overwrite a completed artifact from an older contract."""
+
+    if not path.is_file() or force:
+        return
+    try:
+        value = read_json(path)
+    except (OSError, ValueError, TypeError) as exc:
+        raise MinuteV2Error(f"minute_v2_existing_manifest_unreadable:{path}") from exc
+    schema = value.get("schema")
+    if schema != MONTH_SCHEMA:
+        raise MinuteV2Error(
+            "minute_v2_existing_manifest_schema_requires_force:"
+            f"{path}:{schema!r}:{MONTH_SCHEMA}"
+        )
 
 
 def _safe_clean_generated(directory: Path, month_directory: Path, *, expected_name: str) -> None:
@@ -302,15 +330,66 @@ def _materialize_cached_view(
     view_name: str,
     path: Path,
     query: str,
+    metadata_path: Path | None = None,
+    cache_spec: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], bool]:
+    expected_metadata: dict[str, Any] | None = None
+    if metadata_path is not None:
+        expected_metadata = {
+            "schema": SUPPORT_CACHE_SCHEMA,
+            "query_sha256": hashlib.sha256(query.encode("utf-8")).hexdigest(),
+            "spec": dict(cache_spec or {}),
+        }
     reused = _valid_part(path)
+    if reused and expected_metadata is not None:
+        try:
+            reused = metadata_path.is_file() and read_json(metadata_path) == expected_metadata
+        except (OSError, ValueError, TypeError):
+            reused = False
     if not reused:
         _copy_query(connection, query, path, compression="SNAPPY")
+        if metadata_path is not None and expected_metadata is not None:
+            write_json(metadata_path, expected_metadata)
     connection.execute(
         f"CREATE OR REPLACE TEMP VIEW {view_name} AS SELECT * FROM "
         + _parquet_scan([path])
     )
     return _artifact(path), reused
+
+
+def _support_cache_signature(
+    snapshot: SourceSnapshot,
+    config: MinuteV2Config,
+) -> str:
+    """Return a source/config key shared by all month builds.
+
+    Quality exclusions live outside QDP dataset manifests, so include their
+    file metadata as part of the key.  A changed quality file consequently
+    creates a new cache namespace instead of reusing stale support rows.
+    """
+
+    quality_files: list[dict[str, Any]] = []
+    if snapshot.minute_quality_root.is_dir():
+        for path in sorted(snapshot.minute_quality_root.rglob("*.parquet")):
+            stat = path.stat()
+            quality_files.append(
+                {
+                    "path": str(path.relative_to(snapshot.minute_quality_root)),
+                    "size": int(stat.st_size),
+                    "mtime_ns": int(stat.st_mtime_ns),
+                }
+            )
+    config_values = config.as_dict()
+    for name in RUNTIME_ONLY_CONFIG_FIELDS:
+        config_values.pop(name, None)
+    payload = {
+        "schema": SUPPORT_CACHE_SCHEMA,
+        "source_dataset_ids": snapshot.dataset_ids,
+        "config": config_values,
+        "quality_files": quality_files,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()[:24]
 
 
 def _materialize_label_support(
@@ -319,20 +398,41 @@ def _materialize_label_support(
     start_date: str,
     extended_end_date: str,
     support_directory: Path,
+    support_cache_context: dict[str, Any],
 ) -> dict[str, Any]:
+    stock_day_path = support_directory / (
+        f"label_stock_days__{start_date}__{extended_end_date}.parquet"
+    )
     stock_day_artifact, stock_day_reused = _materialize_cached_view(
         connection,
         view_name="label_stock_days",
-        path=support_directory / "label_stock_days.parquet",
+        path=stock_day_path,
+        metadata_path=stock_day_path.with_suffix(".json"),
+        cache_spec={
+            **support_cache_context,
+            "view": "label_stock_days",
+            "start_date": start_date,
+            "end_date": extended_end_date,
+        },
         query=label_stock_day_query(
             start_date=start_date,
             end_date=extended_end_date,
         ),
     )
+    calendar_path = support_directory / (
+        f"calendar_dates__{start_date}__{extended_end_date}.parquet"
+    )
     calendar_artifact, calendar_reused = _materialize_cached_view(
         connection,
         view_name="calendar_dates",
-        path=support_directory / "calendar_dates.parquet",
+        path=calendar_path,
+        metadata_path=calendar_path.with_suffix(".json"),
+        cache_spec={
+            **support_cache_context,
+            "view": "calendar_dates",
+            "start_date": start_date,
+            "end_date": extended_end_date,
+        },
         query=calendar_query(start_date=start_date, end_date=extended_end_date),
     )
     return {
@@ -422,6 +522,30 @@ def _verify_month_artifacts(
     base_reference_parts: list[Path],
 ) -> dict[str, Any]:
     event_schema = {field.name for field in pq.ParquetFile(events).schema_arrow}
+    required_event_columns = {
+        "symbol",
+        "trade_date",
+        "bar_time",
+        *EVENT_CONTEXT_COLUMNS,
+        *EVENT_FLAG_COLUMNS,
+        *CANDIDATE_COLUMNS,
+        "candidate_reason_mask",
+        "event_mask",
+    }
+    missing_event_columns = sorted(required_event_columns.difference(event_schema))
+    if missing_event_columns:
+        raise MinuteV2Error(
+            "minute_v2_event_columns_missing:" + ",".join(missing_event_columns)
+        )
+    # A narrow event artifact must not silently grow back into a second copy of
+    # the model feature matrix.  The full matrix remains in `base`.
+    duplicated_model_features = sorted(
+        (set(event_schema) - set(EVENT_CONTEXT_COLUMNS)).intersection(MODEL_FEATURE_COLUMNS)
+    )
+    if duplicated_model_features:
+        raise MinuteV2Error(
+            "minute_v2_event_wide_columns_present:" + ",".join(duplicated_model_features)
+        )
     forbidden = sorted(
         name
         for name in event_schema
@@ -524,7 +648,7 @@ def build_month(
     month: int,
     output_root: str | Path | None = None,
     config: MinuteV2Config | None = None,
-    keep_base: bool = False,
+    keep_base: bool = True,
     force: bool = False,
 ) -> dict[str, Any]:
     current = config or MinuteV2Config()
@@ -538,6 +662,7 @@ def build_month(
     directory = _month_directory(output, year, month)
     directory.mkdir(parents=True, exist_ok=True)
     manifest_path = directory / "manifest.json"
+    _protect_existing_manifest(manifest_path, force=force)
     if not force and _manifest_is_complete(manifest_path, keep_base=keep_base):
         return read_json(manifest_path)
     start_date, end_date = month_bounds(year, month)
@@ -600,11 +725,33 @@ def build_month(
             minute_history_start_date=minute_history_start,
             minute_end_date=extended_end,
         )
-        support_directory = checkpoint / "support"
+        support_signature = _support_cache_signature(snapshot, current)
+        support_directory = output / "_support_cache" / support_signature
+        support_directory.mkdir(parents=True, exist_ok=True)
+        support_cache_context = {
+            "support_cache_schema": SUPPORT_CACHE_SCHEMA,
+            "support_signature": support_signature,
+            "source_dataset_ids": snapshot.dataset_ids,
+            "config": {
+                name: value
+                for name, value in current.as_dict().items()
+                if name not in RUNTIME_ONLY_CONFIG_FIELDS
+            },
+        }
+        stock_day_support_path = support_directory / (
+            f"stock_days__{start_date}__{end_date}.parquet"
+        )
         stock_day_artifact, stock_day_reused = _materialize_cached_view(
             connection,
             view_name="stock_days",
-            path=support_directory / "stock_days.parquet",
+            path=stock_day_support_path,
+            metadata_path=stock_day_support_path.with_suffix(".json"),
+            cache_spec={
+                **support_cache_context,
+                "view": "stock_days",
+                "start_date": start_date,
+                "end_date": end_date,
+            },
             query=stock_day_query(
                 start_date=start_date,
                 end_date=end_date,
@@ -623,11 +770,23 @@ def build_month(
             "dates": int(stock_day_row[2]),
         }
         sixty_state_started = time.perf_counter()
-        sixty_state_path = support_directory / "sixty_minute_states.parquet"
+        sixty_state_path = support_directory / (
+            "sixty_minute_states__"
+            f"{minute_history_start}__{end_date}__{start_date}__{end_date}.parquet"
+        )
         sixty_state_artifact, sixty_state_reused = _materialize_cached_view(
             connection,
             view_name="sixty_minute_states",
             path=sixty_state_path,
+            metadata_path=sixty_state_path.with_suffix(".json"),
+            cache_spec={
+                **support_cache_context,
+                "view": "sixty_minute_states",
+                "minute_history_start": minute_history_start,
+                "start_date": start_date,
+                "end_date": end_date,
+                "stock_days_sha256": stock_day_artifact["sha256"],
+            },
             query=sixty_state_query(
                 bars_view="minute_bars_history",
                 stock_days_view="stock_days",
@@ -639,6 +798,7 @@ def build_month(
             start_date=start_date,
             extended_end_date=extended_end,
             support_directory=support_directory,
+            support_cache_context=support_cache_context,
         )
         available_dates = [
             _date_text(row[0])
@@ -790,7 +950,12 @@ def build_month(
             int(pq.ParquetFile(path).metadata.num_rows) for path in event_parts
         )
         event_scan = _parquet_scan(event_parts)
-        label_bucket_directory = support_directory / "label_buckets"
+        # Buckets are tied to this month's event keys.  Keep the persistent
+        # cache namespace shared across months, but isolate each date range so
+        # one month's labels cannot overwrite another month's buckets.
+        label_bucket_directory = support_directory / (
+            f"label_buckets__{start_date}__{extended_end}"
+        )
         label_bucket_directory.mkdir(parents=True, exist_ok=True)
         label_bucket_paths: list[Path] = []
         label_bucket_specs: list[dict[str, Any]] = []
@@ -812,7 +977,11 @@ def build_month(
                 "bucket_count": LABEL_BUCKET_COUNT,
                 "event_rows": bucket_event_count,
                 "event_parts": [
-                    {"name": path.name, "size": int(path.stat().st_size)}
+                    {
+                        "name": path.name,
+                        "size": int(path.stat().st_size),
+                        "sha256": sha256_file(path),
+                    }
                     for path in event_parts
                 ],
             }
@@ -953,7 +1122,7 @@ def build_month(
             "intermediate_compression": "SNAPPY for new day/support parts; final artifacts ZSTD",
         }
         result = {
-            "schema": "quantlab.minute_v2_month/1",
+            "schema": MONTH_SCHEMA,
             "status": "ok",
             "year": int(year),
             "month": int(month),
@@ -978,6 +1147,12 @@ def build_month(
                     }
                     for name, value in label_support_artifacts.items()
                 },
+            },
+            "support_cache": {
+                "schema": SUPPORT_CACHE_SCHEMA,
+                "signature": support_signature,
+                "directory": str(support_directory),
+                "persistent": True,
             },
             "complete_session_stock_days": complete_sessions,
             "date_selection": {
@@ -1033,6 +1208,7 @@ def build_range(
     output_root: str | Path | None = None,
     config: MinuteV2Config | None = None,
     force: bool = False,
+    keep_base: bool = True,
 ) -> dict[str, Any]:
     current = config or MinuteV2Config()
     workspace = Path(workspace_root).resolve()
@@ -1050,7 +1226,7 @@ def build_range(
                 month=month,
                 output_root=output,
                 config=current,
-                keep_base=False,
+                keep_base=keep_base,
                 force=force,
             )
         )

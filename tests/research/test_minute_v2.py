@@ -3,23 +3,44 @@ from __future__ import annotations
 import duckdb
 import numpy as np
 import pandas as pd
+import pytest
 from pandas.testing import assert_frame_equal
 
-from quantlab.research.minute_v2.builder import _checkpoint_specs_compatible
+from quantlab.research.minute_v2.builder import (
+    _checkpoint_specs_compatible,
+    _protect_existing_manifest,
+)
 from quantlab.research.minute_v2.contracts import (
     DAILY_WINDOWS,
     EXPECTED_DECISION_BARS,
     MODEL_FEATURE_COLUMNS,
     MinuteV2Config,
+    MinuteV2Error,
     is_decision_bar,
 )
 from quantlab.research.minute_v2.features import build_feature_frame
 from quantlab.research.minute_v2.labels import build_label_frame
 from quantlab.research.minute_v2.mining import mine_formula_features
-from quantlab.research.minute_v2.models import fit_ridge, rule_score
+from quantlab.research.minute_v2.models import (
+    evaluate_scores,
+    fit_ridge,
+    fit_ridge_chunks,
+    rule_score,
+)
 from quantlab.research.minute_v2.replay import EventReplayConfig, replay_events
-from quantlab.research.minute_v2.sampling import build_event_frame
+from quantlab.research.minute_v2.sampling import (
+    EVENT_CONTEXT_COLUMNS,
+    EVENT_FLAG_COLUMNS,
+    audit_candidate_recall,
+    build_event_frame,
+)
 from quantlab.research.minute_v2.source import stock_day_query
+from quantlab.research.minute_v2.training import (
+    _collect_cross_section_sample,
+    _evaluate_score_file,
+    _load_top_scored,
+    _write_scored_period,
+)
 
 
 def _times() -> list[str]:
@@ -56,6 +77,17 @@ def test_checkpoint_reuses_parts_when_only_resource_controls_change() -> None:
     assert _checkpoint_specs_compatible(current, requested)
     requested["config"]["candidate_background_percent"] = 2
     assert not _checkpoint_specs_compatible(current, requested)
+
+
+def test_builder_refuses_old_month_manifest_without_force(tmp_path) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        '{"schema":"quantlab.minute_v2_month/1","status":"ok"}',
+        encoding="utf-8",
+    )
+    with pytest.raises(MinuteV2Error, match="requires_force"):
+        _protect_existing_manifest(manifest, force=False)
+    _protect_existing_manifest(manifest, force=True)
 
 
 def _bars(
@@ -337,6 +369,34 @@ def test_candidate_gate_is_deterministic_and_keeps_every_decision_minute() -> No
     assert first["candidate_selected"].all()
     assert first["event_mask"].ge(0).all()
     assert not any(column.startswith(("label_", "entry_", "actual_exit")) for column in first.columns)
+    assert set(EVENT_CONTEXT_COLUMNS).issubset(first.columns)
+    assert set(EVENT_FLAG_COLUMNS).issubset(first.columns)
+    assert not set(MODEL_FEATURE_COLUMNS).difference(EVENT_CONTEXT_COLUMNS).intersection(first.columns)
+
+
+def test_candidate_recall_audit_uses_keys_and_reports_top_k_hits() -> None:
+    base = pd.DataFrame(
+        [
+            {"symbol": "A", "trade_date": "2022-06-01", "bar_time": "093100000"},
+            {"symbol": "B", "trade_date": "2022-06-01", "bar_time": "093100000"},
+            {"symbol": "C", "trade_date": "2022-06-01", "bar_time": "093100000"},
+            {"symbol": "A", "trade_date": "2022-06-01", "bar_time": "093200000"},
+            {"symbol": "B", "trade_date": "2022-06-01", "bar_time": "093200000"},
+            {"symbol": "C", "trade_date": "2022-06-01", "bar_time": "093200000"},
+        ]
+    )
+    candidates = base.loc[
+        ((base["symbol"] == "B") & (base["bar_time"] == "093100000"))
+        | ((base["symbol"] == "B") & (base["bar_time"] == "093200000"))
+    ].copy()
+    outcomes = base.copy()
+    outcomes["label_return_5m"] = [0.01, 0.03, 0.02, 0.03, 0.01, 0.02]
+    result = audit_candidate_recall(base, candidates, outcomes)
+    assert result["group_count"] == 2
+    assert result["groups_without_candidates"] == 0
+    assert result["top_k_hits"]["top_1"] == 1
+    assert result["top_k_recall"]["top_1"] == 0.5
+    assert result["top_k_recall"]["top_3"] == 1.0
 
 
 def test_labels_use_next_bar_and_next_market_day() -> None:
@@ -396,7 +456,9 @@ def test_minute_labels_are_near_close_safe_and_masks_are_field_specific() -> Non
     stock_days = _stock_days(symbols=("600000.SH",))
     stock_days.loc[:, "exclude_high"] = True
     features = build_feature_frame(bars, stock_days)
-    events = features.loc[features["bar_time"].isin(["093500000", "145500000"])].copy()
+    events = features.loc[
+        features["bar_time"].isin(["093500000", "112900000", "145500000"])
+    ].copy()
     empty_daily = pd.DataFrame(
         columns=[
             "symbol",
@@ -432,11 +494,15 @@ def test_minute_labels_are_near_close_safe_and_masks_are_field_specific() -> Non
         calendar,
     )
     early = labels.loc[labels["bar_time"] == "093500000"].iloc[0]
+    lunch = labels.loc[labels["bar_time"] == "112900000"].iloc[0]
     late = labels.loc[labels["bar_time"] == "145500000"].iloc[0]
     assert bool(early["entry_executable"])
     assert np.isfinite(early["label_return_5m"])
     assert np.isnan(early["label_mfe_5m"])
     assert np.isfinite(early["label_mae_5m"])
+    assert lunch["label_end_bar_time_5m"] == "130500000"
+    assert bool(lunch["label_5m_crossed_lunch"])
+    assert lunch["label_5m_invalid_reason"] == ""
     assert bool(late["label_5m_observed"])
     assert bool(late["label_5m_crossed_overnight"])
     assert late["label_end_date_5m"] == "2022-06-02"
@@ -600,3 +666,103 @@ def test_rule_ridge_and_formula_mining_have_small_deterministic_contracts() -> N
     )
     assert mining["candidate_count"] == 9
     assert mining["selected_count"] > 0
+
+
+def test_streamed_ridge_matches_batch_fit_when_medians_are_fully_observed() -> None:
+    rng = np.random.default_rng(11)
+    frame = pd.DataFrame(
+        {
+            "label_net_return": rng.normal(size=300),
+            "f1": rng.normal(size=300),
+            "f2": rng.normal(size=300),
+        }
+    )
+    batch = fit_ridge(
+        frame,
+        target="label_net_return",
+        feature_names=("f1", "f2"),
+        alpha=1.0,
+    )
+    streamed, metadata = fit_ridge_chunks(
+        lambda: [frame.iloc[:100], frame.iloc[100:200], frame.iloc[200:]],
+        target="label_net_return",
+        feature_names=("f1", "f2"),
+        alpha=1.0,
+        median_sample_size=1000,
+    )
+    assert metadata["row_count"] == len(frame)
+    assert metadata["second_pass_rows"] == len(frame)
+    assert np.allclose(batch.coefficients, streamed.coefficients)
+    assert np.allclose(batch.means, streamed.means)
+    assert np.allclose(batch.scales, streamed.scales)
+    assert streamed.intercept == pytest.approx(batch.intercept)
+
+
+def test_cross_section_sample_cap_is_global_across_input_chunks() -> None:
+    chunks = [
+        pd.DataFrame(
+            {
+                "symbol": [f"{part}{index}" for index in range(10)],
+                "trade_date": ["2022-06-01"] * 10,
+                "bar_time": ["093100000"] * 10,
+                "label_net_return": np.arange(10, dtype=float),
+            }
+        )
+        for part in ("A", "B", "C", "D")
+    ]
+    sample, metadata = _collect_cross_section_sample(
+        lambda: chunks,
+        rows_per_group=2,
+        maximum_rows=100,
+    )
+    assert metadata["sample_rows"] == 2
+    assert sample.groupby(["trade_date", "bar_time"]).size().tolist() == [2]
+
+
+def test_streamed_score_file_matches_in_memory_metrics(tmp_path) -> None:
+    rows = []
+    for minute_index, bar_time in enumerate(("093100000", "093200000")):
+        for symbol_index in range(6):
+            rows.append(
+                {
+                    "symbol": f"{symbol_index:06d}.SH",
+                    "trade_date": "2022-06-01",
+                    "bar_time": bar_time,
+                    "score": float(symbol_index + minute_index * 0.1),
+                    "label_net_return": float(0.01 * (5 - symbol_index) + minute_index * 0.001),
+                    "planned_exit_date": "2022-06-02",
+                    "entry_bar_time": "093600000",
+                    "entry_price": 10.0,
+                    "entry_amount": 100_000.0,
+                    "entry_executable": True,
+                    "actual_exit_date": "2022-06-02",
+                    "exit_amount": 100_000.0,
+                    "label_observed": True,
+                }
+            )
+    frame = pd.DataFrame(rows)
+    path = tmp_path / "scores.parquet"
+    metadata = _write_scored_period(
+        lambda: [frame.iloc[:5], frame.iloc[5:]],
+        lambda value: value["score"],
+        path,
+    )
+    assert metadata["row_count"] == len(frame)
+    streamed = _evaluate_score_file(path, top_k=3)
+    expected = evaluate_scores(frame, score="score", target="label_net_return", top_k=3)
+    for key in (
+        "row_count",
+        "group_count",
+        "rank_ic_mean",
+        "rank_ic_positive_fraction",
+        "universe_row_mean_net_return",
+        "universe_group_mean_net_return",
+        "top_k_mean_net_return",
+        "top_k_mean_excess_over_group_mean",
+        "top_k_positive_excess_group_fraction",
+        "daily_top_k_mean_net_return",
+        "positive_day_fraction",
+    ):
+        assert streamed[key] == pytest.approx(expected[key])
+    top = _load_top_scored(path, top_k=3)
+    assert len(top) == 6

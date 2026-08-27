@@ -1,4 +1,10 @@
-"""Physically separate continuous-minute, same-session, and holding labels."""
+"""Physically separate decision-step, same-session, and holding labels.
+
+The ``label_*m`` family advances on the 234-bar decision grid so a late-day
+signal has a well-defined next decision on the following session. The
+``label_session_*m`` family advances on raw bars within the same session and
+therefore captures the executable 11:30/15:00 tail separately.
+"""
 
 from __future__ import annotations
 
@@ -448,7 +454,8 @@ def label_query(
             )
         ),
         decision_bars AS (
-            SELECT b.*, g.decision_ordinal
+            SELECT
+                b.*, g.decision_ordinal
             FROM bar_context b
             JOIN market_decision_grid g USING(trade_date, bar_time)
         ),

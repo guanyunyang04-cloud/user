@@ -10,6 +10,7 @@ from typing import Any
 from .builder import build_month, build_range, verify_dataset, verify_month
 from .contracts import MinuteV2Config
 from .pilot import audit_pilot_month
+from .sampling import audit_candidate_recall_files
 from .training import run_two_fold_baselines
 
 
@@ -35,7 +36,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     month.add_argument("--year", type=int, required=True)
     month.add_argument("--month", type=int, choices=range(1, 13), required=True)
     month.add_argument("--output-root", default="")
-    month.add_argument("--keep-base", action="store_true")
+    month_base = month.add_mutually_exclusive_group()
+    month_base.add_argument("--keep-base", dest="keep_base", action="store_true")
+    month_base.add_argument("--drop-base", dest="keep_base", action="store_false")
+    month.set_defaults(keep_base=True)
     month.add_argument("--force", action="store_true")
     month.add_argument("--maximum-trading-days-per-month", type=int, default=0)
     month.add_argument("--processing-days-per-chunk", type=int, default=1)
@@ -47,6 +51,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     range_parser.add_argument("--end-year", type=int, required=True)
     range_parser.add_argument("--output-root", default="")
     range_parser.add_argument("--force", action="store_true")
+    range_base = range_parser.add_mutually_exclusive_group()
+    range_base.add_argument("--keep-base", dest="keep_base", action="store_true")
+    range_base.add_argument("--drop-base", dest="keep_base", action="store_false")
+    range_parser.set_defaults(keep_base=True)
     range_parser.add_argument("--maximum-trading-days-per-month", type=int, default=0)
     range_parser.add_argument("--processing-days-per-chunk", type=int, default=1)
     range_parser.add_argument("--duckdb-threads", type=int, default=4)
@@ -62,6 +70,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     train = subparsers.add_parser("train-baselines")
     train.add_argument("--dataset-root", required=True)
     train.add_argument("--output-root", required=True)
+    recall = subparsers.add_parser(
+        "audit-candidate-recall",
+        help="audit candidate-gate recall from narrow Parquet artifacts",
+    )
+    recall.add_argument("--base", required=True)
+    recall.add_argument("--candidates", required=True)
+    recall.add_argument("--outcomes", required=True)
+    recall.add_argument("--target", default="label_return_5m")
+    recall.add_argument("--top-k", type=int, nargs="+", default=[1, 3, 5])
+    recall.add_argument("--output", default="")
     return parser
 
 
@@ -90,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_root=args.output_root or None,
                 config=_config(args),
                 force=bool(args.force),
+                keep_base=bool(args.keep_base),
             )
         )
     elif args.command == "audit-pilot":
@@ -105,6 +124,19 @@ def main(argv: list[str] | None = None) -> int:
                 output_root=args.output_root,
             )
         )
+    elif args.command == "audit-candidate-recall":
+        result = audit_candidate_recall_files(
+            args.base,
+            args.candidates,
+            args.outcomes,
+            target=args.target,
+            top_k=args.top_k,
+        )
+        if args.output:
+            output = Path(args.output).resolve()
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        _print(result)
     return 0
 
 

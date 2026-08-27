@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -120,6 +120,146 @@ def fit_ridge(
         intercept=label_mean,
         alpha=float(alpha),
     )
+
+
+def fit_ridge_chunks(
+    chunk_factory: Callable[[], Iterable[pd.DataFrame]],
+    *,
+    target: str = "label_net_return",
+    feature_names: Sequence[str] = MODEL_FEATURE_COLUMNS,
+    alpha: float = 10.0,
+    median_sample_size: int = 8192,
+    random_state: int = 17,
+) -> tuple[RidgeMinuteModel, dict[str, Any]]:
+    """Fit Ridge from a re-iterable chunk source with bounded memory.
+
+    The first pass collects feature moments and a bounded row reservoir for
+    imputation medians. The second pass accumulates the normalized Gram matrix
+    and cross-product. Only ``O(features**2 + median_sample_size*features)``
+    state is retained; callers may therefore provide a multi-year Parquet
+    iterator without materializing it as one DataFrame.
+    """
+
+    names = tuple(str(name) for name in feature_names)
+    if not names:
+        raise MinuteV2Error("minute_v2_ridge_features_empty")
+    reservoir_size = int(median_sample_size)
+    if reservoir_size <= 0:
+        raise MinuteV2Error("minute_v2_ridge_median_sample_invalid")
+    p = len(names)
+    finite_count = np.zeros(p, dtype=np.int64)
+    raw_sum = np.zeros(p, dtype=np.float64)
+    raw_sum_sq = np.zeros(p, dtype=np.float64)
+    label_sum = 0.0
+    label_count = 0
+    row_count = 0
+    chunk_count = 0
+    max_chunk_rows = 0
+    reservoir = np.full((reservoir_size, p), np.nan, dtype=np.float64)
+    reservoir_keys = np.full(reservoir_size, np.inf, dtype=np.float64)
+    reservoir_seen = 0
+    rng = np.random.default_rng(int(random_state))
+
+    for frame in chunk_factory():
+        if target not in frame:
+            raise MinuteV2Error(f"minute_v2_ridge_target_missing:{target}")
+        matrix = _numeric_matrix(frame, names)
+        labels = pd.to_numeric(frame[target], errors="coerce").to_numpy(dtype=np.float64)
+        valid_label = np.isfinite(labels)
+        matrix = matrix[valid_label]
+        labels = labels[valid_label]
+        if matrix.size == 0:
+            continue
+        chunk_count += 1
+        row_count += int(len(labels))
+        max_chunk_rows = max(max_chunk_rows, int(len(labels)))
+        finite = np.isfinite(matrix)
+        finite_count += finite.sum(axis=0, dtype=np.int64)
+        raw_sum += np.where(finite, matrix, 0.0).sum(axis=0, dtype=np.float64)
+        raw_sum_sq += np.where(finite, matrix * matrix, 0.0).sum(axis=0, dtype=np.float64)
+        label_sum += float(labels.sum(dtype=np.float64))
+        label_count += int(len(labels))
+
+        # Keep the rows with the smallest independent random priorities.  This
+        # is an exact uniform reservoir and avoids the biased vectorized
+        # denominator that ordinary one-pass reservoir formulas require.
+        incoming_keys = rng.random(len(matrix), dtype=np.float64)
+        existing_count = min(reservoir_seen, reservoir_size)
+        if existing_count < reservoir_size:
+            take = min(reservoir_size - existing_count, len(matrix))
+            start = existing_count
+            reservoir[start : start + take] = matrix[:take]
+            reservoir_keys[start : start + take] = incoming_keys[:take]
+            existing_count += take
+            matrix = matrix[take:]
+            incoming_keys = incoming_keys[take:]
+        if len(matrix):
+            combined_matrix = np.concatenate((reservoir[:existing_count], matrix), axis=0)
+            combined_keys = np.concatenate((reservoir_keys[:existing_count], incoming_keys))
+            keep_count = min(reservoir_size, len(combined_keys))
+            keep_indices = np.argpartition(combined_keys, keep_count - 1)[:keep_count]
+            reservoir[:keep_count] = combined_matrix[keep_indices]
+            reservoir_keys[:keep_count] = combined_keys[keep_indices]
+            existing_count = keep_count
+        reservoir_seen += int(len(labels))
+
+    minimum_support = max(100, p * 3)
+    if label_count < minimum_support:
+        raise MinuteV2Error(f"minute_v2_ridge_support_too_small:{label_count}")
+    medians = np.nanmedian(reservoir[: min(reservoir_seen, reservoir_size)], axis=0)
+    medians = np.where(np.isfinite(medians), medians, 0.0)
+    missing_count = label_count - finite_count
+    imputed_sum = raw_sum + missing_count * medians
+    imputed_sum_sq = raw_sum_sq + missing_count * medians * medians
+    means = imputed_sum / float(label_count)
+    variances = np.maximum(imputed_sum_sq / float(label_count) - means * means, 0.0)
+    scales = np.sqrt(variances)
+    scales = np.where(scales > 1.0e-12, scales, 1.0)
+    label_mean = label_sum / float(label_count)
+
+    gram = np.zeros((p, p), dtype=np.float64)
+    cross = np.zeros(p, dtype=np.float64)
+    second_pass_rows = 0
+    for frame in chunk_factory():
+        matrix = _numeric_matrix(frame, names)
+        labels = pd.to_numeric(frame[target], errors="coerce").to_numpy(dtype=np.float64)
+        valid_label = np.isfinite(labels)
+        if not valid_label.any():
+            continue
+        matrix = matrix[valid_label]
+        labels = labels[valid_label]
+        matrix = np.where(np.isfinite(matrix), matrix, medians)
+        normalized = (matrix - means) / scales
+        centered = labels - label_mean
+        gram += normalized.T @ normalized
+        cross += normalized.T @ centered
+        second_pass_rows += int(len(labels))
+    if second_pass_rows != label_count:
+        raise MinuteV2Error(
+            f"minute_v2_ridge_stream_pass_mismatch:{label_count}:{second_pass_rows}"
+        )
+    coefficients = np.linalg.solve(
+        gram + float(alpha) * np.eye(p, dtype=np.float64),
+        cross,
+    )
+    model = RidgeMinuteModel(
+        feature_names=names,
+        medians=tuple(float(value) for value in medians),
+        means=tuple(float(value) for value in means),
+        scales=tuple(float(value) for value in scales),
+        coefficients=tuple(float(value) for value in coefficients),
+        intercept=float(label_mean),
+        alpha=float(alpha),
+    )
+    return model, {
+        "row_count": int(label_count),
+        "chunk_count": int(chunk_count),
+        "max_chunk_rows": int(max_chunk_rows),
+        "second_pass_rows": int(second_pass_rows),
+        "median_sample_rows": int(min(reservoir_seen, reservoir_size)),
+        "feature_count": int(p),
+        "algorithm": "two-pass-bounded-ridge",
+    }
 
 
 def _ranker_frame(
@@ -283,6 +423,7 @@ __all__ = [
     "evaluate_scores",
     "fit_lightgbm_ranker",
     "fit_ridge",
+    "fit_ridge_chunks",
     "grouped_rank_ic",
     "rule_score",
 ]
