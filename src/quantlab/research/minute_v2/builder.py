@@ -790,6 +790,7 @@ def build_month(
             query=sixty_state_query(
                 bars_view="minute_bars_history",
                 stock_days_view="stock_days",
+                auction_view="opening_auction",
             ),
         )
         sixty_state_seconds = time.perf_counter() - sixty_state_started
@@ -871,6 +872,7 @@ def build_month(
                     feature_query(
                         bars_view="day_minute_history",
                         stock_days_view="day_stock_days",
+                        auction_view="opening_auction",
                         sixty_state_view="sixty_minute_states",
                     ),
                     base_part,

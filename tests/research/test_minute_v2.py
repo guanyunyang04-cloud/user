@@ -131,7 +131,9 @@ def _stock_days(
                 "adjust_factor": 1.0,
                 "previous_adjust_factor": 1.0,
                 "previous_close": 9.9 + symbol_index,
-                "auction_price": 10.0 + symbol_index,
+                # The auction price is intentionally different from the first
+                # continuous bar so the 60-minute opening seed is observable.
+                "auction_price": 9.5 + symbol_index,
                 "auction_amount": 1_000_000.0,
                 "previous_return_1d": 0.01,
                 "previous_amount_20d": 200_000_000.0,
@@ -331,6 +333,10 @@ def test_features_are_causal_and_field_masks_are_specific() -> None:
     first = original.loc[original["symbol"] == "600000.SH"].set_index("bar_time")
     assert bool(first.loc["093100000", "crossed_overnight_from_previous_bar"])
     assert np.isfinite(first.loc["093100000", "return_240m"])
+    assert first.loc["093100000", "partial_60m_return"] == pytest.approx(
+        first.loc["093100000", "close"] / 9.5 - 1.0
+    )
+    assert first.loc["093100000", "partial_60m_range"] > 0.0
     assert first.loc["093100000", "m60_close_to_sma_5bar"] == first.loc[
         "102900000", "m60_close_to_sma_5bar"
     ]

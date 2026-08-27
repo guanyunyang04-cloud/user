@@ -255,9 +255,10 @@ def sixty_state_query(
     stock_days_view: str = "stock_days",
     factor_view: str = "adjust_factor",
     quality_view: str = "minute_feature_exclusions",
+    auction_view: str = "opening_auction",
     expected_session_bars: int = EXPECTED_SESSION_BARS,
 ) -> str:
-    """Aggregate long 60-minute history once before target-minute feature construction."""
+    """Aggregate long 60-minute history, seeding the first bar with the auction."""
 
     expected = int(expected_session_bars)
     if expected <= 0 or expected % 60 != 0:
@@ -282,6 +283,18 @@ def sixty_state_query(
             FROM {quality_view}
             GROUP BY symbol, trade_date
         ),
+        auctions AS (
+            SELECT
+                CAST(symbol AS VARCHAR) AS symbol,
+                CAST(trade_date AS VARCHAR) AS trade_date,
+                CASE WHEN SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) > 0
+                     THEN SUM(GREATEST(CAST(amount AS DOUBLE), 0.0))
+                          / SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) END
+                    AS auction_price,
+                SUM(GREATEST(CAST(amount AS DOUBLE), 0.0)) AS auction_amount
+            FROM {auction_view}
+            GROUP BY symbol, trade_date
+        ),
         history_joined AS (
             SELECT
                 CAST(b.symbol AS VARCHAR) AS symbol,
@@ -293,6 +306,8 @@ def sixty_state_query(
                 CAST(b.close AS DOUBLE) AS close,
                 GREATEST(CAST(b.amount AS DOUBLE), 0.0) AS amount,
                 f.adjust_factor,
+                a.auction_price AS opening_auction_price,
+                GREATEST(COALESCE(a.auction_amount, 0.0), 0.0) AS opening_auction_amount,
                 NOT COALESCE(q.exclude_open, FALSE) AS valid_open,
                 NOT COALESCE(q.exclude_high, FALSE) AS valid_high,
                 NOT COALESCE(q.exclude_low, FALSE) AS valid_low,
@@ -302,6 +317,7 @@ def sixty_state_query(
             FROM {bars_view} b
             JOIN target_symbols t ON t.symbol = b.symbol
             JOIN factors f ON f.symbol = b.symbol AND f.trade_date = b.trade_date
+            LEFT JOIN auctions a ON a.symbol = b.symbol AND a.trade_date = b.trade_date
             LEFT JOIN quality q ON q.symbol = b.symbol AND q.trade_date = b.trade_date
             WINDOW w_day AS (PARTITION BY b.symbol, b.trade_date ORDER BY b.bar_time)
         ),
@@ -312,7 +328,9 @@ def sixty_state_query(
                 CASE WHEN valid_open THEN open * adjust_factor END AS adjusted_open,
                 CASE WHEN valid_high THEN high * adjust_factor END AS adjusted_high,
                 CASE WHEN valid_low THEN low * adjust_factor END AS adjusted_low,
-                CASE WHEN valid_close THEN close * adjust_factor END AS adjusted_close
+                CASE WHEN valid_close THEN close * adjust_factor END AS adjusted_close,
+                CASE WHEN opening_auction_price > 0
+                     THEN opening_auction_price * adjust_factor END AS adjusted_auction_price
             FROM history_joined
             WHERE session_bar_count = {expected} AND adjust_factor > 0
         ),
@@ -322,11 +340,36 @@ def sixty_state_query(
                 trade_date,
                 sixty_minute_bucket,
                 COUNT(*) AS constituent_count,
-                ARG_MIN(adjusted_open, bar_time) AS adjusted_open_60m,
-                MAX(adjusted_high) AS adjusted_high_60m,
-                MIN(adjusted_low) AS adjusted_low_60m,
+                CASE WHEN sixty_minute_bucket = 1
+                     THEN COALESCE(MAX(adjusted_auction_price), ARG_MIN(adjusted_open, bar_time))
+                     ELSE ARG_MIN(adjusted_open, bar_time)
+                END AS adjusted_open_60m,
+                CASE WHEN sixty_minute_bucket = 1
+                          AND MAX(CASE WHEN valid_high THEN adjusted_auction_price END) IS NOT NULL
+                     THEN GREATEST(
+                         COALESCE(
+                             MAX(adjusted_high),
+                             MAX(CASE WHEN valid_high THEN adjusted_auction_price END)
+                         ),
+                         MAX(CASE WHEN valid_high THEN adjusted_auction_price END)
+                     )
+                     ELSE MAX(adjusted_high)
+                END AS adjusted_high_60m,
+                CASE WHEN sixty_minute_bucket = 1
+                          AND MAX(CASE WHEN valid_low THEN adjusted_auction_price END) IS NOT NULL
+                     THEN LEAST(
+                         COALESCE(
+                             MIN(adjusted_low),
+                             MAX(CASE WHEN valid_low THEN adjusted_auction_price END)
+                         ),
+                         MAX(CASE WHEN valid_low THEN adjusted_auction_price END)
+                     )
+                     ELSE MIN(adjusted_low)
+                END AS adjusted_low_60m,
                 ARG_MAX(adjusted_close, bar_time) AS adjusted_close_60m,
-                SUM(amount) AS amount_60m
+                SUM(amount) + CASE WHEN sixty_minute_bucket = 1
+                                   THEN COALESCE(MAX(opening_auction_amount), 0.0)
+                                   ELSE 0.0 END AS amount_60m
             FROM valid_sessions
             GROUP BY symbol, trade_date, sixty_minute_bucket
             HAVING constituent_count = 60
@@ -371,6 +414,7 @@ def feature_query(
     stock_days_view: str = "stock_days",
     factor_view: str = "adjust_factor",
     quality_view: str = "minute_feature_exclusions",
+    auction_view: str = "opening_auction",
     calendar_view: str = "trading_calendar",
     sixty_state_view: str = "sixty_minute_states",
     expected_session_bars: int = EXPECTED_SESSION_BARS,
@@ -400,6 +444,18 @@ def feature_query(
             FROM {quality_view}
             GROUP BY symbol, trade_date
         ),
+        auctions AS (
+            SELECT
+                CAST(symbol AS VARCHAR) AS symbol,
+                CAST(trade_date AS VARCHAR) AS trade_date,
+                CASE WHEN SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) > 0
+                     THEN SUM(GREATEST(CAST(amount AS DOUBLE), 0.0))
+                          / SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) END
+                    AS auction_price,
+                SUM(GREATEST(CAST(amount AS DOUBLE), 0.0)) AS auction_amount
+            FROM {auction_view}
+            GROUP BY symbol, trade_date
+        ),
         market_calendar AS (
             SELECT
                 trade_date,
@@ -420,6 +476,8 @@ def feature_query(
                 GREATEST(CAST(b.volume AS DOUBLE), 0.0) AS volume,
                 GREATEST(CAST(b.amount AS DOUBLE), 0.0) AS amount,
                 f.adjust_factor,
+                a.auction_price AS opening_auction_price,
+                GREATEST(COALESCE(a.auction_amount, 0.0), 0.0) AS opening_auction_amount,
                 NOT COALESCE(q.exclude_open, FALSE) AS valid_open,
                 NOT COALESCE(q.exclude_high, FALSE) AS valid_high,
                 NOT COALESCE(q.exclude_low, FALSE) AS valid_low,
@@ -431,6 +489,7 @@ def feature_query(
             JOIN target_symbols t ON t.symbol = b.symbol
             JOIN factors f ON f.symbol = b.symbol AND f.trade_date = b.trade_date
             JOIN market_calendar c ON c.trade_date = b.trade_date
+            LEFT JOIN auctions a ON a.symbol = b.symbol AND a.trade_date = b.trade_date
             LEFT JOIN quality q ON q.symbol = b.symbol AND q.trade_date = b.trade_date
             WINDOW w_day AS (PARTITION BY b.symbol, b.trade_date ORDER BY b.bar_time)
         ),
@@ -443,7 +502,9 @@ def feature_query(
                 CASE WHEN valid_open THEN open * adjust_factor END AS adjusted_open,
                 CASE WHEN valid_high THEN high * adjust_factor END AS adjusted_high,
                 CASE WHEN valid_low THEN low * adjust_factor END AS adjusted_low,
-                CASE WHEN valid_close THEN close * adjust_factor END AS adjusted_close
+                CASE WHEN valid_close THEN close * adjust_factor END AS adjusted_close,
+                CASE WHEN opening_auction_price > 0
+                     THEN opening_auction_price * adjust_factor END AS adjusted_auction_price
             FROM history_joined
             WHERE session_bar_count = {expected} AND adjust_factor > 0
         ),
@@ -697,15 +758,42 @@ def feature_query(
                     AS short_long_momentum_spread,
                 last_completed_60m_bucket,
                 m60_history_bar_count,
-                CASE WHEN adjusted_close > 0 AND partial_60m_open > 0
-                     THEN adjusted_close / partial_60m_open - 1.0 END AS partial_60m_return,
-                CASE WHEN partial_60m_high > 0 AND partial_60m_low > 0
+                CASE WHEN adjusted_close > 0
+                          AND CASE WHEN sixty_minute_bucket = 1
+                                   THEN COALESCE(adjusted_auction_price, partial_60m_open)
+                                   ELSE partial_60m_open END > 0
+                     THEN adjusted_close
+                          / CASE WHEN sixty_minute_bucket = 1
+                                 THEN COALESCE(adjusted_auction_price, partial_60m_open)
+                                 ELSE partial_60m_open END - 1.0 END AS partial_60m_return,
+                CASE WHEN NOT valid_high OR NOT valid_low THEN NULL
+                     WHEN sixty_minute_bucket = 1 AND adjusted_auction_price > 0
+                     THEN GREATEST(COALESCE(partial_60m_high, adjusted_auction_price),
+                                   adjusted_auction_price)
+                          / LEAST(COALESCE(partial_60m_low, adjusted_auction_price),
+                                  adjusted_auction_price) - 1.0
+                     WHEN partial_60m_high > 0 AND partial_60m_low > 0
                      THEN partial_60m_high / partial_60m_low - 1.0 END AS partial_60m_range,
-                CASE WHEN partial_60m_high > partial_60m_low
+                CASE WHEN NOT valid_high OR NOT valid_low THEN NULL
+                     WHEN sixty_minute_bucket = 1 AND adjusted_auction_price > 0
+                          AND GREATEST(COALESCE(partial_60m_high, adjusted_auction_price),
+                                       adjusted_auction_price)
+                              > LEAST(COALESCE(partial_60m_low, adjusted_auction_price),
+                                      adjusted_auction_price)
+                     THEN (adjusted_close - LEAST(COALESCE(partial_60m_low, adjusted_auction_price),
+                                                  adjusted_auction_price))
+                          / (GREATEST(COALESCE(partial_60m_high, adjusted_auction_price),
+                                      adjusted_auction_price)
+                             - LEAST(COALESCE(partial_60m_low, adjusted_auction_price),
+                                     adjusted_auction_price))
+                     WHEN partial_60m_high > partial_60m_low
                      THEN (adjusted_close - partial_60m_low)
                           / (partial_60m_high - partial_60m_low) END
                     AS partial_60m_close_location,
-                LN(1.0 + partial_60m_amount) AS partial_60m_log_amount
+                LN(1.0 + partial_60m_amount
+                   + CASE WHEN sixty_minute_bucket = 1
+                          THEN opening_auction_amount ELSE 0.0 END)
+                    AS partial_60m_log_amount
             FROM target_with_sixty
             WHERE
                 (bar_time BETWEEN '{MORNING_DECISION_START}' AND '{MORNING_DECISION_END}')
@@ -905,10 +993,28 @@ def build_feature_frame(
     factors, quality, calendar = _fixture_context(bars, stock_days, bar_day_context)
     owned = connection is None
     con = duckdb.connect(":memory:") if owned else connection
+    auction = stock_days.loc[
+        :,
+        ["symbol", "trade_date", "auction_price", "auction_amount"],
+    ].copy()
+    auction["bar_time"] = "093000000"
+    auction["open"] = pd.to_numeric(auction["auction_price"], errors="coerce")
+    auction["high"] = auction["open"]
+    auction["low"] = auction["open"]
+    auction["close"] = auction["open"]
+    auction["amount"] = pd.to_numeric(auction["auction_amount"], errors="coerce").fillna(0.0)
+    auction["volume"] = auction["amount"].where(auction["open"] > 0.0, 0.0) / auction["open"].where(
+        auction["open"] > 0.0
+    )
+    auction = auction.loc[
+        :,
+        ["symbol", "trade_date", "bar_time", "open", "high", "low", "close", "volume", "amount"],
+    ]
     try:
         con.register("minute_bars_history", bars)
         con.register("stock_days", stock_days)
         con.register("adjust_factor", factors)
+        con.register("opening_auction", auction)
         con.register("minute_feature_exclusions", quality)
         con.register("trading_calendar", calendar)
         con.execute(
