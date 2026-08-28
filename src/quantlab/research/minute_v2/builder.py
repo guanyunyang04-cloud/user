@@ -11,10 +11,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import pandas as pd
 import pyarrow.parquet as pq
 
-from quantlab.core.io import read_json, sha256_file, write_json
+from quantlab.core.io import DataContractError, read_json, sha256_file, write_json
 from quantlab.data.qdp_v2.duckdb_resources import GIB, MIB, open_guarded_duckdb
 
 from .contracts import (
@@ -25,7 +26,7 @@ from .contracts import (
     MinuteV2Error,
 )
 from .features import feature_query, sixty_state_query
-from .labels import calendar_query, label_query, label_stock_day_query
+from .labels import LABEL_COLUMNS, calendar_query, label_query, label_stock_day_query
 from .sampling import (
     CANDIDATE_COLUMNS,
     EVENT_CONTEXT_COLUMNS,
@@ -46,6 +47,11 @@ CHECKPOINT_SCHEMA = "quantlab.minute_v2_day_parts/4"
 LABEL_CACHE_SCHEMA = "quantlab.minute_v2_all_event_labels/1"
 MONTH_SCHEMA = "quantlab.minute_v2_month/2"
 SUPPORT_CACHE_SCHEMA = "quantlab.minute_v2_support_cache/1"
+BUILD_SPEC_SCHEMA = "quantlab.minute_v2_build_spec/1"
+# Bump this when a change can alter a generated month even if the Parquet
+# column contract remains compatible.  It prevents a valid-looking old
+# manifest from silently surviving a logic change.
+BUILD_IMPLEMENTATION_REVISION = "2026-08-28-5"
 LABEL_BUCKET_COUNT = 16
 RUNTIME_ONLY_CONFIG_FIELDS = frozenset(
     {
@@ -54,6 +60,12 @@ RUNTIME_ONLY_CONFIG_FIELDS = frozenset(
         "duckdb_memory_limit_gib",
     }
 )
+
+# Cache successful fingerprint checks for the lifetime of this process.  A
+# month can be inspected repeatedly by training factories; using the file
+# stat plus the declared digest avoids re-hashing the same large Parquet file
+# on every pass while still invalidating a replaced or retimestamped file.
+_FINGERPRINT_CHECK_CACHE: dict[tuple[str, int, int, int, int, int, str], bool] = {}
 
 
 def _sql_literal(value: str | Path) -> str:
@@ -69,6 +81,95 @@ def _artifact(path: Path) -> dict[str, Any]:
         "row_count": int(metadata.num_rows),
         "row_group_count": int(metadata.num_row_groups),
     }
+
+
+def _artifact_matches(
+    path: Path,
+    expected: Any,
+    *,
+    base_directory: Path | None = None,
+) -> bool:
+    """Validate an artifact record, including its content digest.
+
+    The cache is deliberately positive-only: a failed check is retried so a
+    caller can repair a file and validate it again in the same process.
+    """
+
+    if not isinstance(expected, dict):
+        return False
+    try:
+        target = Path(path).resolve()
+        if not target.is_file():
+            return False
+        expected_path = Path(str(expected.get("path", "")))
+        if not expected_path.is_absolute() and base_directory is not None:
+            expected_path = Path(base_directory) / expected_path
+        expected_path = expected_path.resolve()
+        if expected_path != target:
+            return False
+        stat = target.stat()
+        expected_size = expected.get("size")
+        expected_sha = expected.get("sha256")
+        expected_rows = expected.get("row_count")
+        expected_groups = expected.get("row_group_count")
+        if (
+            type(expected_size) is not int
+            or type(expected_rows) is not int
+            or type(expected_groups) is not int
+            or not isinstance(expected_sha, str)
+            or expected_size != int(stat.st_size)
+        ):
+            return False
+        cache_key = (
+            str(target),
+            int(stat.st_size),
+            int(getattr(stat, "st_mtime_ns", 0)),
+            int(getattr(stat, "st_ctime_ns", 0)),
+            expected_rows,
+            expected_groups,
+            expected_sha,
+        )
+        if _FINGERPRINT_CHECK_CACHE.get(cache_key) is True:
+            return True
+        metadata = pq.ParquetFile(target).metadata
+        if (
+            int(metadata.num_rows) != expected_rows
+            or int(metadata.num_row_groups) != expected_groups
+            or sha256_file(target) != expected_sha
+        ):
+            return False
+        _FINGERPRINT_CHECK_CACHE[cache_key] = True
+        return True
+    except Exception:
+        return False
+
+
+def _unfinished_build_files(manifest_path: Path) -> list[Path]:
+    """Return transient files that prove a month build did not finish cleanly."""
+
+    month_directory = manifest_path.parent
+    candidates: list[Path] = []
+    candidates.extend(path for path in month_directory.rglob("*.partial") if path.is_file())
+    for directory_name in ("_parts", "_runtime"):
+        directory = month_directory / directory_name
+        if directory.is_dir():
+            candidates.extend(path for path in directory.rglob("*") if path.is_file())
+    return sorted(set(candidates))
+
+
+def _remove_stale_base_artifact(month_directory: Path) -> bool:
+    """Remove the exact month-level base artifact when ``keep_base`` is off."""
+
+    directory = Path(month_directory).resolve()
+    target = directory / "base.parquet"
+    # ``exists`` is false for a broken symlink, but unlinking that exact path
+    # is still safe and prevents it from being mistaken for a clean build.
+    if not target.exists() and not target.is_symlink():
+        return False
+    if target.is_dir():
+        raise MinuteV2Error(f"minute_v2_stale_base_not_file:{target}")
+    target.unlink()
+    return True
 
 
 def _parquet_uncompressed_bytes(path: Path) -> int:
@@ -102,11 +203,13 @@ def _copy_query(
         )
         if not partial.is_file():
             raise MinuteV2Error(f"minute_v2_copy_missing:{partial}")
+        # The final path is changed only after the write is complete.  Keep
+        # cleanup active until the atomic replacement itself succeeds.
+        os.replace(partial, target)
         completed = True
     finally:
         if not completed and partial.exists():
             partial.unlink()
-    os.replace(partial, target)
     return _artifact(target)
 
 
@@ -155,18 +258,48 @@ def _month_directory(output_root: Path, year: int, month: int) -> Path:
     return output_root / "months" / f"year={int(year):04d}" / f"month={int(month):02d}"
 
 
-def _manifest_is_complete(path: Path, *, keep_base: bool) -> bool:
+def _manifest_is_complete(
+    path: Path,
+    *,
+    keep_base: bool,
+    expected_build_spec: dict[str, Any] | None = None,
+) -> bool:
     if not path.is_file():
         return False
-    value = read_json(path)
+    try:
+        value = read_json(path)
+    except (DataContractError, OSError, ValueError, TypeError):
+        return False
+    if not isinstance(value, dict):
+        return False
     if value.get("status") != "ok" or value.get("schema") != MONTH_SCHEMA:
         return False
+    if expected_build_spec is not None and value.get("build_spec") != expected_build_spec:
+        return False
+    if _unfinished_build_files(path):
+        return False
     required = ["events", "labels"] + (["base"] if keep_base else [])
-    artifacts = dict(value.get("artifacts", {}))
+    raw_artifacts = value.get("artifacts")
+    if not isinstance(raw_artifacts, dict):
+        return False
+    artifacts = raw_artifacts
+    if set(artifacts) != set(required):
+        return False
     for name in required:
-        record = dict(artifacts.get(name, {}))
+        raw_record = artifacts.get(name)
+        if not isinstance(raw_record, dict):
+            return False
+        record = raw_record
         target = Path(str(record.get("path", "")))
-        if not target.is_file() or int(record.get("size", -1)) != target.stat().st_size:
+        try:
+            if not target.is_absolute():
+                target = (path.parent / target).resolve()
+            expected_target = (path.parent / f"{name}.parquet").resolve()
+            if target != expected_target or not target.is_file():
+                return False
+        except Exception:
+            return False
+        if not _artifact_matches(target, record, base_directory=path.parent):
             return False
     return True
 
@@ -178,8 +311,10 @@ def _protect_existing_manifest(path: Path, *, force: bool) -> None:
         return
     try:
         value = read_json(path)
-    except (OSError, ValueError, TypeError) as exc:
+    except (DataContractError, OSError, ValueError, TypeError) as exc:
         raise MinuteV2Error(f"minute_v2_existing_manifest_unreadable:{path}") from exc
+    if not isinstance(value, dict):
+        raise MinuteV2Error(f"minute_v2_existing_manifest_not_object:{path}")
     schema = value.get("schema")
     if schema != MONTH_SCHEMA:
         raise MinuteV2Error(
@@ -206,15 +341,20 @@ def _checkpoint_spec(
     month: int,
     keep_base: bool,
     extended_end: str,
+    support_signature: str | None = None,
+    source_manifest_sha256: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "schema": CHECKPOINT_SCHEMA,
+        "build_implementation_revision": BUILD_IMPLEMENTATION_REVISION,
         "source_dataset_ids": snapshot.dataset_ids,
+        "source_manifest_sha256": dict(source_manifest_sha256 or {}),
         "config": config.as_dict(),
         "year": int(year),
         "month": int(month),
         "keep_base": bool(keep_base),
         "extended_end": str(extended_end),
+        "support_signature": support_signature,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     content_payload = dict(payload)
@@ -273,11 +413,14 @@ def _checkpoint_specs_compatible(
         return True
     for name in (
         "schema",
+        "build_implementation_revision",
         "source_dataset_ids",
+        "source_manifest_sha256",
         "year",
         "month",
         "keep_base",
         "extended_end",
+        "support_signature",
     ):
         if current.get(name) != requested.get(name):
             return False
@@ -294,7 +437,7 @@ def _valid_part(path: Path, *, expected_rows: int | None = None) -> bool:
         return False
     try:
         rows = int(pq.ParquetFile(path).metadata.num_rows)
-    except (OSError, ValueError):
+    except Exception:
         return False
     return expected_rows is None or rows == int(expected_rows)
 
@@ -343,13 +486,23 @@ def _materialize_cached_view(
     reused = _valid_part(path)
     if reused and expected_metadata is not None:
         try:
-            reused = metadata_path.is_file() and read_json(metadata_path) == expected_metadata
-        except (OSError, ValueError, TypeError):
+            metadata = read_json(metadata_path)
+            reused = (
+                metadata.get("schema") == expected_metadata["schema"]
+                and metadata.get("query_sha256") == expected_metadata["query_sha256"]
+                and metadata.get("spec") == expected_metadata["spec"]
+                and _artifact_matches(
+                    path,
+                    metadata.get("artifact"),
+                    base_directory=path.parent,
+                )
+            )
+        except (DataContractError, OSError, ValueError, TypeError):
             reused = False
     if not reused:
-        _copy_query(connection, query, path, compression="SNAPPY")
+        artifact = _copy_query(connection, query, path, compression="SNAPPY")
         if metadata_path is not None and expected_metadata is not None:
-            write_json(metadata_path, expected_metadata)
+            write_json(metadata_path, {**expected_metadata, "artifact": artifact})
     connection.execute(
         f"CREATE OR REPLACE TEMP VIEW {view_name} AS SELECT * FROM "
         + _parquet_scan([path])
@@ -360,11 +513,13 @@ def _materialize_cached_view(
 def _support_cache_signature(
     snapshot: SourceSnapshot,
     config: MinuteV2Config,
+    *,
+    source_manifest_sha256: dict[str, str] | None = None,
 ) -> str:
     """Return a source/config key shared by all month builds.
 
     Quality exclusions live outside QDP dataset manifests, so include their
-    file metadata as part of the key.  A changed quality file consequently
+    content hashes as part of the key.  A changed quality file consequently
     creates a new cache namespace instead of reusing stale support rows.
     """
 
@@ -376,7 +531,7 @@ def _support_cache_signature(
                 {
                     "path": str(path.relative_to(snapshot.minute_quality_root)),
                     "size": int(stat.st_size),
-                    "mtime_ns": int(stat.st_mtime_ns),
+                    "sha256": sha256_file(path),
                 }
             )
     config_values = config.as_dict()
@@ -385,11 +540,55 @@ def _support_cache_signature(
     payload = {
         "schema": SUPPORT_CACHE_SCHEMA,
         "source_dataset_ids": snapshot.dataset_ids,
+        "source_manifest_sha256": dict(
+            source_manifest_sha256 or _source_manifest_sha256(snapshot)
+        ),
         "config": config_values,
         "quality_files": quality_files,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()[:24]
+
+
+def _source_manifest_sha256(snapshot: SourceSnapshot) -> dict[str, str]:
+    """Hash active source manifests so mutable dataset IDs cannot hide changes."""
+
+    return {
+        name: sha256_file(Path(path))
+        for name, path in sorted(snapshot.manifests.items())
+    }
+
+
+def _manifest_build_spec(
+    *,
+    checkpoint_spec: dict[str, Any],
+    start_date: str,
+    end_date: str,
+    minute_history_start: str,
+    support_signature: str,
+) -> dict[str, Any]:
+    """Return the stable input identity stored in a completed month manifest."""
+
+    config = dict(checkpoint_spec.get("config", {}))
+    for name in RUNTIME_ONLY_CONFIG_FIELDS:
+        config.pop(name, None)
+    return {
+        "schema": BUILD_SPEC_SCHEMA,
+        "implementation_revision": BUILD_IMPLEMENTATION_REVISION,
+        "checkpoint_schema": checkpoint_spec["schema"],
+        "content_signature": checkpoint_spec["content_signature"],
+        "source_dataset_ids": dict(checkpoint_spec["source_dataset_ids"]),
+        "source_manifest_sha256": dict(checkpoint_spec.get("source_manifest_sha256", {})),
+        "config": config,
+        "year": int(checkpoint_spec["year"]),
+        "month": int(checkpoint_spec["month"]),
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "extended_label_end_date": str(checkpoint_spec["extended_end"]),
+        "minute_history_start_date": str(minute_history_start),
+        "keep_base": bool(checkpoint_spec["keep_base"]),
+        "support_signature": str(support_signature),
+    }
 
 
 def _materialize_label_support(
@@ -451,8 +650,17 @@ def _label_cache_is_valid(
     if not _valid_part(path, expected_rows=expected_rows) or not metadata_path.is_file():
         return False
     try:
-        return read_json(metadata_path) == expected_spec
-    except (OSError, ValueError, TypeError):
+        metadata = read_json(metadata_path)
+        if not isinstance(metadata, dict):
+            return False
+        if any(metadata.get(name) != value for name, value in expected_spec.items()):
+            return False
+        return _artifact_matches(
+            path,
+            metadata.get("artifact"),
+            base_directory=path.parent,
+        )
+    except (DataContractError, OSError, ValueError, TypeError):
         return False
 
 
@@ -518,10 +726,13 @@ def _verify_month_artifacts(
     events: Path,
     labels: Path,
     expected_decision_rows: int,
-    expected_decision_groups: int,
-    base_reference_parts: list[Path],
+    expected_decision_groups: int | None,
+    base_reference_parts: list[Path] | None,
 ) -> dict[str, Any]:
-    event_schema = {field.name for field in pq.ParquetFile(events).schema_arrow}
+    event_parquet = pq.ParquetFile(events)
+    label_parquet = pq.ParquetFile(labels)
+    event_schema = {field.name for field in event_parquet.schema_arrow}
+    label_schema = {field.name for field in label_parquet.schema_arrow}
     required_event_columns = {
         "symbol",
         "trade_date",
@@ -537,6 +748,21 @@ def _verify_month_artifacts(
         raise MinuteV2Error(
             "minute_v2_event_columns_missing:" + ",".join(missing_event_columns)
         )
+    missing_label_columns = sorted(set(LABEL_COLUMNS).difference(label_schema))
+    if missing_label_columns:
+        raise MinuteV2Error(
+            "minute_v2_label_columns_missing:" + ",".join(missing_label_columns)
+        )
+    if base is not None:
+        base_schema = {field.name for field in pq.ParquetFile(base).schema_arrow}
+        missing_base_columns = sorted(
+            (set(MODEL_FEATURE_COLUMNS) | {"symbol", "trade_date", "bar_time"})
+            .difference(base_schema)
+        )
+        if missing_base_columns:
+            raise MinuteV2Error(
+                "minute_v2_base_columns_missing:" + ",".join(missing_base_columns)
+            )
     # A narrow event artifact must not silently grow back into a second copy of
     # the model feature matrix.  The full matrix remains in `base`.
     duplicated_model_features = sorted(
@@ -553,63 +779,113 @@ def _verify_month_artifacts(
     )
     if forbidden:
         raise MinuteV2Error(f"minute_v2_future_columns_in_features:{','.join(forbidden)}")
-    event_rows = int(pq.ParquetFile(events).metadata.num_rows)
-    label_rows = int(pq.ParquetFile(labels).metadata.num_rows)
+    event_rows = int(event_parquet.metadata.num_rows)
+    label_rows = int(label_parquet.metadata.num_rows)
+    if int(expected_decision_rows) <= 0:
+        raise MinuteV2Error("minute_v2_expected_decision_rows_invalid")
     if event_rows != label_rows:
         raise MinuteV2Error(f"minute_v2_event_label_row_mismatch:{event_rows}:{label_rows}")
     if event_rows > int(expected_decision_rows):
         raise MinuteV2Error(
             f"minute_v2_event_rows_exceed_decisions:{event_rows}:{expected_decision_rows}"
         )
-    base_reference_scan = _parquet_scan(base_reference_parts)
+    base_reference_scan = (
+        _parquet_scan(base_reference_parts) if base_reference_parts else None
+    )
     event_scan = _parquet_scan([events])
     label_scan = _parquet_scan([labels])
+
+    def count(query: str) -> int:
+        value = connection.execute(query).fetchone()
+        return int(value[0]) if value and value[0] is not None else 0
+
+    null_events = count(
+        f"SELECT count(*) FROM {event_scan} "
+        "WHERE symbol IS NULL OR trade_date IS NULL OR bar_time IS NULL"
+    )
+    null_labels = count(
+        f"SELECT count(*) FROM {label_scan} "
+        "WHERE symbol IS NULL OR trade_date IS NULL OR bar_time IS NULL"
+    )
     duplicate_events = int(
-        connection.execute(
+        count(
             "SELECT count(*) FROM (SELECT symbol,trade_date,bar_time,count(*) c "
             f"FROM {event_scan} GROUP BY ALL HAVING c>1)"
-        ).fetchone()[0]
+        )
     )
     duplicate_labels = int(
-        connection.execute(
+        count(
             "SELECT count(*) FROM (SELECT symbol,trade_date,bar_time,count(*) c "
             f"FROM {label_scan} GROUP BY ALL HAVING c>1)"
-        ).fetchone()[0]
-    )
-    if duplicate_events or duplicate_labels:
-        raise MinuteV2Error(
-            f"minute_v2_artifact_duplicate_keys:{duplicate_events}:{duplicate_labels}"
         )
+    )
+    duplicate_base = 0
+    if base_reference_scan is not None:
+        duplicate_base = count(
+            "SELECT count(*) FROM (SELECT symbol,trade_date,bar_time,count(*) c "
+            f"FROM {base_reference_scan} GROUP BY ALL HAVING c>1)"
+        )
+    if null_events or null_labels:
+        raise MinuteV2Error(f"minute_v2_artifact_null_keys:{null_events}:{null_labels}")
+    if duplicate_events or duplicate_labels or duplicate_base:
+        raise MinuteV2Error(
+            "minute_v2_artifact_duplicate_keys:"
+            f"{duplicate_events}:{duplicate_labels}:{duplicate_base}"
+        )
+
+    event_label_missing = count(
+        f"SELECT count(*) FROM {event_scan} e LEFT JOIN {label_scan} l "
+        f"USING(symbol,trade_date,bar_time) WHERE l.symbol IS NULL"
+    )
+    label_event_extra = count(
+        f"SELECT count(*) FROM {label_scan} l LEFT JOIN {event_scan} e "
+        f"USING(symbol,trade_date,bar_time) WHERE e.symbol IS NULL"
+    )
+    if event_label_missing or label_event_extra:
+        raise MinuteV2Error(
+            "minute_v2_event_label_key_contract_invalid:"
+            f"{event_label_missing}:{label_event_extra}"
+        )
+
+    event_outside_base = 0
+    if base_reference_scan is not None:
+        event_outside_base = count(
+            f"SELECT count(*) FROM {event_scan} e LEFT JOIN {base_reference_scan} b "
+            f"USING(symbol,trade_date,bar_time) WHERE b.symbol IS NULL"
+        )
+        if event_outside_base:
+            raise MinuteV2Error(
+                f"minute_v2_event_keys_outside_base:{event_outside_base}"
+            )
     decision_groups = int(
         connection.execute(
             f"SELECT count(*) FROM (SELECT DISTINCT trade_date,bar_time FROM {event_scan})"
         ).fetchone()[0]
     )
-    if decision_groups != int(expected_decision_groups):
+    if expected_decision_groups is not None and decision_groups != int(expected_decision_groups):
         raise MinuteV2Error(
             f"minute_v2_candidate_group_count_mismatch:{decision_groups}:"
             f"{expected_decision_groups}"
         )
-    missing_groups = int(
-        connection.execute(
+    missing_groups = 0
+    oversized_groups = 0
+    if base_reference_scan is not None:
+        missing_groups = count(
             "WITH expected AS (SELECT trade_date,bar_time,count(*) AS rows "
             f"FROM {base_reference_scan} GROUP BY trade_date,bar_time),"
             "actual AS (SELECT trade_date,bar_time,count(*) AS rows "
             f"FROM {event_scan} GROUP BY trade_date,bar_time) "
             "SELECT count(*) FROM expected LEFT JOIN actual USING(trade_date,bar_time) "
             "WHERE actual.rows IS NULL"
-        ).fetchone()[0]
-    )
-    oversized_groups = int(
-        connection.execute(
+        )
+        oversized_groups = count(
             "WITH expected AS (SELECT trade_date,bar_time,count(*) AS rows "
             f"FROM {base_reference_scan} GROUP BY trade_date,bar_time),"
             "actual AS (SELECT trade_date,bar_time,count(*) AS rows "
             f"FROM {event_scan} GROUP BY trade_date,bar_time) "
             "SELECT count(*) FROM actual JOIN expected USING(trade_date,bar_time) "
             "WHERE actual.rows > expected.rows"
-        ).fetchone()[0]
-    )
+        )
     if missing_groups or oversized_groups:
         raise MinuteV2Error(
             f"minute_v2_candidate_group_contract_invalid:{missing_groups}:{oversized_groups}"
@@ -631,8 +907,15 @@ def _verify_month_artifacts(
         "missing_decision_group_count": missing_groups,
         "oversized_candidate_group_count": oversized_groups,
         "candidate_fraction_of_decision_rows": event_rows / int(expected_decision_rows),
+        "null_event_key_rows": null_events,
+        "null_label_key_rows": null_labels,
         "duplicate_event_keys": duplicate_events,
         "duplicate_label_keys": duplicate_labels,
+        "duplicate_base_keys": duplicate_base,
+        "event_label_missing_keys": event_label_missing,
+        "label_event_extra_keys": label_event_extra,
+        "event_keys_outside_base": event_outside_base,
+        "missing_label_column_count": 0,
         "observed_label_rows": int(label_stats[0] or 0),
         "executable_entry_rows": int(label_stats[1] or 0),
         "minimum_net_label": float(label_stats[2]) if label_stats[2] is not None else None,
@@ -663,8 +946,6 @@ def build_month(
     directory.mkdir(parents=True, exist_ok=True)
     manifest_path = directory / "manifest.json"
     _protect_existing_manifest(manifest_path, force=force)
-    if not force and _manifest_is_complete(manifest_path, keep_base=keep_base):
-        return read_json(manifest_path)
     start_date, end_date = month_bounds(year, month)
     snapshot = resolve_source_snapshot(workspace)
     minute_history_start = prior_open_date(
@@ -680,6 +961,37 @@ def build_month(
             current.maximum_delayed_exit_days + 1,
         ),
     )
+    source_manifest_sha256 = _source_manifest_sha256(snapshot)
+    support_signature = _support_cache_signature(
+        snapshot,
+        current,
+        source_manifest_sha256=source_manifest_sha256,
+    )
+    checkpoint_spec = _checkpoint_spec(
+        snapshot=snapshot,
+        config=current,
+        year=year,
+        month=month,
+        keep_base=keep_base,
+        extended_end=extended_end,
+        support_signature=support_signature,
+        source_manifest_sha256=source_manifest_sha256,
+    )
+    manifest_build_spec = _manifest_build_spec(
+        checkpoint_spec=checkpoint_spec,
+        start_date=start_date,
+        end_date=end_date,
+        minute_history_start=minute_history_start,
+        support_signature=support_signature,
+    )
+    if not force and _manifest_is_complete(
+        manifest_path,
+        keep_base=keep_base,
+        expected_build_spec=manifest_build_spec,
+    ):
+        if not keep_base:
+            _remove_stale_base_artifact(directory)
+        return read_json(manifest_path)
     paths = {
         "events": directory / "events.parquet",
         "labels": directory / "labels.parquet",
@@ -689,14 +1001,6 @@ def build_month(
     runtime = directory / "_runtime"
     _safe_clean_generated(runtime, directory, expected_name="_runtime")
     runtime.mkdir(parents=True, exist_ok=True)
-    checkpoint_spec = _checkpoint_spec(
-        snapshot=snapshot,
-        config=current,
-        year=year,
-        month=month,
-        keep_base=keep_base,
-        extended_end=extended_end,
-    )
     checkpoint, resumed_checkpoint = _prepare_checkpoint(
         directory,
         spec=checkpoint_spec,
@@ -725,7 +1029,6 @@ def build_month(
             minute_history_start_date=minute_history_start,
             minute_end_date=extended_end,
         )
-        support_signature = _support_cache_signature(snapshot, current)
         support_directory = output / "_support_cache" / support_signature
         support_directory.mkdir(parents=True, exist_ok=True)
         support_cache_context = {
@@ -1003,7 +1306,7 @@ def build_month(
                     "minute_bars_extended "
                     f"WHERE hash(symbol)%{LABEL_BUCKET_COUNT}={bucket}"
                 )
-                _copy_query(
+                bucket_artifact = _copy_query(
                     connection,
                     label_query(
                         event_view="bucket_events",
@@ -1021,7 +1324,7 @@ def build_month(
                         "minute_v2_label_bucket_row_mismatch:"
                         f"{bucket}:{bucket_event_count}"
                     )
-                write_json(bucket_metadata, bucket_spec)
+                write_json(bucket_metadata, {**bucket_spec, "artifact": bucket_artifact})
                 built_parts += 1
             else:
                 reused_parts += 1
@@ -1095,6 +1398,8 @@ def build_month(
             expected_decision_groups=expected_decision_groups,
             base_reference_parts=base_parts,
         )
+        if not keep_base:
+            _remove_stale_base_artifact(directory)
         total_seconds = time.perf_counter() - build_started
         benchmark = {
             "feature_construction_seconds": feature_phase_seconds,
@@ -1134,6 +1439,7 @@ def build_month(
             "minute_history_start_date": minute_history_start,
             "config": current.as_dict(),
             "source": snapshot.as_dict(),
+            "build_spec": manifest_build_spec,
             "stock_days": stock_day_stats,
             "shared_support": {
                 "stock_days": {
@@ -1262,29 +1568,145 @@ def build_range(
 
 
 def verify_month(manifest_path: str | Path) -> dict[str, Any]:
-    manifest = read_json(Path(manifest_path))
-    if manifest.get("status") != "ok":
+    manifest_file = Path(manifest_path).resolve()
+    try:
+        manifest = read_json(manifest_file)
+    except (DataContractError, OSError, ValueError, TypeError) as exc:
+        raise MinuteV2Error(f"minute_v2_manifest_unreadable:{manifest_file}") from exc
+    if not isinstance(manifest, dict):
+        raise MinuteV2Error("minute_v2_manifest_not_object")
+    if manifest.get("status") != "ok" or manifest.get("schema") != MONTH_SCHEMA:
         raise MinuteV2Error("minute_v2_manifest_not_ok")
+    unfinished = _unfinished_build_files(manifest_file)
+    if unfinished:
+        raise MinuteV2Error(f"minute_v2_manifest_build_incomplete:{unfinished[0]}")
+    build_spec = manifest.get("build_spec")
+    if (
+        not isinstance(build_spec, dict)
+        or build_spec.get("schema") != BUILD_SPEC_SCHEMA
+        or not isinstance(build_spec.get("keep_base"), bool)
+        or not isinstance(build_spec.get("implementation_revision"), str)
+        or not isinstance(build_spec.get("content_signature"), str)
+    ):
+        raise MinuteV2Error("minute_v2_manifest_build_spec_missing")
+    if build_spec["implementation_revision"] != BUILD_IMPLEMENTATION_REVISION:
+        raise MinuteV2Error(
+            "minute_v2_manifest_build_revision_mismatch:"
+            f"{build_spec['implementation_revision']}:{BUILD_IMPLEMENTATION_REVISION}"
+        )
+    raw_artifacts = manifest.get("artifacts")
+    if not isinstance(raw_artifacts, dict) or not raw_artifacts:
+        raise MinuteV2Error("minute_v2_manifest_artifacts_missing")
+    artifacts = raw_artifacts
+    keep_base = build_spec["keep_base"]
+    stale_base = manifest_file.parent / "base.parquet"
+    if not keep_base and (stale_base.exists() or stale_base.is_symlink()):
+        raise MinuteV2Error(f"minute_v2_verify_unexpected_base_artifact:{stale_base}")
+    expected_names = {"events", "labels"} | ({"base"} if keep_base else set())
+    if set(artifacts) != expected_names:
+        raise MinuteV2Error(
+            "minute_v2_manifest_artifact_set_invalid:"
+            f"{sorted(artifacts)}:{sorted(expected_names)}"
+        )
     checked: dict[str, Any] = {}
-    for name, record_value in dict(manifest.get("artifacts", {})).items():
-        record = dict(record_value)
+    for name, record_value in artifacts.items():
+        if not isinstance(record_value, dict):
+            raise MinuteV2Error(f"minute_v2_verify_artifact_record_invalid:{name}")
+        record = record_value
         path = Path(str(record.get("path", "")))
+        try:
+            if not path.is_absolute():
+                path = (manifest_file.parent / path).resolve()
+            expected_path = (manifest_file.parent / f"{name}.parquet").resolve()
+        except (OSError, ValueError, TypeError) as exc:
+            raise MinuteV2Error(f"minute_v2_verify_artifact_path_invalid:{name}") from exc
+        if path != expected_path:
+            raise MinuteV2Error(f"minute_v2_verify_artifact_path_invalid:{name}:{path}")
         if not path.is_file():
             raise MinuteV2Error(f"minute_v2_verify_artifact_missing:{name}:{path}")
-        current = _artifact(path)
-        if current["size"] != int(record.get("size", -1)) or current["sha256"] != record.get("sha256"):
+        try:
+            current = _artifact(path)
+        except Exception as exc:
+            raise MinuteV2Error(f"minute_v2_verify_artifact_unreadable:{name}:{path}") from exc
+        if any(record.get(field) != current[field] for field in ("size", "sha256", "row_count", "row_group_count")):
             raise MinuteV2Error(f"minute_v2_verify_artifact_changed:{name}:{path}")
         checked[name] = current
-    return {"status": "ok", "manifest": str(Path(manifest_path).resolve()), "artifacts": checked}
+    raw_verification = manifest.get("verification")
+    verification = raw_verification if isinstance(raw_verification, dict) else {}
+    expected_rows_value = verification.get("expected_decision_rows")
+    if expected_rows_value is None:
+        expected_rows_value = checked.get("base", checked["events"]).get("row_count")
+    try:
+        expected_rows = int(expected_rows_value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MinuteV2Error("minute_v2_manifest_expected_decision_rows_invalid") from exc
+    expected_groups_value = verification.get("decision_group_count")
+    try:
+        expected_groups = (
+            int(expected_groups_value) if expected_groups_value is not None else None
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MinuteV2Error("minute_v2_manifest_decision_group_count_invalid") from exc
+    if not keep_base and expected_groups is None:
+        raise MinuteV2Error("minute_v2_manifest_verification_missing")
+    base_path = Path(checked["base"]["path"]) if "base" in checked else None
+    connection = duckdb.connect(":memory:")
+    try:
+        connection.execute("SET threads=2")
+        connection.execute("SET preserve_insertion_order=false")
+        contract = _verify_month_artifacts(
+            connection,
+            base=base_path,
+            events=Path(checked["events"]["path"]),
+            labels=Path(checked["labels"]["path"]),
+            expected_decision_rows=expected_rows,
+            expected_decision_groups=expected_groups,
+            base_reference_parts=[base_path] if base_path is not None else None,
+        )
+    except duckdb.Error as exc:
+        raise MinuteV2Error(f"minute_v2_verify_contract_unreadable:{manifest_file}") from exc
+    finally:
+        connection.close()
+    return {
+        "status": "ok",
+        "manifest": str(manifest_file),
+        "artifacts": checked,
+        "contract": contract,
+    }
 
 
 def verify_dataset(manifest_path: str | Path) -> dict[str, Any]:
     dataset_manifest_path = Path(manifest_path).resolve()
-    manifest = read_json(dataset_manifest_path)
+    try:
+        manifest = read_json(dataset_manifest_path)
+    except (DataContractError, OSError, ValueError, TypeError) as exc:
+        raise MinuteV2Error(
+            f"minute_v2_dataset_manifest_unreadable:{dataset_manifest_path}"
+        ) from exc
+    if not isinstance(manifest, dict):
+        raise MinuteV2Error("minute_v2_dataset_manifest_not_object")
     if manifest.get("status") != "ok" or manifest.get("schema") != "quantlab.minute_v2_dataset/1":
         raise MinuteV2Error("minute_v2_dataset_manifest_not_ok")
-    months = list(manifest.get("months", []))
-    if len(months) != int(manifest.get("month_count", -1)):
+
+    def required_int(name: str, *, minimum: int = 0) -> int:
+        value = manifest.get(name)
+        if type(value) is not int or value < minimum:
+            raise MinuteV2Error(f"minute_v2_dataset_{name}_invalid")
+        return int(value)
+
+    start_year = required_int("start_year", minimum=1900)
+    end_year = required_int("end_year", minimum=start_year)
+    expected_pairs = {
+        (year, month)
+        for year in range(start_year, end_year + 1)
+        for month in range(1, 13)
+    }
+    month_count = required_int("month_count")
+    raw_months = manifest.get("months")
+    if not isinstance(raw_months, list):
+        raise MinuteV2Error("minute_v2_dataset_months_invalid")
+    months = raw_months
+    if len(months) != month_count or month_count != len(expected_pairs):
         raise MinuteV2Error("minute_v2_dataset_month_count_mismatch")
     totals = {
         "expected_decision_rows": 0,
@@ -1295,23 +1717,87 @@ def verify_dataset(manifest_path: str | Path) -> dict[str, Any]:
     artifact_count = 0
     artifact_bytes = 0
     selected_dates = 0
+    seen_pairs: set[tuple[int, int]] = set()
     for record in months:
-        month_manifest_path = Path(str(record["manifest"])).resolve()
-        month_manifest = read_json(month_manifest_path)
+        if not isinstance(record, dict):
+            raise MinuteV2Error("minute_v2_dataset_month_record_invalid")
+        year = record.get("year")
+        month = record.get("month")
+        manifest_value = record.get("manifest")
+        if (
+            type(year) is not int
+            or type(month) is not int
+            or not isinstance(manifest_value, str)
+            or not 1 <= month <= 12
+        ):
+            raise MinuteV2Error("minute_v2_dataset_month_record_invalid")
+        pair = (int(year), int(month))
+        if pair not in expected_pairs or pair in seen_pairs:
+            raise MinuteV2Error(f"minute_v2_dataset_month_set_invalid:{pair[0]}:{pair[1]}")
+        seen_pairs.add(pair)
+        try:
+            month_manifest_path = Path(manifest_value)
+            if not month_manifest_path.is_absolute():
+                month_manifest_path = dataset_manifest_path.parent / month_manifest_path
+            month_manifest_path = month_manifest_path.resolve()
+            expected_month_path = (
+                dataset_manifest_path.parent
+                / "months"
+                / f"year={pair[0]:04d}"
+                / f"month={pair[1]:02d}"
+                / "manifest.json"
+            ).resolve()
+        except (OSError, ValueError, TypeError) as exc:
+            raise MinuteV2Error("minute_v2_dataset_month_manifest_path_invalid") from exc
+        if month_manifest_path != expected_month_path:
+            raise MinuteV2Error(
+                "minute_v2_dataset_month_manifest_path_invalid:"
+                f"{month_manifest_path}"
+            )
+        try:
+            month_manifest = read_json(month_manifest_path)
+        except (DataContractError, OSError, ValueError, TypeError) as exc:
+            raise MinuteV2Error(
+                f"minute_v2_dataset_month_manifest_unreadable:{month_manifest_path}"
+            ) from exc
+        if (
+            not isinstance(month_manifest, dict)
+            or month_manifest.get("year") != pair[0]
+            or month_manifest.get("month") != pair[1]
+        ):
+            raise MinuteV2Error(
+                f"minute_v2_dataset_month_identity_invalid:{pair[0]:04d}-{pair[1]:02d}"
+            )
         checked = verify_month(month_manifest_path)
         artifact_count += len(checked["artifacts"])
         artifact_bytes += sum(int(value["size"]) for value in checked["artifacts"].values())
-        verification = dict(month_manifest["verification"])
+        verification = checked["contract"]
         for name in totals:
-            totals[name] += int(verification[name] or 0)
-        selected_dates += int(dict(month_manifest.get("date_selection", {})).get("selected_trading_days", 0))
+            value = verification.get(name)
+            if type(value) is not int or value < 0:
+                raise MinuteV2Error(
+                    f"minute_v2_dataset_month_total_invalid:{pair[0]:04d}-{pair[1]:02d}:{name}"
+                )
+            totals[name] += int(value)
+        selection = month_manifest.get("date_selection", {})
+        if not isinstance(selection, dict):
+            raise MinuteV2Error("minute_v2_dataset_date_selection_invalid")
+        selected = selection.get("selected_trading_days", 0)
+        if type(selected) is not int or selected < 0:
+            raise MinuteV2Error("minute_v2_dataset_date_selection_invalid")
+        selected_dates += int(selected)
+    if seen_pairs != expected_pairs:
+        raise MinuteV2Error("minute_v2_dataset_month_set_invalid")
     for name, value in totals.items():
-        if value != int(manifest.get(name, -1)):
+        declared = manifest.get(name)
+        if type(declared) is not int or declared < 0 or value != declared:
             raise MinuteV2Error(f"minute_v2_dataset_total_mismatch:{name}:{value}")
     return {
         "schema": "quantlab.minute_v2_dataset_verification/1",
         "status": "ok",
         "manifest": str(dataset_manifest_path),
+        "start_year": start_year,
+        "end_year": end_year,
         "month_count": len(months),
         "selected_trading_days": selected_dates,
         "artifact_count": artifact_count,

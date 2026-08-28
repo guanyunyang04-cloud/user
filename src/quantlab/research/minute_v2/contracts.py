@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
+from numbers import Integral
 from typing import Any
 
 MORNING_DECISION_START = "093100000"
@@ -197,15 +199,53 @@ class MinuteV2Config:
     minute_history_lookback_open_days: int = MINUTE_HISTORY_LOOKBACK_OPEN_DAYS
 
     def validate(self) -> None:
+        def exact_int(value: Any, error: str) -> int:
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                raise MinuteV2Error(error)
+            return int(value)
+
+        def finite_float(value: Any, error: str) -> float:
+            try:
+                number = float(value)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise MinuteV2Error(error) from exc
+            if not math.isfinite(number):
+                raise MinuteV2Error(error)
+            return number
+
         if self.board != "main":
             raise MinuteV2Error(f"unsupported_minute_v2_board:{self.board}")
-        if self.expected_session_bars != EXPECTED_SESSION_BARS:
+        expected_session_bars = exact_int(
+            self.expected_session_bars,
+            "minute_v2_session_bar_contract_invalid",
+        )
+        if expected_session_bars != EXPECTED_SESSION_BARS:
             raise MinuteV2Error(
                 f"minute_v2_session_bar_contract_invalid:{self.expected_session_bars}"
             )
-        if not 0 <= int(self.candidate_background_percent) <= 100:
+        for name, expected in (
+            ("morning_decision_start", MORNING_DECISION_START),
+            ("morning_decision_end", MORNING_DECISION_END),
+            ("afternoon_decision_start", AFTERNOON_DECISION_START),
+            ("afternoon_decision_end", AFTERNOON_DECISION_END),
+            ("exit_window_start", EXIT_WINDOW_START),
+            ("exit_window_end", EXIT_WINDOW_END),
+        ):
+            if getattr(self, name) != expected:
+                raise MinuteV2Error(
+                    f"minute_v2_{name}_contract_invalid:{getattr(self, name)!r}"
+                )
+        candidate_background_percent = exact_int(
+            self.candidate_background_percent,
+            "minute_v2_candidate_background_percent_invalid",
+        )
+        if not 0 <= candidate_background_percent <= 100:
             raise MinuteV2Error("minute_v2_candidate_background_percent_invalid")
-        if not 0.0 <= float(self.minimum_daily_liquidity_rank) < 1.0:
+        minimum_daily_liquidity_rank = finite_float(
+            self.minimum_daily_liquidity_rank,
+            "minute_v2_liquidity_rank_invalid",
+        )
+        if not 0.0 <= minimum_daily_liquidity_rank < 1.0:
             raise MinuteV2Error("minute_v2_liquidity_rank_invalid")
         for name, value in (
             ("stock", self.candidate_stock_rank_floor),
@@ -213,23 +253,78 @@ class MinuteV2Config:
             ("industry_stock", self.candidate_industry_stock_rank_floor),
             ("volume", self.candidate_volume_rank_floor),
         ):
-            if not 0.0 <= float(value) <= 1.0:
+            number = finite_float(value, f"minute_v2_candidate_{name}_rank_invalid")
+            if not 0.0 <= number <= 1.0:
                 raise MinuteV2Error(f"minute_v2_candidate_{name}_rank_invalid")
-        if not 0.0 < float(self.maximum_participation_rate) <= 1.0:
+        maximum_participation_rate = finite_float(
+            self.maximum_participation_rate,
+            "minute_v2_participation_rate_invalid",
+        )
+        if not 0.0 < maximum_participation_rate <= 1.0:
             raise MinuteV2Error("minute_v2_participation_rate_invalid")
-        if float(self.memory_floor_gib) < 0.5:
+        memory_floor_gib = finite_float(
+            self.memory_floor_gib,
+            "minute_v2_memory_floor_invalid",
+        )
+        if memory_floor_gib < 0.5:
             raise MinuteV2Error("minute_v2_memory_floor_too_small")
-        if not 0.25 <= float(self.duckdb_memory_limit_gib) <= 4.0:
+        duckdb_memory_limit_gib = finite_float(
+            self.duckdb_memory_limit_gib,
+            "minute_v2_duckdb_memory_limit_invalid",
+        )
+        if not 0.25 <= duckdb_memory_limit_gib <= 4.0:
             raise MinuteV2Error("minute_v2_duckdb_memory_limit_invalid")
-        if not 1 <= int(self.processing_days_per_chunk) <= 23:
+        for name, value in (
+            ("commission_bps", self.commission_bps),
+            ("transfer_fee_bps", self.transfer_fee_bps),
+            ("stamp_tax_bps_before_20230828", self.stamp_tax_bps_before_20230828),
+            ("stamp_tax_bps_after_20230828", self.stamp_tax_bps_after_20230828),
+            ("slippage_bps", self.slippage_bps),
+        ):
+            number = finite_float(value, f"minute_v2_{name}_invalid")
+            if number < 0.0:
+                raise MinuteV2Error(f"minute_v2_{name}_invalid")
+        maximum_delayed_exit_days = exact_int(
+            self.maximum_delayed_exit_days,
+            "minute_v2_delayed_exit_days_invalid",
+        )
+        if maximum_delayed_exit_days < 0:
+            raise MinuteV2Error("minute_v2_delayed_exit_days_invalid")
+        processing_days_per_chunk = exact_int(
+            self.processing_days_per_chunk,
+            "minute_v2_processing_chunk_invalid",
+        )
+        if not 1 <= processing_days_per_chunk <= 23:
             raise MinuteV2Error("minute_v2_processing_chunk_invalid")
-        if not 0 <= int(self.maximum_trading_days_per_month) <= 23:
+        maximum_trading_days_per_month = exact_int(
+            self.maximum_trading_days_per_month,
+            "minute_v2_month_day_sample_invalid",
+        )
+        if not 0 <= maximum_trading_days_per_month <= 23:
             raise MinuteV2Error("minute_v2_month_day_sample_invalid")
-        if int(self.minimum_daily_history) != MINIMUM_DAILY_HISTORY:
+        duckdb_threads = exact_int(
+            self.duckdb_threads,
+            "minute_v2_duckdb_threads_invalid",
+        )
+        if duckdb_threads <= 0:
+            raise MinuteV2Error("minute_v2_duckdb_threads_invalid")
+        minimum_daily_history = exact_int(
+            self.minimum_daily_history,
+            "minute_v2_minimum_daily_history_contract_invalid",
+        )
+        if minimum_daily_history != MINIMUM_DAILY_HISTORY:
             raise MinuteV2Error("minute_v2_minimum_daily_history_contract_invalid")
-        if int(self.daily_history_lookback_open_days) < max(DAILY_WINDOWS) + 2:
+        daily_history_lookback_open_days = exact_int(
+            self.daily_history_lookback_open_days,
+            "minute_v2_daily_history_lookback_invalid",
+        )
+        if daily_history_lookback_open_days < max(DAILY_WINDOWS) + 2:
             raise MinuteV2Error("minute_v2_daily_history_lookback_too_short")
-        if int(self.minute_history_lookback_open_days) < 62:
+        minute_history_lookback_open_days = exact_int(
+            self.minute_history_lookback_open_days,
+            "minute_v2_minute_history_lookback_invalid",
+        )
+        if minute_history_lookback_open_days < 62:
             raise MinuteV2Error("minute_v2_minute_history_lookback_too_short")
 
     def as_dict(self) -> dict[str, Any]:

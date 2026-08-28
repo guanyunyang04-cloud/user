@@ -121,6 +121,28 @@ def _sql_literal(value: str | Path) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _finite_double_sql(expression: str) -> str:
+    value = f"TRY_CAST({expression} AS DOUBLE)"
+    return f"CASE WHEN isfinite({value}) THEN {value} END"
+
+
+def _finite_positive_double_sql(expression: str) -> str:
+    value = f"TRY_CAST({expression} AS DOUBLE)"
+    return f"CASE WHEN isfinite({value}) AND {value} > 0 THEN {value} END"
+
+
+def _safe_ln_sql(expression: str) -> str:
+    return f"CASE WHEN isfinite({expression}) AND {expression} > 0 THEN LN({expression}) END"
+
+
+def _safe_ratio_sql(numerator: str, denominator: str) -> str:
+    ratio = f"({numerator}) / ({denominator})"
+    return (
+        f"CASE WHEN isfinite({numerator}) AND isfinite({denominator}) "
+        f"AND {denominator} <> 0 AND isfinite({ratio}) THEN {ratio} END"
+    )
+
+
 def _scan(paths: tuple[Path, ...] | list[Path]) -> str:
     if not paths:
         raise MinuteV2Error("minute_v2_parquet_scan_empty")
@@ -288,16 +310,19 @@ def stock_day_query(
                 f"""CASE WHEN COUNT(*) OVER (PARTITION BY symbol ORDER BY trade_date
                          ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) >= {window + 1}
                      AND LAG(adjusted_close, {window + 1}) OVER w > 0
-                     THEN LAG(adjusted_close, 1) OVER w
-                          / LAG(adjusted_close, {window + 1}) OVER w - 1.0
+                     THEN {_safe_ratio_sql(
+                          "LAG(adjusted_close, 1) OVER w",
+                         f"LAG(adjusted_close, {window + 1}) OVER w",
+                     )} - 1.0
                 END AS previous_return_{window}d""",
                 f"""CASE WHEN COUNT(*) OVER (PARTITION BY symbol ORDER BY trade_date
                          ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) = {window}
                      AND AVG(adjusted_close) OVER (PARTITION BY symbol ORDER BY trade_date
                          ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) > 0
-                     THEN LAG(adjusted_close, 1) OVER w
-                          / AVG(adjusted_close) OVER (PARTITION BY symbol ORDER BY trade_date
-                              ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) - 1.0
+                     THEN {_safe_ratio_sql(
+                          "LAG(adjusted_close, 1) OVER w",
+                         f"AVG(adjusted_close) OVER (PARTITION BY symbol ORDER BY trade_date ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING)",
+                     )} - 1.0
                 END AS previous_close_to_sma_{window}d""",
                 f"""CASE WHEN COUNT(adjusted_log_return) OVER (
                          PARTITION BY symbol ORDER BY trade_date
@@ -310,9 +335,10 @@ def stock_day_query(
                          ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) = {window}
                      AND AVG(amount) OVER (PARTITION BY symbol ORDER BY trade_date
                          ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) > 0
-                     THEN LAG(amount, 1) OVER w
-                          / AVG(amount) OVER (PARTITION BY symbol ORDER BY trade_date
-                              ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING) - 1.0
+                     THEN {_safe_ratio_sql(
+                          "LAG(amount, 1) OVER w",
+                         f"AVG(amount) OVER (PARTITION BY symbol ORDER BY trade_date ROWS BETWEEN {window} PRECEDING AND 1 PRECEDING)",
+                     )} - 1.0
                 END AS previous_amount_ratio_{window}d""",
             ]
         )
@@ -342,7 +368,10 @@ def stock_day_query(
             SELECT MIN(trade_date) AS warmup_date FROM prior_open_dates
         ),
         factors AS (
-            SELECT symbol, trade_date, ANY_VALUE(adjust_factor) AS adjust_factor
+            SELECT
+                symbol,
+                trade_date,
+                ANY_VALUE({_finite_positive_double_sql("adjust_factor")}) AS adjust_factor
             FROM adjust_factor
             WHERE trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
             GROUP BY symbol, trade_date
@@ -351,20 +380,29 @@ def stock_day_query(
             SELECT
                 d.symbol,
                 d.trade_date,
-                CAST(d.close AS DOUBLE) AS close,
-                CAST(d.amount AS DOUBLE) AS amount,
-                CAST(d.close AS DOUBLE) * CAST(f.adjust_factor AS DOUBLE) AS adjusted_close,
-                CAST(f.adjust_factor AS DOUBLE) AS adjust_factor
+                {_finite_positive_double_sql("d.close")} AS close,
+                {_finite_double_sql("d.amount")} AS raw_amount,
+                CASE WHEN isfinite({_finite_positive_double_sql("d.close")} * f.adjust_factor)
+                     THEN {_finite_positive_double_sql("d.close")} * f.adjust_factor END AS adjusted_close,
+                f.adjust_factor
             FROM daily_raw d
             JOIN factors f USING(symbol, trade_date)
             WHERE d.trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
-              AND d.close > 0
+              AND {_finite_positive_double_sql("d.close")} IS NOT NULL
+              AND f.adjust_factor IS NOT NULL
+              AND isfinite({_finite_positive_double_sql("d.close")} * f.adjust_factor)
         ),
         daily_returns AS (
             SELECT
                 *,
-                CASE WHEN adjusted_close > 0 AND LAG(adjusted_close) OVER w > 0
-                     THEN LN(adjusted_close / LAG(adjusted_close) OVER w) END AS adjusted_log_return
+                CASE WHEN isfinite(adjusted_close)
+                          AND adjusted_close > 0
+                          AND isfinite(LAG(adjusted_close) OVER w)
+                          AND LAG(adjusted_close) OVER w > 0
+                          AND isfinite(adjusted_close / LAG(adjusted_close) OVER w)
+                          AND adjusted_close / LAG(adjusted_close) OVER w > 0
+                     THEN LN(adjusted_close / LAG(adjusted_close) OVER w) END AS adjusted_log_return,
+                CASE WHEN isfinite(raw_amount) THEN GREATEST(raw_amount, 0.0) END AS amount
             FROM daily_joined
             WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
         ),
@@ -375,9 +413,12 @@ def stock_day_query(
                 adjust_factor,
                 LAG(close, 1) OVER w AS previous_close,
                 LAG(adjust_factor, 1) OVER w AS previous_adjust_factor,
-                CASE WHEN LAG(adjusted_close, 2) OVER w > 0
-                     THEN LAG(adjusted_close, 1) OVER w / LAG(adjusted_close, 2) OVER w - 1.0
-                END AS previous_return_1d,
+                 CASE WHEN LAG(adjusted_close, 2) OVER w > 0
+                      THEN {_safe_ratio_sql(
+                          "LAG(adjusted_close, 1) OVER w",
+                          "LAG(adjusted_close, 2) OVER w",
+                      )} - 1.0
+                 END AS previous_return_1d,
                 CASE WHEN COUNT(amount) OVER (
                     PARTITION BY symbol ORDER BY trade_date ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
                 ) = 20 THEN AVG(amount) OVER (
@@ -395,8 +436,8 @@ def stock_day_query(
             SELECT
                 symbol,
                 trade_date,
-                LAG(CAST(total_share AS DOUBLE), 1) OVER w AS previous_total_share,
-                LAG(CAST(float_share AS DOUBLE), 1) OVER w AS previous_float_share
+                LAG({_finite_double_sql("total_share")}, 1) OVER w AS previous_total_share,
+                LAG({_finite_double_sql("float_share")}, 1) OVER w AS previous_float_share
             FROM share_capital
             WHERE trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
             WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
@@ -405,11 +446,11 @@ def stock_day_query(
             SELECT
                 symbol,
                 trade_date,
-                LAG(CAST(total_mv AS DOUBLE), 1) OVER w AS previous_total_mv,
-                LAG(CAST(circ_mv AS DOUBLE), 1) OVER w AS previous_circ_mv,
-                LAG(CAST(turnover_rate AS DOUBLE), 1) OVER w AS previous_turnover_rate,
-                LAG(CAST(pe AS DOUBLE), 1) OVER w AS previous_pe,
-                LAG(CAST(pb AS DOUBLE), 1) OVER w AS previous_pb
+                LAG({_finite_double_sql("total_mv")}, 1) OVER w AS previous_total_mv,
+                LAG({_finite_double_sql("circ_mv")}, 1) OVER w AS previous_circ_mv,
+                LAG({_finite_double_sql("turnover_rate")}, 1) OVER w AS previous_turnover_rate,
+                LAG({_finite_double_sql("pe")}, 1) OVER w AS previous_pe,
+                LAG({_finite_double_sql("pb")}, 1) OVER w AS previous_pb
             FROM valuation
             WHERE trade_date BETWEEN (SELECT warmup_date FROM history_bounds) AND {end_sql}
             WINDOW w AS (PARTITION BY symbol ORDER BY trade_date)
@@ -435,11 +476,15 @@ def stock_day_query(
             SELECT
                 symbol,
                 trade_date,
-                CASE WHEN SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) > 0
-                     THEN SUM(GREATEST(CAST(amount AS DOUBLE), 0.0))
-                          / SUM(GREATEST(CAST(volume AS DOUBLE), 0.0))
+                CASE WHEN SUM(GREATEST({_finite_double_sql("volume")}, 0.0)) > 0
+                          AND isfinite(
+                              SUM(GREATEST({_finite_double_sql("amount")}, 0.0))
+                              / SUM(GREATEST({_finite_double_sql("volume")}, 0.0))
+                          )
+                     THEN SUM(GREATEST({_finite_double_sql("amount")}, 0.0))
+                          / SUM(GREATEST({_finite_double_sql("volume")}, 0.0))
                 END AS auction_price,
-                SUM(GREATEST(CAST(amount AS DOUBLE), 0.0)) AS auction_amount
+                SUM(GREATEST({_finite_double_sql("amount")}, 0.0)) AS auction_amount
             FROM opening_auction
             WHERE trade_date BETWEEN {start_sql} AND {end_sql}
             GROUP BY symbol, trade_date

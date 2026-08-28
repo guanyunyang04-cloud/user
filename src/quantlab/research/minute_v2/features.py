@@ -94,6 +94,22 @@ STOCK_DAY_COLUMNS = (
 )
 
 
+def _finite_double_sql(expression: str) -> str:
+    """Convert malformed numeric input to SQL NULL without raising in DuckDB."""
+
+    value = f"TRY_CAST({expression} AS DOUBLE)"
+    return f"CASE WHEN isfinite({value}) THEN {value} END"
+
+
+def _finite_positive_double_sql(expression: str) -> str:
+    value = f"TRY_CAST({expression} AS DOUBLE)"
+    return f"CASE WHEN isfinite({value}) AND {value} > 0 THEN {value} END"
+
+
+def _safe_ln_sql(expression: str) -> str:
+    return f"CASE WHEN isfinite({expression}) AND {expression} > 0 THEN LN({expression}) END"
+
+
 def _minute_lag_expressions() -> str:
     return ",\n                ".join(
         f"LAG(adjusted_close, {window}) OVER w_symbol AS adjusted_close_lag_{window}"
@@ -211,7 +227,7 @@ def _sixty_feature_expressions() -> str:
 
 def _daily_joined_expressions() -> str:
     return ",\n                ".join(
-        f"CAST(s.{name} AS DOUBLE) AS {name}"
+        f"{_finite_double_sql(f's.{name}')} AS {name}"
         for window in DAILY_WINDOWS
         for name in (
             f"previous_return_{window}d",
@@ -268,7 +284,10 @@ def sixty_state_query(
             SELECT DISTINCT symbol FROM {stock_days_view}
         ),
         factors AS (
-            SELECT symbol, trade_date, ANY_VALUE(CAST(adjust_factor AS DOUBLE)) AS adjust_factor
+            SELECT
+                symbol,
+                trade_date,
+                ANY_VALUE({_finite_positive_double_sql("adjust_factor")}) AS adjust_factor
             FROM {factor_view}
             GROUP BY symbol, trade_date
         ),
@@ -287,35 +306,58 @@ def sixty_state_query(
             SELECT
                 CAST(symbol AS VARCHAR) AS symbol,
                 CAST(trade_date AS VARCHAR) AS trade_date,
-                CASE WHEN SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) > 0
-                     THEN SUM(GREATEST(CAST(amount AS DOUBLE), 0.0))
-                          / SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) END
+                CASE WHEN SUM(GREATEST({_finite_double_sql("volume")}, 0.0)) > 0
+                     AND isfinite(
+                         SUM(GREATEST({_finite_double_sql("amount")}, 0.0))
+                         / SUM(GREATEST({_finite_double_sql("volume")}, 0.0))
+                     )
+                     THEN SUM(GREATEST({_finite_double_sql("amount")}, 0.0))
+                          / SUM(GREATEST({_finite_double_sql("volume")}, 0.0)) END
                     AS auction_price,
-                SUM(GREATEST(CAST(amount AS DOUBLE), 0.0)) AS auction_amount
+                SUM(GREATEST({_finite_double_sql("amount")}, 0.0)) AS auction_amount
             FROM {auction_view}
             GROUP BY symbol, trade_date
         ),
-        history_joined AS (
+        raw_bars AS (
             SELECT
                 CAST(b.symbol AS VARCHAR) AS symbol,
                 CAST(b.trade_date AS VARCHAR) AS trade_date,
                 CAST(b.bar_time AS VARCHAR) AS bar_time,
-                CAST(b.open AS DOUBLE) AS open,
-                CAST(b.high AS DOUBLE) AS high,
-                CAST(b.low AS DOUBLE) AS low,
-                CAST(b.close AS DOUBLE) AS close,
-                GREATEST(CAST(b.amount AS DOUBLE), 0.0) AS amount,
-                f.adjust_factor,
-                a.auction_price AS opening_auction_price,
-                GREATEST(COALESCE(a.auction_amount, 0.0), 0.0) AS opening_auction_amount,
-                NOT COALESCE(q.exclude_open, FALSE) AS valid_open,
-                NOT COALESCE(q.exclude_high, FALSE) AS valid_high,
-                NOT COALESCE(q.exclude_low, FALSE) AS valid_low,
-                NOT COALESCE(q.exclude_close, FALSE) AS valid_close,
-                ROW_NUMBER() OVER w_day AS minute_index,
-                COUNT(*) OVER (PARTITION BY b.symbol, b.trade_date) AS session_bar_count
+                {_finite_double_sql("b.open")} AS raw_open,
+                {_finite_double_sql("b.high")} AS raw_high,
+                {_finite_double_sql("b.low")} AS raw_low,
+                {_finite_double_sql("b.close")} AS raw_close,
+                {_finite_double_sql("b.amount")} AS raw_amount
             FROM {bars_view} b
             JOIN target_symbols t ON t.symbol = b.symbol
+        ),
+        history_joined AS (
+            SELECT
+                b.symbol,
+                b.trade_date,
+                b.bar_time,
+                b.raw_open AS open,
+                b.raw_high AS high,
+                b.raw_low AS low,
+                b.raw_close AS close,
+                CASE WHEN b.raw_amount IS NOT NULL THEN GREATEST(b.raw_amount, 0.0) END AS amount,
+                f.adjust_factor,
+                a.auction_price AS opening_auction_price,
+                CASE WHEN isfinite(a.auction_amount) AND a.auction_amount > 0
+                     THEN a.auction_amount ELSE 0.0 END AS opening_auction_amount,
+                NOT COALESCE(q.exclude_open, FALSE) AND b.raw_open > 0 AS valid_open,
+                NOT COALESCE(q.exclude_high, FALSE)
+                    AND b.raw_high > 0
+                    AND b.raw_low > 0
+                    AND b.raw_high >= b.raw_low AS valid_high,
+                NOT COALESCE(q.exclude_low, FALSE)
+                    AND b.raw_low > 0
+                    AND b.raw_high > 0
+                    AND b.raw_high >= b.raw_low AS valid_low,
+                NOT COALESCE(q.exclude_close, FALSE) AND b.raw_close > 0 AS valid_close,
+                ROW_NUMBER() OVER w_day AS minute_index,
+                COUNT(*) OVER (PARTITION BY b.symbol, b.trade_date) AS session_bar_count
+            FROM raw_bars b
             JOIN factors f ON f.symbol = b.symbol AND f.trade_date = b.trade_date
             LEFT JOIN auctions a ON a.symbol = b.symbol AND a.trade_date = b.trade_date
             LEFT JOIN quality q ON q.symbol = b.symbol AND q.trade_date = b.trade_date
@@ -325,11 +367,16 @@ def sixty_state_query(
             SELECT
                 *,
                 CAST(FLOOR((minute_index - 1) / 60) + 1 AS TINYINT) AS sixty_minute_bucket,
-                CASE WHEN valid_open THEN open * adjust_factor END AS adjusted_open,
-                CASE WHEN valid_high THEN high * adjust_factor END AS adjusted_high,
-                CASE WHEN valid_low THEN low * adjust_factor END AS adjusted_low,
-                CASE WHEN valid_close THEN close * adjust_factor END AS adjusted_close,
+                CASE WHEN valid_open AND isfinite(open * adjust_factor)
+                     THEN open * adjust_factor END AS adjusted_open,
+                CASE WHEN valid_high AND isfinite(high * adjust_factor)
+                     THEN high * adjust_factor END AS adjusted_high,
+                CASE WHEN valid_low AND isfinite(low * adjust_factor)
+                     THEN low * adjust_factor END AS adjusted_low,
+                CASE WHEN valid_close AND isfinite(close * adjust_factor)
+                     THEN close * adjust_factor END AS adjusted_close,
                 CASE WHEN opening_auction_price > 0
+                          AND isfinite(opening_auction_price * adjust_factor)
                      THEN opening_auction_price * adjust_factor END AS adjusted_auction_price
             FROM history_joined
             WHERE session_bar_count = {expected} AND adjust_factor > 0
@@ -386,7 +433,12 @@ def sixty_state_query(
         sixty_returns AS (
             SELECT
                 *,
-                CASE WHEN adjusted_close_60m > 0 AND adjusted_close_60m_lag_1 > 0
+                CASE WHEN isfinite(adjusted_close_60m)
+                          AND adjusted_close_60m > 0
+                          AND isfinite(adjusted_close_60m_lag_1)
+                          AND adjusted_close_60m_lag_1 > 0
+                          AND isfinite(adjusted_close_60m / adjusted_close_60m_lag_1)
+                          AND adjusted_close_60m / adjusted_close_60m_lag_1 > 0
                      THEN LN(adjusted_close_60m / adjusted_close_60m_lag_1) END
                     AS log_return_60m
             FROM sixty_ordered
@@ -429,7 +481,10 @@ def feature_query(
             SELECT DISTINCT symbol FROM {stock_days_view}
         ),
         factors AS (
-            SELECT symbol, trade_date, ANY_VALUE(CAST(adjust_factor AS DOUBLE)) AS adjust_factor
+            SELECT
+                symbol,
+                trade_date,
+                ANY_VALUE({_finite_positive_double_sql("adjust_factor")}) AS adjust_factor
             FROM {factor_view}
             GROUP BY symbol, trade_date
         ),
@@ -448,11 +503,15 @@ def feature_query(
             SELECT
                 CAST(symbol AS VARCHAR) AS symbol,
                 CAST(trade_date AS VARCHAR) AS trade_date,
-                CASE WHEN SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) > 0
-                     THEN SUM(GREATEST(CAST(amount AS DOUBLE), 0.0))
-                          / SUM(GREATEST(CAST(volume AS DOUBLE), 0.0)) END
+                CASE WHEN SUM(GREATEST({_finite_double_sql("volume")}, 0.0)) > 0
+                     AND isfinite(
+                         SUM(GREATEST({_finite_double_sql("amount")}, 0.0))
+                         / SUM(GREATEST({_finite_double_sql("volume")}, 0.0))
+                     )
+                     THEN SUM(GREATEST({_finite_double_sql("amount")}, 0.0))
+                          / SUM(GREATEST({_finite_double_sql("volume")}, 0.0)) END
                     AS auction_price,
-                SUM(GREATEST(CAST(amount AS DOUBLE), 0.0)) AS auction_amount
+                SUM(GREATEST({_finite_double_sql("amount")}, 0.0)) AS auction_amount
             FROM {auction_view}
             GROUP BY symbol, trade_date
         ),
@@ -464,29 +523,49 @@ def feature_query(
                 SELECT DISTINCT trade_date FROM {calendar_view} WHERE is_open
             )
         ),
-        history_joined AS (
+        raw_bars AS (
             SELECT
                 CAST(b.symbol AS VARCHAR) AS symbol,
                 CAST(b.trade_date AS VARCHAR) AS trade_date,
                 CAST(b.bar_time AS VARCHAR) AS bar_time,
-                CAST(b.open AS DOUBLE) AS open,
-                CAST(b.high AS DOUBLE) AS high,
-                CAST(b.low AS DOUBLE) AS low,
-                CAST(b.close AS DOUBLE) AS close,
-                GREATEST(CAST(b.volume AS DOUBLE), 0.0) AS volume,
-                GREATEST(CAST(b.amount AS DOUBLE), 0.0) AS amount,
+                {_finite_double_sql("b.open")} AS raw_open,
+                {_finite_double_sql("b.high")} AS raw_high,
+                {_finite_double_sql("b.low")} AS raw_low,
+                {_finite_double_sql("b.close")} AS raw_close,
+                {_finite_double_sql("b.volume")} AS raw_volume,
+                {_finite_double_sql("b.amount")} AS raw_amount
+            FROM {bars_view} b
+            JOIN target_symbols t ON t.symbol = b.symbol
+        ),
+        history_joined AS (
+            SELECT
+                b.symbol,
+                b.trade_date,
+                b.bar_time,
+                b.raw_open AS open,
+                b.raw_high AS high,
+                b.raw_low AS low,
+                b.raw_close AS close,
+                CASE WHEN b.raw_volume IS NOT NULL THEN GREATEST(b.raw_volume, 0.0) END AS volume,
+                CASE WHEN b.raw_amount IS NOT NULL THEN GREATEST(b.raw_amount, 0.0) END AS amount,
                 f.adjust_factor,
                 a.auction_price AS opening_auction_price,
-                GREATEST(COALESCE(a.auction_amount, 0.0), 0.0) AS opening_auction_amount,
-                NOT COALESCE(q.exclude_open, FALSE) AS valid_open,
-                NOT COALESCE(q.exclude_high, FALSE) AS valid_high,
-                NOT COALESCE(q.exclude_low, FALSE) AS valid_low,
-                NOT COALESCE(q.exclude_close, FALSE) AS valid_close,
+                CASE WHEN isfinite(a.auction_amount) AND a.auction_amount > 0
+                     THEN a.auction_amount ELSE 0.0 END AS opening_auction_amount,
+                NOT COALESCE(q.exclude_open, FALSE) AND b.raw_open > 0 AS valid_open,
+                NOT COALESCE(q.exclude_high, FALSE)
+                    AND b.raw_high > 0
+                    AND b.raw_low > 0
+                    AND b.raw_high >= b.raw_low AS valid_high,
+                NOT COALESCE(q.exclude_low, FALSE)
+                    AND b.raw_low > 0
+                    AND b.raw_high > 0
+                    AND b.raw_high >= b.raw_low AS valid_low,
+                NOT COALESCE(q.exclude_close, FALSE) AND b.raw_close > 0 AS valid_close,
                 c.market_day_index,
                 ROW_NUMBER() OVER w_day AS minute_index,
                 COUNT(*) OVER (PARTITION BY b.symbol, b.trade_date) AS session_bar_count
-            FROM {bars_view} b
-            JOIN target_symbols t ON t.symbol = b.symbol
+            FROM raw_bars b
             JOIN factors f ON f.symbol = b.symbol AND f.trade_date = b.trade_date
             JOIN market_calendar c ON c.trade_date = b.trade_date
             LEFT JOIN auctions a ON a.symbol = b.symbol AND a.trade_date = b.trade_date
@@ -499,11 +578,16 @@ def feature_query(
                 CAST((market_day_index - 1) * {expected} + minute_index AS BIGINT)
                     AS trading_minute_ordinal,
                 CAST(FLOOR((minute_index - 1) / 60) + 1 AS TINYINT) AS sixty_minute_bucket,
-                CASE WHEN valid_open THEN open * adjust_factor END AS adjusted_open,
-                CASE WHEN valid_high THEN high * adjust_factor END AS adjusted_high,
-                CASE WHEN valid_low THEN low * adjust_factor END AS adjusted_low,
-                CASE WHEN valid_close THEN close * adjust_factor END AS adjusted_close,
+                CASE WHEN valid_open AND isfinite(open * adjust_factor)
+                     THEN open * adjust_factor END AS adjusted_open,
+                CASE WHEN valid_high AND isfinite(high * adjust_factor)
+                     THEN high * adjust_factor END AS adjusted_high,
+                CASE WHEN valid_low AND isfinite(low * adjust_factor)
+                     THEN low * adjust_factor END AS adjusted_low,
+                CASE WHEN valid_close AND isfinite(close * adjust_factor)
+                     THEN close * adjust_factor END AS adjusted_close,
                 CASE WHEN opening_auction_price > 0
+                          AND isfinite(opening_auction_price * adjust_factor)
                      THEN opening_auction_price * adjust_factor END AS adjusted_auction_price
             FROM history_joined
             WHERE session_bar_count = {expected} AND adjust_factor > 0
@@ -554,7 +638,12 @@ def feature_query(
         returns AS (
             SELECT
                 *,
-                CASE WHEN adjusted_close > 0 AND adjusted_close_lag_1 > 0
+                CASE WHEN isfinite(adjusted_close)
+                          AND adjusted_close > 0
+                          AND isfinite(adjusted_close_lag_1)
+                          AND adjusted_close_lag_1 > 0
+                          AND isfinite(adjusted_close / adjusted_close_lag_1)
+                          AND adjusted_close / adjusted_close_lag_1 > 0
                      THEN LN(adjusted_close / adjusted_close_lag_1) END AS log_return_1m,
                 CASE WHEN cumulative_volume > 0
                      THEN cumulative_amount / cumulative_volume END AS cumulative_vwap_raw,
@@ -600,27 +689,27 @@ def feature_query(
             SELECT
                 m.*,
                 COALESCE(NULLIF(s.industry_name, ''), 'UNKNOWN') AS industry_name,
-                CAST(s.previous_close AS DOUBLE) AS previous_close,
-                CAST(s.previous_adjust_factor AS DOUBLE) AS previous_adjust_factor,
-                CAST(s.auction_price AS DOUBLE) AS auction_price,
-                CAST(s.auction_amount AS DOUBLE) AS auction_amount,
-                CAST(s.previous_return_1d AS DOUBLE) AS previous_return_1d,
+                {_finite_double_sql("s.previous_close")} AS previous_close,
+                {_finite_double_sql("s.previous_adjust_factor")} AS previous_adjust_factor,
+                {_finite_double_sql("s.auction_price")} AS auction_price,
+                {_finite_double_sql("s.auction_amount")} AS auction_amount,
+                {_finite_double_sql("s.previous_return_1d")} AS previous_return_1d,
                 {_daily_joined_expressions()},
-                CAST(s.previous_amount_20d AS DOUBLE) AS previous_amount_20d,
+                {_finite_double_sql("s.previous_amount_20d")} AS previous_amount_20d,
                 CAST(s.history_120d_available AS DOUBLE) AS history_120d_available,
                 CAST(s.history_240d_available AS DOUBLE) AS history_240d_available,
-                CAST(s.previous_total_share AS DOUBLE) AS previous_total_share,
-                CAST(s.previous_float_share AS DOUBLE) AS previous_float_share,
-                CAST(s.previous_total_mv AS DOUBLE) AS previous_total_mv,
-                CAST(s.previous_circ_mv AS DOUBLE) AS previous_circ_mv,
-                CAST(s.previous_turnover_rate AS DOUBLE) AS previous_turnover_rate,
-                CAST(s.previous_pe AS DOUBLE) AS previous_pe,
-                CAST(s.previous_pb AS DOUBLE) AS previous_pb,
+                {_finite_double_sql("s.previous_total_share")} AS previous_total_share,
+                {_finite_double_sql("s.previous_float_share")} AS previous_float_share,
+                {_finite_double_sql("s.previous_total_mv")} AS previous_total_mv,
+                {_finite_double_sql("s.previous_circ_mv")} AS previous_circ_mv,
+                {_finite_double_sql("s.previous_turnover_rate")} AS previous_turnover_rate,
+                {_finite_double_sql("s.previous_pe")} AS previous_pe,
+                {_finite_double_sql("s.previous_pb")} AS previous_pb,
                 CAST(s.corporate_action_today AS DOUBLE) AS corporate_action_today,
-                CAST(s.cash_dividend_per_10 AS DOUBLE) AS cash_dividend_per_10,
-                CAST(s.bonus_share_per_10 AS DOUBLE) AS bonus_share_per_10,
-                CAST(s.transfer_share_per_10 AS DOUBLE) AS transfer_share_per_10,
-                CAST(s.daily_liquidity_rank AS DOUBLE) AS daily_liquidity_rank,
+                {_finite_double_sql("s.cash_dividend_per_10")} AS cash_dividend_per_10,
+                {_finite_double_sql("s.bonus_share_per_10")} AS bonus_share_per_10,
+                {_finite_double_sql("s.transfer_share_per_10")} AS transfer_share_per_10,
+                {_finite_double_sql("s.daily_liquidity_rank")} AS daily_liquidity_rank,
                 d.previous_complete_trade_date,
                 CAST(FLOOR(m.minute_index / 60) AS TINYINT) AS last_completed_60m_bucket
             FROM minute_rolling m
@@ -703,13 +792,14 @@ def feature_query(
                 CASE WHEN previous_amount_20d > 0 AND minute_index > 0
                      THEN cumulative_amount / (previous_amount_20d * minute_index / {expected}.0) - 1.0
                 END AS amount_curve_surprise,
-                LN(1.0 + amount) AS log_bar_amount,
+                {_safe_ln_sql("1.0 + amount")} AS log_bar_amount,
                 CASE WHEN amount > 0 AND adjusted_close > 0 AND adjusted_close_lag_1 > 0
                      THEN ABS(adjusted_close / adjusted_close_lag_1 - 1.0)
                           / (amount / 1000000.0 + 1.0) END AS price_impact_1m,
                 CASE WHEN adjusted_close > 0 AND cumulative_absolute_return > 0
                           AND day_open_adjusted > 0
-                     THEN ABS(LN(adjusted_close / day_open_adjusted)) / cumulative_absolute_return
+                      THEN ABS({_safe_ln_sql("adjusted_close / day_open_adjusted")})
+                           / cumulative_absolute_return
                 END AS trend_efficiency,
                 CASE WHEN adjusted_close > 0 AND previous_high_20 > 0
                      THEN adjusted_close / previous_high_20 - 1.0 END AS breakout_20m,
@@ -726,12 +816,12 @@ def feature_query(
                      THEN auction_amount / previous_amount_20d END AS auction_amount_to_daily20,
                 previous_return_1d,
                 {_daily_projection()},
-                LN(1.0 + GREATEST(previous_amount_20d, 0.0)) AS previous_log_amount_20d,
+                {_safe_ln_sql("1.0 + GREATEST(previous_amount_20d, 0.0)")} AS previous_log_amount_20d,
                 daily_liquidity_rank,
                 history_120d_available,
                 history_240d_available,
-                LN(1.0 + GREATEST(previous_total_mv, 0.0)) AS previous_log_total_market_value,
-                LN(1.0 + GREATEST(previous_circ_mv, 0.0))
+                {_safe_ln_sql("1.0 + GREATEST(previous_total_mv, 0.0)")} AS previous_log_total_market_value,
+                {_safe_ln_sql("1.0 + GREATEST(previous_circ_mv, 0.0)")}
                     AS previous_log_circulating_market_value,
                 previous_turnover_rate,
                 previous_pe,
@@ -739,7 +829,7 @@ def feature_query(
                 CASE WHEN previous_float_share > 0
                      THEN cumulative_volume / previous_float_share END AS intraday_float_turnover,
                 CASE WHEN previous_float_share > 0 AND close > 0
-                     THEN LN(1.0 + close * previous_float_share) END
+                      THEN {_safe_ln_sql("1.0 + close * previous_float_share")} END
                     AS intraday_log_circulating_market_value,
                 corporate_action_today,
                 cash_dividend_per_10,
@@ -790,9 +880,7 @@ def feature_query(
                      THEN (adjusted_close - partial_60m_low)
                           / (partial_60m_high - partial_60m_low) END
                     AS partial_60m_close_location,
-                LN(1.0 + partial_60m_amount
-                   + CASE WHEN sixty_minute_bucket = 1
-                          THEN opening_auction_amount ELSE 0.0 END)
+                {_safe_ln_sql("1.0 + partial_60m_amount + CASE WHEN sixty_minute_bucket = 1 THEN opening_auction_amount ELSE 0.0 END")}
                     AS partial_60m_log_amount
             FROM target_with_sixty
             WHERE
@@ -829,7 +917,7 @@ def feature_query(
                 AVG(CASE WHEN return_from_previous_close > 0 THEN 1.0 ELSE 0.0 END)
                     AS market_breadth_positive,
                 STDDEV_SAMP(return_from_previous_close) AS market_return_dispersion,
-                LN(1.0 + SUM(amount)) AS market_log_total_amount,
+                {_safe_ln_sql("1.0 + SUM(amount)")} AS market_log_total_amount,
                 SUM(amount) AS market_total_amount
             FROM timeframe_enriched
             GROUP BY trade_date, bar_time
@@ -925,7 +1013,12 @@ def _fixture_context(
             "exclude_low",
             "exclude_close",
         ]
-        context = keys.merge(stock_days.loc[:, columns], on=["symbol", "trade_date"], how="left")
+        context = keys.merge(
+            stock_days.loc[:, columns],
+            on=["symbol", "trade_date"],
+            how="left",
+            indicator="_context_present",
+        )
     else:
         required = {
             "symbol",
@@ -943,10 +1036,17 @@ def _fixture_context(
             bar_day_context.loc[:, sorted(required)],
             on=["symbol", "trade_date"],
             how="left",
+            indicator="_context_present",
         )
-    context["adjust_factor"] = pd.to_numeric(
-        context["adjust_factor"], errors="coerce"
-    ).fillna(1.0)
+    factor = pd.to_numeric(context["adjust_factor"], errors="coerce")
+    has_context = context["_context_present"].eq("both")
+    invalid_factor = has_context & ~factor.between(0.0, float("inf"), inclusive="neither")
+    if invalid_factor.any():
+        raise MinuteV2Error("minute_v2_bar_day_context_adjust_factor_invalid")
+    # A missing row is allowed only as a synthetic fixture convenience. A
+    # present row with a bad factor must remain visible as an input error.
+    context["adjust_factor"] = factor.where(has_context, 1.0)
+    context = context.drop(columns="_context_present")
     for name in ("exclude_open", "exclude_high", "exclude_low", "exclude_close"):
         context[name] = context[name].astype("boolean").fillna(False).astype(bool)
     factors = context.loc[:, ["symbol", "trade_date", "adjust_factor"]].copy()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from numbers import Integral
 from typing import Any
 
 import numpy as np
@@ -22,11 +23,31 @@ class EventReplayConfig:
     lot_size: int = 100
 
     def validate(self) -> None:
-        if self.starting_cash <= 0:
+        try:
+            starting_cash = float(self.starting_cash)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise MinuteV2Error("minute_v2_replay_starting_cash_invalid") from exc
+        if not math.isfinite(starting_cash) or starting_cash <= 0:
             raise MinuteV2Error("minute_v2_replay_starting_cash_invalid")
-        if min(self.top_k_per_minute, self.maximum_open_positions, self.maximum_new_positions_per_day) <= 0:
+        try:
+            score_threshold = float(self.score_threshold)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise MinuteV2Error("minute_v2_replay_score_threshold_invalid") from exc
+        if not math.isfinite(score_threshold):
+            raise MinuteV2Error("minute_v2_replay_score_threshold_invalid")
+
+        limits = (
+            self.top_k_per_minute,
+            self.maximum_open_positions,
+            self.maximum_new_positions_per_day,
+        )
+        if any(isinstance(value, bool) or not isinstance(value, Integral) for value in limits):
             raise MinuteV2Error("minute_v2_replay_position_limit_invalid")
-        if self.lot_size <= 0:
+        if min(int(value) for value in limits) <= 0:
+            raise MinuteV2Error("minute_v2_replay_position_limit_invalid")
+        if isinstance(self.lot_size, bool) or not isinstance(self.lot_size, Integral):
+            raise MinuteV2Error("minute_v2_replay_lot_size_invalid")
+        if int(self.lot_size) <= 0:
             raise MinuteV2Error("minute_v2_replay_lot_size_invalid")
 
 
@@ -64,6 +85,14 @@ def _required_columns() -> set[str]:
     }
 
 
+def _safe_bool(value: Any) -> bool:
+    """Treat null execution flags as false instead of raising on ``pd.NA``."""
+
+    if value is None or pd.isna(value):
+        return False
+    return bool(value)
+
+
 def replay_events(
     scored: pd.DataFrame,
     *,
@@ -93,7 +122,14 @@ def replay_events(
         frame.loc[valid, name] = pd.to_datetime(
             frame.loc[valid, name], errors="raise"
         ).dt.strftime("%Y-%m-%d")
-    frame["score"] = pd.to_numeric(frame["score"], errors="coerce")
+    for name in (
+        "score",
+        "entry_price",
+        "entry_amount",
+        "exit_amount",
+        "label_net_return",
+    ):
+        frame[name] = pd.to_numeric(frame[name], errors="coerce")
     frame = frame.sort_values(
         ["trade_date", "bar_time", "score", "symbol"],
         ascending=[True, True, False, True],
@@ -152,6 +188,7 @@ def replay_events(
             for _, minute_group in current.groupby("bar_time", sort=True):
                 ranked = minute_group.loc[
                     minute_group["score"].notna()
+                    & np.isfinite(minute_group["score"])
                     & minute_group["score"].ge(float(replay.score_threshold))
                 ].head(int(replay.top_k_per_minute))
                 for row in ranked.itertuples(index=False):
@@ -166,24 +203,34 @@ def replay_events(
                         overlap += 1
                         continue
                     attempted.add(attempt_key)
-                    if not bool(row.entry_executable):
+                    if not _safe_bool(row.entry_executable):
                         unfilled += 1
                         continue
                     actual_exit = row.actual_exit_date
                     if (
-                        pd.isna(row.label_observed)
-                        or not bool(row.label_observed)
+                        not _safe_bool(row.label_observed)
                         or pd.isna(actual_exit)
                         or not str(actual_exit)
                     ):
                         unfilled += 1
                         continue
                     entry_price = float(row.entry_price)
-                    if not math.isfinite(entry_price) or entry_price <= 0:
+                    entry_amount = float(row.entry_amount)
+                    exit_amount = float(row.exit_amount)
+                    label_return = float(row.label_net_return)
+                    if (
+                        not math.isfinite(entry_price)
+                        or entry_price <= 0
+                        or not math.isfinite(entry_amount)
+                        or entry_amount <= 0
+                        or not math.isfinite(exit_amount)
+                        or exit_amount <= 0
+                        or not math.isfinite(label_return)
+                    ):
                         unfilled += 1
                         continue
-                    entry_capacity = float(row.entry_amount) * research.maximum_participation_rate
-                    exit_capacity = float(row.exit_amount) * research.maximum_participation_rate
+                    entry_capacity = entry_amount * research.maximum_participation_rate
+                    exit_capacity = exit_amount * research.maximum_participation_rate
                     position_slots = max(1, replay.maximum_open_positions - len(holdings))
                     cash_budget = cash / position_slots
                     gross_budget = min(entry_capacity, exit_capacity, cash_budget / (1.0 + buy_cost_rate))
@@ -196,7 +243,6 @@ def replay_events(
                     if cash_outflow > cash * (1.0 + 1.0e-12):
                         raise MinuteV2Error("minute_v2_replay_negative_cash_prevented")
                     cash -= cash_outflow
-                    label_return = float(row.label_net_return)
                     holding = _Holding(
                         trade_id=next_trade_id,
                         symbol=symbol,

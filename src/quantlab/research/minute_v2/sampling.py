@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
 import duckdb
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 from .contracts import KEY_COLUMNS, MinuteV2Config, MinuteV2Error
 
@@ -48,6 +51,11 @@ EVENT_CONTEXT_COLUMNS = (
 )
 
 DEFAULT_RECALL_TOP_K = (1, 3, 5)
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+RECALL_TARGET_SEMANTICS = (
+    "label_return_*m is measured over decision-grid steps; "
+    "label_session_return_*m is measured over same-trade-date raw bars"
+)
 
 CANDIDATE_COLUMNS = (
     "candidate_attention",
@@ -198,6 +206,81 @@ def _validate_recall_frame(
         )
     if frame.duplicated(list(KEY_COLUMNS)).any():
         raise MinuteV2Error(f"minute_v2_recall_{name}_duplicate_keys")
+    if frame.loc[:, list(KEY_COLUMNS)].isna().any().any():
+        raise MinuteV2Error(f"minute_v2_recall_{name}_null_keys")
+
+
+def _normalise_recall_top_k(top_k: Sequence[int]) -> tuple[int, ...]:
+    try:
+        if isinstance(top_k, (str, bytes)):
+            raise TypeError
+        values = list(top_k)
+        if any(isinstance(value, bool) or not isinstance(value, Integral) for value in values):
+            raise TypeError
+        requested = tuple(sorted({int(value) for value in values if int(value) > 0}))
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise MinuteV2Error("minute_v2_recall_top_k_invalid") from exc
+    if not requested:
+        raise MinuteV2Error("minute_v2_recall_top_k_invalid")
+    return requested
+
+
+def _validate_recall_target_name(target: str) -> str:
+    if not isinstance(target, str):
+        raise MinuteV2Error("minute_v2_recall_target_invalid")
+    value = target
+    if not _IDENTIFIER_RE.fullmatch(value) or value in KEY_COLUMNS:
+        raise MinuteV2Error("minute_v2_recall_target_invalid")
+    return value
+
+
+def _recall_key_type_signature(path: Path, *, name: str) -> tuple[tuple[str, str], ...]:
+    """Return the physical key types before DuckDB can apply implicit casts."""
+
+    try:
+        schema = pq.ParquetFile(path).schema_arrow
+    except Exception as exc:
+        raise MinuteV2Error(
+            f"minute_v2_recall_{name}_file_unreadable:{path}"
+        ) from exc
+    missing = sorted(set(KEY_COLUMNS).difference(schema.names))
+    if missing:
+        raise MinuteV2Error(
+            f"minute_v2_recall_{name}_columns_missing:{','.join(missing)}"
+        )
+    return tuple((key, str(schema.field(key).type)) for key in KEY_COLUMNS)
+
+
+def _key_difference(left: pd.DataFrame, right: pd.DataFrame) -> int:
+    keys = list(KEY_COLUMNS)
+    try:
+        matched = left.loc[:, keys].merge(
+            right.loc[:, keys],
+            how="left",
+            on=keys,
+            indicator=True,
+            validate="one_to_one",
+        )
+    except (TypeError, ValueError) as exc:
+        raise MinuteV2Error("minute_v2_recall_key_types_inconsistent") from exc
+    return int((matched["_merge"] == "left_only").sum())
+
+
+def _validate_recall_key_relationships(
+    base: pd.DataFrame,
+    candidates: pd.DataFrame,
+    outcomes: pd.DataFrame,
+) -> None:
+    missing_outcomes = _key_difference(base, outcomes)
+    extra_outcomes = _key_difference(outcomes, base)
+    if missing_outcomes or extra_outcomes:
+        raise MinuteV2Error(
+            "minute_v2_recall_outcomes_coverage_invalid:"
+            f"{missing_outcomes}:{extra_outcomes}"
+        )
+    extra_candidates = _key_difference(candidates, base)
+    if extra_candidates:
+        raise MinuteV2Error(f"minute_v2_recall_candidates_outside_base:{extra_candidates}")
 
 
 def audit_candidate_recall(
@@ -216,19 +299,22 @@ def audit_candidate_recall(
     gate, not a way to tune it using future returns.
     """
 
+    target_name = _validate_recall_target_name(target)
     _validate_recall_frame(base, name="base")
     _validate_recall_frame(candidates, name="candidates")
-    outcome_frame = base if outcomes is None and target in base.columns else outcomes
+    outcome_frame = base if outcomes is None and target_name in base.columns else outcomes
     if outcome_frame is None:
         raise MinuteV2Error("minute_v2_recall_outcomes_required")
-    _validate_recall_frame(outcome_frame, name="outcomes", require_target=target)
-    requested_k = tuple(sorted({int(value) for value in top_k if int(value) > 0}))
-    if not requested_k:
-        raise MinuteV2Error("minute_v2_recall_top_k_invalid")
+    _validate_recall_frame(outcome_frame, name="outcomes", require_target=target_name)
+    requested_k = _normalise_recall_top_k(top_k)
+    _validate_recall_key_relationships(base, candidates, outcome_frame)
 
     keys = list(KEY_COLUMNS)
     universe = base.loc[:, keys].merge(
-        outcome_frame.loc[:, [*keys, target]], how="left", on=keys, validate="one_to_one"
+        outcome_frame.loc[:, [*keys, target_name]],
+        how="left",
+        on=keys,
+        validate="one_to_one",
     )
     candidate_keys = candidates.loc[:, keys].drop_duplicates().copy()
     candidate_keys["_candidate_selected"] = True
@@ -236,9 +322,9 @@ def audit_candidate_recall(
     universe["_candidate_selected"] = (
         universe["_candidate_selected"].astype("boolean").fillna(False).astype(bool)
     )
-    universe[target] = pd.to_numeric(universe[target], errors="coerce")
+    universe[target_name] = pd.to_numeric(universe[target_name], errors="coerce")
     finite = np.isfinite(
-        pd.to_numeric(universe[target], errors="coerce").to_numpy(dtype=float)
+        pd.to_numeric(universe[target_name], errors="coerce").to_numpy(dtype=float)
     )
     universe = universe.loc[finite].copy()
     if universe.empty:
@@ -247,6 +333,7 @@ def audit_candidate_recall(
     group_columns = ["trade_date", "bar_time"]
     group_count = int(universe.groupby(group_columns, sort=False).ngroups)
     candidate_count = int(universe["_candidate_selected"].sum())
+    candidate_rows_in_base = int(len(candidates))
     group_sizes = universe.groupby(group_columns, sort=False).size()
     recalls: dict[str, float | None] = {}
     hits: dict[str, int] = {}
@@ -259,7 +346,7 @@ def audit_candidate_recall(
                 continue
             take = min(int(k), len(group))
             ranked = group.sort_values(
-                [target, "symbol"], ascending=[False, True], kind="stable"
+                [target_name, "symbol"], ascending=[False, True], kind="stable"
             ).head(take)
             eligible += 1
             hit_count += int(ranked["_candidate_selected"].any())
@@ -273,11 +360,12 @@ def audit_candidate_recall(
     ).size()
     return {
         "schema": "quantlab.minute_v2_candidate_recall/1",
-        "target": str(target),
+        "target": target_name,
         "base_rows": int(len(base)),
         "outcome_rows": int(len(outcome_frame)),
         "finite_outcome_rows": int(len(universe)),
         "candidate_rows": candidate_count,
+        "candidate_rows_in_base": candidate_rows_in_base,
         "candidate_fraction_of_finite_outcomes": candidate_count / len(universe),
         "group_count": group_count,
         "groups_without_candidates": int(group_count - len(candidate_group_counts)),
@@ -293,6 +381,7 @@ def audit_candidate_recall(
         "top_k_eligible_groups": eligible_groups,
         "top_k_recall": recalls,
         "candidate_membership_source": "primary-key-only; target excluded from gate membership",
+        "target_semantics": RECALL_TARGET_SEMANTICS,
     }
 
 
@@ -306,102 +395,207 @@ def audit_candidate_recall_files(
 ) -> dict[str, Any]:
     """Run the recall audit from Parquet without materializing feature columns."""
 
+    target_name = _validate_recall_target_name(target)
+    requested_k = _normalise_recall_top_k(top_k)
+    paths = {
+        "base": Path(base_path).resolve(),
+        "candidates": Path(candidate_path).resolve(),
+        "outcomes": Path(outcome_path).resolve(),
+    }
+    for name, path in paths.items():
+        if not path.is_file():
+            raise MinuteV2Error(f"minute_v2_recall_{name}_file_missing:{path}")
+    key_types_by_file = {
+        name: _recall_key_type_signature(path, name=name)
+        for name, path in paths.items()
+    }
+    distinct_key_types = {signature for signature in key_types_by_file.values()}
+    if len(distinct_key_types) != 1:
+        details = ";".join(
+            f"{name}=" + ",".join(f"{key}:{kind}" for key, kind in signature)
+            for name, signature in key_types_by_file.items()
+        )
+        raise MinuteV2Error(f"minute_v2_recall_key_types_inconsistent:{details}")
+
     connection = duckdb.connect(":memory:")
     try:
         def literal(path: str | Path) -> str:
             return "'" + str(Path(path).resolve()).replace("'", "''") + "'"
 
-        base_scan = f"read_parquet({literal(base_path)})"
-        candidate_scan = f"read_parquet({literal(candidate_path)})"
-        outcome_scan = f"read_parquet({literal(outcome_path)})"
+        scans = {
+            name: f"read_parquet({literal(path)}, union_by_name=true)"
+            for name, path in paths.items()
+        }
+        views = {
+            name: f"recall_{name}"
+            for name in paths
+        }
+        for name, view in views.items():
+            try:
+                connection.execute(
+                    f"CREATE OR REPLACE TEMP VIEW {view} AS SELECT * FROM {scans[name]}"
+                )
+            except duckdb.Error as exc:
+                raise MinuteV2Error(
+                    f"minute_v2_recall_{name}_file_unreadable:{paths[name]}"
+                ) from exc
+
         key_projection = ",".join(KEY_COLUMNS)
-        top_values = tuple(sorted({int(value) for value in top_k if int(value) > 0}))
-        if not top_values:
-            raise MinuteV2Error("minute_v2_recall_top_k_invalid")
-        query = f"""
-            WITH base_keys AS (
-                SELECT {key_projection} FROM {base_scan}
-            ),
-            candidates AS (
-                SELECT DISTINCT {key_projection} FROM {candidate_scan}
-            ),
-            outcomes AS (
-                SELECT {key_projection}, CAST({target} AS DOUBLE) AS target
-                FROM {outcome_scan}
-            ),
-            universe AS (
-                SELECT b.*, o.target,
-                       c.symbol IS NOT NULL AS candidate_selected
-                FROM base_keys b
-                JOIN outcomes o USING({key_projection})
-                LEFT JOIN candidates c USING({key_projection})
-                WHERE isfinite(o.target)
-            ),
-            ranked AS (
-                SELECT *, ROW_NUMBER() OVER (
-                    PARTITION BY trade_date, bar_time
-                    ORDER BY target DESC, symbol
-                ) AS rank_in_group
-                FROM universe
+        key_predicate = " OR ".join(f"{key} IS NULL" for key in KEY_COLUMNS)
+
+        def scalar(query: str) -> int:
+            value = connection.execute(query).fetchone()
+            return int(value[0]) if value and value[0] is not None else 0
+
+        for name, view in views.items():
+            try:
+                connection.execute(f"SELECT {key_projection} FROM {view} LIMIT 0")
+            except duckdb.Error as exc:
+                raise MinuteV2Error(
+                    f"minute_v2_recall_{name}_columns_missing:{','.join(KEY_COLUMNS)}"
+                ) from exc
+            null_keys = scalar(f"SELECT count(*) FROM {view} WHERE {key_predicate}")
+            if null_keys:
+                raise MinuteV2Error(f"minute_v2_recall_{name}_null_keys")
+            duplicate_keys = scalar(
+                f"SELECT count(*) FROM (SELECT {key_projection} FROM {view} "
+                f"GROUP BY {key_projection} HAVING count(*) > 1)"
             )
-            SELECT
-                (SELECT count(*) FROM base_keys) AS base_rows,
-                (SELECT count(*) FROM outcomes) AS outcome_rows,
-                count(*) AS finite_outcome_rows,
-                count(*) FILTER (WHERE candidate_selected) AS candidate_rows,
-                count(DISTINCT trade_date || 'T' || bar_time) AS group_count,
-                count(DISTINCT trade_date || 'T' || bar_time)
-                    FILTER (WHERE candidate_selected) AS candidate_group_count
-            FROM ranked
-        """
-        summary = connection.execute(query).fetchone()
-        if not summary:
-            raise MinuteV2Error("minute_v2_recall_file_summary_empty")
-        base_rows, outcome_rows, finite_rows, candidate_rows, groups, candidate_groups = summary
+            if duplicate_keys:
+                raise MinuteV2Error(f"minute_v2_recall_{name}_duplicate_keys")
+
+        try:
+            connection.execute(
+                f"SELECT \"{target_name.replace(chr(34), chr(34) * 2)}\" "
+                f"FROM {views['outcomes']} LIMIT 0"
+            )
+        except duckdb.Error as exc:
+            raise MinuteV2Error(
+                f"minute_v2_recall_outcomes_columns_missing:{target_name}"
+            ) from exc
+
+        missing_outcomes = scalar(
+            f"SELECT count(*) FROM {views['base']} b LEFT JOIN {views['outcomes']} o "
+            f"USING({key_projection}) WHERE o.symbol IS NULL"
+        )
+        extra_outcomes = scalar(
+            f"SELECT count(*) FROM {views['outcomes']} o LEFT JOIN {views['base']} b "
+            f"USING({key_projection}) WHERE b.symbol IS NULL"
+        )
+        if missing_outcomes or extra_outcomes:
+            raise MinuteV2Error(
+                "minute_v2_recall_outcomes_coverage_invalid:"
+                f"{missing_outcomes}:{extra_outcomes}"
+            )
+        extra_candidates = scalar(
+            f"SELECT count(*) FROM {views['candidates']} c LEFT JOIN {views['base']} b "
+            f"USING({key_projection}) WHERE b.symbol IS NULL"
+        )
+        if extra_candidates:
+            raise MinuteV2Error(
+                f"minute_v2_recall_candidates_outside_base:{extra_candidates}"
+            )
+
+        escaped_target = target_name.replace('"', '""')
+        connection.execute(
+            f"CREATE OR REPLACE TEMP VIEW recall_outcome_values AS "
+            f"SELECT {key_projection}, TRY_CAST(\"{escaped_target}\" AS DOUBLE) AS target "
+            f"FROM {views['outcomes']}"
+        )
+        connection.execute(
+            f"CREATE OR REPLACE TEMP VIEW recall_universe AS "
+            f"SELECT b.{KEY_COLUMNS[0]}, b.{KEY_COLUMNS[1]}, b.{KEY_COLUMNS[2]}, "
+            "o.target, c.symbol IS NOT NULL AS candidate_selected "
+            f"FROM {views['base']} b JOIN recall_outcome_values o USING({key_projection}) "
+            f"LEFT JOIN {views['candidates']} c USING({key_projection})"
+        )
+        finite_rows = scalar(
+            "SELECT count(*) FROM recall_universe WHERE isfinite(target)"
+        )
+        if finite_rows == 0:
+            raise MinuteV2Error("minute_v2_recall_no_finite_outcomes")
+        base_rows = scalar(f"SELECT count(*) FROM {views['base']}")
+        outcome_rows = scalar(f"SELECT count(*) FROM {views['outcomes']}")
+        candidate_rows_in_base = scalar(f"SELECT count(*) FROM {views['candidates']}")
+        candidate_rows = scalar(
+            "SELECT count(*) FROM recall_universe "
+            "WHERE candidate_selected AND isfinite(target)"
+        )
+        group_count = scalar(
+            "SELECT count(*) FROM (SELECT DISTINCT trade_date,bar_time "
+            "FROM recall_universe WHERE isfinite(target))"
+        )
+        candidate_group_count = scalar(
+            "SELECT count(*) FROM (SELECT DISTINCT trade_date,bar_time "
+            "FROM recall_universe WHERE isfinite(target) AND candidate_selected)"
+        )
+        candidate_group_stats = connection.execute(
+            "SELECT min(rows), max(rows) FROM ("
+            "SELECT trade_date,bar_time,count(*) AS rows FROM recall_universe "
+            "WHERE isfinite(target) AND candidate_selected GROUP BY trade_date,bar_time)"
+        ).fetchone()
+        universe_group_stats = connection.execute(
+            "SELECT min(rows), max(rows) FROM ("
+            "SELECT trade_date,bar_time,count(*) AS rows FROM recall_universe "
+            "WHERE isfinite(target) GROUP BY trade_date,bar_time)"
+        ).fetchone()
         report: dict[str, Any] = {
             "schema": "quantlab.minute_v2_candidate_recall/1",
-            "target": str(target),
-            "base_rows": int(base_rows),
-            "outcome_rows": int(outcome_rows),
-            "finite_outcome_rows": int(finite_rows),
-            "candidate_rows": int(candidate_rows),
+            "target": target_name,
+            "base_rows": base_rows,
+            "outcome_rows": outcome_rows,
+            "finite_outcome_rows": finite_rows,
+            "candidate_rows": candidate_rows,
+            "candidate_rows_in_base": candidate_rows_in_base,
             "candidate_fraction_of_finite_outcomes": float(candidate_rows / finite_rows),
-            "group_count": int(groups),
-            "groups_without_candidates": int(groups - candidate_groups),
-            "candidate_membership_source": "primary-key-only; target excluded from gate membership",
+            "group_count": group_count,
+            "groups_without_candidates": int(group_count - candidate_group_count),
+            "minimum_candidate_rows_per_group": int(candidate_group_stats[0])
+            if candidate_group_stats and candidate_group_stats[0] is not None
+            else 0,
+            "maximum_candidate_rows_per_group": int(candidate_group_stats[1])
+            if candidate_group_stats and candidate_group_stats[1] is not None
+            else 0,
+            "minimum_universe_rows_per_group": int(universe_group_stats[0])
+            if universe_group_stats and universe_group_stats[0] is not None
+            else 0,
+            "maximum_universe_rows_per_group": int(universe_group_stats[1])
+            if universe_group_stats and universe_group_stats[1] is not None
+            else 0,
+            "top_k_hits": {},
+            "top_k_eligible_groups": {},
             "top_k_recall": {},
+            "candidate_membership_source": "primary-key-only; target excluded from gate membership",
+            "target_semantics": RECALL_TARGET_SEMANTICS,
+            "key_types": {key: kind for key, kind in key_types_by_file["base"]},
         }
-        for k in top_values:
+        for k in requested_k:
             row = connection.execute(
                 f"""
-                WITH base_keys AS (SELECT {key_projection} FROM {base_scan}),
-                candidates AS (SELECT DISTINCT {key_projection} FROM {candidate_scan}),
-                outcomes AS (
-                    SELECT {key_projection}, CAST({target} AS DOUBLE) AS target
-                    FROM {outcome_scan} WHERE isfinite(CAST({target} AS DOUBLE))
-                ),
-                ranked AS (
-                    SELECT o.*, c.symbol IS NOT NULL AS candidate_selected,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY o.trade_date, o.bar_time
-                               ORDER BY o.target DESC, o.symbol
-                           ) AS rank_in_group
-                    FROM outcomes o
-                    JOIN base_keys b USING({key_projection})
-                    LEFT JOIN candidates c USING({key_projection})
-                ),
-                groups AS (
-                    SELECT trade_date,bar_time,
-                           bool_or(candidate_selected) AS hit
-                    FROM ranked WHERE rank_in_group <= {int(k)}
-                    GROUP BY trade_date,bar_time
+                WITH ranked AS (
+                    SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY trade_date, bar_time
+                        ORDER BY target DESC, symbol
+                    ) AS rank_in_group
+                    FROM recall_universe
+                    WHERE isfinite(target)
+                ), groups AS (
+                    SELECT trade_date, bar_time,
+                           bool_or(candidate_selected) FILTER (WHERE rank_in_group <= {int(k)}) AS hit
+                    FROM ranked
+                    GROUP BY trade_date, bar_time
                 )
-                SELECT count(*) FILTER(WHERE hit), count(*) FROM groups
+                SELECT count(*) FILTER (WHERE hit), count(*) FROM groups
                 """
             ).fetchone()
             hits, eligible = row or (0, 0)
-            report["top_k_recall"][f"top_{k}"] = (
-                float(hits / eligible) if eligible else None
+            hit_count = int(hits or 0)
+            eligible_count = int(eligible or 0)
+            key = f"top_{k}"
+            report["top_k_hits"][key] = hit_count
+            report["top_k_eligible_groups"][key] = eligible_count
+            report["top_k_recall"][key] = (
+                float(hit_count / eligible_count) if eligible_count else None
             )
         return report
     finally:

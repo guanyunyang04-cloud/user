@@ -30,6 +30,24 @@ from .contracts import (
 MINUTE_LABEL_HORIZONS = (5, 15, 30, 60)
 DAILY_LABEL_HORIZONS = (1, 3, 5, MAXIMUM_DAILY_LABEL_HORIZON)
 
+
+def _session_minute_ordinal_sql(alias: str = "b") -> str:
+    """Map continuous-trading bars to a gap-free ordinal within one session."""
+
+    value = f"CAST({alias}.bar_time AS VARCHAR)"
+    minute_of_day = (
+        f"CAST(SUBSTR({value}, 1, 2) AS INTEGER) * 60 + "
+        f"CAST(SUBSTR({value}, 3, 2) AS INTEGER)"
+    )
+    return (
+        "CASE "
+        f"WHEN {value} BETWEEN '{MORNING_DECISION_START}' AND '113000000' "
+        f"THEN ({minute_of_day} - (9 * 60 + 31)) "
+        f"WHEN {value} BETWEEN '{AFTERNOON_DECISION_START}' AND '150000000' "
+        f"THEN (120 + {minute_of_day} - (13 * 60 + 1)) "
+        "END"
+    )
+
 LEGACY_LABEL_COLUMNS = (
     "symbol",
     "trade_date",
@@ -203,6 +221,20 @@ def _decision_ordered_expressions() -> str:
                 f"COUNT(*) OVER ({frame}) AS continuous_count_{horizon}m",
                 f"COUNT(adjusted_high) OVER ({frame}) AS continuous_high_count_{horizon}m",
                 f"COUNT(adjusted_low) OVER ({frame}) AS continuous_low_count_{horizon}m",
+                f"COUNT(*) FILTER (WHERE high IS NULL "
+                f"OR NOT isfinite(CAST(high AS DOUBLE)) "
+                f"OR high <= 0 "
+                f"OR NOT isfinite(CAST(adjust_factor AS DOUBLE)) "
+                f"OR adjust_factor <= 0 "
+                f"OR (isfinite(CAST(low AS DOUBLE)) AND high < low)) OVER ({frame}) "
+                f"AS continuous_high_invalid_count_{horizon}m",
+                f"COUNT(*) FILTER (WHERE low IS NULL "
+                f"OR NOT isfinite(CAST(low AS DOUBLE)) "
+                f"OR low <= 0 "
+                f"OR NOT isfinite(CAST(adjust_factor AS DOUBLE)) "
+                f"OR adjust_factor <= 0 "
+                f"OR (isfinite(CAST(high AS DOUBLE)) AND high < low)) OVER ({frame}) "
+                f"AS continuous_low_invalid_count_{horizon}m",
             ]
         )
     return ",\n                ".join(values)
@@ -218,12 +250,29 @@ def _session_ordered_expressions() -> str:
         values.extend(
             [
                 f"LEAD(bar_time, {horizon}) OVER w AS session_end_time_{horizon}m",
+                f"LEAD(session_minute_ordinal, {horizon}) OVER w AS session_end_ordinal_{horizon}m",
                 f"LEAD(adjusted_close, {horizon}) OVER w AS session_end_close_{horizon}m",
                 f"MAX(adjusted_high) OVER ({frame}) AS session_high_{horizon}m",
                 f"MIN(adjusted_low) OVER ({frame}) AS session_low_{horizon}m",
                 f"COUNT(*) OVER ({frame}) AS session_count_{horizon}m",
+                f"COUNT(DISTINCT session_minute_ordinal) OVER ({frame}) "
+                f"AS session_distinct_ordinal_count_{horizon}m",
                 f"COUNT(adjusted_high) OVER ({frame}) AS session_high_count_{horizon}m",
                 f"COUNT(adjusted_low) OVER ({frame}) AS session_low_count_{horizon}m",
+                f"COUNT(*) FILTER (WHERE high IS NULL "
+                f"OR NOT isfinite(CAST(high AS DOUBLE)) "
+                f"OR high <= 0 "
+                f"OR NOT isfinite(CAST(adjust_factor AS DOUBLE)) "
+                f"OR adjust_factor <= 0 "
+                f"OR (isfinite(CAST(low AS DOUBLE)) AND high < low)) OVER ({frame}) "
+                f"AS session_high_invalid_count_{horizon}m",
+                f"COUNT(*) FILTER (WHERE low IS NULL "
+                f"OR NOT isfinite(CAST(low AS DOUBLE)) "
+                f"OR low <= 0 "
+                f"OR NOT isfinite(CAST(adjust_factor AS DOUBLE)) "
+                f"OR adjust_factor <= 0 "
+                f"OR (isfinite(CAST(high AS DOUBLE)) AND high < low)) OVER ({frame}) "
+                f"AS session_low_invalid_count_{horizon}m",
             ]
         )
     return ",\n                ".join(values)
@@ -239,6 +288,8 @@ def _daily_aggregate_expressions() -> str:
                 f"MAX(CASE WHEN x.calendar_index = e.signal_calendar_index + {horizon} "
                 "AND NOT s.is_suspended AND NOT s.is_delisted AND NOT s.exclude_close "
                 "AND s.close > 0 AND s.adjust_factor > 0 "
+                "AND isfinite(CAST(s.close AS DOUBLE)) "
+                "AND isfinite(CAST(s.adjust_factor AS DOUBLE)) "
                 f"THEN s.close * s.adjust_factor END) AS endpoint_price_{horizon}d",
                 f"COUNT(*) FILTER (WHERE x.calendar_index <= e.signal_calendar_index + {horizon}) "
                 f"AS future_day_count_{horizon}d",
@@ -246,10 +297,40 @@ def _daily_aggregate_expressions() -> str:
                 f"AND s.exclude_high) AS excluded_high_count_{horizon}d",
                 f"COUNT(*) FILTER (WHERE x.calendar_index <= e.signal_calendar_index + {horizon} "
                 f"AND s.exclude_low) AS excluded_low_count_{horizon}d",
+                 f"COUNT(*) FILTER (WHERE x.calendar_index <= e.signal_calendar_index + {horizon} "
+                 "AND (s.exclude_high OR s.high IS NULL "
+                 "OR NOT isfinite(CAST(s.high AS DOUBLE)) "
+                 "OR s.high <= 0 "
+                 "OR s.adjust_factor IS NULL "
+                 "OR NOT isfinite(CAST(s.adjust_factor AS DOUBLE)) "
+                 "OR s.adjust_factor <= 0 "
+                 "OR (isfinite(CAST(s.low AS DOUBLE)) AND s.high < s.low))) "
+                 f"AS invalid_high_count_{horizon}d",
+                 f"COUNT(*) FILTER (WHERE x.calendar_index <= e.signal_calendar_index + {horizon} "
+                 "AND (s.exclude_low OR s.low IS NULL "
+                 "OR NOT isfinite(CAST(s.low AS DOUBLE)) "
+                 "OR s.low <= 0 "
+                 "OR s.adjust_factor IS NULL "
+                 "OR NOT isfinite(CAST(s.adjust_factor AS DOUBLE)) "
+                 "OR s.adjust_factor <= 0 "
+                 "OR (isfinite(CAST(s.high AS DOUBLE)) AND s.high < s.low))) "
+                 f"AS invalid_low_count_{horizon}d",
                 f"MAX(CASE WHEN x.calendar_index <= e.signal_calendar_index + {horizon} "
-                f"THEN s.high * s.adjust_factor END) AS future_high_{horizon}d",
+                 "AND NOT s.exclude_high "
+                 "AND isfinite(CAST(s.high AS DOUBLE)) "
+                 "AND s.high > 0 "
+                 "AND isfinite(CAST(s.adjust_factor AS DOUBLE)) "
+                 "AND s.adjust_factor > 0 "
+                 "AND (s.low IS NULL OR NOT isfinite(CAST(s.low AS DOUBLE)) OR s.high >= s.low) "
+                 f"THEN s.high * s.adjust_factor END) AS future_high_{horizon}d",
                 f"MIN(CASE WHEN x.calendar_index <= e.signal_calendar_index + {horizon} "
-                f"THEN s.low * s.adjust_factor END) AS future_low_{horizon}d",
+                 "AND NOT s.exclude_low "
+                 "AND isfinite(CAST(s.low AS DOUBLE)) "
+                 "AND s.low > 0 "
+                 "AND isfinite(CAST(s.adjust_factor AS DOUBLE)) "
+                 "AND s.adjust_factor > 0 "
+                 "AND (s.high IS NULL OR NOT isfinite(CAST(s.high AS DOUBLE)) OR s.high >= s.low) "
+                 f"THEN s.low * s.adjust_factor END) AS future_low_{horizon}d",
                 f"SUM(CASE WHEN x.calendar_index <= e.signal_calendar_index + {horizon} "
                 f"THEN s.corporate_action_count ELSE 0 END) AS action_count_{horizon}d",
             ]
@@ -261,25 +342,33 @@ def _continuous_final_expressions() -> str:
     values: list[str] = []
     for horizon in MINUTE_LABEL_HORIZONS:
         observed = (
-            "continuous_entry_executable "
+            "COALESCE(("
+            "COALESCE(continuous_entry_executable, FALSE) "
             "AND continuous_entry_ordinal = signal_decision_ordinal + 1 "
             f"AND continuous_end_ordinal_{horizon}m = signal_decision_ordinal + {horizon} "
             f"AND continuous_count_{horizon}m = {horizon} "
+            f"AND isfinite(CAST(continuous_end_close_{horizon}m AS DOUBLE)) "
             f"AND continuous_end_close_{horizon}m > 0 "
-            "AND continuous_entry_adjusted_price > 0"
+            "AND isfinite(CAST(continuous_entry_adjusted_price AS DOUBLE)) "
+            "AND continuous_entry_adjusted_price > 0 "
+            f"AND isfinite(CAST(continuous_end_close_{horizon}m "
+            "/ continuous_entry_adjusted_price - 1.0 AS DOUBLE))"
+            "), FALSE)"
         )
         reason = (
-            "CASE "
+            "COALESCE(CASE "
             "WHEN continuous_entry_ordinal IS NULL "
             "OR continuous_entry_ordinal <> signal_decision_ordinal + 1 "
             "THEN 'next_decision_bar_missing_or_untradable' "
-            "WHEN NOT continuous_entry_executable THEN continuous_entry_unfilled_reason "
+            "WHEN NOT COALESCE(continuous_entry_executable, FALSE) "
+            "THEN COALESCE(continuous_entry_unfilled_reason, 'continuous_entry_unexecutable') "
             f"WHEN continuous_end_ordinal_{horizon}m IS NULL "
             f"OR continuous_end_ordinal_{horizon}m <> signal_decision_ordinal + {horizon} "
             "THEN 'future_decision_bar_missing_or_untradable' "
             f"WHEN continuous_count_{horizon}m <> {horizon} THEN 'future_window_incomplete' "
             f"WHEN continuous_end_close_{horizon}m IS NULL "
-            "THEN 'endpoint_close_excluded' ELSE '' END"
+            f"OR NOT isfinite(CAST(continuous_end_close_{horizon}m AS DOUBLE)) "
+            "THEN 'endpoint_close_excluded' ELSE '' END, 'continuous_label_unavailable')"
         )
         values.extend(
             [
@@ -287,10 +376,16 @@ def _continuous_final_expressions() -> str:
                 f"continuous_end_time_{horizon}m AS label_end_bar_time_{horizon}m",
                 f"CASE WHEN {observed} THEN continuous_end_close_{horizon}m "
                 f"/ continuous_entry_adjusted_price - 1.0 END AS label_return_{horizon}m",
-                f"CASE WHEN {observed} AND continuous_high_count_{horizon}m = {horizon} "
+                 f"CASE WHEN {observed} AND continuous_high_count_{horizon}m = {horizon} "
+                 f"AND continuous_high_invalid_count_{horizon}m = 0 "
+                 f"AND isfinite(CAST(continuous_high_{horizon}m "
+                "/ continuous_entry_adjusted_price - 1.0 AS DOUBLE)) "
                 f"THEN continuous_high_{horizon}m / continuous_entry_adjusted_price - 1.0 END "
                 f"AS label_mfe_{horizon}m",
-                f"CASE WHEN {observed} AND continuous_low_count_{horizon}m = {horizon} "
+                 f"CASE WHEN {observed} AND continuous_low_count_{horizon}m = {horizon} "
+                 f"AND continuous_low_invalid_count_{horizon}m = 0 "
+                 f"AND isfinite(CAST(continuous_low_{horizon}m "
+                "/ continuous_entry_adjusted_price - 1.0 AS DOUBLE)) "
                 f"THEN continuous_low_{horizon}m / continuous_entry_adjusted_price - 1.0 END "
                 f"AS label_mae_{horizon}m",
                 f"({observed}) AS label_{horizon}m_observed",
@@ -306,11 +401,17 @@ def _continuous_final_expressions() -> str:
                 f"AS label_{horizon}m_elapsed_calendar_days",
                 f"{reason} AS label_{horizon}m_invalid_reason",
                 f"CASE WHEN NOT ({observed}) THEN {reason} "
-                f"WHEN continuous_high_count_{horizon}m <> {horizon} "
-                f"THEN 'future_high_excluded' ELSE '' END AS label_{horizon}m_mfe_invalid_reason",
+                 f"WHEN continuous_high_count_{horizon}m <> {horizon} "
+                 f"OR continuous_high_invalid_count_{horizon}m > 0 "
+                 f"THEN CASE WHEN continuous_high_invalid_count_{horizon}m > 0 "
+                "THEN 'future_high_nonfinite' ELSE 'future_high_excluded' END "
+                f"ELSE '' END AS label_{horizon}m_mfe_invalid_reason",
                 f"CASE WHEN NOT ({observed}) THEN {reason} "
-                f"WHEN continuous_low_count_{horizon}m <> {horizon} "
-                f"THEN 'future_low_excluded' ELSE '' END AS label_{horizon}m_mae_invalid_reason",
+                 f"WHEN continuous_low_count_{horizon}m <> {horizon} "
+                 f"OR continuous_low_invalid_count_{horizon}m > 0 "
+                 f"THEN CASE WHEN continuous_low_invalid_count_{horizon}m > 0 "
+                "THEN 'future_low_nonfinite' ELSE 'future_low_excluded' END "
+                f"ELSE '' END AS label_{horizon}m_mae_invalid_reason",
             ]
         )
     return ",\n            ".join(values)
@@ -320,25 +421,48 @@ def _session_final_expressions() -> str:
     values: list[str] = []
     for horizon in MINUTE_LABEL_HORIZONS:
         observed = (
-            "entry_executable "
+            "COALESCE(("
+            "COALESCE(entry_executable, FALSE) "
+            "AND session_minute_ordinal IS NOT NULL "
+            f"AND session_end_ordinal_{horizon}m = session_minute_ordinal + {horizon} "
             f"AND session_count_{horizon}m = {horizon} "
-            f"AND session_end_close_{horizon}m > 0 AND entry_adjusted_price > 0"
+            f"AND session_distinct_ordinal_count_{horizon}m = {horizon} "
+            f"AND isfinite(CAST(session_end_close_{horizon}m AS DOUBLE)) "
+            f"AND session_end_close_{horizon}m > 0 "
+            "AND isfinite(CAST(entry_adjusted_price AS DOUBLE)) "
+            "AND entry_adjusted_price > 0 "
+            f"AND isfinite(CAST(session_end_close_{horizon}m "
+            "/ entry_adjusted_price - 1.0 AS DOUBLE))"
+            "), FALSE)"
         )
         reason = (
-            "CASE WHEN NOT entry_executable THEN entry_unfilled_reason "
+            "COALESCE(CASE WHEN NOT COALESCE(entry_executable, FALSE) "
+            "THEN COALESCE(entry_unfilled_reason, 'entry_unexecutable') "
+            f"WHEN session_minute_ordinal IS NULL OR session_end_ordinal_{horizon}m "
+            f"     <> session_minute_ordinal + {horizon} THEN 'same_session_window_incomplete' "
             f"WHEN session_count_{horizon}m <> {horizon} THEN 'same_session_window_incomplete' "
-            f"WHEN session_end_close_{horizon}m IS NULL THEN 'endpoint_close_excluded' "
-            "ELSE '' END"
+            f"WHEN session_distinct_ordinal_count_{horizon}m <> {horizon} "
+            "THEN 'same_session_window_incomplete' "
+            f"WHEN session_end_close_{horizon}m IS NULL "
+            f"OR NOT isfinite(CAST(session_end_close_{horizon}m AS DOUBLE)) "
+            "THEN 'endpoint_close_excluded' "
+            "ELSE '' END, 'session_label_unavailable')"
         )
         values.extend(
             [
                 f"session_end_time_{horizon}m AS label_session_end_bar_time_{horizon}m",
                 f"CASE WHEN {observed} THEN session_end_close_{horizon}m / entry_adjusted_price "
                 f"- 1.0 END AS label_session_return_{horizon}m",
-                f"CASE WHEN {observed} AND session_high_count_{horizon}m = {horizon} "
+                 f"CASE WHEN {observed} AND session_high_count_{horizon}m = {horizon} "
+                 f"AND session_high_invalid_count_{horizon}m = 0 "
+                 f"AND isfinite(CAST(session_high_{horizon}m "
+                "/ entry_adjusted_price - 1.0 AS DOUBLE)) "
                 f"THEN session_high_{horizon}m / entry_adjusted_price - 1.0 END "
                 f"AS label_session_mfe_{horizon}m",
-                f"CASE WHEN {observed} AND session_low_count_{horizon}m = {horizon} "
+                 f"CASE WHEN {observed} AND session_low_count_{horizon}m = {horizon} "
+                 f"AND session_low_invalid_count_{horizon}m = 0 "
+                 f"AND isfinite(CAST(session_low_{horizon}m "
+                "/ entry_adjusted_price - 1.0 AS DOUBLE)) "
                 f"THEN session_low_{horizon}m / entry_adjusted_price - 1.0 END "
                 f"AS label_session_mae_{horizon}m",
                 f"({observed}) AS label_session_{horizon}m_observed",
@@ -352,8 +476,15 @@ def _daily_final_expressions() -> str:
     values: list[str] = []
     for horizon in DAILY_LABEL_HORIZONS:
         observed = (
-            f"entry_executable AND endpoint_date_{horizon}d IS NOT NULL "
-            f"AND endpoint_price_{horizon}d > 0 AND entry_adjusted_price > 0"
+            "COALESCE(("
+            f"COALESCE(entry_executable, FALSE) AND endpoint_date_{horizon}d IS NOT NULL "
+            f"AND isfinite(CAST(endpoint_price_{horizon}d AS DOUBLE)) "
+            f"AND endpoint_price_{horizon}d > 0 "
+            "AND isfinite(CAST(entry_adjusted_price AS DOUBLE)) "
+            "AND entry_adjusted_price > 0 "
+            f"AND isfinite(CAST(endpoint_price_{horizon}d "
+            "/ entry_adjusted_price - 1.0 AS DOUBLE))"
+            "), FALSE)"
         )
         values.extend(
             [
@@ -361,19 +492,26 @@ def _daily_final_expressions() -> str:
                 f"CASE WHEN {observed} THEN endpoint_price_{horizon}d / entry_adjusted_price - 1.0 "
                 f"END AS label_return_{horizon}d",
                 f"CASE WHEN {observed} AND future_day_count_{horizon}d = {horizon} "
-                f"AND excluded_high_count_{horizon}d = 0 "
+                f"AND invalid_high_count_{horizon}d = 0 "
+                f"AND isfinite(CAST(future_high_{horizon}d "
+                "/ entry_adjusted_price - 1.0 AS DOUBLE)) "
                 f"THEN future_high_{horizon}d / entry_adjusted_price - 1.0 "
                 f"END AS label_mfe_{horizon}d",
                 f"CASE WHEN {observed} AND future_day_count_{horizon}d = {horizon} "
-                f"AND excluded_low_count_{horizon}d = 0 "
+                f"AND invalid_low_count_{horizon}d = 0 "
+                f"AND isfinite(CAST(future_low_{horizon}d "
+                "/ entry_adjusted_price - 1.0 AS DOUBLE)) "
                 f"THEN future_low_{horizon}d / entry_adjusted_price - 1.0 "
                 f"END AS label_mae_{horizon}d",
                 f"action_count_{horizon}d AS label_action_count_{horizon}d",
                 f"({observed}) AS label_{horizon}d_observed",
-                f"CASE WHEN NOT entry_executable THEN entry_unfilled_reason "
-                f"WHEN endpoint_date_{horizon}d IS NULL THEN 'future_market_day_missing' "
-                f"WHEN endpoint_price_{horizon}d IS NULL THEN 'future_close_missing_or_untradable' "
-                f"ELSE '' END AS label_{horizon}d_invalid_reason",
+                f"COALESCE(CASE WHEN NOT COALESCE(entry_executable, FALSE) "
+                 f"THEN COALESCE(entry_unfilled_reason, 'entry_unexecutable') "
+                 f"WHEN endpoint_date_{horizon}d IS NULL THEN 'future_market_day_missing' "
+                 f"WHEN endpoint_price_{horizon}d IS NULL "
+                 f"OR NOT isfinite(CAST(endpoint_price_{horizon}d AS DOUBLE)) "
+                 f"THEN 'future_close_missing_or_untradable' "
+                f"ELSE '' END, 'daily_label_unavailable') AS label_{horizon}d_invalid_reason",
             ]
         )
     return ",\n            ".join(values)
@@ -407,7 +545,14 @@ def label_query(
     )
     return f"""
         WITH factors AS (
-            SELECT symbol, trade_date, ANY_VALUE(CAST(adjust_factor AS DOUBLE)) AS adjust_factor
+            SELECT
+                symbol,
+                trade_date,
+                ANY_VALUE(
+                    CASE WHEN isfinite(CAST(adjust_factor AS DOUBLE))
+                               AND CAST(adjust_factor AS DOUBLE) > 0
+                         THEN CAST(adjust_factor AS DOUBLE) END
+                ) AS adjust_factor
             FROM {factor_view}
             GROUP BY symbol, trade_date
         ),
@@ -431,12 +576,30 @@ def label_query(
                 CAST(b.close AS DOUBLE) AS close,
                 GREATEST(CAST(b.volume AS DOUBLE), 0.0) AS volume,
                 GREATEST(CAST(b.amount AS DOUBLE), 0.0) AS amount,
+                {_session_minute_ordinal_sql('b')} AS session_minute_ordinal,
                 f.adjust_factor,
-                CASE WHEN NOT COALESCE(q.exclude_high, FALSE)
-                     THEN CAST(b.high AS DOUBLE) * f.adjust_factor END AS adjusted_high,
-                CASE WHEN NOT COALESCE(q.exclude_low, FALSE)
-                     THEN CAST(b.low AS DOUBLE) * f.adjust_factor END AS adjusted_low,
+                 CASE WHEN NOT COALESCE(q.exclude_high, FALSE)
+                           AND isfinite(CAST(b.high AS DOUBLE))
+                           AND CAST(b.high AS DOUBLE) > 0
+                           AND isfinite(CAST(f.adjust_factor AS DOUBLE))
+                           AND f.adjust_factor > 0
+                           AND (b.low IS NULL
+                                OR NOT isfinite(CAST(b.low AS DOUBLE))
+                                OR CAST(b.high AS DOUBLE) >= CAST(b.low AS DOUBLE))
+                      THEN CAST(b.high AS DOUBLE) * f.adjust_factor END AS adjusted_high,
+                 CASE WHEN NOT COALESCE(q.exclude_low, FALSE)
+                           AND isfinite(CAST(b.low AS DOUBLE))
+                           AND CAST(b.low AS DOUBLE) > 0
+                           AND isfinite(CAST(f.adjust_factor AS DOUBLE))
+                           AND f.adjust_factor > 0
+                           AND (b.high IS NULL
+                                OR NOT isfinite(CAST(b.high AS DOUBLE))
+                                OR CAST(b.high AS DOUBLE) >= CAST(b.low AS DOUBLE))
+                      THEN CAST(b.low AS DOUBLE) * f.adjust_factor END AS adjusted_low,
                 CASE WHEN NOT COALESCE(q.exclude_close, FALSE)
+                          AND isfinite(CAST(b.close AS DOUBLE))
+                          AND isfinite(CAST(f.adjust_factor AS DOUBLE))
+                          AND f.adjust_factor > 0
                      THEN CAST(b.close AS DOUBLE) * f.adjust_factor END AS adjusted_close
             FROM {extended_bars_view} b
             JOIN factors f USING(symbol, trade_date)
@@ -524,7 +687,7 @@ def label_query(
                     symbol, trade_date, bar_time, high, low, close, volume, amount,
                     adjust_factor, adjusted_high, adjusted_low, adjusted_close,
                     raw_entry_time, raw_entry_high, raw_entry_low, raw_entry_volume,
-                    raw_entry_amount, raw_entry_factor
+                    raw_entry_amount, raw_entry_factor, session_minute_ordinal
                 )
             FROM {event_view} e
             JOIN decision_ordered d USING(symbol, trade_date, bar_time)
@@ -534,28 +697,78 @@ def label_query(
         entries AS (
             SELECT
                 *,
-                (
-                    entry_bar_time IS NOT NULL
+                COALESCE((
+                     entry_bar_time IS NOT NULL
+                    AND isfinite(CAST(entry_price AS DOUBLE))
+                    AND entry_price > 0
+                    AND isfinite(CAST(entry_adjust_factor AS DOUBLE))
+                    AND entry_adjust_factor > 0
+                    AND isfinite(CAST(entry_volume AS DOUBLE))
                     AND entry_volume > 0
+                    AND isfinite(CAST(entry_amount AS DOUBLE))
                     AND entry_amount > 0
+                     AND isfinite(CAST(raw_entry_high AS DOUBLE))
+                     AND isfinite(CAST(raw_entry_low AS DOUBLE))
+                     AND raw_entry_high > 0
+                     AND raw_entry_low > 0
+                     AND raw_entry_high >= raw_entry_low
                     AND NOT (ABS(raw_entry_high - raw_entry_low) <= 1.0e-12)
-                ) AS entry_executable,
+                ), FALSE) AS entry_executable,
                 CASE
                     WHEN entry_bar_time IS NULL THEN 'next_raw_bar_missing'
-                    WHEN entry_volume <= 0 OR entry_amount <= 0 THEN 'zero_flow'
+                    WHEN entry_volume IS NULL OR NOT isfinite(CAST(entry_volume AS DOUBLE))
+                         OR entry_amount IS NULL OR NOT isfinite(CAST(entry_amount AS DOUBLE))
+                         OR entry_volume <= 0 OR entry_amount <= 0 THEN 'zero_flow'
+                    WHEN entry_price IS NULL OR NOT isfinite(CAST(entry_price AS DOUBLE))
+                         OR entry_price <= 0
+                         OR entry_adjust_factor IS NULL
+                         OR NOT isfinite(CAST(entry_adjust_factor AS DOUBLE))
+                         OR entry_adjust_factor <= 0 THEN 'entry_price_invalid'
+                     WHEN raw_entry_high IS NULL OR raw_entry_low IS NULL
+                          OR NOT isfinite(CAST(raw_entry_high AS DOUBLE))
+                          OR NOT isfinite(CAST(raw_entry_low AS DOUBLE))
+                          OR raw_entry_high <= 0 OR raw_entry_low <= 0
+                          OR raw_entry_high < raw_entry_low THEN 'entry_high_low_invalid'
                     WHEN ABS(raw_entry_high - raw_entry_low) <= 1.0e-12 THEN 'one_price'
                     ELSE ''
                 END AS entry_unfilled_reason,
-                (
+                COALESCE((
                     continuous_entry_time IS NOT NULL
+                    AND isfinite(CAST(continuous_entry_price AS DOUBLE))
+                    AND continuous_entry_price > 0
+                    AND isfinite(CAST(continuous_entry_factor AS DOUBLE))
+                    AND continuous_entry_factor > 0
+                    AND isfinite(CAST(continuous_entry_volume AS DOUBLE))
                     AND continuous_entry_volume > 0
+                    AND isfinite(CAST(continuous_entry_amount AS DOUBLE))
                     AND continuous_entry_amount > 0
+                    AND isfinite(CAST(continuous_entry_high AS DOUBLE))
+                    AND isfinite(CAST(continuous_entry_low AS DOUBLE))
+                    AND continuous_entry_high > 0
+                    AND continuous_entry_low > 0
+                    AND continuous_entry_high >= continuous_entry_low
                     AND NOT (ABS(continuous_entry_high - continuous_entry_low) <= 1.0e-12)
-                ) AS continuous_entry_executable,
+                ), FALSE) AS continuous_entry_executable,
                 CASE
                     WHEN continuous_entry_time IS NULL THEN 'next_decision_bar_missing'
-                    WHEN continuous_entry_volume <= 0 OR continuous_entry_amount <= 0
+                    WHEN continuous_entry_volume IS NULL
+                         OR NOT isfinite(CAST(continuous_entry_volume AS DOUBLE))
+                         OR continuous_entry_amount IS NULL
+                         OR NOT isfinite(CAST(continuous_entry_amount AS DOUBLE))
+                         OR continuous_entry_volume <= 0 OR continuous_entry_amount <= 0
                         THEN 'continuous_zero_flow'
+                    WHEN continuous_entry_price IS NULL
+                         OR NOT isfinite(CAST(continuous_entry_price AS DOUBLE))
+                         OR continuous_entry_price <= 0
+                         OR continuous_entry_factor IS NULL
+                         OR NOT isfinite(CAST(continuous_entry_factor AS DOUBLE))
+                         OR continuous_entry_factor <= 0 THEN 'continuous_entry_price_invalid'
+                     WHEN continuous_entry_high IS NULL OR continuous_entry_low IS NULL
+                          OR NOT isfinite(CAST(continuous_entry_high AS DOUBLE))
+                          OR NOT isfinite(CAST(continuous_entry_low AS DOUBLE))
+                          OR continuous_entry_high <= 0 OR continuous_entry_low <= 0
+                          OR continuous_entry_high < continuous_entry_low
+                        THEN 'continuous_entry_high_low_invalid'
                     WHEN ABS(continuous_entry_high - continuous_entry_low) <= 1.0e-12
                         THEN 'continuous_one_price'
                     ELSE ''
@@ -571,13 +784,39 @@ def label_query(
                 b.trade_date,
                 c.calendar_index,
                 COUNT(*) AS exit_bar_count,
-                MIN(CAST(b.low AS DOUBLE)) AS exit_low,
-                MAX(CAST(b.high AS DOUBLE)) AS exit_high,
-                SUM(GREATEST(CAST(b.volume AS DOUBLE), 0.0)) AS exit_volume,
-                SUM(GREATEST(CAST(b.amount AS DOUBLE), 0.0)) AS exit_amount,
-                CASE WHEN SUM(GREATEST(CAST(b.volume AS DOUBLE), 0.0)) > 0
-                     THEN SUM(GREATEST(CAST(b.amount AS DOUBLE), 0.0))
-                          / SUM(GREATEST(CAST(b.volume AS DOUBLE), 0.0)) END AS exit_price,
+                 MIN(CASE WHEN isfinite(CAST(b.low AS DOUBLE))
+                               AND CAST(b.low AS DOUBLE) > 0
+                         THEN CAST(b.low AS DOUBLE) END) AS exit_low,
+                 MAX(CASE WHEN isfinite(CAST(b.high AS DOUBLE))
+                               AND CAST(b.high AS DOUBLE) > 0
+                         THEN CAST(b.high AS DOUBLE) END) AS exit_high,
+                 COUNT(*) FILTER (WHERE isfinite(CAST(b.high AS DOUBLE))
+                                       AND isfinite(CAST(b.low AS DOUBLE))
+                                       AND CAST(b.high AS DOUBLE) > 0
+                                       AND CAST(b.low AS DOUBLE) > 0
+                                       AND CAST(b.high AS DOUBLE) >= CAST(b.low AS DOUBLE))
+                    AS exit_valid_range_count,
+                COUNT(*) FILTER (WHERE isfinite(CAST(b.volume AS DOUBLE))
+                                      AND CAST(b.volume AS DOUBLE) >= 0)
+                    AS exit_valid_volume_count,
+                COUNT(*) FILTER (WHERE isfinite(CAST(b.amount AS DOUBLE))
+                                      AND CAST(b.amount AS DOUBLE) >= 0)
+                    AS exit_valid_amount_count,
+                SUM(CASE WHEN isfinite(CAST(b.volume AS DOUBLE))
+                              AND CAST(b.volume AS DOUBLE) >= 0
+                         THEN CAST(b.volume AS DOUBLE) ELSE 0.0 END) AS exit_volume,
+                SUM(CASE WHEN isfinite(CAST(b.amount AS DOUBLE))
+                              AND CAST(b.amount AS DOUBLE) >= 0
+                         THEN CAST(b.amount AS DOUBLE) ELSE 0.0 END) AS exit_amount,
+                CASE WHEN SUM(CASE WHEN isfinite(CAST(b.volume AS DOUBLE))
+                                        AND CAST(b.volume AS DOUBLE) >= 0
+                                   THEN CAST(b.volume AS DOUBLE) ELSE 0.0 END) > 0
+                     THEN SUM(CASE WHEN isfinite(CAST(b.amount AS DOUBLE))
+                                        AND CAST(b.amount AS DOUBLE) >= 0
+                                   THEN CAST(b.amount AS DOUBLE) ELSE 0.0 END)
+                          / SUM(CASE WHEN isfinite(CAST(b.volume AS DOUBLE))
+                                        AND CAST(b.volume AS DOUBLE) >= 0
+                                   THEN CAST(b.volume AS DOUBLE) ELSE 0.0 END) END AS exit_price,
                 s.adjust_factor AS exit_adjust_factor,
                 s.previous_close,
                 s.previous_adjust_factor,
@@ -596,16 +835,23 @@ def label_query(
                 *,
                 (
                     exit_bar_count = 26
+                    AND exit_valid_range_count = 26
+                    AND exit_valid_volume_count = 26
+                    AND exit_valid_amount_count = 26
                     AND exit_volume > 0
                     AND exit_amount > 0
+                    AND isfinite(CAST(exit_price AS DOUBLE))
                     AND exit_adjust_factor > 0
+                    AND isfinite(CAST(exit_adjust_factor AS DOUBLE))
                     AND NOT is_suspended
                     AND NOT is_delisted
                     AND NOT exclude_high
                     AND NOT exclude_low
                     AND NOT (
                         ABS(exit_high - exit_low) <= 1.0e-12
+                        AND isfinite(CAST(previous_close AS DOUBLE))
                         AND previous_close > 0
+                        AND isfinite(CAST(previous_adjust_factor AS DOUBLE))
                         AND previous_adjust_factor > 0
                         AND exit_price < previous_close * previous_adjust_factor / exit_adjust_factor
                     )
@@ -660,9 +906,18 @@ def label_query(
                 x.exit_volume,
                 x.exit_amount,
                 x.exit_adjust_factor,
-                x.exit_price * x.exit_adjust_factor AS exit_adjusted_price,
-                x.exit_low * x.exit_adjust_factor AS exit_adjusted_low,
-                x.exit_high * x.exit_adjust_factor AS exit_adjusted_high,
+                CASE WHEN isfinite(CAST(x.exit_price AS DOUBLE))
+                          AND isfinite(CAST(x.exit_adjust_factor AS DOUBLE))
+                          AND x.exit_adjust_factor > 0
+                     THEN x.exit_price * x.exit_adjust_factor END AS exit_adjusted_price,
+                CASE WHEN isfinite(CAST(x.exit_low AS DOUBLE))
+                          AND isfinite(CAST(x.exit_adjust_factor AS DOUBLE))
+                          AND x.exit_adjust_factor > 0
+                     THEN x.exit_low * x.exit_adjust_factor END AS exit_adjusted_low,
+                CASE WHEN isfinite(CAST(x.exit_high AS DOUBLE))
+                          AND isfinite(CAST(x.exit_adjust_factor AS DOUBLE))
+                          AND x.exit_adjust_factor > 0
+                     THEN x.exit_high * x.exit_adjust_factor END AS exit_adjusted_high,
                 d.* EXCLUDE(symbol, trade_date, bar_time)
             FROM entries e
             LEFT JOIN first_exit x USING(symbol, trade_date, bar_time)
@@ -685,9 +940,17 @@ def label_query(
             exit_amount,
             CASE WHEN actual_exit_date IS NOT NULL
                  THEN exit_calendar_index - signal_calendar_index - 1 END AS delayed_exit_days,
-            CASE WHEN entry_executable AND exit_adjusted_price > 0 AND entry_adjusted_price > 0
+            CASE WHEN entry_executable
+                      AND isfinite(CAST(exit_adjusted_price AS DOUBLE))
+                      AND exit_adjusted_price > 0
+                      AND isfinite(CAST(entry_adjusted_price AS DOUBLE))
+                      AND entry_adjusted_price > 0
                  THEN exit_adjusted_price / entry_adjusted_price - 1.0 END AS label_gross_return,
-            CASE WHEN entry_executable AND exit_adjusted_price > 0 AND entry_adjusted_price > 0
+            CASE WHEN entry_executable
+                      AND isfinite(CAST(exit_adjusted_price AS DOUBLE))
+                      AND exit_adjusted_price > 0
+                      AND isfinite(CAST(entry_adjusted_price AS DOUBLE))
+                      AND entry_adjusted_price > 0
                  THEN (
                      exit_adjusted_price * (
                          1.0 - {sell_common} - CASE
@@ -696,11 +959,28 @@ def label_query(
                          END
                      )
                  ) / (entry_adjusted_price * (1.0 + {buy_cost})) - 1.0 END AS label_net_return,
-            CASE WHEN entry_executable AND exit_adjusted_low > 0 AND entry_adjusted_price > 0
+            CASE WHEN entry_executable
+                      AND isfinite(CAST(exit_adjusted_low AS DOUBLE))
+                      AND exit_adjusted_low > 0
+                      AND isfinite(CAST(entry_adjusted_price AS DOUBLE))
+                      AND entry_adjusted_price > 0
                  THEN exit_adjusted_low / entry_adjusted_price - 1.0 END AS label_adverse_return,
-            CASE WHEN entry_executable AND exit_adjusted_high > 0 AND entry_adjusted_price > 0
+            CASE WHEN entry_executable
+                      AND isfinite(CAST(exit_adjusted_high AS DOUBLE))
+                      AND exit_adjusted_high > 0
+                      AND isfinite(CAST(entry_adjusted_price AS DOUBLE))
+                      AND entry_adjusted_price > 0
                  THEN exit_adjusted_high / entry_adjusted_price - 1.0 END AS label_favorable_return,
-            entry_executable AND actual_exit_date IS NOT NULL AS label_observed,
+            COALESCE((
+                entry_executable
+                AND actual_exit_date IS NOT NULL
+                AND isfinite(CAST(entry_adjusted_price AS DOUBLE))
+                AND entry_adjusted_price > 0
+                AND isfinite(CAST(exit_adjusted_price AS DOUBLE))
+                AND exit_adjusted_price > 0
+                AND isfinite(CAST(exit_adjusted_price / entry_adjusted_price - 1.0 AS DOUBLE))
+            ), FALSE)
+                AS label_observed,
             {_continuous_final_expressions()},
             {_session_final_expressions()},
             {_daily_final_expressions()}
@@ -715,24 +995,58 @@ def _fixture_factor_quality(
     label_stock_days: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     keys = extended_bars.loc[:, ["symbol", "trade_date"]].drop_duplicates().copy()
-    event_context = events.loc[:, ["symbol", "trade_date", "adjust_factor"]].drop_duplicates(
-        ["symbol", "trade_date"]
-    )
-    daily_factor = (
-        label_stock_days.loc[:, ["symbol", "trade_date", "adjust_factor"]]
-        if "adjust_factor" in label_stock_days
-        else pd.DataFrame(columns=["symbol", "trade_date", "adjust_factor"])
-    )
-    factors = keys.merge(daily_factor, how="left", on=["symbol", "trade_date"])
+    context_keys = ["symbol", "trade_date"]
+
+    # Keep presence separate from the numeric value.  A missing row is a
+    # synthetic-fixture convenience, but a present row with a missing or bad
+    # factor is an input error and must not be silently replaced with 1.0.
+    if set(context_keys).issubset(label_stock_days.columns):
+        daily_factor = label_stock_days.loc[
+            :, context_keys + (["adjust_factor"] if "adjust_factor" in label_stock_days else [])
+        ].drop_duplicates(context_keys)
+        if "adjust_factor" not in daily_factor:
+            daily_factor = daily_factor.assign(adjust_factor=pd.NA)
+        daily_factor["_daily_context_present"] = True
+    else:
+        daily_factor = pd.DataFrame(
+            columns=[*context_keys, "adjust_factor", "_daily_context_present"]
+        )
+    if set([*context_keys, "adjust_factor"]).issubset(events.columns):
+        event_context = events.loc[:, [*context_keys, "adjust_factor"]].drop_duplicates(
+            context_keys
+        )
+    elif set(context_keys).issubset(events.columns):
+        event_context = events.loc[:, context_keys].drop_duplicates(context_keys)
+        event_context = event_context.assign(adjust_factor=pd.NA)
+    else:
+        event_context = pd.DataFrame(columns=[*context_keys, "adjust_factor"])
+    if not event_context.empty:
+        event_context["_event_context_present"] = True
+    else:
+        event_context = event_context.assign(_event_context_present=pd.Series(dtype=bool))
+
+    factors = keys.merge(daily_factor, how="left", on=context_keys)
     factors = factors.merge(
         event_context.rename(columns={"adjust_factor": "event_adjust_factor"}),
         how="left",
-        on=["symbol", "trade_date"],
+        on=context_keys,
     )
-    factors["adjust_factor"] = pd.to_numeric(
-        factors["adjust_factor"], errors="coerce"
-    ).fillna(pd.to_numeric(factors["event_adjust_factor"], errors="coerce")).fillna(1.0)
-    factors = factors.loc[:, ["symbol", "trade_date", "adjust_factor"]]
+    daily_values = pd.to_numeric(factors["adjust_factor"], errors="coerce")
+    event_values = pd.to_numeric(factors["event_adjust_factor"], errors="coerce")
+    daily_present = factors["_daily_context_present"].astype("boolean").fillna(False)
+    event_present = factors["_event_context_present"].astype("boolean").fillna(False)
+    daily_valid = daily_values.notna() & daily_values.between(
+        0.0, float("inf"), inclusive="neither"
+    )
+    event_valid = event_values.notna() & event_values.between(
+        0.0, float("inf"), inclusive="neither"
+    )
+    if ((daily_present & ~daily_valid) | (event_present & ~event_valid)).any():
+        raise MinuteV2Error("minute_v2_bar_day_context_adjust_factor_invalid")
+    chosen = daily_values.where(daily_values.notna(), event_values)
+    has_context = daily_present | event_present
+    factors["adjust_factor"] = chosen.where(has_context, 1.0)
+    factors = factors.loc[:, context_keys + ["adjust_factor"]]
     quality_columns = ["exclude_high", "exclude_low", "exclude_close"]
     daily_quality = (
         label_stock_days.loc[:, ["symbol", "trade_date", *quality_columns]]

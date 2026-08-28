@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from typing import Any
 
 from .data import verify_current_data
@@ -19,6 +20,10 @@ def _print(value: Any) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    values = list(sys.argv[1:] if argv is None else argv)
+    if values and values[0] == "minute-v2":
+        return int(minute_v2_main(values[1:]) or 0)
+
     parser = argparse.ArgumentParser(description="Current daily research pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("verify")
@@ -52,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     walk.add_argument("--maximum-participation-rate", type=float, default=DEFAULT_PARTICIPATION_RATE)
     minute_v2 = subparsers.add_parser("minute-v2")
     minute_v2.add_argument("args", nargs=argparse.REMAINDER)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(values)
 
     if args.command == "verify":
         _print(verify_current_data())

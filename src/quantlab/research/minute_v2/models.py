@@ -6,6 +6,7 @@ import json
 import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
+from numbers import Integral
 from pathlib import Path
 from typing import Any
 
@@ -30,14 +31,17 @@ def rule_score(frame: pd.DataFrame) -> pd.Series:
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise MinuteV2Error(f"minute_v2_rule_features_missing:{','.join(missing)}")
+    def finite(name: str) -> pd.Series:
+        return pd.to_numeric(frame[name], errors="coerce").replace([np.inf, -np.inf], np.nan)
+
     values = (
-        0.25 * frame["stock_return_5m_rank"].fillna(0.5)
-        + 0.20 * frame["stock_volume_acceleration_rank"].fillna(0.5)
-        + 0.20 * frame["industry_strength_rank"].fillna(0.5)
-        + 0.15 * frame["industry_stock_return_rank"].fillna(0.5)
-        + 0.10 * frame["market_breadth_positive"].fillna(0.5)
-        + 0.05 * frame["vwap_deviation"].clip(-0.03, 0.03).fillna(0.0) / 0.03
-        + 0.05 * frame["drawdown_from_day_high"].clip(-0.05, 0.0).fillna(-0.05) / 0.05
+        0.25 * finite("stock_return_5m_rank").fillna(0.5)
+        + 0.20 * finite("stock_volume_acceleration_rank").fillna(0.5)
+        + 0.20 * finite("industry_strength_rank").fillna(0.5)
+        + 0.15 * finite("industry_stock_return_rank").fillna(0.5)
+        + 0.10 * finite("market_breadth_positive").fillna(0.5)
+        + 0.05 * finite("vwap_deviation").clip(-0.03, 0.03).fillna(0.0) / 0.03
+        + 0.05 * finite("drawdown_from_day_high").clip(-0.05, 0.0).fillna(-0.05) / 0.05
     )
     return values.astype(float).rename("score")
 
@@ -83,6 +87,25 @@ def _numeric_matrix(frame: pd.DataFrame, features: Sequence[str]) -> np.ndarray:
     return frame.loc[:, list(features)].apply(pd.to_numeric, errors="coerce").to_numpy(dtype=np.float64)
 
 
+def _normalise_score_top_k(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise MinuteV2Error("minute_v2_score_top_k_invalid")
+    normalised = int(value)
+    if normalised <= 0:
+        raise MinuteV2Error("minute_v2_score_top_k_invalid")
+    return normalised
+
+
+def _validate_ridge_alpha(value: Any) -> float:
+    try:
+        alpha = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise MinuteV2Error("minute_v2_ridge_alpha_invalid") from exc
+    if not math.isfinite(alpha) or alpha < 0.0:
+        raise MinuteV2Error("minute_v2_ridge_alpha_invalid")
+    return alpha
+
+
 def fit_ridge(
     frame: pd.DataFrame,
     *,
@@ -90,6 +113,7 @@ def fit_ridge(
     feature_names: Sequence[str] = MODEL_FEATURE_COLUMNS,
     alpha: float = 10.0,
 ) -> RidgeMinuteModel:
+    alpha_value = _validate_ridge_alpha(alpha)
     if target not in frame:
         raise MinuteV2Error(f"minute_v2_ridge_target_missing:{target}")
     matrix = _numeric_matrix(frame, feature_names)
@@ -109,7 +133,7 @@ def fit_ridge(
     label_mean = float(labels.mean())
     centered = labels - label_mean
     gram = normalized.T @ normalized
-    regularized = gram + float(alpha) * np.eye(gram.shape[0], dtype=np.float64)
+    regularized = gram + alpha_value * np.eye(gram.shape[0], dtype=np.float64)
     coefficients = np.linalg.solve(regularized, normalized.T @ centered)
     return RidgeMinuteModel(
         feature_names=tuple(str(name) for name in feature_names),
@@ -118,7 +142,7 @@ def fit_ridge(
         scales=tuple(float(value) for value in scales),
         coefficients=tuple(float(value) for value in coefficients),
         intercept=label_mean,
-        alpha=float(alpha),
+        alpha=alpha_value,
     )
 
 
@@ -143,6 +167,9 @@ def fit_ridge_chunks(
     names = tuple(str(name) for name in feature_names)
     if not names:
         raise MinuteV2Error("minute_v2_ridge_features_empty")
+    alpha_value = _validate_ridge_alpha(alpha)
+    if isinstance(median_sample_size, bool) or not isinstance(median_sample_size, Integral):
+        raise MinuteV2Error("minute_v2_ridge_median_sample_invalid")
     reservoir_size = int(median_sample_size)
     if reservoir_size <= 0:
         raise MinuteV2Error("minute_v2_ridge_median_sample_invalid")
@@ -222,6 +249,8 @@ def fit_ridge_chunks(
     second_pass_rows = 0
     for frame in chunk_factory():
         matrix = _numeric_matrix(frame, names)
+        if target not in frame:
+            raise MinuteV2Error(f"minute_v2_ridge_target_missing:{target}")
         labels = pd.to_numeric(frame[target], errors="coerce").to_numpy(dtype=np.float64)
         valid_label = np.isfinite(labels)
         if not valid_label.any():
@@ -239,7 +268,7 @@ def fit_ridge_chunks(
             f"minute_v2_ridge_stream_pass_mismatch:{label_count}:{second_pass_rows}"
         )
     coefficients = np.linalg.solve(
-        gram + float(alpha) * np.eye(p, dtype=np.float64),
+        gram + alpha_value * np.eye(p, dtype=np.float64),
         cross,
     )
     model = RidgeMinuteModel(
@@ -249,7 +278,7 @@ def fit_ridge_chunks(
         scales=tuple(float(value) for value in scales),
         coefficients=tuple(float(value) for value in coefficients),
         intercept=float(label_mean),
-        alpha=float(alpha),
+        alpha=alpha_value,
     )
     return model, {
         "row_count": int(label_count),
@@ -272,7 +301,10 @@ def _ranker_frame(
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise MinuteV2Error(f"minute_v2_ranker_columns_missing:{','.join(missing)}")
-    working = frame.loc[frame[target].notna(), list(required)].copy()
+    target_values = pd.to_numeric(frame[target], errors="coerce")
+    valid_target = np.isfinite(target_values.to_numpy(dtype=float))
+    working = frame.loc[valid_target, list(required)].copy()
+    working[target] = target_values.loc[valid_target].to_numpy(dtype=float)
     working = working.sort_values(["trade_date", "bar_time", "symbol"], kind="stable")
     group_size = working.groupby(["trade_date", "bar_time"], sort=False)["symbol"].transform("size")
     working = working.loc[group_size >= 5].copy()
@@ -288,7 +320,12 @@ def _ranker_frame(
         .astype(int)
         .tolist()
     )
-    matrix = working.loc[:, list(features)].apply(pd.to_numeric, errors="coerce").astype("float32")
+    matrix = (
+        working.loc[:, list(features)]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .astype("float32")
+    )
     return matrix, relevance, groups
 
 
@@ -364,9 +401,22 @@ def grouped_rank_ic(
     score: str = "score",
     target: str = "label_net_return",
 ) -> pd.Series:
+    if score not in frame.columns or target not in frame.columns:
+        missing = [name for name in (score, target) if name not in frame.columns]
+        raise MinuteV2Error(f"minute_v2_score_columns_missing:{','.join(missing)}")
+    score_values = pd.to_numeric(frame[score], errors="coerce")
+    target_values = pd.to_numeric(frame[target], errors="coerce")
+    finite = np.isfinite(score_values.to_numpy(dtype=float)) & np.isfinite(
+        target_values.to_numpy(dtype=float)
+    )
+    working = frame.loc[finite, ["trade_date", "bar_time"]].copy()
+    working[score] = score_values.loc[finite].to_numpy(dtype=float)
+    working[target] = target_values.loc[finite].to_numpy(dtype=float)
     values: dict[str, float] = {}
-    for (trade_date, bar_time), group in frame.groupby(["trade_date", "bar_time"], sort=True):
-        current = group[[score, target]].dropna()
+    for (trade_date, bar_time), group in working.groupby(
+        ["trade_date", "bar_time"], sort=True
+    ):
+        current = group[[score, target]]
         if len(current) < 5:
             continue
         correlation = current[score].rank().corr(current[target].rank())
@@ -382,7 +432,18 @@ def evaluate_scores(
     target: str = "label_net_return",
     top_k: int = 3,
 ) -> dict[str, Any]:
-    current = frame.loc[frame[score].notna() & frame[target].notna()].copy()
+    if score not in frame.columns or target not in frame.columns:
+        missing = [name for name in (score, target) if name not in frame.columns]
+        raise MinuteV2Error(f"minute_v2_score_columns_missing:{','.join(missing)}")
+    top_k_value = _normalise_score_top_k(top_k)
+    score_values = pd.to_numeric(frame[score], errors="coerce")
+    target_values = pd.to_numeric(frame[target], errors="coerce")
+    finite = np.isfinite(score_values.to_numpy(dtype=float)) & np.isfinite(
+        target_values.to_numpy(dtype=float)
+    )
+    current = frame.loc[finite].copy()
+    current[score] = score_values.loc[finite].to_numpy(dtype=float)
+    current[target] = target_values.loc[finite].to_numpy(dtype=float)
     if current.empty:
         raise MinuteV2Error("minute_v2_score_evaluation_empty")
     rank_ic = grouped_rank_ic(current, score=score, target=target)
@@ -393,7 +454,7 @@ def evaluate_scores(
             kind="stable",
         )
         .groupby(["trade_date", "bar_time"], sort=False)
-        .head(int(top_k))
+        .head(top_k_value)
     )
     group_means = current.groupby(["trade_date", "bar_time"], sort=False)[target].mean()
     top = top.join(group_means.rename("group_mean_net_return"), on=["trade_date", "bar_time"])
@@ -409,7 +470,7 @@ def evaluate_scores(
         "rank_ic_positive_fraction": float(rank_ic.gt(0).mean()) if len(rank_ic) else None,
         "universe_row_mean_net_return": float(current[target].mean()),
         "universe_group_mean_net_return": float(group_means.mean()),
-        "top_k": int(top_k),
+        "top_k": top_k_value,
         "top_k_mean_net_return": float(top[target].mean()),
         "top_k_mean_excess_over_group_mean": float(top["excess_over_group_mean"].mean()),
         "top_k_positive_excess_group_fraction": float(excess_by_group.gt(0).mean()),

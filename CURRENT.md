@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 ## Objective
 
@@ -16,7 +16,9 @@ manifest.
 - QDP data: `data/qdp/qdp_v2/active/active.json`.
 - Research contract: `data/research/daily/manifest.json`.
 - Model outputs: `runs/daily/`.
-- Minute-v2 pilot: `data/research/minute_v2/`.
+- Minute-v2 correctness benchmark: `data/research/minute_v2_bench_narrow/`.
+- The older `data/research/minute_v2/` tree is retained legacy material and is
+  not the active `/2` benchmark.
 - Durable evidence: `research/records/` and `research/studies/`.
 
 The former `daily_research` and `quant_data_platform` trees were removed from
@@ -70,7 +72,7 @@ deleted. This file is the sole concise cross-session handoff; detailed evidence
 belongs in `research/records/` and code behavior belongs in tests.
 
 The completed source refactor and current minute-quality policy are validated
-by the complete suite (`166 passed`),
+by the complete test suite (`276 passed`),
 whole-repository Ruff checks, bytecode compilation, and the physical
 QDP/research checks. The canonical
 curation record contains explicit machine-checkable assertions for industry,
@@ -201,13 +203,15 @@ dedicated producer code has been retired.
   The failed baseline is not a paper- or live-trading candidate and remains
   separate from the 158/raw-60 daily benchmark.
 
-## Causal minute-v2 research (2026-08-27)
+## Causal minute-v2 research (2026-08-28)
 
 - `src/quantlab/research/minute_v2/` is the active minute research path. It
   evaluates every causal decision bar from 09:31-11:29 and 13:01-14:55 rather
   than reducing the day to a fixed 10:00 summary. A signal uses bars only
-  through its own timestamp, enters on the next one-minute VWAP, and starts a
-  fixed 09:35-10:00 exit window on the next market day. Ordinary-share T+1,
+  through its own timestamp. Legacy execution fields use the next raw
+  one-minute VWAP; the decision-grid `label_*m` family uses the next decision
+  bar, so late-day windows can cross lunch or overnight. It starts a fixed
+  09:35-10:00 exit window on the next market day. Ordinary-share T+1,
   fees, stamp tax, slippage, one-price bars, suspension/delisting state,
   volume capacity, finite cash, overlap and up to five delayed exit days are
   explicit.
@@ -221,17 +225,44 @@ dedicated producer code has been retired.
   5/10/20/30/60/120-minute state, 5/10/20/30/60/120/240-day context, liquidity,
   market/industry cross-sections and a small set of scale interactions. The
   labels separately store 5/15/30/60-minute and 1/3/5/10-market-day returns,
-  MFE and MAE. High, low and close masks affect only their corresponding
-  outcomes.
-- The rebuilt 2022-06 correctness pilot contains 61,375 complete stock-days,
-  14,361,750 full-base rows (all 234 decision minutes), 5,302,856 causal
-  candidate events, and the same number of labels. Candidate coverage is
-  36.9235% of base rows; no decision-time group is missing. Its 16-bucket
-  label-support pass took 403.5 seconds and avoided the former repeated
-  full-range scan. All keys are unique, fixed 60-minute boundaries have zero
-  violations, all field-mask checks are zero, and the future-mutation probe is
-  invariant through 10:00 within `4.44e-16` absolute roundoff. This is a
-  data-contract pilot only; no model return was evaluated.
+  MFE and MAE. High/low masks are field-specific for future MFE/MAE and close
+  returns remain independently observable; execution-window range, flow and
+  status checks can still make a trade unobserved or delay its exit.
+- The current `/2` 2022-06 benchmark is deliberately a one-day development
+  slice, not a full-month training set. Its support query contains 62,853
+  eligible stock-days (3,016 symbols across 21 available trading days), while
+  `date_selection` retains only `2022-06-16`; that date contributes 2,922
+  complete sessions and 683,748 full-base rows (234 decision minutes each).
+  The retained candidate and label artifacts each contain 254,417 rows, or
+  37.2092% of the base rows. The percentage is an observed compute-budget
+  characteristic, not an industry standard, a target, or evidence of alpha.
+- The benchmark manifest is `data/research/minute_v2_bench_narrow/months/year=2022/month=06/manifest.json`.
+  It is `quantlab.minute_v2_month/2` and was built with implementation revision
+  `2026-08-28-3`. The current code is revision `2026-08-28-5` after defensive
+  finite-value, structural-price, and field-mask fixes, so the existing files remain historical
+  evidence and must be rebuilt before the month verifier can certify them.
+  The prior pilot
+  audit reports unique keys, all 234 candidate time groups present, zero
+  fixed-60-minute boundary violations, zero field-mask violations, and a
+  future-mutation maximum of about `4.44e-16` on its sampled probe. These are
+  data-contract and causal-invariance checks only; no model return has been
+  evaluated.
+- In the label contract, `label_*m` advances by N positions on the 234-point
+  decision grid. It is therefore N decision steps, not necessarily N elapsed
+  trading minutes: a window may cross lunch or overnight. The separate
+  `label_session_*m` family advances over raw bars within one trade date and
+  may include the 11:30/15:00 tails; incomplete or gapped same-session windows
+  are marked `same_session_window_incomplete`. High, low and close quality
+  masks remain field-specific. The current `labels.parquet` contains labels
+  only for selected candidate keys, so it cannot by itself be used as the
+  complete-outcome input for a candidate-recall audit; that audit requires an
+  outcome file covering every base key.
+- The current event replay remains a comparison harness, not a fill-accurate
+  inventory backtest. It sizes entries using the future `exit_amount` capacity
+  and closes positions with the future label return at the selected legal exit
+  date; open positions are marked at entry cost. A real held-position path,
+  independent market marks and order-state reconciliation are required before
+  any paper or live-trading interpretation.
 - The deleted `minute_v2_dev` and `runs/minute_v2_v1` products were derived
   under the former contract and are reproducible. They are not part of the
   active dataset; QDP source data and repair evidence remain intact.
@@ -429,11 +460,12 @@ dedicated producer code has been retired.
    every mask unless the current field-level gates pass. Daily/factor/basic and
    PIT auxiliary tails remain separate and continue through the existing local
    or free-source update path.
-2. Use the rebuilt pilot only to validate the data contract. Before training,
-   generate the same causal artifacts for the selected development years, then
-   compare candidate-only training with a full-base scan and explicitly force
-   current holdings through the gate during replay. No model or broker decision
-   is authorized by this pilot alone.
+2. Use the one-day benchmark only to validate the data contract. Before
+   training, generate the same causal artifacts for selected development years,
+   create a complete-base outcome view for recall auditing, then compare
+   candidate-only training with a full-base scan and explicitly force current
+   holdings through the gate during replay. No model or broker decision is
+   authorized by this benchmark alone.
 3. Keep the QDP flattening migration as maintenance rather than a blocker for
    minute research. The active physical/latest-key quick check and the new
    minute-v2 artifact verification are green. Preserve atomic manifests,

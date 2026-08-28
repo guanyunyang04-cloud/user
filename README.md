@@ -128,25 +128,47 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research verify
 The active minute research pipeline is `quantlab.research.minute_v2`. It uses
 causal features at every eligible minute, next-bar entry, ordinary-share T+1,
 field-level QDP quality masks and physically separate outcome labels. The
-retained 2022-06 pilot now enforces 60 completed daily observations, carries
-optional 120/240-day context, computes causal 1-minute and fixed-boundary
-60-minute features with 5/10/20/30/60/120/240 moving-average periods, and stores
-5/15/30/60-minute plus 1/3/5/10-day outcomes. The base artifact keeps every
-234 decision minute for every eligible stock; the causal candidate gate then
-retains the stocks that merit full label/model work at each minute.
+retained `/2` correctness benchmark is a one-day development slice under
+`data/research/minute_v2_bench_narrow/`, not a full-month training set. Its
+support query covers 62,853 eligible stock-days (3,016 symbols across 21
+available trading days), while the selected output date is `2022-06-16` with
+2,922 complete sessions. The base artifact has 683,748 rows (all 234 decision
+minutes), and the candidate and label artifacts each have 254,417 rows.
+Candidate coverage is 37.2092% in this run; that is a compute-budget
+observation, not an industry standard or a strategy-validity result. The
+checked-in benchmark was produced by revision `2026-08-28-3`; the current
+finite-value and structural-price safeguards are revision `2026-08-28-5`, so rebuild the benchmark
+before treating its verifier result as current.
+
+The minute labels have distinct time semantics. `label_*m` advances N positions
+on the decision grid, so it is N decision steps rather than necessarily N
+elapsed trading minutes and can cross lunch or overnight. Legacy execution
+fields use the next raw one-minute VWAP, while this decision-grid family uses
+the next decision bar. The
+`label_session_*m` family advances over raw bars within one trade date and marks
+gapped or incomplete windows explicitly. The benchmark's labels are stored for
+candidate keys only; candidate-recall auditing therefore needs a separate
+outcome file covering every base key. The replay output is a comparison harness
+that uses future exit-capacity/label fields and entry-cost marking, not a
+fill-accurate inventory backtest.
 
 ```powershell
 $env:PYTHONPATH='H:\quant_project\src'
 
-# Recheck the current full-month correctness pilot.
+# Recheck the current one-day correctness benchmark.
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
   --workspace-root H:/quant_project verify-month `
-  --manifest H:/quant_project/data/research/minute_v2/months/year=2022/month=06/manifest.json
+  --manifest H:/quant_project/data/research/minute_v2_bench_narrow/months/year=2022/month=06/manifest.json
 ```
 
-The old derived `data/research/minute_v2_dev` and `runs/minute_v2_v1` trees were
-removed before this rebuild because they were reproducible products under an
-obsolete contract. QDP source data and repair evidence were not touched.
+With the retained historical files this command intentionally reports
+`minute_v2_manifest_build_revision_mismatch:2026-08-28-3:2026-08-28-5` until
+the month is explicitly rebuilt. Do not edit the old manifest to suppress the
+guard or start a duplicate full-range build just to make this check pass.
+
+The older `data/research/minute_v2/` and any derived `/1` products are retained
+only as historical material and must not be mixed with the `/2` benchmark.
+QDP source data and repair evidence were not touched.
 
 Local iQuant K-line files can be sampled without a trading connection. The
 adapter validates the binary layout and records all inferred units before
