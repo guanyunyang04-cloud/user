@@ -16,7 +16,9 @@ manifest.
 - QDP data: `data/qdp/qdp_v2/active/active.json`.
 - Research contract: `data/research/daily/manifest.json`.
 - Model outputs: `runs/daily/`.
-- Minute-v2 correctness benchmark: `data/research/minute_v2_bench_narrow/`.
+- Minute-v2 correctness benchmark: `data/research/minute_v2_bench_narrow_rev5/`.
+- The prior `data/research/minute_v2_bench_narrow/` tree is retained as the
+  immutable revision-3 historical benchmark.
 - The older `data/research/minute_v2/` tree is retained legacy material and is
   not the active `/2` benchmark.
 - Durable evidence: `research/records/` and `research/studies/`.
@@ -236,11 +238,13 @@ dedicated producer code has been retired.
   The retained candidate and label artifacts each contain 254,417 rows, or
   37.2092% of the base rows. The percentage is an observed compute-budget
   characteristic, not an industry standard, a target, or evidence of alpha.
-- The benchmark manifest is `data/research/minute_v2_bench_narrow/months/year=2022/month=06/manifest.json`.
-  It is `quantlab.minute_v2_month/2` and was built with implementation revision
-  `2026-08-28-3`. The current code is revision `2026-08-28-5` after defensive
-  finite-value, structural-price, and field-mask fixes, so the existing files remain historical
-  evidence and must be rebuilt before the month verifier can certify them.
+- The current benchmark manifest is
+  `data/research/minute_v2_bench_narrow_rev5/months/year=2022/month=06/manifest.json`.
+  It is `quantlab.minute_v2_month/2` and was rebuilt with implementation revision
+  `2026-08-28-5` after defensive finite-value, structural-price, and field-mask
+  fixes. The prior revision-3 manifest remains at
+  `data/research/minute_v2_bench_narrow/months/year=2022/month=06/manifest.json`
+  as historical evidence; its revision mismatch is intentional.
   The prior pilot
   audit reports unique keys, all 234 candidate time groups present, zero
   fixed-60-minute boundary violations, zero field-mask violations, and a

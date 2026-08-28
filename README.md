@@ -129,16 +129,16 @@ The active minute research pipeline is `quantlab.research.minute_v2`. It uses
 causal features at every eligible minute, next-bar entry, ordinary-share T+1,
 field-level QDP quality masks and physically separate outcome labels. The
 retained `/2` correctness benchmark is a one-day development slice under
-`data/research/minute_v2_bench_narrow/`, not a full-month training set. Its
+`data/research/minute_v2_bench_narrow_rev5/`, not a full-month training set. Its
 support query covers 62,853 eligible stock-days (3,016 symbols across 21
 available trading days), while the selected output date is `2022-06-16` with
 2,922 complete sessions. The base artifact has 683,748 rows (all 234 decision
 minutes), and the candidate and label artifacts each have 254,417 rows.
 Candidate coverage is 37.2092% in this run; that is a compute-budget
 observation, not an industry standard or a strategy-validity result. The
-checked-in benchmark was produced by revision `2026-08-28-3`; the current
-finite-value and structural-price safeguards are revision `2026-08-28-5`, so rebuild the benchmark
-before treating its verifier result as current.
+current benchmark was rebuilt with implementation revision `2026-08-28-5`.
+The previous `data/research/minute_v2_bench_narrow/` directory is retained as
+an explicitly historical revision-3 artifact and is not mixed with this one.
 
 The minute labels have distinct time semantics. `label_*m` advances N positions
 on the decision grid, so it is N decision steps rather than necessarily N
@@ -158,13 +158,14 @@ $env:PYTHONPATH='H:\quant_project\src'
 # Recheck the current one-day correctness benchmark.
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
   --workspace-root H:/quant_project verify-month `
-  --manifest H:/quant_project/data/research/minute_v2_bench_narrow/months/year=2022/month=06/manifest.json
+  --manifest H:/quant_project/data/research/minute_v2_bench_narrow_rev5/months/year=2022/month=06/manifest.json
 ```
 
-With the retained historical files this command intentionally reports
-`minute_v2_manifest_build_revision_mismatch:2026-08-28-3:2026-08-28-5` until
-the month is explicitly rebuilt. Do not edit the old manifest to suppress the
-guard or start a duplicate full-range build just to make this check pass.
+The historical revision-3 manifest remains available at
+`data/research/minute_v2_bench_narrow/months/year=2022/month=06/manifest.json`.
+Running the verifier against that path intentionally reports
+`minute_v2_manifest_build_revision_mismatch:2026-08-28-3:2026-08-28-5`; do not
+edit it to suppress the guard.
 
 The older `data/research/minute_v2/` and any derived `/1` products are retained
 only as historical material and must not be mixed with the `/2` benchmark.
