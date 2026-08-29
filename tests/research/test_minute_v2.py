@@ -490,6 +490,47 @@ def test_candidate_recall_cli_writes_complete_json_output(tmp_path, monkeypatch,
     assert json.loads(capsys.readouterr().out) == expected
 
 
+def test_stage_one_cli_forwards_manifest_output_and_top_k(monkeypatch, capsys) -> None:
+    expected = {
+        "schema": "quantlab.minute_v2_stage_one_audit/1",
+        "status": "ok",
+    }
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_stage_one(manifest: str, **kwargs):
+        calls.append((manifest, kwargs))
+        return expected
+
+    monkeypatch.setattr(minute_v2_cli, "run_stage_one_audit", fake_stage_one)
+    assert (
+        minute_v2_cli.main(
+            [
+                "stage-one-audit",
+                "--manifest",
+                "month.json",
+                "--output-directory",
+                "audit-output",
+                "--top-k",
+                "1",
+                "5",
+                "--force",
+            ]
+        )
+        == 0
+    )
+    assert calls == [
+        (
+            "month.json",
+            {
+                "output_directory": "audit-output",
+                "top_k": (1, 5),
+                "force": True,
+            },
+        )
+    ]
+    assert json.loads(capsys.readouterr().out) == expected
+
+
 def _bars(
     *,
     dates: tuple[str, ...] = ("2022-06-01",),
@@ -896,11 +937,44 @@ def test_candidate_recall_audit_uses_keys_and_reports_top_k_hits() -> None:
     outcomes = base.copy()
     outcomes["label_return_5m"] = [0.01, 0.03, 0.02, 0.03, 0.01, 0.02]
     result = audit_candidate_recall(base, candidates, outcomes)
+    assert result["schema"] == "quantlab.minute_v2_candidate_recall/2"
     assert result["group_count"] == 2
     assert result["groups_without_candidates"] == 0
     assert result["top_k_hits"]["top_1"] == 1
     assert result["top_k_recall"]["top_1"] == 0.5
     assert result["top_k_recall"]["top_3"] == 1.0
+    assert result["top_k_group_hit_rate"]["top_1"] == 0.5
+    assert result["top_k_row_hits"]["top_1"] == 1
+    assert result["top_k_rows"]["top_1"] == 2
+    assert result["top_k_row_recall"]["top_1"] == 0.5
+    assert result["top_k_random_group_hit_rate"]["top_1"] == pytest.approx(1 / 3)
+    assert result["top_k_random_row_recall"]["top_1"] == pytest.approx(1 / 3)
+    assert result["top_k_row_recall_lift_vs_random"]["top_1"] == pytest.approx(1.5)
+    assert result["positive_outcome_row_recall"] == pytest.approx(1 / 3)
+    assert result["random_positive_outcome_row_recall"] == pytest.approx(1 / 3)
+    assert result["positive_utility_capture"] == pytest.approx(1 / 3)
+    assert result["random_positive_utility_capture"] == pytest.approx(1 / 3)
+
+
+def test_candidate_recall_reports_symmetric_upside_and_downside_capture() -> None:
+    base = pd.DataFrame(
+        {
+            "symbol": ["A", "B", "C", "D"],
+            "trade_date": ["2022-06-01"] * 4,
+            "bar_time": ["093100000"] * 4,
+        }
+    )
+    candidates = base.iloc[:2].copy()
+    outcomes = base.assign(label_return_5m=[0.4, -0.3, 0.1, -0.2])
+    result = audit_candidate_recall(base, candidates, outcomes, top_k=(1,))
+    assert result["positive_outcome_row_recall"] == 0.5
+    assert result["random_positive_outcome_row_recall"] == 0.5
+    assert result["positive_utility_capture"] == pytest.approx(0.8)
+    assert result["random_positive_utility_capture"] == 0.5
+    assert result["negative_outcome_row_recall"] == 0.5
+    assert result["random_negative_outcome_row_recall"] == 0.5
+    assert result["negative_utility_capture"] == pytest.approx(0.6)
+    assert result["random_negative_utility_capture"] == 0.5
 
 
 def test_file_candidate_recall_matches_memory_and_checks_coverage(tmp_path) -> None:
@@ -935,8 +1009,19 @@ def test_file_candidate_recall_matches_memory_and_checks_coverage(tmp_path) -> N
         "top_k_hits",
         "top_k_eligible_groups",
         "top_k_recall",
+        "top_k_group_hit_rate",
+        "top_k_row_hits",
+        "top_k_rows",
+        "top_k_row_recall",
     ):
         assert actual[key] == expected[key]
+    for key in (
+        "positive_outcome_row_recall",
+        "random_positive_outcome_row_recall",
+        "positive_utility_capture",
+        "random_positive_utility_capture",
+    ):
+        assert actual[key] == pytest.approx(expected[key])
     with pytest.raises(MinuteV2Error, match="columns_missing"):
         audit_candidate_recall_files(
             base_path,

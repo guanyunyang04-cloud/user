@@ -147,10 +147,17 @@ fields use the next raw one-minute VWAP, while this decision-grid family uses
 the next decision bar. The
 `label_session_*m` family advances over raw bars within one trade date and marks
 gapped or incomplete windows explicitly. The benchmark's labels are stored for
-candidate keys only; candidate-recall auditing therefore needs a separate
-outcome file covering every base key. The replay output is a comparison harness
-that uses future exit-capacity/label fields and entry-cost marking, not a
-fill-accurate inventory backtest.
+candidate keys only. The separate stage-one artifact now covers all 683,748
+base keys at
+`data/research/minute_v2_bench_narrow_rev5/audits/stage_one/date=2022-06-16/complete_outcomes.parquet`;
+582,485 rows have an executable observed net-return label. Its gate report uses
+exact within-minute, same-density random baselines and separates “at least one
+top-K hit in a minute” from true top-K row recall. On this single date the gate
+retains 69.06% of top-five net-return rows and 50.69% of positive-return
+magnitude, but also 49.58% of negative-return magnitude. It is therefore an
+attention/volatility prefilter, not a demonstrated buy signal. The replay
+output remains a comparison harness that uses future exit-capacity/label fields
+and entry-cost marking, not a fill-accurate inventory backtest.
 
 ```powershell
 $env:PYTHONPATH='H:\quant_project\src'
@@ -158,6 +165,11 @@ $env:PYTHONPATH='H:\quant_project\src'
 # Recheck the current one-day correctness benchmark.
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
   --workspace-root H:/quant_project verify-month `
+  --manifest H:/quant_project/data/research/minute_v2_bench_narrow_rev5/months/year=2022/month=06/manifest.json
+
+# Reuse or rebuild the separate full-base outcomes, then refresh all recall reports.
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
+  --workspace-root H:/quant_project stage-one-audit `
   --manifest H:/quant_project/data/research/minute_v2_bench_narrow_rev5/months/year=2022/month=06/manifest.json
 ```
 

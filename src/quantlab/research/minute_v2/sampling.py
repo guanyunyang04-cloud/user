@@ -283,6 +283,241 @@ def _validate_recall_key_relationships(
         raise MinuteV2Error(f"minute_v2_recall_candidates_outside_base:{extra_candidates}")
 
 
+def _ratio(numerator: float | int, denominator: float | int) -> float | None:
+    return float(numerator / denominator) if denominator else None
+
+
+def _lift(value: float | None, baseline: float | None) -> float | None:
+    if value is None or baseline is None or baseline <= 0:
+        return None
+    return float(value / baseline)
+
+
+def _random_group_hit_probability(
+    universe_rows: int,
+    candidate_rows: int,
+    take: int,
+) -> float:
+    """Exact same-density null probability of at least one hit.
+
+    The null draws ``candidate_rows`` rows uniformly without replacement from
+    a group of ``universe_rows``.  This conditions the benchmark on the gate's
+    actual density in every decision-minute group instead of comparing it with
+    a looser global Bernoulli approximation.
+    """
+
+    universe = int(universe_rows)
+    candidates = int(candidate_rows)
+    selected = min(max(int(take), 0), universe)
+    if universe <= 0 or selected <= 0 or candidates <= 0:
+        return 0.0
+    if candidates >= universe or selected > universe - candidates:
+        return 1.0
+    miss = 1.0
+    for offset in range(selected):
+        miss *= (universe - candidates - offset) / (universe - offset)
+    return float(1.0 - miss)
+
+
+def _recall_metrics_from_universe(
+    universe: pd.DataFrame,
+    *,
+    target_name: str,
+    requested_k: tuple[int, ...],
+) -> dict[str, Any]:
+    """Calculate recall metrics from a finite, key-complete universe."""
+
+    group_columns = ["trade_date", "bar_time"]
+    groups = list(universe.groupby(group_columns, sort=False))
+    group_count = len(groups)
+    candidate_count = int(universe["_candidate_selected"].sum())
+    group_sizes = universe.groupby(group_columns, sort=False).size()
+    candidate_group_counts = universe.loc[universe["_candidate_selected"]].groupby(
+        group_columns, sort=False
+    ).size()
+
+    target_values = universe[target_name].astype(float)
+    candidate_mask = universe["_candidate_selected"].astype(bool)
+    positive_mask = target_values > 0.0
+    positive_utility = target_values.clip(lower=0.0)
+    negative_mask = target_values < 0.0
+    negative_utility = (-target_values).clip(lower=0.0)
+    positive_rows = int(positive_mask.sum())
+    candidate_positive_rows = int((candidate_mask & positive_mask).sum())
+    negative_rows = int(negative_mask.sum())
+    candidate_negative_rows = int((candidate_mask & negative_mask).sum())
+    total_positive_utility = float(positive_utility.sum())
+    candidate_positive_utility = float(positive_utility.loc[candidate_mask].sum())
+    total_negative_utility = float(negative_utility.sum())
+    candidate_negative_utility = float(negative_utility.loc[candidate_mask].sum())
+
+    random_positive_rows = 0.0
+    random_positive_utility = 0.0
+    random_negative_rows = 0.0
+    random_negative_utility = 0.0
+    for _, group in groups:
+        universe_rows = len(group)
+        candidate_rows = int(group["_candidate_selected"].sum())
+        density = candidate_rows / universe_rows
+        group_target = group[target_name].astype(float)
+        random_positive_rows += int((group_target > 0.0).sum()) * density
+        random_positive_utility += float(group_target.clip(lower=0.0).sum()) * density
+        random_negative_rows += int((group_target < 0.0).sum()) * density
+        random_negative_utility += float((-group_target).clip(lower=0.0).sum()) * density
+
+    positive_recall = _ratio(candidate_positive_rows, positive_rows)
+    random_positive_recall = _ratio(random_positive_rows, positive_rows)
+    utility_capture = _ratio(candidate_positive_utility, total_positive_utility)
+    random_utility_capture = _ratio(random_positive_utility, total_positive_utility)
+    negative_recall = _ratio(candidate_negative_rows, negative_rows)
+    random_negative_recall = _ratio(random_negative_rows, negative_rows)
+    negative_utility_capture = _ratio(candidate_negative_utility, total_negative_utility)
+    random_negative_utility_capture = _ratio(
+        random_negative_utility, total_negative_utility
+    )
+
+    top_k_group_hits: dict[str, int] = {}
+    top_k_eligible_groups: dict[str, int] = {}
+    top_k_group_hit_rate: dict[str, float | None] = {}
+    top_k_row_hits: dict[str, int] = {}
+    top_k_rows: dict[str, int] = {}
+    top_k_row_recall: dict[str, float | None] = {}
+    top_k_random_group_hit_rate: dict[str, float | None] = {}
+    top_k_random_row_recall: dict[str, float | None] = {}
+    top_k_group_hit_lift_vs_random: dict[str, float | None] = {}
+    top_k_row_recall_lift_vs_random: dict[str, float | None] = {}
+    for k in requested_k:
+        hit_count = 0
+        row_hit_count = 0
+        eligible = 0
+        ranked_rows = 0
+        expected_group_hits = 0.0
+        expected_row_hits = 0.0
+        for _, group in groups:
+            universe_rows = len(group)
+            if universe_rows == 0:
+                continue
+            take = min(int(k), universe_rows)
+            ranked = group.sort_values(
+                [target_name, "symbol"], ascending=[False, True], kind="stable"
+            ).head(take)
+            candidate_rows = int(group["_candidate_selected"].sum())
+            eligible += 1
+            ranked_rows += take
+            selected_in_top = int(ranked["_candidate_selected"].sum())
+            row_hit_count += selected_in_top
+            hit_count += int(selected_in_top > 0)
+            expected_group_hits += _random_group_hit_probability(
+                universe_rows,
+                candidate_rows,
+                take,
+            )
+            expected_row_hits += take * candidate_rows / universe_rows
+        key = f"top_{k}"
+        group_rate = _ratio(hit_count, eligible)
+        row_recall = _ratio(row_hit_count, ranked_rows)
+        random_group_rate = _ratio(expected_group_hits, eligible)
+        random_row_recall = _ratio(expected_row_hits, ranked_rows)
+        top_k_group_hits[key] = hit_count
+        top_k_eligible_groups[key] = eligible
+        top_k_group_hit_rate[key] = group_rate
+        top_k_row_hits[key] = row_hit_count
+        top_k_rows[key] = ranked_rows
+        top_k_row_recall[key] = row_recall
+        top_k_random_group_hit_rate[key] = random_group_rate
+        top_k_random_row_recall[key] = random_row_recall
+        top_k_group_hit_lift_vs_random[key] = _lift(group_rate, random_group_rate)
+        top_k_row_recall_lift_vs_random[key] = _lift(row_recall, random_row_recall)
+
+    candidate_values = target_values.loc[candidate_mask]
+    non_candidate_values = target_values.loc[~candidate_mask]
+    candidate_positive_precision = _ratio(candidate_positive_rows, candidate_count)
+    overall_positive_rate = _ratio(positive_rows, len(universe))
+    return {
+        "finite_outcome_rows": int(len(universe)),
+        "candidate_rows": candidate_count,
+        "candidate_fraction_of_finite_outcomes": float(candidate_count / len(universe)),
+        "group_count": group_count,
+        "groups_without_candidates": int(group_count - len(candidate_group_counts)),
+        "minimum_candidate_rows_per_group": int(candidate_group_counts.min())
+        if len(candidate_group_counts)
+        else 0,
+        "maximum_candidate_rows_per_group": int(candidate_group_counts.max())
+        if len(candidate_group_counts)
+        else 0,
+        "minimum_universe_rows_per_group": int(group_sizes.min()),
+        "maximum_universe_rows_per_group": int(group_sizes.max()),
+        "target_mean": float(target_values.mean()),
+        "candidate_target_mean": float(candidate_values.mean())
+        if len(candidate_values)
+        else None,
+        "non_candidate_target_mean": float(non_candidate_values.mean())
+        if len(non_candidate_values)
+        else None,
+        "candidate_target_mean_difference": (
+            float(candidate_values.mean() - non_candidate_values.mean())
+            if len(candidate_values) and len(non_candidate_values)
+            else None
+        ),
+        "positive_outcome_threshold": 0.0,
+        "positive_outcome_rows": positive_rows,
+        "candidate_positive_outcome_rows": candidate_positive_rows,
+        "positive_outcome_row_recall": positive_recall,
+        "random_positive_outcome_row_recall": random_positive_recall,
+        "positive_outcome_row_recall_lift_vs_random": _lift(
+            positive_recall, random_positive_recall
+        ),
+        "candidate_positive_outcome_precision": candidate_positive_precision,
+        "overall_positive_outcome_rate": overall_positive_rate,
+        "candidate_positive_outcome_precision_lift_vs_overall": _lift(
+            candidate_positive_precision, overall_positive_rate
+        ),
+        "positive_utility_total": total_positive_utility,
+        "candidate_positive_utility": candidate_positive_utility,
+        "positive_utility_capture": utility_capture,
+        "random_positive_utility_capture": random_utility_capture,
+        "positive_utility_capture_lift_vs_random": _lift(
+            utility_capture, random_utility_capture
+        ),
+        "negative_outcome_rows": negative_rows,
+        "candidate_negative_outcome_rows": candidate_negative_rows,
+        "negative_outcome_row_recall": negative_recall,
+        "random_negative_outcome_row_recall": random_negative_recall,
+        "negative_outcome_row_recall_lift_vs_random": _lift(
+            negative_recall, random_negative_recall
+        ),
+        "negative_utility_total": total_negative_utility,
+        "candidate_negative_utility": candidate_negative_utility,
+        "negative_utility_capture": negative_utility_capture,
+        "random_negative_utility_capture": random_negative_utility_capture,
+        "negative_utility_capture_lift_vs_random": _lift(
+            negative_utility_capture, random_negative_utility_capture
+        ),
+        "top_k_group_hits": top_k_group_hits,
+        "top_k_eligible_groups": top_k_eligible_groups,
+        "top_k_group_hit_rate": top_k_group_hit_rate,
+        "top_k_row_hits": top_k_row_hits,
+        "top_k_rows": top_k_rows,
+        "top_k_row_recall": top_k_row_recall,
+        "top_k_random_group_hit_rate": top_k_random_group_hit_rate,
+        "top_k_random_row_recall": top_k_random_row_recall,
+        "top_k_group_hit_lift_vs_random": top_k_group_hit_lift_vs_random,
+        "top_k_row_recall_lift_vs_random": top_k_row_recall_lift_vs_random,
+        # Backward-compatible aliases.  In schema /1 these were called
+        # "recall", although they are group hit rates rather than row recall.
+        "top_k_hits": dict(top_k_group_hits),
+        "top_k_recall": dict(top_k_group_hit_rate),
+        "legacy_top_k_recall_definition": (
+            "fraction of decision-minute groups with at least one candidate "
+            "among the top-k rows; use top_k_row_recall for row recall"
+        ),
+        "random_baseline_definition": (
+            "exact within-group uniform sampling without replacement at each "
+            "decision-minute group's observed candidate density"
+        ),
+    }
+
+
 def audit_candidate_recall(
     base: pd.DataFrame,
     candidates: pd.DataFrame,
@@ -330,56 +565,21 @@ def audit_candidate_recall(
     if universe.empty:
         raise MinuteV2Error("minute_v2_recall_no_finite_outcomes")
 
-    group_columns = ["trade_date", "bar_time"]
-    group_count = int(universe.groupby(group_columns, sort=False).ngroups)
-    candidate_count = int(universe["_candidate_selected"].sum())
     candidate_rows_in_base = int(len(candidates))
-    group_sizes = universe.groupby(group_columns, sort=False).size()
-    recalls: dict[str, float | None] = {}
-    hits: dict[str, int] = {}
-    eligible_groups: dict[str, int] = {}
-    for k in requested_k:
-        hit_count = 0
-        eligible = 0
-        for _, group in universe.groupby(group_columns, sort=False):
-            if group.empty:
-                continue
-            take = min(int(k), len(group))
-            ranked = group.sort_values(
-                [target_name, "symbol"], ascending=[False, True], kind="stable"
-            ).head(take)
-            eligible += 1
-            hit_count += int(ranked["_candidate_selected"].any())
-        key = f"top_{k}"
-        hits[key] = hit_count
-        eligible_groups[key] = eligible
-        recalls[key] = hit_count / eligible if eligible else None
-
-    candidate_group_counts = universe.loc[universe["_candidate_selected"]].groupby(
-        group_columns, sort=False
-    ).size()
+    metrics = _recall_metrics_from_universe(
+        universe,
+        target_name=target_name,
+        requested_k=requested_k,
+    )
     return {
-        "schema": "quantlab.minute_v2_candidate_recall/1",
+        "schema": "quantlab.minute_v2_candidate_recall/2",
         "target": target_name,
         "base_rows": int(len(base)),
         "outcome_rows": int(len(outcome_frame)),
-        "finite_outcome_rows": int(len(universe)),
-        "candidate_rows": candidate_count,
         "candidate_rows_in_base": candidate_rows_in_base,
-        "candidate_fraction_of_finite_outcomes": candidate_count / len(universe),
-        "group_count": group_count,
-        "groups_without_candidates": int(group_count - len(candidate_group_counts)),
-        "minimum_candidate_rows_per_group": int(candidate_group_counts.min())
-        if len(candidate_group_counts)
-        else 0,
-        "maximum_candidate_rows_per_group": int(candidate_group_counts.max())
-        if len(candidate_group_counts)
-        else 0,
-        "minimum_universe_rows_per_group": int(group_sizes.min()),
-        "maximum_universe_rows_per_group": int(group_sizes.max()),
-        "top_k_hits": hits,
-        "top_k_eligible_groups": eligible_groups,
-        "top_k_recall": recalls,
+        "candidate_fraction_of_base": candidate_rows_in_base / len(base) if len(base) else None,
+        "finite_outcome_fraction_of_base": len(universe) / len(base) if len(base) else None,
+        **metrics,
         "candidate_membership_source": "primary-key-only; target excluded from gate membership",
         "target_semantics": RECALL_TARGET_SEMANTICS,
     }
@@ -517,54 +717,177 @@ def audit_candidate_recall_files(
         base_rows = scalar(f"SELECT count(*) FROM {views['base']}")
         outcome_rows = scalar(f"SELECT count(*) FROM {views['outcomes']}")
         candidate_rows_in_base = scalar(f"SELECT count(*) FROM {views['candidates']}")
-        candidate_rows = scalar(
-            "SELECT count(*) FROM recall_universe "
-            "WHERE candidate_selected AND isfinite(target)"
-        )
-        group_count = scalar(
-            "SELECT count(*) FROM (SELECT DISTINCT trade_date,bar_time "
-            "FROM recall_universe WHERE isfinite(target))"
-        )
-        candidate_group_count = scalar(
-            "SELECT count(*) FROM (SELECT DISTINCT trade_date,bar_time "
-            "FROM recall_universe WHERE isfinite(target) AND candidate_selected)"
-        )
-        candidate_group_stats = connection.execute(
-            "SELECT min(rows), max(rows) FROM ("
-            "SELECT trade_date,bar_time,count(*) AS rows FROM recall_universe "
-            "WHERE isfinite(target) AND candidate_selected GROUP BY trade_date,bar_time)"
+        aggregate = connection.execute(
+            """
+            SELECT
+                count(*) AS finite_rows,
+                count(*) FILTER (WHERE candidate_selected) AS candidate_rows,
+                avg(target) AS target_mean,
+                avg(target) FILTER (WHERE candidate_selected) AS candidate_target_mean,
+                avg(target) FILTER (WHERE NOT candidate_selected) AS non_candidate_target_mean,
+                count(*) FILTER (WHERE target > 0.0) AS positive_rows,
+                count(*) FILTER (WHERE candidate_selected AND target > 0.0)
+                    AS candidate_positive_rows,
+                sum(greatest(target, 0.0)) AS positive_utility,
+                sum(greatest(target, 0.0)) FILTER (WHERE candidate_selected)
+                    AS candidate_positive_utility,
+                count(*) FILTER (WHERE target < 0.0) AS negative_rows,
+                count(*) FILTER (WHERE candidate_selected AND target < 0.0)
+                    AS candidate_negative_rows,
+                sum(greatest(-target, 0.0)) AS negative_utility,
+                sum(greatest(-target, 0.0)) FILTER (WHERE candidate_selected)
+                    AS candidate_negative_utility
+            FROM recall_universe
+            WHERE isfinite(target)
+            """
         ).fetchone()
-        universe_group_stats = connection.execute(
-            "SELECT min(rows), max(rows) FROM ("
-            "SELECT trade_date,bar_time,count(*) AS rows FROM recall_universe "
-            "WHERE isfinite(target) GROUP BY trade_date,bar_time)"
-        ).fetchone()
+        if not aggregate:
+            raise MinuteV2Error("minute_v2_recall_no_finite_outcomes")
+        candidate_rows = int(aggregate[1] or 0)
+        target_mean = float(aggregate[2])
+        candidate_target_mean = (
+            float(aggregate[3]) if aggregate[3] is not None else None
+        )
+        non_candidate_target_mean = (
+            float(aggregate[4]) if aggregate[4] is not None else None
+        )
+        positive_rows = int(aggregate[5] or 0)
+        candidate_positive_rows = int(aggregate[6] or 0)
+        positive_utility = float(aggregate[7] or 0.0)
+        candidate_positive_utility = float(aggregate[8] or 0.0)
+        negative_rows = int(aggregate[9] or 0)
+        candidate_negative_rows = int(aggregate[10] or 0)
+        negative_utility = float(aggregate[11] or 0.0)
+        candidate_negative_utility = float(aggregate[12] or 0.0)
+        group_rows = connection.execute(
+            """
+            SELECT
+                count(*) AS universe_rows,
+                count(*) FILTER (WHERE candidate_selected) AS candidate_rows,
+                count(*) FILTER (WHERE target > 0.0) AS positive_rows,
+                sum(greatest(target, 0.0)) AS positive_utility,
+                count(*) FILTER (WHERE target < 0.0) AS negative_rows,
+                sum(greatest(-target, 0.0)) AS negative_utility
+            FROM recall_universe
+            WHERE isfinite(target)
+            GROUP BY trade_date, bar_time
+            """
+        ).fetchall()
+        group_count = len(group_rows)
+        candidate_group_values = [int(row[1]) for row in group_rows if int(row[1]) > 0]
+        universe_group_values = [int(row[0]) for row in group_rows]
+        random_positive_rows = sum(
+            int(row[2]) * int(row[1]) / int(row[0]) for row in group_rows
+        )
+        random_positive_utility = sum(
+            float(row[3] or 0.0) * int(row[1]) / int(row[0]) for row in group_rows
+        )
+        random_negative_rows = sum(
+            int(row[4]) * int(row[1]) / int(row[0]) for row in group_rows
+        )
+        random_negative_utility = sum(
+            float(row[5] or 0.0) * int(row[1]) / int(row[0]) for row in group_rows
+        )
+        positive_recall = _ratio(candidate_positive_rows, positive_rows)
+        random_positive_recall = _ratio(random_positive_rows, positive_rows)
+        utility_capture = _ratio(candidate_positive_utility, positive_utility)
+        random_utility_capture = _ratio(random_positive_utility, positive_utility)
+        negative_recall = _ratio(candidate_negative_rows, negative_rows)
+        random_negative_recall = _ratio(random_negative_rows, negative_rows)
+        negative_utility_capture = _ratio(candidate_negative_utility, negative_utility)
+        random_negative_utility_capture = _ratio(
+            random_negative_utility, negative_utility
+        )
+        candidate_positive_precision = _ratio(candidate_positive_rows, candidate_rows)
+        overall_positive_rate = _ratio(positive_rows, finite_rows)
         report: dict[str, Any] = {
-            "schema": "quantlab.minute_v2_candidate_recall/1",
+            "schema": "quantlab.minute_v2_candidate_recall/2",
             "target": target_name,
             "base_rows": base_rows,
             "outcome_rows": outcome_rows,
             "finite_outcome_rows": finite_rows,
             "candidate_rows": candidate_rows,
             "candidate_rows_in_base": candidate_rows_in_base,
+            "candidate_fraction_of_base": float(candidate_rows_in_base / base_rows)
+            if base_rows
+            else None,
+            "finite_outcome_fraction_of_base": float(finite_rows / base_rows)
+            if base_rows
+            else None,
             "candidate_fraction_of_finite_outcomes": float(candidate_rows / finite_rows),
             "group_count": group_count,
-            "groups_without_candidates": int(group_count - candidate_group_count),
-            "minimum_candidate_rows_per_group": int(candidate_group_stats[0])
-            if candidate_group_stats and candidate_group_stats[0] is not None
+            "groups_without_candidates": int(group_count - len(candidate_group_values)),
+            "minimum_candidate_rows_per_group": min(candidate_group_values)
+            if candidate_group_values
             else 0,
-            "maximum_candidate_rows_per_group": int(candidate_group_stats[1])
-            if candidate_group_stats and candidate_group_stats[1] is not None
+            "maximum_candidate_rows_per_group": max(candidate_group_values)
+            if candidate_group_values
             else 0,
-            "minimum_universe_rows_per_group": int(universe_group_stats[0])
-            if universe_group_stats and universe_group_stats[0] is not None
-            else 0,
-            "maximum_universe_rows_per_group": int(universe_group_stats[1])
-            if universe_group_stats and universe_group_stats[1] is not None
-            else 0,
+            "minimum_universe_rows_per_group": min(universe_group_values),
+            "maximum_universe_rows_per_group": max(universe_group_values),
+            "target_mean": target_mean,
+            "candidate_target_mean": candidate_target_mean,
+            "non_candidate_target_mean": non_candidate_target_mean,
+            "candidate_target_mean_difference": (
+                candidate_target_mean - non_candidate_target_mean
+                if candidate_target_mean is not None
+                and non_candidate_target_mean is not None
+                else None
+            ),
+            "positive_outcome_threshold": 0.0,
+            "positive_outcome_rows": positive_rows,
+            "candidate_positive_outcome_rows": candidate_positive_rows,
+            "positive_outcome_row_recall": positive_recall,
+            "random_positive_outcome_row_recall": random_positive_recall,
+            "positive_outcome_row_recall_lift_vs_random": _lift(
+                positive_recall, random_positive_recall
+            ),
+            "candidate_positive_outcome_precision": candidate_positive_precision,
+            "overall_positive_outcome_rate": overall_positive_rate,
+            "candidate_positive_outcome_precision_lift_vs_overall": _lift(
+                candidate_positive_precision, overall_positive_rate
+            ),
+            "positive_utility_total": positive_utility,
+            "candidate_positive_utility": candidate_positive_utility,
+            "positive_utility_capture": utility_capture,
+            "random_positive_utility_capture": random_utility_capture,
+            "positive_utility_capture_lift_vs_random": _lift(
+                utility_capture, random_utility_capture
+            ),
+            "negative_outcome_rows": negative_rows,
+            "candidate_negative_outcome_rows": candidate_negative_rows,
+            "negative_outcome_row_recall": negative_recall,
+            "random_negative_outcome_row_recall": random_negative_recall,
+            "negative_outcome_row_recall_lift_vs_random": _lift(
+                negative_recall, random_negative_recall
+            ),
+            "negative_utility_total": negative_utility,
+            "candidate_negative_utility": candidate_negative_utility,
+            "negative_utility_capture": negative_utility_capture,
+            "random_negative_utility_capture": random_negative_utility_capture,
+            "negative_utility_capture_lift_vs_random": _lift(
+                negative_utility_capture, random_negative_utility_capture
+            ),
+            "top_k_group_hits": {},
             "top_k_hits": {},
             "top_k_eligible_groups": {},
+            "top_k_group_hit_rate": {},
             "top_k_recall": {},
+            "top_k_row_hits": {},
+            "top_k_rows": {},
+            "top_k_row_recall": {},
+            "top_k_random_group_hit_rate": {},
+            "top_k_random_row_recall": {},
+            "top_k_group_hit_lift_vs_random": {},
+            "top_k_row_recall_lift_vs_random": {},
+            "legacy_top_k_recall_definition": (
+                "fraction of decision-minute groups with at least one candidate "
+                "among the top-k rows; use top_k_row_recall for row recall"
+            ),
+            "random_baseline_definition": (
+                "exact within-group uniform sampling without replacement at each "
+                "decision-minute group's observed candidate density"
+            ),
             "candidate_membership_source": "primary-key-only; target excluded from gate membership",
             "target_semantics": RECALL_TARGET_SEMANTICS,
             "key_types": {key: kind for key, kind in key_types_by_file["base"]},
@@ -581,21 +904,58 @@ def audit_candidate_recall_files(
                     WHERE isfinite(target)
                 ), groups AS (
                     SELECT trade_date, bar_time,
-                           bool_or(candidate_selected) FILTER (WHERE rank_in_group <= {int(k)}) AS hit
+                           bool_or(candidate_selected) FILTER (WHERE rank_in_group <= {int(k)}) AS hit,
+                           count(*) FILTER (WHERE rank_in_group <= {int(k)}) AS top_rows,
+                           count(*) FILTER (
+                               WHERE rank_in_group <= {int(k)} AND candidate_selected
+                           ) AS selected_top_rows
                     FROM ranked
                     GROUP BY trade_date, bar_time
                 )
-                SELECT count(*) FILTER (WHERE hit), count(*) FROM groups
+                SELECT count(*) FILTER (WHERE hit), count(*),
+                       sum(top_rows), sum(selected_top_rows)
+                FROM groups
                 """
             ).fetchone()
-            hits, eligible = row or (0, 0)
+            hits, eligible, ranked_rows, selected_ranked_rows = row or (0, 0, 0, 0)
             hit_count = int(hits or 0)
             eligible_count = int(eligible or 0)
+            ranked_row_count = int(ranked_rows or 0)
+            selected_ranked_row_count = int(selected_ranked_rows or 0)
             key = f"top_{k}"
+            group_rate = _ratio(hit_count, eligible_count)
+            row_recall = _ratio(selected_ranked_row_count, ranked_row_count)
+            expected_group_hits = sum(
+                _random_group_hit_probability(
+                    int(group_row[0]),
+                    int(group_row[1]),
+                    min(int(k), int(group_row[0])),
+                )
+                for group_row in group_rows
+            )
+            expected_row_hits = sum(
+                min(int(k), int(group_row[0]))
+                * int(group_row[1])
+                / int(group_row[0])
+                for group_row in group_rows
+            )
+            random_group_rate = _ratio(expected_group_hits, eligible_count)
+            random_row_recall = _ratio(expected_row_hits, ranked_row_count)
+            report["top_k_group_hits"][key] = hit_count
             report["top_k_hits"][key] = hit_count
             report["top_k_eligible_groups"][key] = eligible_count
-            report["top_k_recall"][key] = (
-                float(hit_count / eligible_count) if eligible_count else None
+            report["top_k_group_hit_rate"][key] = group_rate
+            report["top_k_recall"][key] = group_rate
+            report["top_k_row_hits"][key] = selected_ranked_row_count
+            report["top_k_rows"][key] = ranked_row_count
+            report["top_k_row_recall"][key] = row_recall
+            report["top_k_random_group_hit_rate"][key] = random_group_rate
+            report["top_k_random_row_recall"][key] = random_row_recall
+            report["top_k_group_hit_lift_vs_random"][key] = _lift(
+                group_rate, random_group_rate
+            )
+            report["top_k_row_recall_lift_vs_random"][key] = _lift(
+                row_recall, random_row_recall
             )
         return report
     finally:

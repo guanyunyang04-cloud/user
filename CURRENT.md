@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-28
+Updated: 2026-08-29
 
 ## Objective
 
@@ -205,7 +205,7 @@ dedicated producer code has been retired.
   The failed baseline is not a paper- or live-trading candidate and remains
   separate from the 158/raw-60 daily benchmark.
 
-## Causal minute-v2 research (2026-08-28)
+## Causal minute-v2 research (2026-08-29)
 
 - `src/quantlab/research/minute_v2/` is the active minute research path. It
   evaluates every causal decision bar from 09:31-11:29 and 13:01-14:55 rather
@@ -258,9 +258,35 @@ dedicated producer code has been retired.
   may include the 11:30/15:00 tails; incomplete or gapped same-session windows
   are marked `same_session_window_incomplete`. High, low and close quality
   masks remain field-specific. The current `labels.parquet` contains labels
-  only for selected candidate keys, so it cannot by itself be used as the
-  complete-outcome input for a candidate-recall audit; that audit requires an
-  outcome file covering every base key.
+  only for selected candidate keys. The stage-one audit now supplies the
+  separate complete-outcome artifact at
+  `data/research/minute_v2_bench_narrow_rev5/audits/stage_one/date=2022-06-16/complete_outcomes.parquet`.
+  It covers all 683,748 base keys with zero missing, extra, null or duplicate
+  keys, reuses all 254,417 verified candidate labels without any difference,
+  and builds the remaining 429,331 rows. Of the complete rows, 582,485 have an
+  executable and observed next-day net-return label. The 101,263 unavailable
+  entries are explicit: 91,443 one-price next bars and 9,820 zero-flow next
+  bars.
+- Candidate recall now distinguishes group hit rate from row recall. The old
+  `top_k_recall` compatibility field means “at least one candidate occurs in
+  the group's top K”; it is not the fraction of top-K rows retained. For
+  `label_net_return`, the gate hits at least one top-five row in all 234
+  decision groups, but retains 808 of the actual 1,170 top-five rows
+  (69.06%). Its exact same-density random baselines are 92.79% for top-five
+  group hit and 41.05% for top-five row recall.
+- The gate occupies 37.21% of all base rows and 40.97% of finite net-return
+  rows. It retains 42.01% of positive rows versus a 40.80% within-group random
+  expectation, and 50.69% of total positive-return magnitude versus 40.81%
+  random. This is useful extreme-move concentration, but it is not directional
+  alpha: it also retains 49.58% of total negative-return magnitude versus
+  41.09% random, and its mean net return is -0.5247% compared with -0.3894%
+  outside the gate. The current gate is therefore an attention/volatility
+  prefilter, not a buy signal.
+- Time and causal market-state splits are stored beside the complete outcome
+  file. They are one-day diagnostics only. The gate misses 57.99% of all
+  positive net-return rows and 49.31% of positive-return magnitude on this
+  date, so it should not be treated as a hard full-recall universe until a
+  wider gate or full-base training comparison is audited on multiple dates.
 - The current event replay remains a comparison harness, not a fill-accurate
   inventory backtest. It sizes entries using the future `exit_amount` capacity
   and closes positions with the future label return at the selected legal exit
@@ -464,11 +490,12 @@ dedicated producer code has been retired.
    every mask unless the current field-level gates pass. Daily/factor/basic and
    PIT auxiliary tails remain separate and continue through the existing local
    or free-source update path.
-2. Use the one-day benchmark only to validate the data contract. Before
-   training, generate the same causal artifacts for selected development years,
-   create a complete-base outcome view for recall auditing, then compare
-   candidate-only training with a full-base scan and explicitly force current
-   holdings through the gate during replay. No model or broker decision is
+2. The one-day complete-base recall audit is finished. Do not tune the gate to
+   this date or call its concentrated tails alpha. Next, repeat the same audit
+   on a small, regime-spanning set of dates, compare the present 37% attention
+   gate with a wider gate and a full-base/weighted-sampling baseline, and only
+   then train a directional ranker. Explicitly force current holdings through
+   the gate during a real inventory replay. No model or broker decision is
    authorized by this benchmark alone.
 3. Keep the QDP flattening migration as maintenance rather than a blocker for
    minute research. The active physical/latest-key quick check and the new

@@ -11,6 +11,7 @@ from .builder import build_month, build_range, verify_dataset, verify_month
 from .contracts import MinuteV2Config
 from .pilot import audit_pilot_month
 from .sampling import audit_candidate_recall_files
+from .stage_one import run_stage_one_audit
 from .training import run_two_fold_baselines
 
 
@@ -80,6 +81,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     recall.add_argument("--target", default="label_return_5m")
     recall.add_argument("--top-k", type=int, nargs="+", default=[1, 3, 5])
     recall.add_argument("--output", default="")
+    stage_one = subparsers.add_parser(
+        "stage-one-audit",
+        help="build complete outcomes and audit the candidate gate for a narrow month",
+    )
+    stage_one.add_argument("--manifest", required=True)
+    stage_one.add_argument("--output-directory", default="")
+    stage_one.add_argument("--top-k", type=int, nargs="+", default=[1, 3, 5])
+    stage_one.add_argument("--force", action="store_true")
     return parser
 
 
@@ -137,6 +146,15 @@ def main(argv: list[str] | None = None) -> int:
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         _print(result)
+    elif args.command == "stage-one-audit":
+        _print(
+            run_stage_one_audit(
+                args.manifest,
+                output_directory=args.output_directory or None,
+                top_k=tuple(args.top_k),
+                force=bool(args.force),
+            )
+        )
     return 0
 
 
