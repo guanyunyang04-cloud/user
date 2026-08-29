@@ -22,7 +22,13 @@ import pyarrow.parquet as pq
 from quantlab.core.io import DataContractError, read_json, sha256_file, write_json
 
 from .builder import BUILD_IMPLEMENTATION_REVISION, BUILD_SPEC_SCHEMA, MONTH_SCHEMA
-from .contracts import KEY_COLUMNS, MODEL_FEATURE_COLUMNS, MinuteV2Error
+from .contracts import (
+    CORE_STORAGE_COLUMNS,
+    KEY_COLUMNS,
+    MODEL_FEATURE_COLUMNS,
+    OPTIONAL_STORAGE_COLUMNS,
+    MinuteV2Error,
+)
 from .mining import mine_formula_features, write_mining_result
 from .models import (
     evaluate_scores,
@@ -87,6 +93,8 @@ class PeriodPart:
     events: Path
     labels: Path
     base: Path
+    optional: Path | None = None
+    feature_storage: str = "full"
 
 
 _TRAINING_ARTIFACT_CHECK_CACHE: dict[tuple[str, int, int, int, int, int, str], bool] = {}
@@ -207,12 +215,16 @@ def _period_parts(dataset_root: Path, start_year: int, end_year: int) -> list[Pe
                 raise MinuteV2Error(
                     f"minute_v2_training_base_required:{manifest_path}"
                 )
+            feature_storage = str(build_spec.get("feature_storage", "full"))
+            if feature_storage not in {"full", "split", "core"}:
+                raise MinuteV2Error(
+                    f"minute_v2_training_feature_storage_invalid:{manifest_path}"
+                )
             raw_artifacts = manifest.get("artifacts")
-            if not isinstance(raw_artifacts, dict) or set(raw_artifacts) != {
-                "base",
-                "events",
-                "labels",
-            }:
+            expected_artifacts = {"base", "events", "labels"}
+            if feature_storage == "split":
+                expected_artifacts.add("optional_features")
+            if not isinstance(raw_artifacts, dict) or set(raw_artifacts) != expected_artifacts:
                 raise MinuteV2Error(f"minute_v2_training_artifacts_invalid:{manifest_path}")
 
             def artifact_path(
@@ -238,7 +250,7 @@ def _period_parts(dataset_root: Path, start_year: int, end_year: int) -> list[Pe
                 return target
 
             artifact_paths = {
-                name: artifact_path(name) for name in ("base", "events", "labels")
+                name: artifact_path(name) for name in expected_artifacts
             }
             for name, path in artifact_paths.items():
                 if not path.is_file():
@@ -254,14 +266,26 @@ def _period_parts(dataset_root: Path, start_year: int, end_year: int) -> list[Pe
                 name: set(pq.ParquetFile(path).schema_arrow.names)
                 for name, path in artifact_paths.items()
             }
-            missing_base = sorted(
-                (set(KEY_COLUMNS) | set(MODEL_FEATURE_COLUMNS)).difference(schemas["base"])
+            required_base_columns = (
+                set(CORE_STORAGE_COLUMNS)
+                if feature_storage in {"split", "core"}
+                else set(KEY_COLUMNS) | set(MODEL_FEATURE_COLUMNS)
             )
+            missing_base = sorted(required_base_columns.difference(schemas["base"]))
             if missing_base:
                 raise MinuteV2Error(
                     "minute_v2_training_base_columns_missing:"
                     f"{manifest_path}:{','.join(missing_base)}"
                 )
+            if feature_storage == "split":
+                missing_optional = sorted(
+                    set(OPTIONAL_STORAGE_COLUMNS).difference(schemas["optional_features"])
+                )
+                if missing_optional:
+                    raise MinuteV2Error(
+                        "minute_v2_training_optional_columns_missing:"
+                        f"{manifest_path}:{','.join(missing_optional)}"
+                    )
             missing_events = sorted(set(KEY_COLUMNS).difference(schemas["events"]))
             if missing_events:
                 raise MinuteV2Error(
@@ -292,6 +316,10 @@ def _period_parts(dataset_root: Path, start_year: int, end_year: int) -> list[Pe
                 raise MinuteV2Error(
                     f"minute_v2_training_event_label_rows_mismatch:{manifest_path}"
                 )
+            if feature_storage == "split" and row_counts["optional_features"] != row_counts["base"]:
+                raise MinuteV2Error(
+                    f"minute_v2_training_optional_rows_mismatch:{manifest_path}"
+                )
             raw_verification = manifest.get("verification")
             if not isinstance(raw_verification, dict):
                 raise MinuteV2Error(
@@ -317,6 +345,12 @@ def _period_parts(dataset_root: Path, start_year: int, end_year: int) -> list[Pe
                     events=event_path.resolve(),
                     labels=label_path.resolve(),
                     base=base_path.resolve(),
+                    optional=(
+                        artifact_paths["optional_features"].resolve()
+                        if feature_storage == "split"
+                        else None
+                    ),
+                    feature_storage=feature_storage,
                 )
             )
     return parts
@@ -343,7 +377,16 @@ def _period_query(
     event_scan = _scan([part.events])
     label_scan = _scan([part.labels])
     base_scan = _scan([part.base])
-    feature_projection = ",".join(f"b.{name}" for name in MODEL_FEATURE_COLUMNS)
+    optional_scan = _scan([part.optional]) if part.optional is not None else None
+    optional_names = set(OPTIONAL_STORAGE_COLUMNS)
+    feature_projection = ",".join(
+        (
+            f"o.{name}"
+            if optional_scan is not None and name in optional_names
+            else f"b.{name}"
+        )
+        for name in MODEL_FEATURE_COLUMNS
+    )
     execution_projection = (
         "," + ",".join(f"l.{name}" for name in EXECUTION_LABEL_COLUMNS)
         if include_execution
@@ -357,6 +400,11 @@ def _period_query(
             f"AND CAST(l.label_end_date_10d AS DATE) < CAST({cutoff} AS DATE)"
         )
     order = "ORDER BY e.trade_date,e.bar_time,e.symbol" if ordered else ""
+    optional_join = (
+        f"JOIN {optional_scan} o USING(symbol,trade_date,bar_time)"
+        if optional_scan is not None
+        else ""
+    )
     return f"""
         SELECT
             CAST(e.symbol AS VARCHAR) AS symbol,
@@ -367,6 +415,7 @@ def _period_query(
             {execution_projection}
         FROM {event_scan} e
         JOIN {base_scan} b USING(symbol,trade_date,bar_time)
+        {optional_join}
         JOIN {label_scan} l USING(symbol,trade_date,bar_time)
         WHERE l.label_observed {boundary}
         {order}

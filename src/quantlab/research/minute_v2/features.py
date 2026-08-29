@@ -273,6 +273,7 @@ def sixty_state_query(
     quality_view: str = "minute_feature_exclusions",
     auction_view: str = "opening_auction",
     expected_session_bars: int = EXPECTED_SESSION_BARS,
+    ordered: bool = True,
 ) -> str:
     """Aggregate long 60-minute history, seeding the first bar with the auction."""
 
@@ -456,7 +457,7 @@ def sixty_state_query(
             m60_history_bar_count,
             {_sixty_feature_expressions()}
         FROM sixty_rolling
-        ORDER BY symbol, trade_date, sixty_minute_bucket
+        {"ORDER BY symbol, trade_date, sixty_minute_bucket" if ordered else ""}
     """
 
 

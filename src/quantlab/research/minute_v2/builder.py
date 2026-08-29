@@ -8,6 +8,7 @@ import os
 import shutil
 import time
 from dataclasses import asdict
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +20,11 @@ from quantlab.core.io import DataContractError, read_json, sha256_file, write_js
 from quantlab.data.qdp_v2.duckdb_resources import GIB, MIB, open_guarded_duckdb
 
 from .contracts import (
+    CORE_STORAGE_COLUMNS,
     EXPECTED_DECISION_BARS,
     MAXIMUM_DAILY_LABEL_HORIZON,
     MODEL_FEATURE_COLUMNS,
+    OPTIONAL_STORAGE_COLUMNS,
     MinuteV2Config,
     MinuteV2Error,
 )
@@ -51,13 +54,16 @@ BUILD_SPEC_SCHEMA = "quantlab.minute_v2_build_spec/1"
 # Bump this when a change can alter a generated month even if the Parquet
 # column contract remains compatible.  It prevents a valid-looking old
 # manifest from silently surviving a logic change.
-BUILD_IMPLEMENTATION_REVISION = "2026-08-28-5"
+BUILD_IMPLEMENTATION_REVISION = "2026-08-29-1"
 LABEL_BUCKET_COUNT = 16
+PERIOD_SUPPORT_BUCKET_COUNT = 16
 RUNTIME_ONLY_CONFIG_FIELDS = frozenset(
     {
         "duckdb_threads",
         "memory_floor_gib",
         "duckdb_memory_limit_gib",
+        "temp_directory",
+        "query_profile_path",
     }
 )
 
@@ -172,6 +178,155 @@ def _remove_stale_base_artifact(month_directory: Path) -> bool:
     return True
 
 
+def _remove_exact_file(path: Path) -> bool:
+    """Remove one generated file, refusing directories and broad paths."""
+
+    target = Path(path).resolve()
+    if not target.exists() and not target.is_symlink():
+        return False
+    if target.is_dir():
+        raise MinuteV2Error(f"minute_v2_generated_file_is_directory:{target}")
+    target.unlink()
+    return True
+
+
+def _remove_stale_optional_artifact(month_directory: Path) -> bool:
+    """Remove the exact split-feature sidecar when the requested build omits it."""
+
+    return _remove_exact_file(Path(month_directory).resolve() / "optional_features.parquet")
+
+
+def _runtime_directory(
+    month_directory: Path,
+    config: MinuteV2Config,
+    *,
+    year: int,
+    month: int,
+) -> tuple[Path, bool]:
+    """Return an isolated spill directory and whether it is externally rooted.
+
+    An explicit temporary root is useful when the output volume is slow or
+    nearly full (for example, putting DuckDB spill on the NVMe C: volume).
+    Only a uniquely named child carrying our marker is ever cleaned up.
+    """
+
+    if not config.temp_directory:
+        runtime = month_directory / "_runtime"
+        _safe_clean_generated(runtime, month_directory, expected_name="_runtime")
+        runtime.mkdir(parents=True, exist_ok=True)
+        return runtime, False
+    root = Path(config.temp_directory).expanduser().resolve()
+    runtime = root / "quantlab_minute_v2" / f"year={int(year):04d}" / f"month={int(month):02d}"
+    marker = runtime / ".quantlab_runtime_marker"
+    if runtime.exists():
+        if not marker.is_file():
+            raise MinuteV2Error(f"minute_v2_external_runtime_not_owned:{runtime}")
+        shutil.rmtree(runtime)
+    runtime.mkdir(parents=True, exist_ok=True)
+    marker.write_text("quantlab.minute_v2.runtime/1\n", encoding="utf-8")
+    return runtime, True
+
+
+def _clean_runtime_directory(runtime: Path, *, external: bool, month_directory: Path) -> None:
+    if external:
+        marker = runtime / ".quantlab_runtime_marker"
+        if marker.is_file():
+            shutil.rmtree(runtime)
+    else:
+        _safe_clean_generated(runtime, month_directory, expected_name="_runtime")
+
+
+def _effective_memory_limit_bytes(connection: Any, config: MinuteV2Config) -> int:
+    """Apply an optional user cap on top of the live available-RAM limit."""
+
+    dynamic = int(connection.settings.memory_limit_bytes)
+    requested = config.duckdb_memory_limit_gib
+    if isinstance(requested, str) and requested.strip().lower() == "auto":
+        return dynamic
+    return min(dynamic, int(float(requested) * GIB))
+
+
+def _profile_path(directory: Path, config: MinuteV2Config) -> Path | None:
+    value = config.query_profile_path
+    if not value:
+        return None
+    if str(value).strip().lower() == "auto":
+        return directory / "query_profile.json"
+    return Path(value).expanduser().resolve()
+
+
+def _quarter_support_bounds(
+    snapshot: SourceSnapshot,
+    *,
+    year: int,
+    month: int,
+    config: MinuteV2Config,
+) -> dict[str, str]:
+    """Return fixed quarter boundaries shared by the three monthly builds."""
+
+    quarter = (int(month) - 1) // 3
+    quarter_start = date(int(year), quarter * 3 + 1, 1).isoformat()
+    if quarter == 3:
+        next_start = date(int(year) + 1, 1, 1)
+    else:
+        next_start = date(int(year), quarter * 3 + 4, 1)
+    quarter_end = (next_start - timedelta(days=1)).isoformat()
+    history_start = prior_open_date(
+        snapshot,
+        start_date=quarter_start,
+        open_days=config.minute_history_lookback_open_days,
+    )
+    extended_end = _calendar_extension(
+        snapshot,
+        end_date=quarter_end,
+        future_open_days=max(
+            MAXIMUM_DAILY_LABEL_HORIZON,
+            config.maximum_delayed_exit_days + 1,
+        ),
+    )
+    return {
+        "key": f"{int(year):04d}Q{quarter + 1}",
+        "start_date": quarter_start,
+        "end_date": quarter_end,
+        "history_start_date": history_start,
+        "extended_end_date": extended_end,
+    }
+
+
+def _state_support_bounds(
+    snapshot: SourceSnapshot,
+    *,
+    period: dict[str, str],
+    year: int,
+    month: int,
+    config: MinuteV2Config,
+) -> dict[str, str]:
+    """Choose the state-query interval without changing the raw cache key.
+
+    A sampled development build only needs state rows through its selected
+    month.  Keeping the raw quarter cache while narrowing this window avoids a
+    large warm-up query during one-day validation; full builds use the entire
+    shared period.
+    """
+
+    if int(config.maximum_trading_days_per_month) <= 0:
+        return {
+            "start_date": period["start_date"],
+            "end_date": period["end_date"],
+            "history_start_date": period["history_start_date"],
+        }
+    start_date, end_date = month_bounds(year, month)
+    return {
+        "start_date": start_date,
+        "end_date": end_date,
+        "history_start_date": prior_open_date(
+            snapshot,
+            start_date=start_date,
+            open_days=config.minute_history_lookback_open_days,
+        ),
+    }
+
+
 def _parquet_uncompressed_bytes(path: Path) -> int:
     metadata = pq.ParquetFile(path).metadata
     return sum(
@@ -278,7 +433,16 @@ def _manifest_is_complete(
         return False
     if _unfinished_build_files(path):
         return False
-    required = ["events", "labels"] + (["base"] if keep_base else [])
+    feature_storage = "full"
+    if isinstance(expected_build_spec, dict):
+        feature_storage = str(expected_build_spec.get("feature_storage", "full"))
+    elif isinstance(value.get("build_spec"), dict):
+        feature_storage = str(value["build_spec"].get("feature_storage", "full"))
+    required = ["events", "labels"]
+    if keep_base:
+        required.append("base")
+        if feature_storage == "split":
+            required.append("optional_features")
     raw_artifacts = value.get("artifacts")
     if not isinstance(raw_artifacts, dict):
         return False
@@ -510,6 +674,427 @@ def _materialize_cached_view(
     return _artifact(path), reused
 
 
+def _bucketed_artifact(paths: list[Path]) -> dict[str, Any]:
+    """Summarise a deterministic set of Parquet parts as one cache artifact."""
+
+    if not paths:
+        raise MinuteV2Error("minute_v2_bucketed_cache_parts_empty")
+    records = [_artifact(path) for path in paths]
+    digest_payload = json.dumps(
+        [
+            {
+                "path": record["path"],
+                "size": record["size"],
+                "sha256": record["sha256"],
+                "row_count": record["row_count"],
+                "row_group_count": record["row_group_count"],
+            }
+            for record in records
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return {
+        # ``path`` is retained for human-facing compatibility; consumers that
+        # need to scan the cache must use ``paths`` because this is a part set.
+        "path": str(paths[0]),
+        "paths": [str(path) for path in paths],
+        "size": sum(int(record["size"]) for record in records),
+        "sha256": hashlib.sha256(digest_payload).hexdigest(),
+        "row_count": sum(int(record["row_count"]) for record in records),
+        "row_group_count": sum(int(record["row_group_count"]) for record in records),
+        "parts": records,
+    }
+
+
+def _materialize_bucketed_view(
+    connection: Any,
+    *,
+    view_name: str,
+    directory: Path,
+    prefix: str,
+    bucket_count: int,
+    query_factory: Any,
+    metadata_spec: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Materialize a view in hash buckets so window queries stay bounded.
+
+    A single quarter can contain several times the rows of the original
+    one-month pilot.  Running the 60-minute window query over all symbols at
+    once can exhaust RAM even when the final result is modest.  Hash buckets
+    cap each window execution while retaining one reusable, logically unified
+    view for downstream joins.
+    """
+
+    count = int(bucket_count)
+    if count <= 0:
+        raise MinuteV2Error("minute_v2_bucketed_cache_bucket_count_invalid")
+    directory.mkdir(parents=True, exist_ok=True)
+    paths = [directory / f"{prefix}_{bucket:02d}_of_{count:02d}.parquet" for bucket in range(count)]
+    metadata_path = directory / f"{prefix}.json"
+    queries = [str(query_factory(bucket)) for bucket in range(count)]
+    expected_metadata = {
+        "schema": SUPPORT_CACHE_SCHEMA,
+        "spec": dict(metadata_spec),
+        "bucket_count": count,
+        "query_sha256": [
+            hashlib.sha256(query.encode("utf-8")).hexdigest() for query in queries
+        ],
+    }
+    reused = True
+    metadata: Any = None
+    try:
+        metadata = read_json(metadata_path)
+        reused = metadata == {
+            **expected_metadata,
+            "artifact": metadata.get("artifact"),
+        }
+        if reused:
+            artifact = metadata.get("artifact")
+            if not isinstance(artifact, dict):
+                reused = False
+            else:
+                raw_parts = artifact.get("parts")
+                if not isinstance(raw_parts, list) or len(raw_parts) != count:
+                    reused = False
+                else:
+                    for path, record in zip(paths, raw_parts, strict=True):
+                        if not _artifact_matches(path, record, base_directory=directory):
+                            reused = False
+                            break
+    except (DataContractError, OSError, ValueError, TypeError):
+        reused = False
+
+    if not reused:
+        for path in paths:
+            _remove_exact_file(path)
+        for bucket, query in enumerate(queries):
+            part = paths[bucket]
+            _copy_query(connection, query, part, compression="SNAPPY")
+        artifact = _bucketed_artifact(paths)
+        write_json(metadata_path, {**expected_metadata, "artifact": artifact})
+    else:
+        artifact = _bucketed_artifact(paths)
+    connection.execute(
+        f"CREATE OR REPLACE TEMP VIEW {view_name} AS SELECT * FROM "
+        + _parquet_scan(paths)
+    )
+    return artifact, reused
+
+
+def _materialize_period_raw_bars(
+    connection: Any,
+    *,
+    period: dict[str, str],
+    directory: Path,
+    bucket_count: int,
+    metadata_spec: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Cache the quarter's raw bars in one-pass, hash-partitioned Parquet.
+
+    The source QDP minute domain is spread over many shards.  Reading those
+    shards once and partitioning the result is substantially cheaper than
+    making every state/label bucket scan all source shards independently.
+    DuckDB's partition writer drops the partition expression from the stored
+    schema, so downstream views retain the original nine raw-bar columns.
+    """
+
+    count = int(bucket_count)
+    if count <= 0:
+        raise MinuteV2Error("minute_v2_period_raw_bucket_count_invalid")
+    directory.mkdir(parents=True, exist_ok=True)
+    prefix = "period_raw_minute_bars"
+    paths = [directory / f"{prefix}_{bucket:02d}_of_{count:02d}.parquet" for bucket in range(count)]
+    metadata_path = directory / f"{prefix}.json"
+    raw_query = (
+        "SELECT symbol,trade_date,bar_time,open,high,low,close,volume,amount "
+        "FROM minute_bars_extended "
+        f"WHERE trade_date BETWEEN {_sql_literal(period['history_start_date'])} "
+        f"AND {_sql_literal(period['extended_end_date'])}"
+    )
+    expected_metadata = {
+        "schema": SUPPORT_CACHE_SCHEMA,
+        "spec": dict(metadata_spec),
+        "bucket_count": count,
+        "query_sha256": hashlib.sha256(raw_query.encode("utf-8")).hexdigest(),
+    }
+    reused = False
+    artifact: dict[str, Any] | None = None
+    try:
+        metadata = read_json(metadata_path)
+        if isinstance(metadata, dict) and all(
+            metadata.get(name) == value for name, value in expected_metadata.items()
+        ):
+            candidate = metadata.get("artifact")
+            if isinstance(candidate, dict) and isinstance(candidate.get("parts"), list):
+                raw_parts = candidate["parts"]
+                if len(raw_parts) == count and all(
+                    _artifact_matches(path, record, base_directory=directory)
+                    for path, record in zip(paths, raw_parts, strict=True)
+                ):
+                    reused = True
+                    artifact = _bucketed_artifact(paths)
+    except (DataContractError, OSError, ValueError, TypeError):
+        reused = False
+
+    if not reused:
+        for path in paths:
+            _remove_exact_file(path)
+        staging = directory / f".{prefix}_staging"
+        if staging.exists():
+            resolved = staging.resolve()
+            if resolved.parent != directory.resolve() or resolved.name != staging.name:
+                raise MinuteV2Error(f"minute_v2_period_raw_cleanup_refused:{resolved}")
+            shutil.rmtree(resolved)
+        staging.mkdir(parents=True, exist_ok=True)
+        completed = False
+        try:
+            partition_query = (
+                "SELECT *, hash(symbol)%"
+                f"{count} AS __minute_v2_bucket FROM ({raw_query}) raw_bars"
+            )
+            connection.execute(
+                f"COPY ({partition_query}) TO {_sql_literal(staging)} "
+                "(FORMAT PARQUET, PARTITION_BY (__minute_v2_bucket), "
+                "COMPRESSION SNAPPY, PER_THREAD_OUTPUT FALSE)"
+            )
+            for bucket, path in enumerate(paths):
+                candidates = sorted(
+                    (staging / f"__minute_v2_bucket={bucket}").glob("*.parquet")
+                )
+                if len(candidates) == 1:
+                    os.replace(candidates[0], path)
+                elif not candidates:
+                    # Keep a schema-bearing empty part so every bucket has a
+                    # stable path and the union view remains deterministic.
+                    _copy_query(
+                        connection,
+                        raw_query + " AND FALSE",
+                        path,
+                        compression="SNAPPY",
+                    )
+                else:
+                    raise MinuteV2Error(
+                        f"minute_v2_period_raw_partition_count:{bucket}:{len(candidates)}"
+                    )
+            completed = True
+        finally:
+            if staging.exists():
+                shutil.rmtree(staging)
+        if not completed:
+            for path in paths:
+                _remove_exact_file(path)
+        artifact = _bucketed_artifact(paths)
+        write_json(metadata_path, {**expected_metadata, "artifact": artifact})
+    if artifact is None:
+        raise MinuteV2Error("minute_v2_period_raw_artifact_missing")
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW period_raw_minute_bars AS SELECT * FROM "
+        + _parquet_scan(paths)
+    )
+    return artifact, reused
+
+
+def _materialize_period_support(
+    connection: Any,
+    *,
+    snapshot: SourceSnapshot,
+    year: int,
+    month: int,
+    period: dict[str, str],
+    support_directory: Path,
+    support_cache_context: dict[str, Any],
+    config: MinuteV2Config,
+) -> dict[str, Any]:
+    """Materialize support once per calendar quarter and expose stable views.
+
+    Monthly builds overlap roughly two months of warm-up and future bars.  The
+    old cache key included each month's dates, so every month decompressed the
+    same overlap again.  A fixed quarter namespace makes the first month pay
+    that cost once; later months simply scan the already validated Parquet
+    files.  The files are support inputs, not model outputs, and therefore do
+    not alter the month key contract.
+    """
+
+    period_directory = support_directory / f"period={period['key']}"
+    period_directory.mkdir(parents=True, exist_ok=True)
+    state_bounds = _state_support_bounds(
+        snapshot,
+        period=period,
+        year=year,
+        month=month,
+        config=config,
+    )
+    common = {
+        **support_cache_context,
+        "period": dict(period),
+        "cache_grain": "calendar_quarter",
+        "state_bounds": dict(state_bounds),
+    }
+
+    stock_path = period_directory / "period_stock_days.parquet"
+    stock_artifact, stock_reused = _materialize_cached_view(
+        connection,
+        view_name="period_stock_days",
+        path=stock_path,
+        metadata_path=stock_path.with_suffix(".json"),
+        cache_spec={**common, "view": "period_stock_days"},
+        query=stock_day_query(
+            start_date=period["history_start_date"],
+            end_date=period["extended_end_date"],
+            config=config,
+        ),
+    )
+    period_label_path = period_directory / "period_label_stock_days.parquet"
+    period_label_artifact, period_label_reused = _materialize_cached_view(
+        connection,
+        view_name="period_label_stock_days",
+        path=period_label_path,
+        metadata_path=period_label_path.with_suffix(".json"),
+        cache_spec={**common, "view": "period_label_stock_days"},
+        query=label_stock_day_query(
+            start_date=period["start_date"],
+            end_date=period["extended_end_date"],
+        ),
+    )
+    calendar_path = period_directory / "period_calendar_dates.parquet"
+    calendar_artifact, calendar_reused = _materialize_cached_view(
+        connection,
+        view_name="period_calendar_dates",
+        path=calendar_path,
+        metadata_path=calendar_path.with_suffix(".json"),
+        cache_spec={**common, "view": "period_calendar_dates"},
+        query=calendar_query(
+            start_date=period["history_start_date"],
+            end_date=period["extended_end_date"],
+        ),
+    )
+    raw_spec = {
+        **support_cache_context,
+        "period": dict(period),
+        "cache_grain": "calendar_quarter",
+        "view": "period_raw_minute_bars",
+        "bucket_count": LABEL_BUCKET_COUNT,
+    }
+    raw_artifact, raw_reused = _materialize_period_raw_bars(
+        connection,
+        period=period,
+        directory=period_directory,
+        bucket_count=LABEL_BUCKET_COUNT,
+        metadata_spec=raw_spec,
+    )
+    raw_paths = [Path(str(value)).resolve() for value in raw_artifact["paths"]]
+    for bucket, path in enumerate(raw_paths):
+        connection.execute(
+            f"CREATE OR REPLACE TEMP VIEW period_raw_minute_bars_{bucket:02d} AS SELECT * FROM "
+            + _parquet_scan([path])
+        )
+    # A full-quarter window query can exceed the available RAM.  Restrict all
+    # state inputs to one symbol bucket per execution and retain the parts for
+    # later month builds.  Auxiliary views are bucketed as well so DuckDB does
+    # not have to keep unrelated symbols in the join hash tables.
+    state_bucket_count = (
+        4 if int(config.maximum_trading_days_per_month) > 0 else PERIOD_SUPPORT_BUCKET_COUNT
+    )
+    state_spec = {
+        **common,
+        "view": "period_sixty_minute_states",
+        "stock_days_sha256": stock_artifact["sha256"],
+        "bucket_count": state_bucket_count,
+    }
+    state_start_sql = _sql_literal(state_bounds["history_start_date"])
+    state_end_sql = _sql_literal(state_bounds["end_date"])
+
+    def state_query_for_bucket(bucket: int) -> str:
+        suffix = f"_{bucket:02d}"
+        state_raw_view = f"period_raw_minute_bars_state{suffix}"
+        if state_bucket_count == LABEL_BUCKET_COUNT:
+            connection.execute(
+                f"CREATE OR REPLACE TEMP VIEW {state_raw_view} AS SELECT * "
+                f"FROM period_raw_minute_bars_{bucket:02d} "
+                f"WHERE trade_date BETWEEN {state_start_sql} AND {state_end_sql}"
+            )
+        else:
+            connection.execute(
+                f"CREATE OR REPLACE TEMP VIEW {state_raw_view} AS SELECT * FROM "
+                + _parquet_scan(
+                    [
+                        path
+                        for index, path in enumerate(raw_paths)
+                        if index % state_bucket_count == bucket
+                    ]
+                )
+                + f" WHERE trade_date BETWEEN {state_start_sql} AND {state_end_sql}"
+            )
+        for source_name, bucket_name in (
+            ("period_stock_days", f"period_stock_days{suffix}"),
+            ("adjust_factor", f"adjust_factor{suffix}"),
+            ("minute_feature_exclusions", f"minute_feature_exclusions{suffix}"),
+            ("opening_auction", f"opening_auction{suffix}"),
+        ):
+            connection.execute(
+                f"CREATE OR REPLACE TEMP VIEW {bucket_name} AS SELECT * FROM {source_name} "
+                f"WHERE hash(symbol)%{state_bucket_count}={bucket} "
+                f"AND trade_date BETWEEN {state_start_sql} AND {state_end_sql}"
+            )
+        return sixty_state_query(
+            bars_view=state_raw_view,
+            stock_days_view=f"period_stock_days{suffix}",
+            factor_view=f"adjust_factor{suffix}",
+            quality_view=f"minute_feature_exclusions{suffix}",
+            auction_view=f"opening_auction{suffix}",
+            ordered=False,
+        )
+
+    state_artifact, state_reused = _materialize_bucketed_view(
+        connection,
+        view_name="period_sixty_minute_states",
+        directory=period_directory,
+        prefix="period_sixty_minute_states",
+        bucket_count=state_bucket_count,
+        query_factory=state_query_for_bucket,
+        metadata_spec=state_spec,
+    )
+
+    # The raw period cache is also the future-label cache.  Its partitions are
+    # already bounded to the exact history/future interval and can be scanned
+    # directly by each label bucket without a second copy on disk.
+    future_artifact = {**raw_artifact, "reused": raw_reused}
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW period_stock_days AS SELECT * FROM "
+        + _parquet_scan([stock_path])
+    )
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW period_label_stock_days AS SELECT * FROM "
+        + _parquet_scan([period_label_path])
+    )
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW period_calendar_dates AS SELECT * FROM "
+        + _parquet_scan([calendar_path])
+    )
+    # ``_materialize_bucketed_view`` already exposes the two unified views;
+    # keep these explicit replacements for clarity if its implementation is
+    # later changed to defer view registration.
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW period_sixty_minute_states AS SELECT * FROM "
+        + _parquet_scan([Path(value) for value in state_artifact["paths"]])
+    )
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW future_label_bars AS SELECT * FROM "
+        + _parquet_scan(raw_paths)
+    )
+    return {
+        "period": dict(period),
+        "directory": str(period_directory),
+        "stock_days": {**stock_artifact, "reused": stock_reused},
+        "label_stock_days": {**period_label_artifact, "reused": period_label_reused},
+        "calendar_dates": {**calendar_artifact, "reused": calendar_reused},
+        "raw_minute_bars": {**raw_artifact, "reused": raw_reused},
+        "sixty_minute_states": {**state_artifact, "reused": state_reused},
+        "future_label_bars": {**future_artifact, "reused": raw_reused},
+    }
+
+
 def _support_cache_signature(
     snapshot: SourceSnapshot,
     config: MinuteV2Config,
@@ -587,6 +1172,7 @@ def _manifest_build_spec(
         "extended_label_end_date": str(checkpoint_spec["extended_end"]),
         "minute_history_start_date": str(minute_history_start),
         "keep_base": bool(checkpoint_spec["keep_base"]),
+        "feature_storage": str(config.get("feature_storage", "full")),
         "support_signature": str(support_signature),
     }
 
@@ -598,6 +1184,8 @@ def _materialize_label_support(
     extended_end_date: str,
     support_directory: Path,
     support_cache_context: dict[str, Any],
+    stock_days_view: str = "stock_days",
+    calendar_view: str = "trading_calendar",
 ) -> dict[str, Any]:
     stock_day_path = support_directory / (
         f"label_stock_days__{start_date}__{extended_end_date}.parquet"
@@ -613,9 +1201,10 @@ def _materialize_label_support(
             "start_date": start_date,
             "end_date": extended_end_date,
         },
-        query=label_stock_day_query(
-            start_date=start_date,
-            end_date=extended_end_date,
+        query=(
+            f"SELECT * FROM {stock_days_view} "
+            f"WHERE trade_date BETWEEN {_sql_literal(start_date)} "
+            f"AND {_sql_literal(extended_end_date)}"
         ),
     )
     calendar_path = support_directory / (
@@ -632,7 +1221,11 @@ def _materialize_label_support(
             "start_date": start_date,
             "end_date": extended_end_date,
         },
-        query=calendar_query(start_date=start_date, end_date=extended_end_date),
+        query=(
+            f"SELECT * FROM {calendar_view} "
+            f"WHERE trade_date BETWEEN {_sql_literal(start_date)} "
+            f"AND {_sql_literal(extended_end_date)}"
+        ),
     )
     return {
         "label_stock_days": {**stock_day_artifact, "reused": stock_day_reused},
@@ -723,11 +1316,13 @@ def _verify_month_artifacts(
     connection: Any,
     *,
     base: Path | None,
+    optional: Path | None = None,
     events: Path,
     labels: Path,
     expected_decision_rows: int,
     expected_decision_groups: int | None,
     base_reference_parts: list[Path] | None,
+    feature_storage: str = "full",
 ) -> dict[str, Any]:
     event_parquet = pq.ParquetFile(events)
     label_parquet = pq.ParquetFile(labels)
@@ -755,14 +1350,46 @@ def _verify_month_artifacts(
         )
     if base is not None:
         base_schema = {field.name for field in pq.ParquetFile(base).schema_arrow}
-        missing_base_columns = sorted(
-            (set(MODEL_FEATURE_COLUMNS) | {"symbol", "trade_date", "bar_time"})
-            .difference(base_schema)
+        required_base = (
+            set(MODEL_FEATURE_COLUMNS)
+            if feature_storage == "full"
+            else set(CORE_STORAGE_COLUMNS)
         )
+        missing_base_columns = sorted(required_base.difference(base_schema))
         if missing_base_columns:
             raise MinuteV2Error(
                 "minute_v2_base_columns_missing:" + ",".join(missing_base_columns)
             )
+        if feature_storage == "split":
+            if optional is None or not optional.is_file():
+                raise MinuteV2Error("minute_v2_optional_feature_artifact_missing")
+            optional_schema = set(pq.ParquetFile(optional).schema_arrow.names)
+            missing_optional = sorted(set(OPTIONAL_STORAGE_COLUMNS).difference(optional_schema))
+            if missing_optional:
+                raise MinuteV2Error(
+                    "minute_v2_optional_feature_columns_missing:" + ",".join(missing_optional)
+                )
+            optional_rows = int(pq.ParquetFile(optional).metadata.num_rows)
+            if optional_rows != int(expected_decision_rows):
+                raise MinuteV2Error(
+                    f"minute_v2_optional_feature_row_mismatch:{optional_rows}:{expected_decision_rows}"
+                )
+            base_scan_for_optional = _parquet_scan([base])
+            optional_scan = _parquet_scan([optional])
+            optional_key_mismatch = int(
+                connection.execute(
+                    "SELECT count(*) FROM ("
+                    f"(SELECT symbol,trade_date,bar_time FROM {base_scan_for_optional} "
+                    f"EXCEPT ALL SELECT symbol,trade_date,bar_time FROM {optional_scan}) UNION ALL "
+                    f"(SELECT symbol,trade_date,bar_time FROM {optional_scan} "
+                    f"EXCEPT ALL SELECT symbol,trade_date,bar_time FROM {base_scan_for_optional})"
+                    ")"
+                ).fetchone()[0]
+            )
+            if optional_key_mismatch:
+                raise MinuteV2Error(
+                    f"minute_v2_optional_feature_key_mismatch:{optional_key_mismatch}"
+                )
     # A narrow event artifact must not silently grow back into a second copy of
     # the model feature matrix.  The full matrix remains in `base`.
     duplicated_model_features = sorted(
@@ -961,6 +1588,12 @@ def build_month(
             current.maximum_delayed_exit_days + 1,
         ),
     )
+    period = _quarter_support_bounds(
+        snapshot,
+        year=year,
+        month=month,
+        config=current,
+    )
     source_manifest_sha256 = _source_manifest_sha256(snapshot)
     support_signature = _support_cache_signature(
         snapshot,
@@ -991,16 +1624,25 @@ def build_month(
     ):
         if not keep_base:
             _remove_stale_base_artifact(directory)
+        if not keep_base or current.feature_storage != "split":
+            _remove_stale_optional_artifact(directory)
         return read_json(manifest_path)
+    if not keep_base or current.feature_storage != "split":
+        _remove_stale_optional_artifact(directory)
     paths = {
         "events": directory / "events.parquet",
         "labels": directory / "labels.parquet",
     }
     if keep_base:
         paths["base"] = directory / "base.parquet"
-    runtime = directory / "_runtime"
-    _safe_clean_generated(runtime, directory, expected_name="_runtime")
-    runtime.mkdir(parents=True, exist_ok=True)
+        if current.feature_storage == "split":
+            paths["optional_features"] = directory / "optional_features.parquet"
+    runtime, external_runtime = _runtime_directory(
+        directory,
+        current,
+        year=year,
+        month=month,
+    )
     checkpoint, resumed_checkpoint = _prepare_checkpoint(
         directory,
         spec=checkpoint_spec,
@@ -1010,13 +1652,11 @@ def build_month(
         ":memory:",
         temp_directory=runtime,
         threads=current.duckdb_threads,
+        profiling_path=_profile_path(directory, current),
         floor_bytes=int(current.memory_floor_gib * GIB),
         minimum_limit_bytes=256 * MIB,
     )
-    effective_memory_limit_bytes = min(
-        int(connection.settings.memory_limit_bytes),
-        int(current.duckdb_memory_limit_gib * GIB),
-    )
+    effective_memory_limit_bytes = _effective_memory_limit_bytes(connection, current)
     connection.execute(f"SET memory_limit='{effective_memory_limit_bytes}B'")
     completed = False
     build_started = time.perf_counter()
@@ -1026,8 +1666,13 @@ def build_month(
             snapshot,
             start_date=start_date,
             end_date=end_date,
-            minute_history_start_date=minute_history_start,
-            minute_end_date=extended_end,
+            minute_history_start_date=min(
+                minute_history_start,
+                period["history_start_date"],
+            ),
+            minute_history_end_date=period["end_date"],
+            minute_end_date=period["extended_end_date"],
+            minute_extended_start_date=period["history_start_date"],
         )
         support_directory = output / "_support_cache" / support_signature
         support_directory.mkdir(parents=True, exist_ok=True)
@@ -1041,6 +1686,31 @@ def build_month(
                 if name not in RUNTIME_ONLY_CONFIG_FIELDS
             },
         }
+        period_support = _materialize_period_support(
+            connection,
+            snapshot=snapshot,
+            year=year,
+            month=month,
+            period=period,
+            support_directory=support_directory,
+            support_cache_context=support_cache_context,
+            config=current,
+        )
+        # Restrict the month-facing views after the shared quarter support has
+        # been validated.  This keeps target features and candidate rows
+        # identical to the previous month-bounded contract.
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW stock_days AS SELECT * FROM period_stock_days "
+            f"WHERE trade_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}"
+        )
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW calendar_dates AS SELECT * FROM period_calendar_dates "
+            f"WHERE trade_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(extended_end)}"
+        )
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW sixty_minute_states AS SELECT * "
+            "FROM period_sixty_minute_states"
+        )
         stock_day_support_path = support_directory / (
             f"stock_days__{start_date}__{end_date}.parquet"
         )
@@ -1055,10 +1725,10 @@ def build_month(
                 "start_date": start_date,
                 "end_date": end_date,
             },
-            query=stock_day_query(
-                start_date=start_date,
-                end_date=end_date,
-                config=current,
+            query=(
+                "SELECT * FROM period_stock_days "
+                f"WHERE trade_date BETWEEN {_sql_literal(start_date)} "
+                f"AND {_sql_literal(end_date)}"
             ),
         )
         stock_day_row = connection.execute(
@@ -1073,28 +1743,14 @@ def build_month(
             "dates": int(stock_day_row[2]),
         }
         sixty_state_started = time.perf_counter()
-        sixty_state_path = support_directory / (
-            "sixty_minute_states__"
-            f"{minute_history_start}__{end_date}__{start_date}__{end_date}.parquet"
-        )
-        sixty_state_artifact, sixty_state_reused = _materialize_cached_view(
-            connection,
-            view_name="sixty_minute_states",
-            path=sixty_state_path,
-            metadata_path=sixty_state_path.with_suffix(".json"),
-            cache_spec={
-                **support_cache_context,
-                "view": "sixty_minute_states",
-                "minute_history_start": minute_history_start,
-                "start_date": start_date,
-                "end_date": end_date,
-                "stock_days_sha256": stock_day_artifact["sha256"],
-            },
-            query=sixty_state_query(
-                bars_view="minute_bars_history",
-                stock_days_view="stock_days",
-                auction_view="opening_auction",
-            ),
+        sixty_state_artifact = period_support["sixty_minute_states"]
+        sixty_state_reused = bool(sixty_state_artifact.get("reused", False))
+        sixty_state_paths = [
+            Path(str(value)).resolve() for value in sixty_state_artifact["paths"]
+        ]
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW sixty_minute_states AS SELECT * FROM "
+            + _parquet_scan(sixty_state_paths)
         )
         sixty_state_seconds = time.perf_counter() - sixty_state_started
         label_support_artifacts = _materialize_label_support(
@@ -1103,6 +1759,8 @@ def build_month(
             extended_end_date=extended_end,
             support_directory=support_directory,
             support_cache_context=support_cache_context,
+            stock_days_view="period_label_stock_days",
+            calendar_view="period_calendar_dates",
         )
         available_dates = [
             _date_text(row[0])
@@ -1265,6 +1923,10 @@ def build_month(
         label_bucket_paths: list[Path] = []
         label_bucket_specs: list[dict[str, Any]] = []
         label_cache_started = time.perf_counter()
+        future_label_paths = [
+            Path(str(value)).resolve()
+            for value in period_support["future_label_bars"]["paths"]
+        ]
         for bucket in range(LABEL_BUCKET_COUNT):
             bucket_name = f"labels_bucket_{bucket:02d}_of_{LABEL_BUCKET_COUNT:02d}.parquet"
             bucket_path = label_bucket_directory / bucket_name
@@ -1303,8 +1965,7 @@ def build_month(
                 )
                 connection.execute(
                     "CREATE OR REPLACE TEMP VIEW bucket_bars AS SELECT * FROM "
-                    "minute_bars_extended "
-                    f"WHERE hash(symbol)%{LABEL_BUCKET_COUNT}={bucket}"
+                    + _parquet_scan([future_label_paths[bucket]])
                 )
                 bucket_artifact = _copy_query(
                     connection,
@@ -1386,20 +2047,40 @@ def build_month(
             )
         artifacts: dict[str, dict[str, Any]] = {}
         if keep_base:
-            artifacts["base"] = _combine_parts(connection, base_parts, paths["base"])
+            if current.feature_storage == "full":
+                artifacts["base"] = _combine_parts(connection, base_parts, paths["base"])
+            else:
+                artifacts["base"] = _copy_query(
+                    connection,
+                    "SELECT " + ",".join(CORE_STORAGE_COLUMNS) + " FROM "
+                    + _parquet_scan(base_parts)
+                    + " ORDER BY trade_date,bar_time,symbol",
+                    paths["base"],
+                )
+                if current.feature_storage == "split":
+                    artifacts["optional_features"] = _copy_query(
+                        connection,
+                        "SELECT " + ",".join(OPTIONAL_STORAGE_COLUMNS) + " FROM "
+                        + _parquet_scan(base_parts)
+                        + " ORDER BY trade_date,bar_time,symbol",
+                        paths["optional_features"],
+                    )
         artifacts["events"] = _combine_parts(connection, event_parts, paths["events"])
         artifacts["labels"] = _combine_parts(connection, label_parts, paths["labels"])
         verification = _verify_month_artifacts(
             connection,
             base=paths.get("base"),
+            optional=paths.get("optional_features"),
             events=paths["events"],
             labels=paths["labels"],
             expected_decision_rows=expected_decision_rows,
             expected_decision_groups=expected_decision_groups,
             base_reference_parts=base_parts,
+            feature_storage=current.feature_storage,
         )
         if not keep_base:
             _remove_stale_base_artifact(directory)
+            _remove_stale_optional_artifact(directory)
         total_seconds = time.perf_counter() - build_started
         benchmark = {
             "feature_construction_seconds": feature_phase_seconds,
@@ -1427,6 +2108,13 @@ def build_month(
             ),
             "decision_time_policy": "all 234 causal decision minutes per complete trading day",
             "intermediate_compression": "SNAPPY for new day/support parts; final artifacts ZSTD",
+            "feature_storage": current.feature_storage,
+            "stored_core_columns": len(CORE_STORAGE_COLUMNS),
+            "stored_optional_columns": (
+                len(OPTIONAL_STORAGE_COLUMNS)
+                if current.feature_storage == "split"
+                else 0
+            ),
         }
         result = {
             "schema": MONTH_SCHEMA,
@@ -1455,12 +2143,31 @@ def build_month(
                     }
                     for name, value in label_support_artifacts.items()
                 },
+                "period_support": {
+                    "period": period,
+                    "directory": period_support["directory"],
+                    "reused": all(
+                        bool(value.get("reused", False))
+                        for name, value in period_support.items()
+                        if isinstance(value, dict) and name != "period"
+                    ),
+                    "artifacts": {
+                        name: {
+                            "rows": value["row_count"],
+                            "bytes": value["size"],
+                            "reused": value.get("reused", False),
+                        }
+                        for name, value in period_support.items()
+                        if isinstance(value, dict) and "row_count" in value
+                    },
+                },
             },
             "support_cache": {
                 "schema": SUPPORT_CACHE_SCHEMA,
                 "signature": support_signature,
                 "directory": str(support_directory),
                 "persistent": True,
+                "period": period,
             },
             "complete_session_stock_days": complete_sessions,
             "date_selection": {
@@ -1496,7 +2203,11 @@ def build_month(
         completed = True
     finally:
         connection.close()
-        _safe_clean_generated(runtime, directory, expected_name="_runtime")
+        _clean_runtime_directory(
+            runtime,
+            external=external_runtime,
+            month_directory=directory,
+        )
         if completed:
             _safe_clean_generated(checkpoint, directory, expected_name="_parts")
     return result
@@ -1594,6 +2305,9 @@ def verify_month(manifest_path: str | Path) -> dict[str, Any]:
             "minute_v2_manifest_build_revision_mismatch:"
             f"{build_spec['implementation_revision']}:{BUILD_IMPLEMENTATION_REVISION}"
         )
+    feature_storage = str(build_spec.get("feature_storage", "full"))
+    if feature_storage not in {"full", "split", "core"}:
+        raise MinuteV2Error("minute_v2_manifest_feature_storage_invalid")
     raw_artifacts = manifest.get("artifacts")
     if not isinstance(raw_artifacts, dict) or not raw_artifacts:
         raise MinuteV2Error("minute_v2_manifest_artifacts_missing")
@@ -1603,6 +2317,8 @@ def verify_month(manifest_path: str | Path) -> dict[str, Any]:
     if not keep_base and (stale_base.exists() or stale_base.is_symlink()):
         raise MinuteV2Error(f"minute_v2_verify_unexpected_base_artifact:{stale_base}")
     expected_names = {"events", "labels"} | ({"base"} if keep_base else set())
+    if keep_base and feature_storage == "split":
+        expected_names.add("optional_features")
     if set(artifacts) != expected_names:
         raise MinuteV2Error(
             "minute_v2_manifest_artifact_set_invalid:"
@@ -1650,6 +2366,11 @@ def verify_month(manifest_path: str | Path) -> dict[str, Any]:
     if not keep_base and expected_groups is None:
         raise MinuteV2Error("minute_v2_manifest_verification_missing")
     base_path = Path(checked["base"]["path"]) if "base" in checked else None
+    optional_path = (
+        Path(checked["optional_features"]["path"])
+        if "optional_features" in checked
+        else None
+    )
     connection = duckdb.connect(":memory:")
     try:
         connection.execute("SET threads=2")
@@ -1657,11 +2378,13 @@ def verify_month(manifest_path: str | Path) -> dict[str, Any]:
         contract = _verify_month_artifacts(
             connection,
             base=base_path,
+            optional=optional_path,
             events=Path(checked["events"]["path"]),
             labels=Path(checked["labels"]["path"]),
             expected_decision_rows=expected_rows,
             expected_decision_groups=expected_groups,
             base_reference_parts=[base_path] if base_path is not None else None,
+            feature_storage=feature_storage,
         )
     except duckdb.Error as exc:
         raise MinuteV2Error(f"minute_v2_verify_contract_unreadable:{manifest_file}") from exc

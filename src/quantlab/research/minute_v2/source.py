@@ -225,7 +225,9 @@ def register_source_views(
     start_date: str,
     end_date: str,
     minute_history_start_date: str | None = None,
+    minute_history_end_date: str | None = None,
     minute_end_date: str | None = None,
+    minute_extended_start_date: str | None = None,
 ) -> None:
     """Register bounded minute views and lazy auxiliary-domain views."""
 
@@ -233,17 +235,21 @@ def register_source_views(
     end = _date_literal(end_date)
     history_start_value = str(minute_history_start_date or start_date)
     history_start = _date_literal(history_start_value)
+    history_end_value = str(minute_history_end_date or end_date)
+    history_end = _date_literal(history_end_value)
+    extended_start_value = str(minute_extended_start_date or start_date)
+    extended_start = _date_literal(extended_start_value)
     extended_end_value = str(minute_end_date or end_date)
     extended_end = _date_literal(extended_end_value)
     target_paths = overlapping_minute_paths(snapshot, start_date=start_date, end_date=end_date)
     history_paths = overlapping_minute_paths(
         snapshot,
         start_date=history_start_value,
-        end_date=end_date,
+        end_date=history_end_value,
     )
     extended_paths = overlapping_minute_paths(
         snapshot,
-        start_date=start_date,
+        start_date=extended_start_value,
         end_date=extended_end_value,
     )
     connection.execute(
@@ -253,11 +259,11 @@ def register_source_views(
     connection.execute(
         f"CREATE OR REPLACE TEMP VIEW minute_bars_history AS "
         f"SELECT * FROM {_scan(history_paths)} "
-        f"WHERE trade_date BETWEEN {history_start} AND {end}"
+        f"WHERE trade_date BETWEEN {history_start} AND {history_end}"
     )
     connection.execute(
         f"CREATE OR REPLACE TEMP VIEW minute_bars_extended AS SELECT * FROM {_scan(extended_paths)} "
-        f"WHERE trade_date BETWEEN {start} AND {extended_end}"
+        f"WHERE trade_date BETWEEN {extended_start} AND {extended_end}"
     )
     for name, view in (
         ("market_opening_auction", "opening_auction"),

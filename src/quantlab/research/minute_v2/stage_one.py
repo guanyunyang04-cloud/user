@@ -308,10 +308,16 @@ def build_complete_outcomes(
         floor_bytes=int(config.memory_floor_gib * GIB),
         minimum_limit_bytes=256 * MIB,
     )
-    effective_memory_limit_bytes = min(
-        int(connection.settings.memory_limit_bytes),
-        int(config.duckdb_memory_limit_gib * GIB),
-    )
+    requested_memory = config.duckdb_memory_limit_gib
+    effective_memory_limit_bytes = int(connection.settings.memory_limit_bytes)
+    if not (
+        isinstance(requested_memory, str)
+        and requested_memory.strip().lower() == "auto"
+    ):
+        effective_memory_limit_bytes = min(
+            effective_memory_limit_bytes,
+            int(float(requested_memory) * GIB),
+        )
     connection.execute(f"SET memory_limit='{effective_memory_limit_bytes}B'")
     completed = False
     try:

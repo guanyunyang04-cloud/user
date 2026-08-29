@@ -19,6 +19,7 @@ from .contracts import (
     DAILY_WINDOWS,
     EXPECTED_DECISION_BARS,
     MODEL_FEATURE_COLUMNS,
+    OPTIONAL_STORAGE_COLUMNS,
     SIXTY_MINUTE_WINDOWS,
     MinuteV2Error,
 )
@@ -37,11 +38,11 @@ def _scan(path: Path) -> str:
 
 def _real_mutation_probe(
     connection: Any,
-    base_path: Path,
+    base_scan: str,
     *,
     workspace_root: Path,
 ) -> dict[str, Any]:
-    scan = _scan(base_path)
+    scan = base_scan
     first_date = connection.execute(
         f"SELECT trade_date FROM {scan} GROUP BY trade_date ORDER BY trade_date LIMIT 1"
     ).fetchone()[0]
@@ -198,6 +199,11 @@ def audit_pilot_month(
     if "base" not in artifacts:
         raise MinuteV2Error("minute_v2_pilot_audit_requires_retained_base")
     base_path = Path(str(artifacts["base"]["path"])).resolve()
+    optional_path = (
+        Path(str(artifacts["optional_features"]["path"])).resolve()
+        if "optional_features" in artifacts
+        else None
+    )
     event_path = Path(str(artifacts["events"]["path"])).resolve()
     label_path = Path(str(artifacts["labels"]["path"])).resolve()
     month_directory = manifest_file.parent
@@ -211,6 +217,22 @@ def audit_pilot_month(
         )
         try:
             base_scan = _scan(base_path)
+            if optional_path is not None:
+                optional_columns = [
+                    name
+                    for name in OPTIONAL_STORAGE_COLUMNS
+                    if name not in {"symbol", "trade_date", "bar_time"}
+                ]
+                connection.execute(
+                    "CREATE OR REPLACE TEMP VIEW base_with_optional AS SELECT b.*," 
+                    + ",".join(f"o.{name}" for name in optional_columns)
+                    + " FROM "
+                    + _scan(base_path)
+                    + " b JOIN "
+                    + _scan(optional_path)
+                    + " o USING(symbol,trade_date,bar_time)"
+                )
+                base_scan = "base_with_optional"
             finite_expressions = [
                 f"count(*) FILTER(WHERE {name} IS NOT NULL AND isfinite(CAST({name} AS DOUBLE))) "
                 f"AS {name}"
@@ -336,7 +358,7 @@ def audit_pilot_month(
             ).fetchone()
             mutation = _real_mutation_probe(
                 connection,
-                base_path,
+                base_scan,
                 workspace_root=Path(str(manifest["source"]["workspace_root"])),
             )
         finally:
@@ -427,8 +449,16 @@ def audit_pilot_month(
     if int(crossnight_row[1]) <= 0:
         raise MinuteV2Error("minute_v2_pilot_crossnight_1455_missing")
     resource_limit = int(manifest.get("effective_duckdb_memory_limit_bytes", 0))
-    configured_limit = int(float(manifest["config"]["duckdb_memory_limit_gib"]) * GIB)
-    if resource_limit <= 0 or resource_limit > configured_limit:
+    configured_value = manifest["config"].get("duckdb_memory_limit_gib", "auto")
+    configured_limit = (
+        None
+        if isinstance(configured_value, str)
+        and configured_value.strip().lower() == "auto"
+        else int(float(configured_value) * GIB)
+    )
+    if resource_limit <= 0 or (
+        configured_limit is not None and resource_limit > configured_limit
+    ):
         raise MinuteV2Error("minute_v2_pilot_memory_limit_invalid")
     target = Path(output_path).resolve() if output_path is not None else month_directory / "pilot_audit.json"
     write_json(target, result)

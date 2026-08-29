@@ -158,6 +158,55 @@ CROSS_SECTION_FEATURE_COLUMNS = (
 
 MODEL_FEATURE_COLUMNS = BASE_FEATURE_COLUMNS + CROSS_SECTION_FEATURE_COLUMNS
 
+# The full feature matrix is useful for a one-off audit, but retaining every
+# rolling window for every historical date is unnecessarily expensive.  The
+# core profile keeps the fields needed by the cheap candidate scan, causal
+# diagnostics, and the first baseline models.  The remaining windows remain
+# available in a sidecar when a model explicitly asks for them.
+_CORE_MODEL_NAMES = frozenset(
+    {
+        *CORE_BASE_FEATURE_COLUMNS,
+        "return_5m",  # used by the candidate gate and its recall audit
+        *CROSS_SECTION_FEATURE_COLUMNS,
+    }
+)
+CORE_MODEL_FEATURE_COLUMNS = tuple(
+    name for name in MODEL_FEATURE_COLUMNS if name in _CORE_MODEL_NAMES
+)
+OPTIONAL_MODEL_FEATURE_COLUMNS = tuple(
+    name for name in MODEL_FEATURE_COLUMNS if name not in _CORE_MODEL_NAMES
+)
+
+BASE_CONTEXT_COLUMNS = (
+    "industry_name",
+    "adjust_factor",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+    "valid_open",
+    "valid_high",
+    "valid_low",
+    "valid_close",
+)
+BASE_METADATA_COLUMNS = ("month", "year")
+CORE_STORAGE_COLUMNS = tuple(
+    dict.fromkeys(
+        (
+            *KEY_COLUMNS,
+            *BASE_CONTEXT_COLUMNS,
+            *CORE_MODEL_FEATURE_COLUMNS,
+            *BASE_METADATA_COLUMNS,
+        )
+    )
+)
+OPTIONAL_STORAGE_COLUMNS = tuple(
+    dict.fromkeys((*KEY_COLUMNS, *OPTIONAL_MODEL_FEATURE_COLUMNS))
+)
+FEATURE_STORAGE_MODES = ("split", "core", "full")
+
 
 class MinuteV2Error(RuntimeError):
     """Raised when a minute-v2 contract or causal invariant is violated."""
@@ -191,9 +240,12 @@ class MinuteV2Config:
     slippage_bps: float = 7.0
     maximum_trading_days_per_month: int = 0
     processing_days_per_chunk: int = 1
-    duckdb_threads: int = 4
+    duckdb_threads: int | str = 4
     memory_floor_gib: float = 0.5
-    duckdb_memory_limit_gib: float = 4.0
+    duckdb_memory_limit_gib: float | str = "auto"
+    temp_directory: str | None = None
+    query_profile_path: str | None = None
+    feature_storage: str = "split"
     minimum_daily_history: int = MINIMUM_DAILY_HISTORY
     daily_history_lookback_open_days: int = DAILY_HISTORY_LOOKBACK_OPEN_DAYS
     minute_history_lookback_open_days: int = MINUTE_HISTORY_LOOKBACK_OPEN_DAYS
@@ -266,14 +318,26 @@ class MinuteV2Config:
             self.memory_floor_gib,
             "minute_v2_memory_floor_invalid",
         )
-        if memory_floor_gib < 0.5:
+        if memory_floor_gib < 0.0:
             raise MinuteV2Error("minute_v2_memory_floor_too_small")
-        duckdb_memory_limit_gib = finite_float(
-            self.duckdb_memory_limit_gib,
-            "minute_v2_duckdb_memory_limit_invalid",
-        )
-        if not 0.25 <= duckdb_memory_limit_gib <= 4.0:
-            raise MinuteV2Error("minute_v2_duckdb_memory_limit_invalid")
+        memory_limit = self.duckdb_memory_limit_gib
+        if isinstance(memory_limit, str) and memory_limit.strip().lower() == "auto":
+            pass
+        else:
+            duckdb_memory_limit_gib = finite_float(
+                memory_limit,
+                "minute_v2_duckdb_memory_limit_invalid",
+            )
+            if not 0.25 <= duckdb_memory_limit_gib:
+                raise MinuteV2Error("minute_v2_duckdb_memory_limit_invalid")
+        if self.temp_directory is not None and not isinstance(self.temp_directory, str):
+            raise MinuteV2Error("minute_v2_temp_directory_invalid")
+        if self.query_profile_path is not None and not isinstance(self.query_profile_path, str):
+            raise MinuteV2Error("minute_v2_query_profile_path_invalid")
+        if self.feature_storage not in FEATURE_STORAGE_MODES:
+            raise MinuteV2Error(
+                f"minute_v2_feature_storage_invalid:{self.feature_storage}"
+            )
         for name, value in (
             ("commission_bps", self.commission_bps),
             ("transfer_fee_bps", self.transfer_fee_bps),
@@ -302,12 +366,16 @@ class MinuteV2Config:
         )
         if not 0 <= maximum_trading_days_per_month <= 23:
             raise MinuteV2Error("minute_v2_month_day_sample_invalid")
-        duckdb_threads = exact_int(
-            self.duckdb_threads,
-            "minute_v2_duckdb_threads_invalid",
-        )
-        if duckdb_threads <= 0:
-            raise MinuteV2Error("minute_v2_duckdb_threads_invalid")
+        if isinstance(self.duckdb_threads, str):
+            if self.duckdb_threads.strip().lower() != "auto":
+                raise MinuteV2Error("minute_v2_duckdb_threads_invalid")
+        else:
+            duckdb_threads = exact_int(
+                self.duckdb_threads,
+                "minute_v2_duckdb_threads_invalid",
+            )
+            if duckdb_threads <= 0:
+                raise MinuteV2Error("minute_v2_duckdb_threads_invalid")
         minimum_daily_history = exact_int(
             self.minimum_daily_history,
             "minute_v2_minimum_daily_history_contract_invalid",
@@ -344,7 +412,11 @@ __all__ = [
     "AFTERNOON_DECISION_END",
     "AFTERNOON_DECISION_START",
     "BASE_FEATURE_COLUMNS",
+    "BASE_CONTEXT_COLUMNS",
+    "BASE_METADATA_COLUMNS",
     "CORE_BASE_FEATURE_COLUMNS",
+    "CORE_MODEL_FEATURE_COLUMNS",
+    "CORE_STORAGE_COLUMNS",
     "CROSS_SECTION_FEATURE_COLUMNS",
     "DAILY_HISTORY_LOOKBACK_OPEN_DAYS",
     "DAILY_MULTISCALE_FEATURE_COLUMNS",
@@ -355,6 +427,9 @@ __all__ = [
     "EXPECTED_SESSION_BARS",
     "KEY_COLUMNS",
     "MODEL_FEATURE_COLUMNS",
+    "OPTIONAL_MODEL_FEATURE_COLUMNS",
+    "OPTIONAL_STORAGE_COLUMNS",
+    "FEATURE_STORAGE_MODES",
     "MAXIMUM_DAILY_LABEL_HORIZON",
     "MINIMUM_DAILY_HISTORY",
     "MINUTE_HISTORY_LOOKBACK_OPEN_DAYS",
