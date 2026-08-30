@@ -11,6 +11,12 @@
 - Do not perform periodic status checks, run unrelated work in parallel, or send progress commentary while the process is running.
 - Resume model work only when the process finishes, fails, explicitly requests attention, or the user sends new instructions.
 
+## Tests
+
+- Keep tests only for active behavior with plausible regression risk; tests are not permanent task-completion receipts.
+- Use disposable checks for one-time migrations and audits. Do not commit their test scaffolding, and retire dedicated tests with the code or workflow they cover.
+- Prefer a small behavioral contract over duplicated edge cases or assertions about private implementation details.
+
 ## Git
 
 - Preserve unrelated user changes and stage only files changed by the current task.

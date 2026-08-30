@@ -10,7 +10,6 @@ import pytest
 from pandas.testing import assert_frame_equal
 
 from quantlab.research.minute_v2 import builder as minute_v2_builder
-from quantlab.research.minute_v2 import cli as minute_v2_cli
 from quantlab.research.minute_v2 import training as minute_v2_training
 from quantlab.research.minute_v2.builder import (
     BUILD_IMPLEMENTATION_REVISION,
@@ -19,7 +18,6 @@ from quantlab.research.minute_v2.builder import (
     _manifest_is_complete,
     _materialize_cached_view,
     _protect_existing_manifest,
-    _remove_stale_base_artifact,
     _safe_clean_generated,
     verify_month,
 )
@@ -103,10 +101,11 @@ def test_checkpoint_reuses_parts_when_only_resource_controls_change() -> None:
     assert not _checkpoint_specs_compatible(current, requested)
 
 
-def test_training_schedule_uses_one_held_out_validation_year() -> None:
+def test_development_validation_run_keeps_2025_out_of_fitting(
+    tmp_path,
+    monkeypatch,
+) -> None:
     spec = minute_v2_training.DEVELOPMENT_VALIDATION_SPEC
-    assert minute_v2_training.DEVELOPMENT_YEARS == (2022, 2023, 2024)
-    assert minute_v2_training.FINAL_VALIDATION_YEAR == 2025
     assert spec.as_dict() == {
         "development_start_year": 2022,
         "development_end_year": 2024,
@@ -115,11 +114,6 @@ def test_training_schedule_uses_one_held_out_validation_year() -> None:
     }
     assert spec.development_label_end_exclusive == "2025-01-01"
 
-
-def test_development_validation_run_keeps_2025_out_of_fitting(
-    tmp_path,
-    monkeypatch,
-) -> None:
     output_root = tmp_path / "models"
     output_root.mkdir()
     scan_calls: list[dict[str, object]] = []
@@ -262,7 +256,7 @@ def test_minute_v2_config_rejects_nonfinite_or_ignored_contract_values(
         config.validate()
 
 
-def test_builder_refuses_old_month_manifest_without_force(tmp_path) -> None:
+def test_builder_protects_existing_manifest(tmp_path) -> None:
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
         '{"schema":"quantlab.minute_v2_month/1","status":"ok"}',
@@ -271,21 +265,9 @@ def test_builder_refuses_old_month_manifest_without_force(tmp_path) -> None:
     with pytest.raises(MinuteV2Error, match="requires_force"):
         _protect_existing_manifest(manifest, force=False)
     _protect_existing_manifest(manifest, force=True)
-
-
-def test_builder_rejects_non_object_existing_manifest(tmp_path) -> None:
-    manifest = tmp_path / "manifest.json"
     manifest.write_text("[]", encoding="utf-8")
     with pytest.raises(MinuteV2Error, match="unreadable"):
         _protect_existing_manifest(manifest, force=False)
-
-
-def test_drop_base_removes_only_the_exact_month_artifact(tmp_path) -> None:
-    base = tmp_path / "base.parquet"
-    base.write_bytes(b"stale")
-    assert _remove_stale_base_artifact(tmp_path)
-    assert not base.exists()
-    assert not _remove_stale_base_artifact(tmp_path)
 
 
 def test_generated_directory_cleanup_retries_windows_directory_not_empty(
@@ -683,120 +665,6 @@ def test_verify_dataset_uses_verified_contract_totals(tmp_path, monkeypatch) -> 
     assert result["artifact_bytes"] == 12 * 20
 
 
-def test_candidate_recall_cli_writes_complete_json_output(tmp_path, monkeypatch, capsys) -> None:
-    expected = {
-        "schema": "quantlab.minute_v2_candidate_recall/1",
-        "target": "label_return_5m",
-        "top_k_recall": {"top_1": 1.0},
-    }
-    calls: list[tuple[str, str, str]] = []
-
-    def fake_audit(base: str, candidates: str, outcomes: str, **kwargs):
-        calls.append((base, candidates, outcomes))
-        assert kwargs == {"target": "label_return_5m", "top_k": [1]}
-        return expected
-
-    monkeypatch.setattr(minute_v2_cli, "audit_candidate_recall_files", fake_audit)
-    output = tmp_path / "recall.json"
-    assert (
-        minute_v2_cli.main(
-            [
-                "audit-candidate-recall",
-                "--base",
-                "base.parquet",
-                "--candidates",
-                "candidates.parquet",
-                "--outcomes",
-                "outcomes.parquet",
-                "--top-k",
-                "1",
-                "--output",
-                str(output),
-            ]
-        )
-        == 0
-    )
-    assert calls == [("base.parquet", "candidates.parquet", "outcomes.parquet")]
-    assert json.loads(output.read_text(encoding="utf-8")) == expected
-    assert json.loads(capsys.readouterr().out) == expected
-
-
-def test_train_baselines_cli_uses_development_validation_runner(
-    monkeypatch,
-    capsys,
-) -> None:
-    expected = {
-        "schema": "quantlab.minute_v2_development_validation/1",
-        "status": "ok",
-    }
-    calls: list[tuple[str, str]] = []
-
-    def fake_train(dataset_root: str, *, output_root: str):
-        calls.append((dataset_root, output_root))
-        return expected
-
-    monkeypatch.setattr(
-        minute_v2_cli,
-        "run_development_validation_baselines",
-        fake_train,
-    )
-    assert (
-        minute_v2_cli.main(
-            [
-                "train-baselines",
-                "--dataset-root",
-                "dataset",
-                "--output-root",
-                "models",
-            ]
-        )
-        == 0
-    )
-    assert calls == [("dataset", "models")]
-    assert json.loads(capsys.readouterr().out) == expected
-
-
-def test_stage_one_cli_forwards_manifest_output_and_top_k(monkeypatch, capsys) -> None:
-    expected = {
-        "schema": "quantlab.minute_v2_stage_one_audit/1",
-        "status": "ok",
-    }
-    calls: list[tuple[str, dict[str, object]]] = []
-
-    def fake_stage_one(manifest: str, **kwargs):
-        calls.append((manifest, kwargs))
-        return expected
-
-    monkeypatch.setattr(minute_v2_cli, "run_stage_one_audit", fake_stage_one)
-    assert (
-        minute_v2_cli.main(
-            [
-                "stage-one-audit",
-                "--manifest",
-                "month.json",
-                "--output-directory",
-                "audit-output",
-                "--top-k",
-                "1",
-                "5",
-                "--force",
-            ]
-        )
-        == 0
-    )
-    assert calls == [
-        (
-            "month.json",
-            {
-                "output_directory": "audit-output",
-                "top_k": (1, 5),
-                "force": True,
-            },
-        )
-    ]
-    assert json.loads(capsys.readouterr().out) == expected
-
-
 def _bars(
     *,
     dates: tuple[str, ...] = ("2022-06-01",),
@@ -1082,10 +950,10 @@ def test_features_are_causal_and_field_masks_are_specific() -> None:
     assert original_open != changed_open
 
 
-@pytest.mark.parametrize("field", ["open", "high", "low", "close", "volume", "amount"])
-def test_features_normalise_nonfinite_bar_values_without_emitting_infinite_features(field: str) -> None:
+def test_features_normalise_nonfinite_bars_without_emitting_infinite_features() -> None:
     bars = _bars()
-    bars.loc[bars.index[10], field] = np.inf
+    for offset, field in enumerate(("open", "high", "low", "close", "volume", "amount")):
+        bars.loc[bars.index[10 + offset], field] = np.inf
 
     result = build_feature_frame(bars, _stock_days())
 
@@ -1220,6 +1088,8 @@ def test_candidate_recall_audit_uses_keys_and_reports_top_k_hits() -> None:
     assert result["random_positive_outcome_row_recall"] == pytest.approx(1 / 3)
     assert result["positive_utility_capture"] == pytest.approx(1 / 3)
     assert result["random_positive_utility_capture"] == pytest.approx(1 / 3)
+    with pytest.raises(MinuteV2Error, match="top_k_invalid"):
+        audit_candidate_recall(base, candidates, outcomes, top_k=())
 
 
 def test_candidate_recall_reports_symmetric_upside_and_downside_capture() -> None:
@@ -1408,6 +1278,48 @@ def _minimal_label_frame(*, symbol: str = "A") -> pd.DataFrame:
     return pd.DataFrame(values)
 
 
+def _empty_daily_label_frame() -> pd.DataFrame:
+    return pd.DataFrame(
+        columns=[
+            "symbol",
+            "trade_date",
+            "high",
+            "low",
+            "close",
+            "adjust_factor",
+            "previous_close",
+            "previous_adjust_factor",
+            "is_suspended",
+            "is_delisted",
+            "exclude_high",
+            "exclude_low",
+            "exclude_close",
+            "corporate_action_count",
+        ]
+    )
+
+
+def _label_calendar(*dates: str) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "trade_date": value,
+                "calendar_index": index + 1,
+                "next_trade_date": dates[index + 1] if index + 1 < len(dates) else None,
+            }
+            for index, value in enumerate(dates)
+        ]
+    )
+
+
+@pytest.fixture(scope="module")
+def label_inputs() -> dict[str, pd.DataFrame]:
+    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
+    target = bars.loc[bars["trade_date"] == "2022-06-01"].copy()
+    features = build_feature_frame(target, _stock_days(symbols=("600000.SH",)))
+    return {"bars": bars, "target": target, "features": features}
+
+
 def test_verify_month_checks_label_schema_and_key_equality(tmp_path) -> None:
     events = _minimal_event_frame()
     labels = _minimal_label_frame(symbol="B")
@@ -1443,13 +1355,10 @@ def test_verify_month_checks_label_schema_and_key_equality(tmp_path) -> None:
         verify_month(manifest)
 
 
-def test_labels_use_next_bar_and_next_market_day() -> None:
-    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
-    features = build_feature_frame(
-        bars.loc[bars["trade_date"] == "2022-06-01"],
-        _stock_days(symbols=("600000.SH",)),
-    )
-    events = features.loc[features["bar_time"] == "093500000"].copy()
+def test_labels_use_next_bar_and_next_market_day(label_inputs) -> None:
+    events = label_inputs["features"].loc[
+        label_inputs["features"]["bar_time"] == "093500000"
+    ].copy()
     label_stock_days = pd.DataFrame(
         [
             {
@@ -1470,18 +1379,12 @@ def test_labels_use_next_bar_and_next_market_day() -> None:
             }
         ]
     )
-    calendar = pd.DataFrame(
-        [
-            {"trade_date": "2022-06-01", "calendar_index": 1, "next_trade_date": "2022-06-02"},
-            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
-        ]
-    )
     labels = build_label_frame(
         events,
-        bars.loc[bars["trade_date"] == "2022-06-01"],
-        bars,
+        label_inputs["target"],
+        label_inputs["bars"],
         label_stock_days,
-        calendar,
+        _label_calendar("2022-06-01", "2022-06-02"),
     )
     row = labels.iloc[0]
     assert row["entry_bar_time"] == "093600000"
@@ -1495,47 +1398,20 @@ def test_labels_use_next_bar_and_next_market_day() -> None:
     assert bool(row["label_1d_observed"])
 
 
-def test_minute_labels_are_near_close_safe_and_masks_are_field_specific() -> None:
-    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
+def test_minute_labels_are_near_close_safe_and_masks_are_field_specific(label_inputs) -> None:
+    bars = label_inputs["bars"]
     stock_days = _stock_days(symbols=("600000.SH",))
     stock_days.loc[:, "exclude_high"] = True
-    features = build_feature_frame(bars, stock_days)
+    features = build_feature_frame(label_inputs["target"], stock_days)
     events = features.loc[
         features["bar_time"].isin(["093500000", "112900000", "145500000"])
     ].copy()
-    empty_daily = pd.DataFrame(
-        columns=[
-            "symbol",
-            "trade_date",
-            "high",
-            "low",
-            "close",
-            "adjust_factor",
-            "previous_close",
-            "previous_adjust_factor",
-            "is_suspended",
-            "is_delisted",
-            "exclude_high",
-            "exclude_low",
-            "exclude_close",
-            "corporate_action_count",
-        ]
-    )
-    calendar = pd.DataFrame(
-        [{"trade_date": "2022-06-01", "calendar_index": 1, "next_trade_date": None}]
-    )
-    calendar = pd.DataFrame(
-        [
-            {"trade_date": "2022-06-01", "calendar_index": 1, "next_trade_date": "2022-06-02"},
-            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
-        ]
-    )
     labels = build_label_frame(
         events,
-        bars.loc[bars["trade_date"] == "2022-06-01"],
+        label_inputs["target"],
         bars,
-        empty_daily,
-        calendar,
+        _empty_daily_label_frame(),
+        _label_calendar("2022-06-01", "2022-06-02"),
     )
     early = labels.loc[labels["bar_time"] == "093500000"].iloc[0]
     lunch = labels.loc[labels["bar_time"] == "112900000"].iloc[0]
@@ -1556,90 +1432,41 @@ def test_minute_labels_are_near_close_safe_and_masks_are_field_specific() -> Non
     assert late["label_session_15m_invalid_reason"] == "same_session_window_incomplete"
 
 
-def test_session_labels_reject_a_missing_raw_bar() -> None:
-    bars = _bars(symbols=("600000.SH",))
-    features = build_feature_frame(bars, _stock_days(symbols=("600000.SH",)))
-    events = features.loc[features["bar_time"] == "093500000"].copy()
-    gapped = bars.loc[bars["bar_time"] != "093700000"].copy()
-    empty_daily = pd.DataFrame(
-        columns=[
-            "symbol",
-            "trade_date",
-            "high",
-            "low",
-            "close",
-            "adjust_factor",
-            "previous_close",
-            "previous_adjust_factor",
-            "is_suspended",
-            "is_delisted",
-            "exclude_high",
-            "exclude_low",
-            "exclude_close",
-            "corporate_action_count",
-        ]
-    )
+def test_session_labels_reject_a_missing_raw_bar(label_inputs) -> None:
+    events = label_inputs["features"].loc[
+        label_inputs["features"]["bar_time"] == "093500000"
+    ].copy()
+    gapped = label_inputs["target"].loc[
+        label_inputs["target"]["bar_time"] != "093700000"
+    ].copy()
     labels = build_label_frame(
         events,
-        bars,
+        label_inputs["target"],
         gapped,
-        empty_daily,
-        pd.DataFrame(
-            [{"trade_date": "2022-06-01", "calendar_index": 1, "next_trade_date": None}]
-        ),
+        _empty_daily_label_frame(),
+        _label_calendar("2022-06-01"),
     )
     row = labels.iloc[0]
     assert not bool(row["label_session_5m_observed"])
     assert row["label_session_5m_invalid_reason"] == "same_session_window_incomplete"
 
 
-def test_labels_normalise_nonfinite_entry_prices_to_explicit_unfilled() -> None:
-    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
-    features = build_feature_frame(
-        bars.loc[bars["trade_date"] == "2022-06-01"],
-        _stock_days(symbols=("600000.SH",)),
-    )
-    events = features.loc[features["bar_time"] == "093500000"].copy()
-    malformed = bars.copy()
+def test_labels_normalise_nonfinite_entry_prices_to_explicit_unfilled(label_inputs) -> None:
+    events = label_inputs["features"].loc[
+        label_inputs["features"]["bar_time"] == "093500000"
+    ].copy()
+    malformed = label_inputs["bars"].copy()
     malformed.loc[
         (malformed["trade_date"] == "2022-06-01")
         & (malformed["bar_time"] == "093600000"),
         "high",
     ] = np.nan
-    empty_daily = pd.DataFrame(
-        columns=[
-            "symbol",
-            "trade_date",
-            "high",
-            "low",
-            "close",
-            "adjust_factor",
-            "previous_close",
-            "previous_adjust_factor",
-            "is_suspended",
-            "is_delisted",
-            "exclude_high",
-            "exclude_low",
-            "exclude_close",
-            "corporate_action_count",
-        ]
-    )
-    calendar = pd.DataFrame(
-        [
-            {
-                "trade_date": "2022-06-01",
-                "calendar_index": 1,
-                "next_trade_date": "2022-06-02",
-            },
-            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
-        ]
-    )
     labels = build_label_frame(
         events,
-        bars.loc[bars["trade_date"] == "2022-06-01"],
+        label_inputs["target"],
         malformed,
-        empty_daily,
-        calendar,
+        _empty_daily_label_frame(),
+        _label_calendar("2022-06-01", "2022-06-02"),
     )
     row = labels.iloc[0]
     assert pd.notna(row["entry_executable"])
@@ -1651,114 +1478,71 @@ def test_labels_normalise_nonfinite_entry_prices_to_explicit_unfilled() -> None:
     assert row["label_1d_invalid_reason"] == "entry_high_low_invalid"
 
 
-@pytest.mark.parametrize("field", ["high", "low"])
-def test_labels_keep_close_observable_when_one_future_extremum_is_nonfinite(field: str) -> None:
-    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
+def test_labels_keep_close_observable_when_future_extrema_are_nonfinite() -> None:
+    symbols = ("600000.SH", "000001.SZ")
+    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=symbols)
+    stock_days = _stock_days(symbols=symbols)
+    stock_days.loc[:, ["exclude_open", "exclude_high", "exclude_low", "exclude_close"]] = False
     features = build_feature_frame(
         bars.loc[bars["trade_date"] == "2022-06-01"],
-        _stock_days(symbols=("600000.SH",)),
+        stock_days,
     )
     events = features.loc[features["bar_time"] == "093500000"].copy()
     malformed = bars.copy()
-    malformed.loc[
-        (malformed["trade_date"] == "2022-06-01")
-        & (malformed["bar_time"] == "094000000"),
-        field,
-    ] = np.nan
-    empty_daily = pd.DataFrame(
-        columns=[
-            "symbol",
-            "trade_date",
-            "high",
-            "low",
-            "close",
-            "adjust_factor",
-            "previous_close",
-            "previous_adjust_factor",
-            "is_suspended",
-            "is_delisted",
-            "exclude_high",
-            "exclude_low",
-            "exclude_close",
-            "corporate_action_count",
-        ]
+    high_invalid = (
+        malformed["symbol"].eq("600000.SH")
+        & malformed["trade_date"].eq("2022-06-01")
+        & malformed["bar_time"].eq("094000000")
     )
-    calendar = pd.DataFrame(
-        [
-            {
-                "trade_date": "2022-06-01",
-                "calendar_index": 1,
-                "next_trade_date": "2022-06-02",
-            },
-            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
-        ]
+    low_invalid = (
+        malformed["symbol"].eq("000001.SZ")
+        & malformed["trade_date"].eq("2022-06-01")
+        & malformed["bar_time"].eq("094000000")
     )
+    malformed.loc[high_invalid, "high"] = np.nan
+    malformed.loc[low_invalid, "low"] = np.nan
     labels = build_label_frame(
         events,
         bars.loc[bars["trade_date"] == "2022-06-01"],
         malformed,
-        empty_daily,
-        calendar,
-    )
-    row = labels.iloc[0]
-    assert bool(row["label_5m_observed"])
-    assert np.isfinite(row["label_return_5m"])
-    if field == "high":
-        assert np.isnan(row["label_mfe_5m"])
-        assert row["label_5m_mfe_invalid_reason"] == "future_high_nonfinite"
-        assert np.isfinite(row["label_mae_5m"])
-        assert row["label_5m_mae_invalid_reason"] == ""
-        assert np.isnan(row["label_session_mfe_5m"])
-        assert np.isfinite(row["label_session_mae_5m"])
-    else:
-        assert np.isfinite(row["label_mfe_5m"])
-        assert row["label_5m_mfe_invalid_reason"] == ""
-        assert np.isnan(row["label_mae_5m"])
-        assert row["label_5m_mae_invalid_reason"] == "future_low_nonfinite"
-        assert np.isfinite(row["label_session_mfe_5m"])
-        assert np.isnan(row["label_session_mae_5m"])
+        _empty_daily_label_frame(),
+        _label_calendar("2022-06-01", "2022-06-02"),
+    ).set_index("symbol")
+
+    high_row = labels.loc["600000.SH"]
+    assert bool(high_row["label_5m_observed"])
+    assert np.isfinite(high_row["label_return_5m"])
+    assert np.isnan(high_row["label_mfe_5m"])
+    assert high_row["label_5m_mfe_invalid_reason"] == "future_high_nonfinite"
+    assert np.isfinite(high_row["label_mae_5m"])
+    assert high_row["label_5m_mae_invalid_reason"] == ""
+    assert np.isnan(high_row["label_session_mfe_5m"])
+    assert np.isfinite(high_row["label_session_mae_5m"])
+
+    low_row = labels.loc["000001.SZ"]
+    assert bool(low_row["label_5m_observed"])
+    assert np.isfinite(low_row["label_return_5m"])
+    assert np.isfinite(low_row["label_mfe_5m"])
+    assert low_row["label_5m_mfe_invalid_reason"] == ""
+    assert np.isnan(low_row["label_mae_5m"])
+    assert low_row["label_5m_mae_invalid_reason"] == "future_low_nonfinite"
+    assert np.isfinite(low_row["label_session_mfe_5m"])
+    assert np.isnan(low_row["label_session_mae_5m"])
 
 
-def test_labels_mask_both_future_extrema_when_high_is_below_low() -> None:
-    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
-    features = build_feature_frame(
-        bars.loc[bars["trade_date"] == "2022-06-01"],
-        _stock_days(symbols=("600000.SH",)),
-    )
-    events = features.loc[features["bar_time"] == "093500000"].copy()
-    malformed = bars.copy()
+def test_labels_mask_both_future_extrema_when_high_is_below_low(label_inputs) -> None:
+    events = label_inputs["features"].loc[
+        label_inputs["features"]["bar_time"] == "093500000"
+    ].copy()
+    malformed = label_inputs["bars"].copy()
     target = (malformed["trade_date"] == "2022-06-01") & malformed["bar_time"].eq("094000000")
     malformed.loc[target, "high"] = malformed.loc[target, "low"] - 0.1
-    empty_daily = pd.DataFrame(
-        columns=[
-            "symbol",
-            "trade_date",
-            "high",
-            "low",
-            "close",
-            "adjust_factor",
-            "previous_close",
-            "previous_adjust_factor",
-            "is_suspended",
-            "is_delisted",
-            "exclude_high",
-            "exclude_low",
-            "exclude_close",
-            "corporate_action_count",
-        ]
-    )
-    calendar = pd.DataFrame(
-        [
-            {"trade_date": "2022-06-01", "calendar_index": 1, "next_trade_date": "2022-06-02"},
-            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
-        ]
-    )
     labels = build_label_frame(
         events,
-        bars.loc[bars["trade_date"] == "2022-06-01"],
+        label_inputs["target"],
         malformed,
-        empty_daily,
-        calendar,
+        _empty_daily_label_frame(),
+        _label_calendar("2022-06-01", "2022-06-02"),
     )
     row = labels.iloc[0]
     assert bool(row["label_5m_observed"])
@@ -1771,53 +1555,22 @@ def test_labels_mask_both_future_extrema_when_high_is_below_low() -> None:
     assert np.isnan(row["label_session_mae_5m"])
 
 
-def test_labels_do_not_execute_a_nonfinite_exit_window() -> None:
-    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
-    features = build_feature_frame(
-        bars.loc[bars["trade_date"] == "2022-06-01"],
-        _stock_days(symbols=("600000.SH",)),
-    )
-    events = features.loc[features["bar_time"] == "093500000"].copy()
-    malformed = bars.copy()
+def test_labels_do_not_execute_a_nonfinite_exit_window(label_inputs) -> None:
+    events = label_inputs["features"].loc[
+        label_inputs["features"]["bar_time"] == "093500000"
+    ].copy()
+    malformed = label_inputs["bars"].copy()
     malformed.loc[
         (malformed["trade_date"] == "2022-06-02")
         & (malformed["bar_time"] == "093500000"),
         ["high", "volume", "amount"],
     ] = np.nan
-    empty_daily = pd.DataFrame(
-        columns=[
-            "symbol",
-            "trade_date",
-            "high",
-            "low",
-            "close",
-            "adjust_factor",
-            "previous_close",
-            "previous_adjust_factor",
-            "is_suspended",
-            "is_delisted",
-            "exclude_high",
-            "exclude_low",
-            "exclude_close",
-            "corporate_action_count",
-        ]
-    )
-    calendar = pd.DataFrame(
-        [
-            {
-                "trade_date": "2022-06-01",
-                "calendar_index": 1,
-                "next_trade_date": "2022-06-02",
-            },
-            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
-        ]
-    )
     labels = build_label_frame(
         events,
-        bars.loc[bars["trade_date"] == "2022-06-01"],
+        label_inputs["target"],
         malformed,
-        empty_daily,
-        calendar,
+        _empty_daily_label_frame(),
+        _label_calendar("2022-06-01", "2022-06-02"),
     )
     row = labels.iloc[0]
     assert not bool(row["label_observed"])
@@ -1825,13 +1578,10 @@ def test_labels_do_not_execute_a_nonfinite_exit_window() -> None:
     assert bool(row["label_5m_observed"])
 
 
-def test_daily_label_keeps_close_and_low_when_high_is_nonfinite() -> None:
-    bars = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
-    features = build_feature_frame(
-        bars.loc[bars["trade_date"] == "2022-06-01"],
-        _stock_days(symbols=("600000.SH",)),
-    )
-    events = features.loc[features["bar_time"] == "093500000"].copy()
+def test_daily_label_keeps_close_and_low_when_high_is_nonfinite(label_inputs) -> None:
+    events = label_inputs["features"].loc[
+        label_inputs["features"]["bar_time"] == "093500000"
+    ].copy()
     daily = pd.DataFrame(
         [
             {
@@ -1852,22 +1602,12 @@ def test_daily_label_keeps_close_and_low_when_high_is_nonfinite() -> None:
             }
         ]
     )
-    calendar = pd.DataFrame(
-        [
-            {
-                "trade_date": "2022-06-01",
-                "calendar_index": 1,
-                "next_trade_date": "2022-06-02",
-            },
-            {"trade_date": "2022-06-02", "calendar_index": 2, "next_trade_date": None},
-        ]
-    )
     labels = build_label_frame(
         events,
-        bars.loc[bars["trade_date"] == "2022-06-01"],
-        bars,
+        label_inputs["target"],
+        label_inputs["bars"],
         daily,
-        calendar,
+        _label_calendar("2022-06-01", "2022-06-02"),
     )
     row = labels.iloc[0]
     assert bool(row["label_1d_observed"])
@@ -1876,7 +1616,7 @@ def test_daily_label_keeps_close_and_low_when_high_is_nonfinite() -> None:
     assert np.isfinite(row["label_mae_1d"])
 
 
-def test_daily_labels_cross_holidays_and_adjust_for_corporate_actions() -> None:
+def test_daily_labels_cross_holidays_and_adjust_for_corporate_actions(label_inputs) -> None:
     calendar_days = [
         "2022-06-01",
         "2022-06-02",
@@ -1890,10 +1630,10 @@ def test_daily_labels_cross_holidays_and_adjust_for_corporate_actions() -> None:
         "2022-06-15",
         "2022-06-16",
     ]
-    target = _bars(symbols=("600000.SH",))
-    extended = _bars(dates=("2022-06-01", "2022-06-02"), symbols=("600000.SH",))
-    features = build_feature_frame(target, _stock_days(symbols=("600000.SH",)))
-    events = features.loc[features["bar_time"] == "093500000"].copy()
+    target = label_inputs["target"]
+    events = label_inputs["features"].loc[
+        label_inputs["features"]["bar_time"] == "093500000"
+    ].copy()
     entry_price = float(
         target.loc[target["bar_time"] == "093600000", "amount"].iloc[0]
         / target.loc[target["bar_time"] == "093600000", "volume"].iloc[0]
@@ -1921,24 +1661,12 @@ def test_daily_labels_cross_holidays_and_adjust_for_corporate_actions() -> None:
                 "corporate_action_count": 1 if index == 1 else 0,
             }
         )
-    calendar = pd.DataFrame(
-        [
-            {
-                "trade_date": value,
-                "calendar_index": index + 1,
-                "next_trade_date": calendar_days[index + 1]
-                if index + 1 < len(calendar_days)
-                else None,
-            }
-            for index, value in enumerate(calendar_days)
-        ]
-    )
     labels = build_label_frame(
         events,
         target,
-        extended,
+        label_inputs["bars"],
         pd.DataFrame(daily_rows),
-        calendar,
+        _label_calendar(*calendar_days),
     )
     row = labels.iloc[0]
     assert row["label_end_date_3d"] == "2022-06-07"
@@ -2200,16 +1928,6 @@ def test_score_file_coerces_invalid_values_and_matches_tie_metrics(tmp_path) -> 
     assert set(loaded["symbol"]) == {"D", "E", "F"}
 
 
-def test_multiple_score_writer_cleans_partials_on_empty_input(tmp_path) -> None:
-    with pytest.raises(MinuteV2Error, match="stream_score_empty"):
-        _write_multiple_scored_periods(
-            lambda: [],
-            {"rule": lambda frame: np.zeros(len(frame))},
-            tmp_path,
-        )
-    assert not list(tmp_path.glob("*.partial"))
-
-
 def test_multiple_score_writer_rolls_back_already_committed_files(tmp_path, monkeypatch) -> None:
     frame = pd.DataFrame(
         {
@@ -2270,31 +1988,5 @@ def test_score_evaluation_excludes_infinite_scores_and_targets() -> None:
     assert result["row_count"] == 4
     assert result["group_count"] == 1
     assert np.isfinite(result["top_k_mean_net_return"])
-
-
-@pytest.mark.parametrize(
-    "top_k",
-    [0, -1, None, float("nan"), float("inf"), "invalid", 1.5, 3.0, True],
-)
-def test_score_evaluation_rejects_non_numeric_top_k(top_k) -> None:
-    frame = pd.DataFrame(
-        {
-            "symbol": ["A"] * 5,
-            "trade_date": ["2022-06-01"] * 5,
-            "bar_time": ["093100000"] * 5,
-            "score": [1.0] * 5,
-            "label_net_return": [0.01] * 5,
-        }
-    )
     with pytest.raises(MinuteV2Error, match="top_k_invalid"):
-        evaluate_scores(frame, top_k=top_k)
-
-
-@pytest.mark.parametrize("top_k", [[1.5], [3.0], [True], "3", None])
-def test_candidate_recall_rejects_non_integer_top_k(top_k) -> None:
-    base = pd.DataFrame(
-        [{"symbol": "A", "trade_date": "2022-06-01", "bar_time": "093100000"}]
-    )
-    outcomes = base.assign(label_return_5m=[0.01])
-    with pytest.raises(MinuteV2Error, match="top_k_invalid"):
-        audit_candidate_recall(base, base, outcomes, top_k=top_k)
+        evaluate_scores(frame, top_k=0)

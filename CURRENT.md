@@ -59,9 +59,8 @@ Completed in the current working tree:
   root by resolving missing archive and ledger paths beside the manifest.
 - Study specifications now use workspace-relative paths where targets still
   exist. Deleted historical inputs are explicit `legacy://` provenance
-  references; the field-level migration record is
-  `research/path_migration_manifest.json`. Rerun outputs are isolated under
-  `runs/studies/` and never target durable records.
+  references. Rerun outputs are isolated under `runs/studies/` and never target
+  durable records.
 
 The QDP physical namespace still uses `qdp_v2`, hashed dataset generations, and
 an `active.json` pointer. Flattening it is maintenance work, not a prerequisite
@@ -70,9 +69,9 @@ provenance if that migration is undertaken.
 
 ## Verification
 
-The latest full run after the cleanup and resolver compatibility changes passed:
+The latest full run at the current source revision passed:
 
-- `292 passed` with pytest;
+- the full pytest suite;
 - repository Ruff checks;
 - bytecode compilation;
 - root-CLI lazy-import check (`torch_loaded=False`,
@@ -81,8 +80,6 @@ The latest full run after the cleanup and resolver compatibility changes passed:
 The final active-data checks also passed: QDP status with file verification,
 QDP quick check, the manifest-first GC dry run (`unreferenced=0`), and the
 current minute-v2 month verifier.
-- The study path migration check (`tools/research_path_migration.py --check`)
-  reports no unqualified legacy references.
 
 The active QDP quick/physical checks and the minute-v2 month verifier should be
 run again after any data migration. Do not treat a stale historical manifest

@@ -10,15 +10,8 @@ resolvable after the `daily_research`/`quant_data_platform` migration now point
 to `research/`, `data/qdp/`, or `runs/`. A `legacy://...` value is an explicit
 historical provenance reference to an artifact that is no longer present; it
 must not be opened as a current input or silently replaced with a guessed file.
-The complete field-level migration record is
-`research/path_migration_manifest.json`.
-
-Before adding or reactivating a study, check its path contract with:
-
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe tools/research_path_migration.py `
-  --workspace-root H:/quant_project --check
-```
+The migration itself is retained in Git history rather than as permanent
+runtime tooling.
 
 Older records may retain the original `daily_research` or
 `quant_data_platform` path strings as historical provenance. They are not

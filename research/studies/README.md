@@ -14,14 +14,5 @@ Path values follow these rules:
 - `legacy://...` identifies a deleted historical input. It preserves the
   original path for provenance and is not a readable filesystem path.
 
-The migration and audit record is
-[`research/path_migration_manifest.json`](../path_migration_manifest.json).
-Run the following check after editing a study specification:
-
-```powershell
-C:/Users/ASUS/miniconda3/envs/yolos/python.exe tools/research_path_migration.py `
-  --workspace-root H:/quant_project --check
-```
-
 Do not replace a `legacy://` reference with a similarly named artifact unless
 the artifact identity and contract have been independently verified.
