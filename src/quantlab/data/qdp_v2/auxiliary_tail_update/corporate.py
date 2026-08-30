@@ -8,14 +8,14 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.qdp_v2.auxiliary_update import (
-    CORPORATE_COLUMNS,
+from quantlab.data.qdp_v2.auxiliary_update.context import (
     SECONDARY_VALIDATION_WORKERS,
     AuxiliaryContext,
     _external_with_retry,
     _paths,
     _scan_sql,
 )
+from quantlab.data.qdp_v2.auxiliary_update.corporate import CORPORATE_COLUMNS
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 
 from .common import (

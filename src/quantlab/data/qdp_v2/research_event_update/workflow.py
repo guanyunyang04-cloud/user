@@ -11,8 +11,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from quantlab.data.core.json_io import json_safe
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.core.io import json_safe
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
 )
@@ -174,9 +174,7 @@ def run_pending(
             include_announcements=True,
         )
     if seal_runtime and phase in {"all", "reports"}:
-        from quantlab.data.qdp_v2.runtime_archive import (
-            seal_completed_workflow,
-        )
+        from quantlab.data.qdp_v2.runtime_archive.seal import seal_completed_workflow
 
         result["runtime_archive"] = seal_completed_workflow(
             UPDATE_ID,

@@ -8,19 +8,14 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
-from quantlab.data.domains.contracts import DataDomain
-from quantlab.data.qdp_v2.auxiliary_update import (
-    _resolve_tushare_token,
-    _TushareClient,
-)
+from quantlab.core.io import sha256_file as _sha256
+from quantlab.data.domains.contracts.schema import DataDomain
+from quantlab.data.qdp_v2.auxiliary_update.context import _resolve_tushare_token, _TushareClient
 from quantlab.data.qdp_v2.manifest import (
     qdp_v2_root,
     read_active_manifest,
 )
-from quantlab.data.qdp_v2.research_event_update import (
-    _sha256,
-    _write_parquet,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _write_parquet
 from quantlab.data.qdp_v2.status import active_dataset_map
 
 from .config import (

@@ -10,7 +10,7 @@ from typing import Any
 
 import pyarrow as pa
 
-from quantlab.data.core.json_io import json_safe, read_json
+from quantlab.core.io import json_safe, read_optional_json
 from quantlab.data.core.paths import qdp_paths
 
 ACTIVE_MANIFEST_VERSION = 2
@@ -225,7 +225,7 @@ class DatasetManifest:
 
 
 def read_dataset_manifest(path: str | Path) -> DatasetManifest:
-    return DatasetManifest.from_mapping(read_json(path))
+    return DatasetManifest.from_mapping(read_optional_json(path))
 
 
 def write_dataset_manifest(root: str | Path, manifest: DatasetManifest) -> Path:
@@ -234,7 +234,7 @@ def write_dataset_manifest(root: str | Path, manifest: DatasetManifest) -> Path:
 
 
 def read_active_manifest(root: str | Path) -> dict[str, Any]:
-    return read_json(Path(root) / "active" / "active.json")
+    return read_optional_json(Path(root) / "active" / "active.json")
 
 
 def write_active_manifest(root: str | Path, payload: Mapping[str, Any]) -> Path:

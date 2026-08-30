@@ -11,7 +11,7 @@ from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     resolve_manifest_path,
 )
-from quantlab.data.qdp_v2.repair import _sql_literal
+from quantlab.data.qdp_v2.repair.common import _sql_literal
 
 from .common import (
     _path_texts,

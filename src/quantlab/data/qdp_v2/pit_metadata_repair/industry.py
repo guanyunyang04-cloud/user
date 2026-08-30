@@ -8,11 +8,9 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.core.json_io import json_safe
-from quantlab.data.qdp_v2.auxiliary_update import (
-    AuxiliaryContext,
-    _fetch_cninfo_industry_parts,
-)
+from quantlab.core.io import json_safe
+from quantlab.data.qdp_v2.auxiliary_update.context import AuxiliaryContext
+from quantlab.data.qdp_v2.auxiliary_update.industry import _fetch_cninfo_industry_parts
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
@@ -21,8 +19,8 @@ from quantlab.data.qdp_v2.manifest import (
     read_dataset_manifest,
     utc_now,
 )
-from quantlab.data.qdp_v2.repair import (
-    _sql_literal,
+from quantlab.data.qdp_v2.repair.common import _sql_literal
+from quantlab.data.qdp_v2.repair.mutation import (
     mutate_active_shards_from_parquet,
     update_active_manifest_metadata,
 )

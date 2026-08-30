@@ -6,8 +6,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from quantlab.data.core.json_io import json_safe
-from quantlab.data.providers import BaostockProvider
+from quantlab.core.io import json_safe
+from quantlab.data.providers.baostock.provider import BaostockProvider
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
     qdp_v2_root,
@@ -15,9 +16,8 @@ from quantlab.data.qdp_v2.manifest import (
     utc_now,
     write_active_manifest,
 )
-from quantlab.data.qdp_v2.repair import (
+from quantlab.data.qdp_v2.repair.mutation import (
     mutate_active_shards_from_parquet,
-    resolve_active_domain,
     update_active_manifest_metadata,
 )
 

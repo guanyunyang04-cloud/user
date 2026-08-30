@@ -41,7 +41,7 @@ COMMAND_MODULES: dict[tuple[str, ...], str] = {
     ("minute-parity",): "quantlab.data.minute_parity",
     ("minute-repair",): "quantlab.data.qdp_v2.minute_repair.cli",
     ("compact",): "quantlab.data.qdp_v2.compact",
-    ("repair",): "quantlab.data.qdp_v2.repair",
+    ("repair",): "quantlab.data.qdp_v2.repair.cli",
 }
 
 ARG_ALIASES: dict[tuple[str, ...], list[str]] = {

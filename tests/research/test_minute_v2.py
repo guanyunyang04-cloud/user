@@ -39,7 +39,6 @@ from quantlab.research.minute_v2.labels import (
     _fixture_factor_quality,
     build_label_frame,
 )
-from quantlab.research.minute_v2.mining import mine_formula_features
 from quantlab.research.minute_v2.models import (
     evaluate_scores,
     fit_ridge,
@@ -2024,7 +2023,7 @@ def test_replay_skips_nonfinite_scores_capacity_and_returns() -> None:
     assert trades.empty
 
 
-def test_rule_ridge_and_formula_mining_have_small_deterministic_contracts() -> None:
+def test_rule_and_ridge_have_small_deterministic_contracts() -> None:
     rng = np.random.default_rng(7)
     rows = []
     for day in range(20):
@@ -2054,16 +2053,6 @@ def test_rule_ridge_and_formula_mining_have_small_deterministic_contracts() -> N
     )
     prediction = ridge.predict(frame.loc[frame["period"] == "validation"])
     assert np.corrcoef(prediction, frame.loc[frame["period"] == "validation", "label_net_return"])[0, 1] > 0.8
-    mining = mine_formula_features(
-        frame.loc[frame["period"] == "train"],
-        frame.loc[frame["period"] == "validation"],
-        seed_features=("return_1m", "return_5m"),
-        maximum_candidates=12,
-        maximum_selected=3,
-        minimum_coverage=0.9,
-    )
-    assert mining["candidate_count"] == 9
-    assert mining["selected_count"] > 0
 
 
 def test_streamed_ridge_matches_batch_fit_when_medians_are_fully_observed() -> None:

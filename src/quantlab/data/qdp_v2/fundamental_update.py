@@ -13,13 +13,9 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from quantlab.core.io import atomic_copy_file
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import atomic_copy_file, json_safe
 from quantlab.data.core.paths import qdp_paths
-from quantlab.data.qdp_v2.auxiliary_update import (
-    _resolve_tushare_token,
-    _TushareClient,
-)
+from quantlab.data.qdp_v2.auxiliary_update.context import _resolve_tushare_token, _TushareClient
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,

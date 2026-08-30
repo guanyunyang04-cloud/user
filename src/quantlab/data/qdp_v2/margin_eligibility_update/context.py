@@ -13,7 +13,7 @@ import duckdb
 import pandas as pd
 
 from quantlab.data.core.paths import qdp_paths
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     atomic_write_json,
@@ -24,9 +24,7 @@ from quantlab.data.qdp_v2.manifest import (
     resolve_manifest_path,
     utc_now,
 )
-from quantlab.data.qdp_v2.research_event_update import (
-    _assert_credential_free,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _assert_credential_free
 from quantlab.data.qdp_v2.status import active_dataset_map
 
 from .config import (

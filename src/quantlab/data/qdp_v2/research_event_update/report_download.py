@@ -16,10 +16,7 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.qdp_v2.auxiliary_update import (
-    _resolve_tushare_token,
-    _TushareClient,
-)
+from quantlab.data.qdp_v2.auxiliary_update.context import _resolve_tushare_token, _TushareClient
 from quantlab.data.qdp_v2.manifest import (
     utc_now,
 )

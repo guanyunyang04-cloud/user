@@ -8,30 +8,28 @@ import duckdb
 import pandas as pd
 import pyarrow.parquet as pq
 
-from quantlab.data.domains.contracts import (
-    normalize_financial_quarterly_frame,
-)
-from quantlab.data.qdp_v2 import auxiliary_tail_update, auxiliary_update
+from quantlab.data.domains.contracts.fundamentals import normalize_financial_quarterly_frame
 from quantlab.data.qdp_v2.audit import _manifest_contract_findings
-from quantlab.data.qdp_v2.auxiliary_tail_update import (
-    _normalize_cninfo_share_change,
+from quantlab.data.qdp_v2.auxiliary_tail_update import index as auxiliary_tail_index
+from quantlab.data.qdp_v2.auxiliary_tail_update import orchestrator as auxiliary_tail_update_orchestrator
+from quantlab.data.qdp_v2.auxiliary_tail_update.common import (
     _only_changed_share_events,
     _unconfirmed_share_detections,
 )
-from quantlab.data.qdp_v2.auxiliary_tail_update import index as auxiliary_tail_index
-from quantlab.data.qdp_v2.auxiliary_update import (
-    TushareRateLimitError,
-    _baostock_snapshot_worker,
-    _normalize_cninfo_dividend,
-    _normalize_cninfo_industry_history,
+from quantlab.data.qdp_v2.auxiliary_tail_update.config import _normalize_cninfo_share_change
+from quantlab.data.qdp_v2.auxiliary_update import baostock as auxiliary_baostock
+from quantlab.data.qdp_v2.auxiliary_update import orchestrator as auxiliary_orchestrator
+from quantlab.data.qdp_v2.auxiliary_update.baostock import _baostock_snapshot_worker
+from quantlab.data.qdp_v2.auxiliary_update.context import TushareRateLimitError, _TushareClient
+from quantlab.data.qdp_v2.auxiliary_update.corporate import _normalize_cninfo_dividend, _normalize_dividend
+from quantlab.data.qdp_v2.auxiliary_update.industry import _normalize_cninfo_industry_history
+from quantlab.data.qdp_v2.auxiliary_update.names import _normalize_name_intervals
+from quantlab.data.qdp_v2.auxiliary_update.secondary import (
     _normalize_comparison_text,
-    _normalize_daily_basic,
-    _normalize_dividend,
     _normalize_industry_comparison,
-    _normalize_name_intervals,
-    _TushareClient,
-    _valuation_secondary_policy,
 )
+from quantlab.data.qdp_v2.auxiliary_update.shares import _normalize_daily_basic
+from quantlab.data.qdp_v2.auxiliary_update.valuation import _valuation_secondary_policy
 from quantlab.data.qdp_v2.baostock_update import _valuation_frame
 from quantlab.data.qdp_v2.fundamental_update import (
     _normalize_financial,
@@ -45,7 +43,7 @@ from quantlab.data.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quantlab.data.qdp_v2.repair import (
+from quantlab.data.qdp_v2.repair.mutation import (
     replace_active_table_from_parquet,
     update_active_manifest_metadata,
 )
@@ -103,8 +101,8 @@ def test_auxiliary_repair_defaults_to_free_source_tail(
         calls.update(kwargs)
         return {"status": "updated", "provider_policy": "free"}
 
-    monkeypatch.setattr(auxiliary_tail_update, "run_auxiliary_tail_update", fake_tail)
-    result = auxiliary_update.run_auxiliary_repair(
+    monkeypatch.setattr(auxiliary_tail_update_orchestrator, "run_auxiliary_tail_update", fake_tail)
+    result = auxiliary_orchestrator.run_auxiliary_repair(
         as_of_date="2026-07-21",
         workspace_root=tmp_path,
         domains=("name_change",),
@@ -514,7 +512,7 @@ def test_baostock_snapshot_worker_checkpoints_each_date(
         query_stock_industry=query_stock_industry,
     )
     monkeypatch.setitem(sys.modules, "baostock", fake_baostock)
-    monkeypatch.setattr(auxiliary_update.time, "sleep", lambda _: None)
+    monkeypatch.setattr(auxiliary_baostock.time, "sleep", lambda _: None)
 
     output_dir = tmp_path / "parts"
     result = _baostock_snapshot_worker(
@@ -578,7 +576,7 @@ def test_index_tail_dates_casts_parquet_dates_before_max(
         target_date="2026-07-21",
     )
 
-    assert auxiliary_tail_update._index_tail_dates(ctx) == [
+    assert auxiliary_tail_index._index_tail_dates(ctx) == [
         "2026-07-17",
         "2026-07-20",
         "2026-07-21",

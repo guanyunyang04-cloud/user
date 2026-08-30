@@ -5,15 +5,6 @@ import json
 import sys
 from typing import Any
 
-from .data import verify_current_data
-from .ensemble import evaluate as evaluate_ensemble
-from .minute import DEFAULT_PARTICIPATION_RATE, run_minute_baseline, run_minute_walk_forward
-from .minute_v2.cli import main as minute_v2_main
-from .sequence import evaluate as evaluate_sequence
-from .sequence import train_all as train_all_sequence
-from .sequence import train_fold as train_sequence_fold
-from .tree import compare, evaluate, train_all, train_fold
-
 
 def _print(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2), flush=True)
@@ -22,6 +13,8 @@ def _print(value: Any) -> None:
 def main(argv: list[str] | None = None) -> int:
     values = list(sys.argv[1:] if argv is None else argv)
     if values and values[0] == "minute-v2":
+        from .minute_v2.cli import main as minute_v2_main
+
         return int(minute_v2_main(values[1:]) or 0)
 
     parser = argparse.ArgumentParser(description="Current daily research pipeline")
@@ -47,21 +40,23 @@ def main(argv: list[str] | None = None) -> int:
     minute.add_argument("--evaluation-end-date", default="")
     minute.add_argument("--output-dir", required=True)
     minute.add_argument("--top-k", type=int, default=5)
-    minute.add_argument("--maximum-participation-rate", type=float, default=DEFAULT_PARTICIPATION_RATE)
+    minute.add_argument("--maximum-participation-rate", type=float)
     walk = subparsers.add_parser("minute-walk-forward")
     walk.add_argument("--parquet", action="append", required=True)
     walk.add_argument("--evaluation-start-year", type=int, required=True)
     walk.add_argument("--evaluation-end-year", type=int, required=True)
     walk.add_argument("--output-dir", required=True)
     walk.add_argument("--top-k", type=int, default=5)
-    walk.add_argument("--maximum-participation-rate", type=float, default=DEFAULT_PARTICIPATION_RATE)
-    minute_v2 = subparsers.add_parser("minute-v2")
-    minute_v2.add_argument("args", nargs=argparse.REMAINDER)
+    walk.add_argument("--maximum-participation-rate", type=float)
     args = parser.parse_args(values)
 
     if args.command == "verify":
+        from .data import verify_current_data
+
         _print(verify_current_data())
     elif args.command == "train-tree":
+        from .tree import train_all, train_fold
+
         result = (
             train_fold(args.features, args.fold)
             if args.fold is not None
@@ -69,10 +64,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         _print(result)
     elif args.command == "evaluate-tree":
+        from .tree import evaluate
+
         _print(evaluate(args.features))
     elif args.command == "compare-tree":
+        from .tree import compare
+
+        _print(compare())
+    elif args.command == "run-tree-comparison":
+        from .data import verify_current_data
+        from .tree import compare, evaluate, train_all
+
+        _print(verify_current_data())
+        for feature_count in (158, 183):
+            train_all(feature_count)
+            _print(evaluate(feature_count))
         _print(compare())
     elif args.command == "train-sequence":
+        from .sequence import train_all as train_all_sequence
+        from .sequence import train_fold as train_sequence_fold
+
         result = (
             train_sequence_fold(args.fold)
             if args.fold is not None
@@ -80,10 +91,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         _print(result)
     elif args.command == "evaluate-sequence":
+        from .sequence import evaluate as evaluate_sequence
+
         _print(evaluate_sequence())
     elif args.command == "evaluate-ensemble":
+        from .ensemble import evaluate as evaluate_ensemble
+
         _print(evaluate_ensemble())
     elif args.command == "minute-baseline":
+        from .minute import DEFAULT_PARTICIPATION_RATE, run_minute_baseline
+
         _print(
             run_minute_baseline(
                 args.parquet,
@@ -92,10 +109,16 @@ def main(argv: list[str] | None = None) -> int:
                 evaluation_end_date=args.evaluation_end_date,
                 output_dir=args.output_dir,
                 top_k=args.top_k,
-                maximum_participation_rate=args.maximum_participation_rate,
+                maximum_participation_rate=(
+                    DEFAULT_PARTICIPATION_RATE
+                    if args.maximum_participation_rate is None
+                    else args.maximum_participation_rate
+                ),
             )
         )
     elif args.command == "minute-walk-forward":
+        from .minute import DEFAULT_PARTICIPATION_RATE, run_minute_walk_forward
+
         _print(
             run_minute_walk_forward(
                 args.parquet,
@@ -103,17 +126,13 @@ def main(argv: list[str] | None = None) -> int:
                 evaluation_end_year=args.evaluation_end_year,
                 output_dir=args.output_dir,
                 top_k=args.top_k,
-                maximum_participation_rate=args.maximum_participation_rate,
+                maximum_participation_rate=(
+                    DEFAULT_PARTICIPATION_RATE
+                    if args.maximum_participation_rate is None
+                    else args.maximum_participation_rate
+                ),
             )
         )
-    elif args.command == "minute-v2":
-        return int(minute_v2_main(list(args.args)) or 0)
-    else:
-        _print(verify_current_data())
-        for feature_count in (158, 183):
-            train_all(feature_count)
-            _print(evaluate(feature_count))
-        _print(compare())
     return 0
 
 

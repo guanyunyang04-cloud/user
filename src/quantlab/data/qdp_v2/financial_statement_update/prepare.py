@@ -12,19 +12,15 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.core.io import sha256_file as _sha256
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     dataset_manifest_for_id,
     qdp_v2_root,
     read_dataset_manifest,
     resolve_manifest_path,
 )
-from quantlab.data.qdp_v2.research_event_update import (
-    _identity_symbols,
-    _open_dates,
-    _sha256,
-    _write_parquet,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _identity_symbols, _open_dates, _write_parquet
 
 from .config import (
     BALANCE_DERIVED_COLUMNS,

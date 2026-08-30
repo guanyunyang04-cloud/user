@@ -15,9 +15,7 @@ from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
     utc_now,
 )
-from quantlab.data.qdp_v2.research_event_update import (
-    _assert_credential_free,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _assert_credential_free
 
 from .config import (
     END_DATE,

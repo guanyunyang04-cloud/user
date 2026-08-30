@@ -10,17 +10,12 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import (
-    DataDomain,
-    DomainFetchRequest,
-    FetchRequest,
-    ProviderResult,
-    build_intraday_daily_feature_frame,
-    coverage_report_for_domain,
-    coverage_report_for_frame,
-    normalize_domain_frame,
-    validate_provider_name,
-)
+from quantlab.data.domains.contracts.base import validate_provider_name
+from quantlab.data.domains.contracts.coverage import coverage_report_for_domain, coverage_report_for_frame
+from quantlab.data.domains.contracts.dispatch import normalize_domain_frame
+from quantlab.data.domains.contracts.intraday import build_intraday_daily_feature_frame
+from quantlab.data.domains.contracts.requests import DomainFetchRequest, FetchRequest, ProviderResult
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.progress import progress_write
 from quantlab.data.provider_symbols import (
     mootdx_symbol as _mootdx_symbol,

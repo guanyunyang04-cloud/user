@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from quantlab.data.qdp_v2 import update as update_module
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -18,19 +19,18 @@ from quantlab.data.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quantlab.data.qdp_v2.pit_history import (
-    PitHistoryContext,
+from quantlab.data.qdp_v2.pit_history.config import (
     _factor_rows,
     _historical_names,
-    _historical_st_status,
     _name_implies_st,
     _normalize_eastmoney_history,
     _normalize_sina_factors,
-    _prepare_symbol_parts,
-    audit_symbol_lifecycle_effectivity,
-    normalize_symbol_lifecycle_effectivity,
 )
-from quantlab.data.qdp_v2.repair import resolve_active_domain
+from quantlab.data.qdp_v2.pit_history.context import PitHistoryContext
+from quantlab.data.qdp_v2.pit_history.download import _historical_st_status
+from quantlab.data.qdp_v2.pit_history.lifecycle_audit import audit_symbol_lifecycle_effectivity
+from quantlab.data.qdp_v2.pit_history.orchestrator import normalize_symbol_lifecycle_effectivity
+from quantlab.data.qdp_v2.pit_history.prepare import _prepare_symbol_parts
 
 
 def _lifecycle_workspace(tmp_path: Path) -> Path:

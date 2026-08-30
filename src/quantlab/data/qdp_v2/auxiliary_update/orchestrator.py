@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 
 from .context import (
     AUXILIARY_DOMAINS,
@@ -110,9 +110,7 @@ def _run_free_source_repair(
     workspace_root: str | Path | None,
     domains: tuple[str, ...],
 ) -> dict[str, Any]:
-    from quantlab.data.qdp_v2.auxiliary_tail_update import (
-        run_auxiliary_tail_update,
-    )
+    from quantlab.data.qdp_v2.auxiliary_tail_update.orchestrator import run_auxiliary_tail_update
 
     result = run_auxiliary_tail_update(
         as_of_date=as_of_date,
@@ -289,9 +287,7 @@ def run_auxiliary_update(
             "domains": list(AUXILIARY_DOMAINS),
             "provider_policy": FREE_SOURCE_POLICY,
         }
-    from quantlab.data.qdp_v2.auxiliary_tail_update import (
-        run_auxiliary_tail_update,
-    )
+    from quantlab.data.qdp_v2.auxiliary_tail_update.orchestrator import run_auxiliary_tail_update
 
     return run_auxiliary_tail_update(
         as_of_date=ctx.target_date,

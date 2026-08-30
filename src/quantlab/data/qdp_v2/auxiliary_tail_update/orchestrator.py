@@ -8,10 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.qdp_v2.auxiliary_update import (
-    AUXILIARY_DOMAINS,
-    _context,
-)
+from quantlab.data.qdp_v2.auxiliary_update.context import AUXILIARY_DOMAINS, _context
 
 from .common import (
     _checked_through,

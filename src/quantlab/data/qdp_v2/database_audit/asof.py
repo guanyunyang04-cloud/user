@@ -24,7 +24,7 @@ from quantlab.data.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quantlab.data.qdp_v2.repair import _sql_literal
+from quantlab.data.qdp_v2.repair.common import _sql_literal
 from quantlab.data.qdp_v2.status import active_dataset_map
 
 from .common import (

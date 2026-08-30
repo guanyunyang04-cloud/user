@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.data.domains.contracts.schema import DataDomain
 
 UPDATE_ID = "financial_statement_quarterly_pit_v2"
 

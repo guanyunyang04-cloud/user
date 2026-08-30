@@ -9,14 +9,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from quantlab.data.qdp_v2.auxiliary_update import (
-    AuxiliaryContext,
-    _manifest,
-    _paths,
-    _scan_sql,
-)
+from quantlab.data.qdp_v2.auxiliary_update.context import AuxiliaryContext, _manifest, _paths, _scan_sql
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
-from quantlab.data.qdp_v2.repair import (
+from quantlab.data.qdp_v2.repair.mutation import (
     append_active_shard,
     update_active_manifest_metadata,
 )

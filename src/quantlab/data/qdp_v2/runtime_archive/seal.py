@@ -12,11 +12,9 @@ from typing import Any
 
 import pandas as pd
 
+from quantlab.core.io import sha256_file as _sha256
 from quantlab.data.qdp_v2.manifest import atomic_write_json, utc_now
-from quantlab.data.qdp_v2.research_event_update import (
-    _assert_credential_free,
-    _sha256,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _assert_credential_free
 
 from .archive import (
     _create_tar_zst,
@@ -47,6 +45,31 @@ from .ledger import (
     _state_snapshot,
     build_ledger,
 )
+
+
+def _resolve_manifest_artifact_path(
+    value: str | Path,
+    manifest_path: str | Path,
+) -> Path:
+    """Resolve an archive artifact, tolerating manifests from the old root.
+
+    Older runtime manifests stored absolute paths below ``quant_data_platform``.
+    The archive and ledger are still required to live beside their manifest, so
+    a missing absolute path can be safely remapped to that sibling without
+    weakening the hash checks performed by the caller.
+    """
+
+    manifest = Path(manifest_path).resolve()
+    candidate = Path(str(value))
+    if not candidate.is_absolute():
+        candidate = manifest.parent / candidate
+    candidate = candidate.resolve()
+    if candidate.is_file():
+        return candidate
+    sibling = (manifest.parent / Path(str(value)).name).resolve()
+    if sibling.is_file():
+        return sibling
+    return candidate
 
 
 def seal_unit(
@@ -125,8 +148,8 @@ def seal_unit(
 def verify_unit_manifest(manifest_path: str | Path) -> dict[str, Any]:
     path = Path(manifest_path).resolve()
     manifest = dict(json.loads(path.read_text(encoding="utf-8")))
-    archive_path = Path(str(manifest["archive_path"])).resolve()
-    ledger_path = Path(str(manifest["ledger_path"])).resolve()
+    archive_path = _resolve_manifest_artifact_path(manifest["archive_path"], path)
+    ledger_path = _resolve_manifest_artifact_path(manifest["ledger_path"], path)
     if _sha256(archive_path) != str(manifest.get("archive_sha256", "")) or _sha256(ledger_path) != str(
         manifest.get("ledger_sha256", "")
     ):
@@ -167,8 +190,8 @@ def _sample_restore(
         except OSError:
             pass
     result = restore_archive(
-        str(selected["archive_path"]),
-        str(selected["ledger_path"]),
+        str(_resolve_manifest_artifact_path(selected["archive_path"], selected["manifest_path"])),
+        str(_resolve_manifest_artifact_path(selected["ledger_path"], selected["manifest_path"])),
         target_root=check_root,
     )
     restored_files = [path for path in check_root.rglob("*") if path.is_file()]
@@ -213,7 +236,10 @@ def seal_workflows(
         unit_map = {unit.key: unit for unit in units}
         for manifest in manifests:
             unit = unit_map[str(manifest["unit_key"])]
-            ledger = pd.read_parquet(str(manifest["ledger_path"]))
+            ledger_path = _resolve_manifest_artifact_path(
+                manifest["ledger_path"], manifest["manifest_path"]
+            )
+            ledger = pd.read_parquet(ledger_path)
             deletion.append(
                 {
                     "unit_key": unit.key,

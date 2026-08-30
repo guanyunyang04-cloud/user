@@ -10,7 +10,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from quantlab.data.qdp_v2 import resolve_active_domain
+from quantlab.data.qdp_v2.active import resolve_active_domain
 
 FEATURE_NAMES = (
     "morning_return",

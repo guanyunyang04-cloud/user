@@ -9,14 +9,14 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     utc_now,
 )
-from quantlab.data.qdp_v2.repair import (
-    _sql_literal,
+from quantlab.data.qdp_v2.repair.common import _sql_literal
+from quantlab.data.qdp_v2.repair.mutation import (
     mutate_active_shards_from_parquet,
-    resolve_active_domain,
     update_active_manifest_metadata,
 )
 

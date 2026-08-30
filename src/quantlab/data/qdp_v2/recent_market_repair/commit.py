@@ -14,9 +14,7 @@ import pyarrow.parquet as pq
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
 )
-from quantlab.data.qdp_v2.repair import (
-    bulk_append_active_shards_from_parquet,
-)
+from quantlab.data.qdp_v2.repair.mutation import bulk_append_active_shards_from_parquet
 
 from .config import (
     DAILY_COLUMNS,

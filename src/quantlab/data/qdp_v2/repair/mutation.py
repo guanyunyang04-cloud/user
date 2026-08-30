@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.manifest import (
     resolve_manifest_path,
 )
@@ -20,10 +21,7 @@ from quantlab.data.qdp_v2.manifest import (
 from .common import (
     _time_token,
 )
-from .model import (
-    QdpV2RepairError,
-    resolve_active_domain,
-)
+from .errors import QdpV2RepairError
 from .validation import (
     _commit_manifest,
     _common_schema,

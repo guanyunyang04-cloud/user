@@ -10,8 +10,8 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import DomainFetchRequest
-from quantlab.data.providers import MootdxOnlineProvider
+from quantlab.data.domains.contracts.requests import DomainFetchRequest
+from quantlab.data.providers.mootdx.provider import MootdxOnlineProvider
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
 )

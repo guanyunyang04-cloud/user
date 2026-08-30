@@ -6,12 +6,12 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from quantlab.data.qdp_v2.runtime_archive import (
-    RuntimeArchiveError,
-    restore_archive,
+from quantlab.data.qdp_v2.runtime_archive.archive import restore_archive, verify_archive
+from quantlab.data.qdp_v2.runtime_archive.config import RuntimeArchiveError
+from quantlab.data.qdp_v2.runtime_archive.seal import (
     seal_completed_workflow,
     seal_workflows,
-    verify_archive,
+    verify_unit_manifest,
 )
 
 WORKFLOW = "research_report_rc_backfill_v1"
@@ -123,6 +123,29 @@ def test_runtime_archive_corruption_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeArchiveError):
         verify_archive(archive, pd.read_parquet(manifest["ledger_path"]))
+
+
+def test_runtime_archive_verifier_recovers_legacy_absolute_root(tmp_path: Path) -> None:
+    _expanded_fixture(tmp_path)
+    sealed = seal_workflows(workspace_root=tmp_path, workflows=(WORKFLOW,))
+    manifest_path = Path(sealed["manifests"][0])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["archive_path"] = str(
+        Path(str(manifest["archive_path"])).parent.parent.parent.parent
+        / "quant_data_platform"
+        / "data"
+        / "qdp_runtime_archives"
+        / WORKFLOW
+        / "raw__moneyflow"
+        / "year=2020"
+        / "raw.tar.zst"
+    )
+    manifest["ledger_path"] = str(Path(manifest["archive_path"]).with_name("ledger.parquet"))
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = verify_unit_manifest(manifest_path)
+
+    assert result["status"] == "ok"
 
 
 def test_runtime_archive_auto_seal_and_different_existing_unit_is_rejected(

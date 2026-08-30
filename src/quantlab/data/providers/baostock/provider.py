@@ -11,20 +11,19 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import (
-    DataDomain,
+from quantlab.data.domains.contracts.base import validate_provider_name
+from quantlab.data.domains.contracts.coverage import coverage_report_for_domain, coverage_report_for_frame
+from quantlab.data.domains.contracts.dispatch import normalize_domain_frame
+from quantlab.data.domains.contracts.intraday import build_intraday_daily_feature_frame
+from quantlab.data.domains.contracts.market import normalize_market_frame
+from quantlab.data.domains.contracts.requests import (
     DatePartitionFetchRequest,
     DatePartitionProviderResult,
     DomainFetchRequest,
     FetchRequest,
     ProviderResult,
-    build_intraday_daily_feature_frame,
-    coverage_report_for_domain,
-    coverage_report_for_frame,
-    normalize_domain_frame,
-    normalize_market_frame,
-    validate_provider_name,
 )
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.progress import create_progress, progress_write
 
 from .frames import (

@@ -7,10 +7,8 @@ from collections.abc import Sequence
 import numpy as np
 import pandas as pd
 
-from quantlab.data.domains.contracts import DataDomain
-from quantlab.data.qdp_v2.research_event_update import (
-    _next_open_date,
-)
+from quantlab.data.domains.contracts.schema import DataDomain
+from quantlab.data.qdp_v2.research_event_update.context import _next_open_date
 
 from .config import (
     BALANCE_DERIVED_COLUMNS,

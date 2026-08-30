@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.qdp_v2.auxiliary_update import AUXILIARY_DOMAINS
+from quantlab.data.qdp_v2.auxiliary_update.context import AUXILIARY_DOMAINS
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     resolve_manifest_path,

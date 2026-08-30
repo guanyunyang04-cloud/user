@@ -18,9 +18,7 @@ from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     utc_now,
 )
-from quantlab.data.qdp_v2.repair import (
-    update_active_manifest_metadata,
-)
+from quantlab.data.qdp_v2.repair.mutation import update_active_manifest_metadata
 
 from .baostock import (
     _valid_parquet_columns,
@@ -108,8 +106,9 @@ def _mootdx_corporate_validation_worker(
     output_dir: str,
     target_date: str,
 ) -> dict[str, Any]:
-    from quantlab.data.domains.contracts import DataDomain, DomainFetchRequest
-    from quantlab.data.providers import MootdxOnlineProvider
+    from quantlab.data.domains.contracts.requests import DomainFetchRequest
+    from quantlab.data.domains.contracts.schema import DataDomain
+    from quantlab.data.providers.mootdx.provider import MootdxOnlineProvider
 
     destination = Path(output_dir)
     destination.mkdir(parents=True, exist_ok=True)

@@ -9,15 +9,13 @@ from typing import Any
 
 import pandas as pd
 
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     qdp_v2_root,
     read_active_manifest,
 )
-from quantlab.data.qdp_v2.repair import (
-    _sql_literal,
-    resolve_active_domain,
-)
+from quantlab.data.qdp_v2.repair.common import _sql_literal
 
 from .config import (
     DEFAULT_START_DATE,

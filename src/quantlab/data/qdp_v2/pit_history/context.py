@@ -15,14 +15,12 @@ import pandas as pd
 
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.core.security_status import st_status_from_name
-from quantlab.data.providers import BaostockProvider
+from quantlab.data.providers.baostock.provider import BaostockProvider
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
     qdp_v2_root,
-)
-from quantlab.data.qdp_v2.repair import (
-    resolve_active_domain,
 )
 
 from .config import (

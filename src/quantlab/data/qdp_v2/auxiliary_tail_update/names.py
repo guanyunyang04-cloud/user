@@ -5,11 +5,7 @@ from __future__ import annotations
 import shutil
 from typing import Any
 
-from quantlab.data.qdp_v2.auxiliary_update import (
-    AuxiliaryContext,
-    _paths,
-    _scan_sql,
-)
+from quantlab.data.qdp_v2.auxiliary_update.context import AuxiliaryContext, _paths, _scan_sql
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 
 from .common import (

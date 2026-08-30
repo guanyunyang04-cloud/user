@@ -13,8 +13,8 @@ from typing import Any
 import duckdb
 import pandas as pd
 
+from quantlab.core.io import json_safe
 from quantlab.core.io import sha256_file as _sha256
-from quantlab.data.core.json_io import json_safe
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,

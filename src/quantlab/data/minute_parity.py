@@ -14,7 +14,7 @@ import pandas as pd
 
 from quantlab.core.io import sha256_file, write_json
 from quantlab.data.iquant import aggregate_1m_to_5m, inspect_file, read_file
-from quantlab.data.qdp_v2 import resolve_active_domain
+from quantlab.data.qdp_v2.active import resolve_active_domain
 
 VALUE_COLUMNS = ("open", "high", "low", "close", "volume", "amount")
 KEY_COLUMNS = ("symbol", "trade_date", "bar_time")

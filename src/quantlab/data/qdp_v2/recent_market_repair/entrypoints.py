@@ -7,13 +7,11 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
 )
-from quantlab.data.qdp_v2.repair import (
-    update_active_manifest_metadata,
-)
+from quantlab.data.qdp_v2.repair.mutation import update_active_manifest_metadata
 
 from .baostock import (
     _active_intraday_quality,

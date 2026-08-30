@@ -10,7 +10,7 @@ from typing import Any
 import duckdb
 import pandas as pd
 
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.data.domains.contracts.schema import DataDomain
 
 from .config import (
     END_DATE,

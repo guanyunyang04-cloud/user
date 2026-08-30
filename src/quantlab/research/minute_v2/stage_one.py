@@ -19,11 +19,11 @@ import pyarrow.parquet as pq
 from quantlab.core.io import DataContractError, read_json, sha256_file, write_json
 from quantlab.data.qdp_v2.duckdb_resources import GIB, MIB, open_guarded_duckdb
 
+from .artifacts import artifact_matches as _artifact_matches
+from .artifacts import artifact_record as _artifact
 from .builder import (
     BUILD_IMPLEMENTATION_REVISION,
     LABEL_BUCKET_COUNT,
-    _artifact,
-    _artifact_matches,
     _copy_query,
     _parquet_scan,
     _safe_clean_generated,

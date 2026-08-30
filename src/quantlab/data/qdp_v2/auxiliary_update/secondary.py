@@ -14,9 +14,7 @@ from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     utc_now,
 )
-from quantlab.data.qdp_v2.repair import (
-    update_active_manifest_metadata,
-)
+from quantlab.data.qdp_v2.repair.mutation import update_active_manifest_metadata
 
 from .context import (
     INDEX_SPECS,

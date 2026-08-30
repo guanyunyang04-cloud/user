@@ -5,12 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from quantlab.data.domains.contracts import (
-    DataDomain,
-    DomainFetchRequest,
-    FetchRequest,
-    ProviderResult,
-)
+from quantlab.data.domains.contracts.requests import DomainFetchRequest, FetchRequest, ProviderResult
+from quantlab.data.domains.contracts.schema import DataDomain
 
 from .baostock import BaostockProvider
 from .cninfo import CninfoAnnouncementProvider

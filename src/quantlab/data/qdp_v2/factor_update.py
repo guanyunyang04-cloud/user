@@ -11,14 +11,12 @@ import numpy as np
 import pandas as pd
 
 from quantlab.data.core.paths import qdp_paths
-from quantlab.data.domains.contracts import (
-    DataDomain,
-    DatePartitionFetchRequest,
-    DomainFetchRequest,
-)
-from quantlab.data.providers import BaostockProvider
+from quantlab.data.domains.contracts.requests import DatePartitionFetchRequest, DomainFetchRequest
+from quantlab.data.domains.contracts.schema import DataDomain
+from quantlab.data.providers.baostock.provider import BaostockProvider
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
-from quantlab.data.qdp_v2.repair import append_active_shard, resolve_active_domain
+from quantlab.data.qdp_v2.repair.mutation import append_active_shard
 
 FACTOR_DOMAIN = "adjust_factor"
 DAILY_DOMAIN = "market_daily_raw"

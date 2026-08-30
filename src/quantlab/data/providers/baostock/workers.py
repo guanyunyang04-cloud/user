@@ -7,10 +7,8 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import (
-    DataDomain,
-    DomainFetchRequest,
-)
+from quantlab.data.domains.contracts.requests import DomainFetchRequest
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.provider_symbols import (
     to_baostock_code as _to_baostock_code,
 )

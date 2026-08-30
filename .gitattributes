@@ -15,5 +15,5 @@
 *.jpeg binary
 *.pdf binary
 
-daily_research/research_records/seq100/status_repair_v1_20260805/audit/status_conflicts.parquet filter=lfs diff=lfs merge=lfs -text
-daily_research/research_records/seq100/status_repair_v1_20260805/audit/status_reconciliation.parquet filter=lfs diff=lfs merge=lfs -text
+# Large research outputs are local/reproducible and are ignored above; keep
+# durable reports and small tabular summaries as ordinary text or binary files.

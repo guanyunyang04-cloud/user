@@ -8,18 +8,10 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import (
-    DataDomain,
-    DatePartitionFetchRequest,
-)
-from quantlab.data.providers import (
-    BaostockProvider,
-)
-from quantlab.data.qdp_v2.auxiliary_update import (
-    AuxiliaryContext,
-    _paths,
-    _scan_sql,
-)
+from quantlab.data.domains.contracts.requests import DatePartitionFetchRequest
+from quantlab.data.domains.contracts.schema import DataDomain
+from quantlab.data.providers.baostock.provider import BaostockProvider
+from quantlab.data.qdp_v2.auxiliary_update.context import AuxiliaryContext, _paths, _scan_sql
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 
 from .common import (

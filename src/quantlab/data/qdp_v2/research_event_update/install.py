@@ -12,7 +12,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from quantlab.core.io import atomic_copy_file
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,

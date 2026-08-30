@@ -16,7 +16,7 @@ from typing import Any
 import pandas as pd
 import requests
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
@@ -34,10 +34,8 @@ from quantlab.data.qdp_v2.provider_credentials import (
     resolve_tushare_rate_limit,
     resolve_tushare_token,
 )
-from quantlab.data.qdp_v2.repair import (
-    _sql_literal,
-    replace_active_table_from_parquet,
-)
+from quantlab.data.qdp_v2.repair.common import _sql_literal
+from quantlab.data.qdp_v2.repair.mutation import replace_active_table_from_parquet
 from quantlab.data.qdp_v2.status import active_dataset_map
 
 AUXILIARY_DOMAINS = (

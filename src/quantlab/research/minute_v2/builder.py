@@ -7,7 +7,7 @@ import json
 import os
 import shutil
 import time
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,6 +19,8 @@ import pyarrow.parquet as pq
 from quantlab.core.io import DataContractError, read_json, sha256_file, write_json
 from quantlab.data.qdp_v2.duckdb_resources import GIB, MIB, open_guarded_duckdb
 
+from .artifacts import artifact_matches as _artifact_matches
+from .artifacts import artifact_record as _artifact
 from .contracts import (
     CORE_STORAGE_COLUMNS,
     EXPECTED_DECISION_BARS,
@@ -68,87 +70,8 @@ RUNTIME_ONLY_CONFIG_FIELDS = frozenset(
 )
 _DIRECTORY_REMOVE_RETRY_DELAYS = (0.05, 0.10, 0.20, 0.40, 0.80)
 
-# Cache successful fingerprint checks for the lifetime of this process.  A
-# month can be inspected repeatedly by training factories; using the file
-# stat plus the declared digest avoids re-hashing the same large Parquet file
-# on every pass while still invalidating a replaced or retimestamped file.
-_FINGERPRINT_CHECK_CACHE: dict[tuple[str, int, int, int, int, int, str], bool] = {}
-
-
 def _sql_literal(value: str | Path) -> str:
     return "'" + str(value).replace("'", "''") + "'"
-
-
-def _artifact(path: Path) -> dict[str, Any]:
-    metadata = pq.ParquetFile(path).metadata
-    return {
-        "path": str(path),
-        "size": int(path.stat().st_size),
-        "sha256": sha256_file(path),
-        "row_count": int(metadata.num_rows),
-        "row_group_count": int(metadata.num_row_groups),
-    }
-
-
-def _artifact_matches(
-    path: Path,
-    expected: Any,
-    *,
-    base_directory: Path | None = None,
-) -> bool:
-    """Validate an artifact record, including its content digest.
-
-    The cache is deliberately positive-only: a failed check is retried so a
-    caller can repair a file and validate it again in the same process.
-    """
-
-    if not isinstance(expected, dict):
-        return False
-    try:
-        target = Path(path).resolve()
-        if not target.is_file():
-            return False
-        expected_path = Path(str(expected.get("path", "")))
-        if not expected_path.is_absolute() and base_directory is not None:
-            expected_path = Path(base_directory) / expected_path
-        expected_path = expected_path.resolve()
-        if expected_path != target:
-            return False
-        stat = target.stat()
-        expected_size = expected.get("size")
-        expected_sha = expected.get("sha256")
-        expected_rows = expected.get("row_count")
-        expected_groups = expected.get("row_group_count")
-        if (
-            type(expected_size) is not int
-            or type(expected_rows) is not int
-            or type(expected_groups) is not int
-            or not isinstance(expected_sha, str)
-            or expected_size != int(stat.st_size)
-        ):
-            return False
-        cache_key = (
-            str(target),
-            int(stat.st_size),
-            int(getattr(stat, "st_mtime_ns", 0)),
-            int(getattr(stat, "st_ctime_ns", 0)),
-            expected_rows,
-            expected_groups,
-            expected_sha,
-        )
-        if _FINGERPRINT_CHECK_CACHE.get(cache_key) is True:
-            return True
-        metadata = pq.ParquetFile(target).metadata
-        if (
-            int(metadata.num_rows) != expected_rows
-            or int(metadata.num_row_groups) != expected_groups
-            or sha256_file(target) != expected_sha
-        ):
-            return False
-        _FINGERPRINT_CHECK_CACHE[cache_key] = True
-        return True
-    except Exception:
-        return False
 
 
 def _unfinished_build_files(manifest_path: Path) -> list[Path]:
@@ -1587,16 +1510,372 @@ def _verify_month_artifacts(
     }
 
 
-def build_month(
+def _chunk_stem(chunk_dates: list[str]) -> str:
+    """Return the stable filename stem for one processing chunk."""
+
+    if len(chunk_dates) == 1:
+        return chunk_dates[0].replace("-", "")
+    return f"{chunk_dates[0].replace('-', '')}_{chunk_dates[-1].replace('-', '')}"
+
+
+@dataclass(frozen=True)
+class _FeatureMaterialization:
+    base_parts: list[Path]
+    complete_sessions: int
+    expected_decision_rows: int
+    feature_phase_seconds: float
+    reused_parts: int
+    built_parts: int
+    base_rows: int
+    expected_decision_groups: int
+    uncompressed_base_bytes: int
+    compressed_base_bytes: int
+
+
+def _materialize_feature_parts(
+    connection: Any,
+    *,
+    checkpoint: Path,
+    current: MinuteV2Config,
+    processing_chunks: list[list[str]],
+) -> _FeatureMaterialization:
+    """Build and validate causal feature parts for the selected dates."""
+
+    complete_sessions = 0
+    expected_decision_rows = 0
+    reused_parts = 0
+    built_parts = 0
+    feature_phase_started = time.perf_counter()
+    for chunk_dates in processing_chunks:
+        date_values = ",".join(_sql_literal(value) for value in chunk_dates)
+        chunk_name = _chunk_stem(chunk_dates)
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW day_stock_days AS "
+            f"SELECT * FROM stock_days WHERE trade_date IN ({date_values})"
+        )
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW day_minute_bars AS "
+            f"SELECT * FROM minute_bars WHERE trade_date IN ({date_values})"
+        )
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW day_minute_history AS "
+            "WITH target_symbols AS (SELECT DISTINCT symbol FROM day_stock_days),"
+            "complete_prior_days AS ("
+            "SELECT b.symbol,b.trade_date FROM minute_bars_history b "
+            "JOIN target_symbols t ON t.symbol=b.symbol "
+            f"WHERE b.trade_date < {_sql_literal(chunk_dates[0])} "
+            "GROUP BY b.symbol,b.trade_date HAVING count(*)=240),"
+            "prior_bars AS ("
+            "SELECT b.* FROM minute_bars_history b JOIN complete_prior_days p "
+            "ON p.symbol=b.symbol AND p.trade_date=b.trade_date "
+            f"WHERE b.trade_date < {_sql_literal(chunk_dates[0])} "
+            "QUALIFY row_number() OVER (PARTITION BY b.symbol "
+            "ORDER BY b.trade_date DESC,b.bar_time DESC)<=240),"
+            "target_bars AS (SELECT b.* FROM minute_bars b JOIN target_symbols t "
+            f"ON t.symbol=b.symbol WHERE b.trade_date IN ({date_values})) "
+            "SELECT * FROM prior_bars UNION ALL BY NAME SELECT * FROM target_bars"
+        )
+        day_sessions = int(
+            connection.execute(
+                "SELECT count(*) FROM ("
+                "SELECT b.symbol,b.trade_date,count(*) bars FROM day_minute_bars b "
+                "JOIN day_stock_days s USING(symbol,trade_date) "
+                "GROUP BY b.symbol,b.trade_date HAVING bars=240)"
+            ).fetchone()[0]
+        )
+        day_decisions = day_sessions * EXPECTED_DECISION_BARS
+        complete_sessions += day_sessions
+        expected_decision_rows += day_decisions
+        base_part = checkpoint / "base" / f"{chunk_name}.parquet"
+        if not _valid_part(base_part, expected_rows=day_decisions):
+            _copy_query(
+                connection,
+                feature_query(
+                    bars_view="day_minute_history",
+                    stock_days_view="day_stock_days",
+                    auction_view="opening_auction",
+                    sixty_state_view="sixty_minute_states",
+                ),
+                base_part,
+                compression="SNAPPY",
+            )
+            if not _valid_part(base_part, expected_rows=day_decisions):
+                raise MinuteV2Error(
+                    f"minute_v2_chunk_base_row_mismatch:{chunk_name}:{day_decisions}"
+                )
+            built_parts += 1
+        else:
+            reused_parts += 1
+
+    base_parts = sorted((checkpoint / "base").glob("*.parquet"))
+    if len(base_parts) != len(processing_chunks):
+        raise MinuteV2Error(
+            f"minute_v2_chunk_base_parts_incomplete:{len(processing_chunks)}:{len(base_parts)}"
+        )
+    feature_phase_seconds = time.perf_counter() - feature_phase_started
+    base_rows = sum(int(pq.ParquetFile(path).metadata.num_rows) for path in base_parts)
+    if base_rows != expected_decision_rows:
+        raise MinuteV2Error(
+            f"minute_v2_base_parts_row_mismatch:{base_rows}:{expected_decision_rows}"
+        )
+    base_scan = _parquet_scan(base_parts)
+    group_stats = connection.execute(
+        "SELECT sum(groups_per_day) AS groups,count(*) AS dates,min(groups_per_day),"
+        "max(groups_per_day) "
+        "FROM (SELECT trade_date,count(DISTINCT bar_time) AS groups_per_day "
+        f"FROM {base_scan} GROUP BY trade_date)"
+    ).fetchone()
+    if not group_stats or min(int(value or 0) for value in group_stats) <= 0:
+        raise MinuteV2Error("minute_v2_base_cross_sections_empty")
+    if int(group_stats[2]) != EXPECTED_DECISION_BARS or int(group_stats[3]) != EXPECTED_DECISION_BARS:
+        raise MinuteV2Error(
+            f"minute_v2_decision_grid_incomplete:{group_stats[2]}:{group_stats[3]}"
+        )
+    uncompressed_base_bytes = sum(_parquet_uncompressed_bytes(path) for path in base_parts)
+    compressed_base_bytes = sum(path.stat().st_size for path in base_parts)
+    return _FeatureMaterialization(
+        base_parts=base_parts,
+        complete_sessions=complete_sessions,
+        expected_decision_rows=expected_decision_rows,
+        feature_phase_seconds=feature_phase_seconds,
+        reused_parts=reused_parts,
+        built_parts=built_parts,
+        base_rows=base_rows,
+        expected_decision_groups=int(group_stats[0]),
+        uncompressed_base_bytes=uncompressed_base_bytes,
+        compressed_base_bytes=compressed_base_bytes,
+    )
+
+
+@dataclass(frozen=True)
+class _EventLabelMaterialization:
+    event_parts: list[Path]
+    label_parts: list[Path]
+    candidate_phase_seconds: float
+    label_cache_seconds: float
+    label_cache_rows: int
+    label_cache_bytes: int
+    label_cache_reused: bool
+    label_bucket_specs: list[dict[str, Any]]
+    label_cache_comparison: dict[str, Any]
+    reused_parts: int
+    built_parts: int
+
+
+def _materialize_event_and_label_parts(
+    connection: Any,
+    *,
+    checkpoint: Path,
+    current: MinuteV2Config,
+    processing_chunks: list[list[str]],
+    base_parts: list[Path],
+    support_directory: Path,
+    start_date: str,
+    extended_end: str,
+    period_support: dict[str, Any],
+    checkpoint_spec: dict[str, Any],
+) -> _EventLabelMaterialization:
+    """Materialize candidate events and their bucketed future labels."""
+
+    reused_parts = 0
+    built_parts = 0
+    candidate_phase_started = time.perf_counter()
+    for chunk_dates, base_part in zip(processing_chunks, base_parts, strict=True):
+        chunk_name = _chunk_stem(chunk_dates)
+        event_part = checkpoint / "events" / f"{chunk_name}.parquet"
+        if _valid_part(event_part):
+            reused_parts += 1
+            continue
+        connection.execute(
+            "CREATE OR REPLACE TEMP VIEW day_minute_features AS SELECT * FROM "
+            + _parquet_scan([base_part])
+        )
+        _copy_query(
+            connection,
+            event_query(
+                feature_view="day_minute_features",
+                config=current,
+            ),
+            event_part,
+            compression="SNAPPY",
+        )
+        built_parts += 1
+
+    event_parts = sorted((checkpoint / "events").glob("*.parquet"))
+    if len(event_parts) != len(processing_chunks):
+        raise MinuteV2Error(
+            f"minute_v2_event_parts_incomplete:{len(processing_chunks)}:{len(event_parts)}"
+        )
+    total_event_rows = sum(int(pq.ParquetFile(path).metadata.num_rows) for path in event_parts)
+    event_scan = _parquet_scan(event_parts)
+    label_bucket_directory = support_directory / f"label_buckets__{start_date}__{extended_end}"
+    label_bucket_directory.mkdir(parents=True, exist_ok=True)
+    label_bucket_paths: list[Path] = []
+    label_bucket_specs: list[dict[str, Any]] = []
+    label_cache_started = time.perf_counter()
+    future_label_paths = [Path(str(value)).resolve() for value in period_support["future_label_bars"]["paths"]]
+    for bucket in range(LABEL_BUCKET_COUNT):
+        bucket_name = f"labels_bucket_{bucket:02d}_of_{LABEL_BUCKET_COUNT:02d}.parquet"
+        bucket_path = label_bucket_directory / bucket_name
+        bucket_metadata = bucket_path.with_suffix(".json")
+        bucket_event_count = int(
+            connection.execute(
+                f"SELECT count(*) FROM {event_scan} "
+                f"WHERE hash(symbol)%{LABEL_BUCKET_COUNT}={bucket}"
+            ).fetchone()[0]
+        )
+        bucket_spec = {
+            "schema": LABEL_CACHE_SCHEMA,
+            "content_signature": checkpoint_spec["content_signature"],
+            "bucket": bucket,
+            "bucket_count": LABEL_BUCKET_COUNT,
+            "event_rows": bucket_event_count,
+            "event_parts": [
+                {
+                    "name": path.name,
+                    "size": int(path.stat().st_size),
+                    "sha256": sha256_file(path),
+                }
+                for path in event_parts
+            ],
+        }
+        bucket_reused = _label_cache_is_valid(
+            bucket_path,
+            bucket_metadata,
+            expected_rows=bucket_event_count,
+            expected_spec=bucket_spec,
+        )
+        if not bucket_reused:
+            connection.execute(
+                "CREATE OR REPLACE TEMP VIEW bucket_events AS SELECT * FROM "
+                f"{event_scan} WHERE hash(symbol)%{LABEL_BUCKET_COUNT}={bucket}"
+            )
+            connection.execute(
+                "CREATE OR REPLACE TEMP VIEW bucket_bars AS SELECT * FROM "
+                + _parquet_scan([future_label_paths[bucket]])
+            )
+            bucket_artifact = _copy_query(
+                connection,
+                label_query(
+                    event_view="bucket_events",
+                    target_bars_view="minute_bars",
+                    extended_bars_view="bucket_bars",
+                    stock_days_view="label_stock_days",
+                    calendar_view="calendar_dates",
+                    config=current,
+                ),
+                bucket_path,
+                compression="SNAPPY",
+            )
+            if not _valid_part(bucket_path, expected_rows=bucket_event_count):
+                raise MinuteV2Error(
+                    "minute_v2_label_bucket_row_mismatch:"
+                    f"{bucket}:{bucket_event_count}"
+                )
+            write_json(bucket_metadata, {**bucket_spec, "artifact": bucket_artifact})
+            built_parts += 1
+        else:
+            reused_parts += 1
+        label_bucket_paths.append(bucket_path)
+        label_bucket_specs.append(
+            {
+                "path": str(bucket_path),
+                "rows": bucket_event_count,
+                "reused": bucket_reused,
+            }
+        )
+    label_cache_seconds = time.perf_counter() - label_cache_started
+    if sum(item["rows"] for item in label_bucket_specs) != total_event_rows:
+        raise MinuteV2Error("minute_v2_label_bucket_rows_incomplete")
+    label_cache_rows = sum(item["rows"] for item in label_bucket_specs)
+    label_cache_bytes = sum(path.stat().st_size for path in label_bucket_paths)
+    existing_label_parts = sorted((checkpoint / "labels").glob("*.parquet"))
+    label_cache_comparison = _assert_label_cache_matches_existing_parts(
+        connection,
+        cache_paths=label_bucket_paths,
+        existing_parts=existing_label_parts,
+    )
+    label_cache_reused = all(item["reused"] for item in label_bucket_specs)
+    label_bucket_scan = _parquet_scan(label_bucket_paths)
+    for chunk_dates, event_part in zip(processing_chunks, event_parts, strict=True):
+        date_values = ",".join(_sql_literal(value) for value in chunk_dates)
+        chunk_name = _chunk_stem(chunk_dates)
+        label_part = checkpoint / "labels" / f"{chunk_name}.parquet"
+        if _valid_part(label_part):
+            reused_parts += 1
+        else:
+            _copy_query(
+                connection,
+                "SELECT * FROM "
+                + label_bucket_scan
+                + f" WHERE trade_date IN ({date_values}) "
+                "ORDER BY trade_date,bar_time,symbol",
+                label_part,
+                compression="SNAPPY",
+            )
+            built_parts += 1
+        event_rows = int(pq.ParquetFile(event_part).metadata.num_rows)
+        label_rows = int(pq.ParquetFile(label_part).metadata.num_rows)
+        if event_rows != label_rows:
+            raise MinuteV2Error(
+                f"minute_v2_chunk_event_label_mismatch:{chunk_name}:{event_rows}:{label_rows}"
+            )
+    label_parts = sorted((checkpoint / "labels").glob("*.parquet"))
+    if len(event_parts) != len(processing_chunks) or len(label_parts) != len(processing_chunks):
+        raise MinuteV2Error(
+            "minute_v2_chunk_parts_incomplete:"
+            f"{len(processing_chunks)}:{len(event_parts)}:{len(label_parts)}"
+        )
+    return _EventLabelMaterialization(
+        event_parts=event_parts,
+        label_parts=label_parts,
+        candidate_phase_seconds=time.perf_counter() - candidate_phase_started,
+        label_cache_seconds=label_cache_seconds,
+        label_cache_rows=label_cache_rows,
+        label_cache_bytes=label_cache_bytes,
+        label_cache_reused=label_cache_reused,
+        label_bucket_specs=label_bucket_specs,
+        label_cache_comparison=label_cache_comparison,
+        reused_parts=reused_parts,
+        built_parts=built_parts,
+    )
+
+
+@dataclass(frozen=True)
+class _MonthPreparation:
+    current: MinuteV2Config
+    year: int
+    month: int
+    workspace: Path
+    output: Path
+    directory: Path
+    manifest_path: Path
+    snapshot: SourceSnapshot
+    start_date: str
+    end_date: str
+    minute_history_start: str
+    extended_end: str
+    period: dict[str, str]
+    source_manifest_sha256: dict[str, str]
+    support_signature: str
+    checkpoint_spec: dict[str, Any]
+    manifest_build_spec: dict[str, Any]
+    paths: dict[str, Path]
+    cached_result: dict[str, Any] | None = None
+
+
+def _prepare_month(
     workspace_root: str | Path,
     *,
     year: int,
     month: int,
-    output_root: str | Path | None = None,
-    config: MinuteV2Config | None = None,
-    keep_base: bool = True,
-    force: bool = False,
-) -> dict[str, Any]:
+    output_root: str | Path | None,
+    config: MinuteV2Config | None,
+    keep_base: bool,
+    force: bool,
+) -> _MonthPreparation:
+    """Resolve source identity, build signatures, and output paths."""
+
     current = config or MinuteV2Config()
     current.validate()
     workspace = Path(workspace_root).resolve()
@@ -1624,12 +1903,7 @@ def build_month(
             current.maximum_delayed_exit_days + 1,
         ),
     )
-    period = _quarter_support_bounds(
-        snapshot,
-        year=year,
-        month=month,
-        config=current,
-    )
+    period = _quarter_support_bounds(snapshot, year=year, month=month, config=current)
     source_manifest_sha256 = _source_manifest_sha256(snapshot)
     support_signature = _support_cache_signature(
         snapshot,
@@ -1662,10 +1936,12 @@ def build_month(
             _remove_stale_base_artifact(directory)
         if not keep_base or current.feature_storage != "split":
             _remove_stale_optional_artifact(directory)
-        return read_json(manifest_path)
-    if not keep_base or current.feature_storage != "split":
-        _remove_stale_optional_artifact(directory)
-    paths = {
+        cached_result = read_json(manifest_path)
+    else:
+        cached_result = None
+        if not keep_base or current.feature_storage != "split":
+            _remove_stale_optional_artifact(directory)
+    paths: dict[str, Path] = {
         "events": directory / "events.parquet",
         "labels": directory / "labels.parquet",
     }
@@ -1673,581 +1949,513 @@ def build_month(
         paths["base"] = directory / "base.parquet"
         if current.feature_storage == "split":
             paths["optional_features"] = directory / "optional_features.parquet"
-    runtime, external_runtime = _runtime_directory(
-        directory,
-        current,
+    return _MonthPreparation(
+        current=current,
+        year=int(year),
+        month=int(month),
+        workspace=workspace,
+        output=output,
+        directory=directory,
+        manifest_path=manifest_path,
+        snapshot=snapshot,
+        start_date=start_date,
+        end_date=end_date,
+        minute_history_start=minute_history_start,
+        extended_end=extended_end,
+        period=period,
+        source_manifest_sha256=source_manifest_sha256,
+        support_signature=support_signature,
+        checkpoint_spec=checkpoint_spec,
+        manifest_build_spec=manifest_build_spec,
+        paths=paths,
+        cached_result=cached_result,
+    )
+
+
+@dataclass(frozen=True)
+class _SupportMaterialization:
+    support_directory: Path
+    support_cache_context: dict[str, Any]
+    period_support: dict[str, Any]
+    stock_day_artifact: dict[str, Any]
+    stock_day_reused: bool
+    stock_day_stats: dict[str, int]
+    sixty_state_artifact: dict[str, Any]
+    sixty_state_reused: bool
+    sixty_state_seconds: float
+    label_support_artifacts: dict[str, Any]
+    available_dates: list[str]
+
+
+def _materialize_support_views(
+    connection: Any,
+    *,
+    preparation: _MonthPreparation,
+) -> _SupportMaterialization:
+    """Register source data and materialize shared month support views."""
+
+    register_source_views(
+        connection,
+        preparation.snapshot,
+        start_date=preparation.start_date,
+        end_date=preparation.end_date,
+        minute_history_start_date=min(
+            preparation.minute_history_start,
+            preparation.period["history_start_date"],
+        ),
+        minute_history_end_date=preparation.period["end_date"],
+        minute_end_date=preparation.period["extended_end_date"],
+        minute_extended_start_date=preparation.period["history_start_date"],
+    )
+    support_directory = preparation.output / "_support_cache" / preparation.support_signature
+    support_directory.mkdir(parents=True, exist_ok=True)
+    support_cache_context = {
+        "support_cache_schema": SUPPORT_CACHE_SCHEMA,
+        "support_signature": preparation.support_signature,
+        "source_dataset_ids": preparation.snapshot.dataset_ids,
+        "config": {
+            name: value
+            for name, value in preparation.current.as_dict().items()
+            if name not in RUNTIME_ONLY_CONFIG_FIELDS
+        },
+    }
+    period_support = _materialize_period_support(
+        connection,
+        snapshot=preparation.snapshot,
+        year=preparation.year,
+        month=preparation.month,
+        period=preparation.period,
+        support_directory=support_directory,
+        support_cache_context=support_cache_context,
+        config=preparation.current,
+    )
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW stock_days AS SELECT * FROM period_stock_days "
+        f"WHERE trade_date BETWEEN {_sql_literal(preparation.start_date)} "
+        f"AND {_sql_literal(preparation.end_date)}"
+    )
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW calendar_dates AS SELECT * FROM period_calendar_dates "
+        f"WHERE trade_date BETWEEN {_sql_literal(preparation.start_date)} "
+        f"AND {_sql_literal(preparation.extended_end)}"
+    )
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW sixty_minute_states AS SELECT * FROM period_sixty_minute_states"
+    )
+    stock_day_support_path = support_directory / (
+        f"stock_days__{preparation.start_date}__{preparation.end_date}.parquet"
+    )
+    stock_day_artifact, stock_day_reused = _materialize_cached_view(
+        connection,
+        view_name="stock_days",
+        path=stock_day_support_path,
+        metadata_path=stock_day_support_path.with_suffix(".json"),
+        cache_spec={
+            **support_cache_context,
+            "view": "stock_days",
+            "start_date": preparation.start_date,
+            "end_date": preparation.end_date,
+        },
+        query=(
+            "SELECT * FROM period_stock_days "
+            f"WHERE trade_date BETWEEN {_sql_literal(preparation.start_date)} "
+            f"AND {_sql_literal(preparation.end_date)}"
+        ),
+    )
+    stock_day_row = connection.execute(
+        "SELECT count(*),count(DISTINCT symbol),count(DISTINCT trade_date) FROM stock_days"
+    ).fetchone()
+    if not stock_day_row or int(stock_day_row[0]) == 0:
+        raise MinuteV2Error(
+            f"minute_v2_stock_days_empty:{preparation.start_date}:{preparation.end_date}"
+        )
+    stock_day_stats = {
+        "stock_days": int(stock_day_row[0]),
+        "symbols": int(stock_day_row[1]),
+        "dates": int(stock_day_row[2]),
+    }
+    sixty_state_started = time.perf_counter()
+    sixty_state_artifact = period_support["sixty_minute_states"]
+    sixty_state_reused = bool(sixty_state_artifact.get("reused", False))
+    sixty_state_paths = [Path(str(value)).resolve() for value in sixty_state_artifact["paths"]]
+    connection.execute(
+        "CREATE OR REPLACE TEMP VIEW sixty_minute_states AS SELECT * FROM "
+        + _parquet_scan(sixty_state_paths)
+    )
+    sixty_state_seconds = time.perf_counter() - sixty_state_started
+    label_support_artifacts = _materialize_label_support(
+        connection,
+        start_date=preparation.start_date,
+        extended_end_date=preparation.extended_end,
+        support_directory=support_directory,
+        support_cache_context=support_cache_context,
+        stock_days_view="period_label_stock_days",
+        calendar_view="period_calendar_dates",
+    )
+    available_dates = [
+        _date_text(row[0])
+        for row in connection.execute(
+            "SELECT DISTINCT trade_date FROM stock_days ORDER BY trade_date"
+        ).fetchall()
+    ]
+    if not available_dates:
+        raise MinuteV2Error(
+            f"minute_v2_trading_dates_empty:{preparation.start_date}:{preparation.end_date}"
+        )
+    return _SupportMaterialization(
+        support_directory=support_directory,
+        support_cache_context=support_cache_context,
+        period_support=period_support,
+        stock_day_artifact=stock_day_artifact,
+        stock_day_reused=stock_day_reused,
+        stock_day_stats=stock_day_stats,
+        sixty_state_artifact=sixty_state_artifact,
+        sixty_state_reused=sixty_state_reused,
+        sixty_state_seconds=sixty_state_seconds,
+        label_support_artifacts=label_support_artifacts,
+        available_dates=available_dates,
+    )
+
+
+@dataclass(frozen=True)
+class _MonthParts:
+    dates: list[str]
+    processing_chunks: list[list[str]]
+    base_parts: list[Path]
+    event_parts: list[Path]
+    label_parts: list[Path]
+    complete_sessions: int
+    expected_decision_rows: int
+    expected_decision_groups: int
+    feature_phase_seconds: float
+    candidate_phase_seconds: float
+    reused_parts: int
+    built_parts: int
+    base_rows: int
+    uncompressed_base_bytes: int
+    compressed_base_bytes: int
+    label_cache_seconds: float
+    label_cache_rows: int
+    label_cache_bytes: int
+    label_cache_reused: bool
+    label_bucket_specs: list[dict[str, Any]]
+    label_cache_comparison: dict[str, Any]
+
+
+def _materialize_month_parts(
+    connection: Any,
+    *,
+    preparation: _MonthPreparation,
+    support: _SupportMaterialization,
+    checkpoint: Path,
+) -> _MonthParts:
+    """Select dates and materialize feature, event, and label parts."""
+
+    dates = _evenly_spaced_dates(
+        support.available_dates,
+        preparation.current.maximum_trading_days_per_month,
+    )
+    processing_chunks = _chunks(dates, preparation.current.processing_days_per_chunk)
+    feature_result = _materialize_feature_parts(
+        connection,
+        checkpoint=checkpoint,
+        current=preparation.current,
+        processing_chunks=processing_chunks,
+    )
+    event_label_result = _materialize_event_and_label_parts(
+        connection,
+        checkpoint=checkpoint,
+        current=preparation.current,
+        processing_chunks=processing_chunks,
+        base_parts=feature_result.base_parts,
+        support_directory=support.support_directory,
+        start_date=preparation.start_date,
+        extended_end=preparation.extended_end,
+        period_support=support.period_support,
+        checkpoint_spec=preparation.checkpoint_spec,
+    )
+    return _MonthParts(
+        dates=dates,
+        processing_chunks=processing_chunks,
+        base_parts=feature_result.base_parts,
+        event_parts=event_label_result.event_parts,
+        label_parts=event_label_result.label_parts,
+        complete_sessions=feature_result.complete_sessions,
+        expected_decision_rows=feature_result.expected_decision_rows,
+        expected_decision_groups=feature_result.expected_decision_groups,
+        feature_phase_seconds=feature_result.feature_phase_seconds,
+        candidate_phase_seconds=event_label_result.candidate_phase_seconds,
+        reused_parts=feature_result.reused_parts + event_label_result.reused_parts,
+        built_parts=feature_result.built_parts + event_label_result.built_parts,
+        base_rows=feature_result.base_rows,
+        uncompressed_base_bytes=feature_result.uncompressed_base_bytes,
+        compressed_base_bytes=feature_result.compressed_base_bytes,
+        label_cache_seconds=event_label_result.label_cache_seconds,
+        label_cache_rows=event_label_result.label_cache_rows,
+        label_cache_bytes=event_label_result.label_cache_bytes,
+        label_cache_reused=event_label_result.label_cache_reused,
+        label_bucket_specs=event_label_result.label_bucket_specs,
+        label_cache_comparison=event_label_result.label_cache_comparison,
+    )
+
+
+def _finalize_month(
+    connection: Any,
+    *,
+    preparation: _MonthPreparation,
+    support: _SupportMaterialization,
+    parts: _MonthParts,
+    keep_base: bool,
+    resumed_checkpoint: bool,
+    effective_memory_limit_bytes: int,
+    build_started: float,
+) -> dict[str, Any]:
+    """Combine temporary parts, verify the month contract, and build its manifest."""
+
+    current = preparation.current
+    paths = preparation.paths
+    artifacts: dict[str, dict[str, Any]] = {}
+    if keep_base:
+        if current.feature_storage == "full":
+            artifacts["base"] = _combine_parts(connection, parts.base_parts, paths["base"])
+        else:
+            artifacts["base"] = _copy_query(
+                connection,
+                "SELECT "
+                + ",".join(CORE_STORAGE_COLUMNS)
+                + " FROM "
+                + _parquet_scan(parts.base_parts)
+                + " ORDER BY trade_date,bar_time,symbol",
+                paths["base"],
+            )
+            if current.feature_storage == "split":
+                artifacts["optional_features"] = _copy_query(
+                    connection,
+                    "SELECT "
+                    + ",".join(OPTIONAL_STORAGE_COLUMNS)
+                    + " FROM "
+                    + _parquet_scan(parts.base_parts)
+                    + " ORDER BY trade_date,bar_time,symbol",
+                    paths["optional_features"],
+                )
+    artifacts["events"] = _combine_parts(connection, parts.event_parts, paths["events"])
+    artifacts["labels"] = _combine_parts(connection, parts.label_parts, paths["labels"])
+    verification = _verify_month_artifacts(
+        connection,
+        base=paths.get("base"),
+        optional=paths.get("optional_features"),
+        events=paths["events"],
+        labels=paths["labels"],
+        expected_decision_rows=parts.expected_decision_rows,
+        expected_decision_groups=parts.expected_decision_groups,
+        base_reference_parts=parts.base_parts,
+        feature_storage=current.feature_storage,
+    )
+    if not keep_base:
+        _remove_stale_base_artifact(preparation.directory)
+        _remove_stale_optional_artifact(preparation.directory)
+    total_seconds = time.perf_counter() - build_started
+    feature_phase_seconds = parts.feature_phase_seconds
+    benchmark = {
+        "feature_construction_seconds": feature_phase_seconds,
+        "sixty_minute_state_seconds": support.sixty_state_seconds,
+        "sixty_minute_state_rows": support.sixty_state_artifact["row_count"],
+        "sixty_minute_state_bytes": support.sixty_state_artifact["size"],
+        "sixty_minute_state_reused": support.sixty_state_reused,
+        "candidate_and_label_seconds": parts.candidate_phase_seconds,
+        "all_event_label_cache_seconds": parts.label_cache_seconds,
+        "all_event_label_cache_rows": parts.label_cache_rows,
+        "all_event_label_cache_bytes": parts.label_cache_bytes,
+        "all_event_label_cache_reused": parts.label_cache_reused,
+        "all_event_label_cache_buckets": parts.label_bucket_specs,
+        "existing_label_equivalence": parts.label_cache_comparison,
+        "total_seconds": total_seconds,
+        "feature_rows_per_second": (
+            parts.base_rows / feature_phase_seconds if feature_phase_seconds > 0 else None
+        ),
+        "base_uncompressed_bytes": parts.uncompressed_base_bytes,
+        "base_compressed_bytes": parts.compressed_base_bytes,
+        "base_parquet_compression_ratio": (
+            parts.compressed_base_bytes / parts.uncompressed_base_bytes
+            if parts.uncompressed_base_bytes > 0
+            else None
+        ),
+        "decision_time_policy": "all 234 causal decision minutes per complete trading day",
+        "intermediate_compression": "SNAPPY for new day/support parts; final artifacts ZSTD",
+        "feature_storage": current.feature_storage,
+        "stored_core_columns": len(CORE_STORAGE_COLUMNS),
+        "stored_optional_columns": (
+            len(OPTIONAL_STORAGE_COLUMNS) if current.feature_storage == "split" else 0
+        ),
+    }
+    result = {
+        "schema": MONTH_SCHEMA,
+        "status": "ok",
+        "year": preparation.year,
+        "month": preparation.month,
+        "start_date": preparation.start_date,
+        "end_date": preparation.end_date,
+        "extended_label_end_date": preparation.extended_end,
+        "minute_history_start_date": preparation.minute_history_start,
+        "config": current.as_dict(),
+        "source": preparation.snapshot.as_dict(),
+        "build_spec": preparation.manifest_build_spec,
+        "stock_days": support.stock_day_stats,
+        "shared_support": {
+            "stock_days": {
+                "rows": support.stock_day_artifact["row_count"],
+                "bytes": support.stock_day_artifact["size"],
+                "reused": support.stock_day_reused,
+            },
+            **{
+                name: {
+                    "rows": value["row_count"],
+                    "bytes": value["size"],
+                    "reused": value["reused"],
+                }
+                for name, value in support.label_support_artifacts.items()
+            },
+            "period_support": {
+                "period": preparation.period,
+                "directory": support.period_support["directory"],
+                "reused": all(
+                    bool(value.get("reused", False))
+                    for name, value in support.period_support.items()
+                    if isinstance(value, dict) and name != "period"
+                ),
+                "artifacts": {
+                    name: {
+                        "rows": value["row_count"],
+                        "bytes": value["size"],
+                        "reused": value.get("reused", False),
+                    }
+                    for name, value in support.period_support.items()
+                    if isinstance(value, dict) and "row_count" in value
+                },
+            },
+        },
+        "support_cache": {
+            "schema": SUPPORT_CACHE_SCHEMA,
+            "signature": preparation.support_signature,
+            "directory": str(support.support_directory),
+            "persistent": True,
+            "period": preparation.period,
+        },
+        "complete_session_stock_days": parts.complete_sessions,
+        "date_selection": {
+            "available_trading_days": len(support.available_dates),
+            "selected_trading_days": len(parts.dates),
+            "selected_dates": parts.dates,
+            "policy": (
+                "all trading days"
+                if len(parts.dates) == len(support.available_dates)
+                else "evenly spaced whole trading days for development; full market retained"
+            ),
+        },
+        "storage_policy": (
+            "complete causal base retained for audit"
+            if keep_base
+            else "full-market causal base computed transiently; causal stock candidates retained"
+        ),
+        "benchmark": benchmark,
+        "resource_settings": asdict(connection.settings),
+        "effective_duckdb_memory_limit_bytes": effective_memory_limit_bytes,
+        "day_part_build": {
+            "trading_days": len(parts.dates),
+            "processing_chunks": len(parts.processing_chunks),
+            "days_per_chunk": current.processing_days_per_chunk,
+            "resumed_checkpoint": resumed_checkpoint,
+            "reused_parts": parts.reused_parts,
+            "built_parts": parts.built_parts,
+        },
+        "artifacts": artifacts,
+        "verification": verification,
+    }
+    write_json(preparation.manifest_path, result)
+    return result
+
+
+def build_month(
+    workspace_root: str | Path,
+    *,
+    year: int,
+    month: int,
+    output_root: str | Path | None = None,
+    config: MinuteV2Config | None = None,
+    keep_base: bool = True,
+    force: bool = False,
+) -> dict[str, Any]:
+    preparation = _prepare_month(
+        workspace_root,
         year=year,
         month=month,
+        output_root=output_root,
+        config=config,
+        keep_base=keep_base,
+        force=force,
+    )
+    if preparation.cached_result is not None:
+        return preparation.cached_result
+
+    runtime, external_runtime = _runtime_directory(
+        preparation.directory,
+        preparation.current,
+        year=preparation.year,
+        month=preparation.month,
     )
     checkpoint, resumed_checkpoint = _prepare_checkpoint(
-        directory,
-        spec=checkpoint_spec,
+        preparation.directory,
+        spec=preparation.checkpoint_spec,
         force=force,
     )
     connection = open_guarded_duckdb(
         ":memory:",
         temp_directory=runtime,
-        threads=current.duckdb_threads,
-        profiling_path=_profile_path(directory, current),
-        floor_bytes=int(current.memory_floor_gib * GIB),
+        threads=preparation.current.duckdb_threads,
+        profiling_path=_profile_path(preparation.directory, preparation.current),
+        floor_bytes=int(preparation.current.memory_floor_gib * GIB),
         minimum_limit_bytes=256 * MIB,
     )
-    effective_memory_limit_bytes = _effective_memory_limit_bytes(connection, current)
+    effective_memory_limit_bytes = _effective_memory_limit_bytes(
+        connection,
+        preparation.current,
+    )
     connection.execute(f"SET memory_limit='{effective_memory_limit_bytes}B'")
     completed = False
     build_started = time.perf_counter()
     try:
-        register_source_views(
+        support = _materialize_support_views(connection, preparation=preparation)
+        parts = _materialize_month_parts(
             connection,
-            snapshot,
-            start_date=start_date,
-            end_date=end_date,
-            minute_history_start_date=min(
-                minute_history_start,
-                period["history_start_date"],
-            ),
-            minute_history_end_date=period["end_date"],
-            minute_end_date=period["extended_end_date"],
-            minute_extended_start_date=period["history_start_date"],
+            preparation=preparation,
+            support=support,
+            checkpoint=checkpoint,
         )
-        support_directory = output / "_support_cache" / support_signature
-        support_directory.mkdir(parents=True, exist_ok=True)
-        support_cache_context = {
-            "support_cache_schema": SUPPORT_CACHE_SCHEMA,
-            "support_signature": support_signature,
-            "source_dataset_ids": snapshot.dataset_ids,
-            "config": {
-                name: value
-                for name, value in current.as_dict().items()
-                if name not in RUNTIME_ONLY_CONFIG_FIELDS
-            },
-        }
-        period_support = _materialize_period_support(
+        result = _finalize_month(
             connection,
-            snapshot=snapshot,
-            year=year,
-            month=month,
-            period=period,
-            support_directory=support_directory,
-            support_cache_context=support_cache_context,
-            config=current,
+            preparation=preparation,
+            support=support,
+            parts=parts,
+            keep_base=keep_base,
+            resumed_checkpoint=resumed_checkpoint,
+            effective_memory_limit_bytes=effective_memory_limit_bytes,
+            build_started=build_started,
         )
-        # Restrict the month-facing views after the shared quarter support has
-        # been validated.  This keeps target features and candidate rows
-        # identical to the previous month-bounded contract.
-        connection.execute(
-            "CREATE OR REPLACE TEMP VIEW stock_days AS SELECT * FROM period_stock_days "
-            f"WHERE trade_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(end_date)}"
-        )
-        connection.execute(
-            "CREATE OR REPLACE TEMP VIEW calendar_dates AS SELECT * FROM period_calendar_dates "
-            f"WHERE trade_date BETWEEN {_sql_literal(start_date)} AND {_sql_literal(extended_end)}"
-        )
-        connection.execute(
-            "CREATE OR REPLACE TEMP VIEW sixty_minute_states AS SELECT * "
-            "FROM period_sixty_minute_states"
-        )
-        stock_day_support_path = support_directory / (
-            f"stock_days__{start_date}__{end_date}.parquet"
-        )
-        stock_day_artifact, stock_day_reused = _materialize_cached_view(
-            connection,
-            view_name="stock_days",
-            path=stock_day_support_path,
-            metadata_path=stock_day_support_path.with_suffix(".json"),
-            cache_spec={
-                **support_cache_context,
-                "view": "stock_days",
-                "start_date": start_date,
-                "end_date": end_date,
-            },
-            query=(
-                "SELECT * FROM period_stock_days "
-                f"WHERE trade_date BETWEEN {_sql_literal(start_date)} "
-                f"AND {_sql_literal(end_date)}"
-            ),
-        )
-        stock_day_row = connection.execute(
-            "SELECT count(*),count(DISTINCT symbol),count(DISTINCT trade_date) "
-            "FROM stock_days"
-        ).fetchone()
-        if not stock_day_row or int(stock_day_row[0]) == 0:
-            raise MinuteV2Error(f"minute_v2_stock_days_empty:{start_date}:{end_date}")
-        stock_day_stats = {
-            "stock_days": int(stock_day_row[0]),
-            "symbols": int(stock_day_row[1]),
-            "dates": int(stock_day_row[2]),
-        }
-        sixty_state_started = time.perf_counter()
-        sixty_state_artifact = period_support["sixty_minute_states"]
-        sixty_state_reused = bool(sixty_state_artifact.get("reused", False))
-        sixty_state_paths = [
-            Path(str(value)).resolve() for value in sixty_state_artifact["paths"]
-        ]
-        connection.execute(
-            "CREATE OR REPLACE TEMP VIEW sixty_minute_states AS SELECT * FROM "
-            + _parquet_scan(sixty_state_paths)
-        )
-        sixty_state_seconds = time.perf_counter() - sixty_state_started
-        label_support_artifacts = _materialize_label_support(
-            connection,
-            start_date=start_date,
-            extended_end_date=extended_end,
-            support_directory=support_directory,
-            support_cache_context=support_cache_context,
-            stock_days_view="period_label_stock_days",
-            calendar_view="period_calendar_dates",
-        )
-        available_dates = [
-            _date_text(row[0])
-            for row in connection.execute(
-                "SELECT DISTINCT trade_date FROM stock_days ORDER BY trade_date"
-            ).fetchall()
-        ]
-        if not available_dates:
-            raise MinuteV2Error(f"minute_v2_trading_dates_empty:{start_date}:{end_date}")
-        dates = _evenly_spaced_dates(
-            available_dates,
-            current.maximum_trading_days_per_month,
-        )
-        complete_sessions = 0
-        expected_decision_rows = 0
-        reused_parts = 0
-        built_parts = 0
-        processing_chunks = _chunks(dates, current.processing_days_per_chunk)
-        feature_phase_started = time.perf_counter()
-        for chunk_dates in processing_chunks:
-            date_values = ",".join(_sql_literal(value) for value in chunk_dates)
-            chunk_name = (
-                chunk_dates[0].replace("-", "")
-                if len(chunk_dates) == 1
-                else chunk_dates[0].replace("-", "") + "_" + chunk_dates[-1].replace("-", "")
-            )
-            connection.execute(
-                "CREATE OR REPLACE TEMP VIEW day_stock_days AS "
-                f"SELECT * FROM stock_days WHERE trade_date IN ({date_values})"
-            )
-            connection.execute(
-                "CREATE OR REPLACE TEMP VIEW day_minute_bars AS "
-                f"SELECT * FROM minute_bars WHERE trade_date IN ({date_values})"
-            )
-            connection.execute(
-                "CREATE OR REPLACE TEMP VIEW day_minute_history AS "
-                "WITH target_symbols AS (SELECT DISTINCT symbol FROM day_stock_days),"
-                "complete_prior_days AS ("
-                "SELECT b.symbol,b.trade_date FROM minute_bars_history b "
-                "JOIN target_symbols t ON t.symbol=b.symbol "
-                f"WHERE b.trade_date < {_sql_literal(chunk_dates[0])} "
-                "GROUP BY b.symbol,b.trade_date HAVING count(*)=240),"
-                "prior_bars AS ("
-                "SELECT b.* FROM minute_bars_history b JOIN complete_prior_days p "
-                "ON p.symbol=b.symbol AND p.trade_date=b.trade_date "
-                f"WHERE b.trade_date < {_sql_literal(chunk_dates[0])} "
-                "QUALIFY row_number() OVER (PARTITION BY b.symbol "
-                "ORDER BY b.trade_date DESC,b.bar_time DESC)<=240),"
-                "target_bars AS (SELECT b.* FROM minute_bars b JOIN target_symbols t "
-                f"ON t.symbol=b.symbol WHERE b.trade_date IN ({date_values})) "
-                "SELECT * FROM prior_bars UNION ALL BY NAME SELECT * FROM target_bars"
-            )
-            day_sessions = int(
-                connection.execute(
-                    "SELECT count(*) FROM ("
-                    "SELECT b.symbol,b.trade_date,count(*) bars FROM day_minute_bars b "
-                    "JOIN day_stock_days s USING(symbol,trade_date) "
-                    "GROUP BY b.symbol,b.trade_date HAVING bars=240)"
-                ).fetchone()[0]
-            )
-            day_decisions = day_sessions * EXPECTED_DECISION_BARS
-            complete_sessions += day_sessions
-            expected_decision_rows += day_decisions
-            stem = chunk_name + ".parquet"
-            base_part = checkpoint / "base" / stem
-            need_base = not _valid_part(base_part, expected_rows=day_decisions)
-            if need_base:
-                _copy_query(
-                    connection,
-                    feature_query(
-                        bars_view="day_minute_history",
-                        stock_days_view="day_stock_days",
-                        auction_view="opening_auction",
-                        sixty_state_view="sixty_minute_states",
-                    ),
-                    base_part,
-                    compression="SNAPPY",
-                )
-                if not _valid_part(base_part, expected_rows=day_decisions):
-                    raise MinuteV2Error(
-                        f"minute_v2_chunk_base_row_mismatch:{chunk_name}:{day_decisions}"
-                    )
-                built_parts += 1
-            else:
-                reused_parts += 1
-        base_parts = sorted((checkpoint / "base").glob("*.parquet"))
-        if len(base_parts) != len(processing_chunks):
-            raise MinuteV2Error(
-                f"minute_v2_chunk_base_parts_incomplete:{len(processing_chunks)}:{len(base_parts)}"
-            )
-        feature_phase_seconds = time.perf_counter() - feature_phase_started
-        base_rows = sum(int(pq.ParquetFile(path).metadata.num_rows) for path in base_parts)
-        if base_rows != expected_decision_rows:
-            raise MinuteV2Error(
-                f"minute_v2_base_parts_row_mismatch:{base_rows}:{expected_decision_rows}"
-            )
-        base_scan = _parquet_scan(base_parts)
-        group_stats = connection.execute(
-            "SELECT sum(groups_per_day) AS groups,count(*) AS dates,min(groups_per_day),"
-            "max(groups_per_day) "
-            "FROM (SELECT trade_date,count(DISTINCT bar_time) AS groups_per_day "
-            f"FROM {base_scan} GROUP BY trade_date)"
-        ).fetchone()
-        if not group_stats or min(int(value or 0) for value in group_stats) <= 0:
-            raise MinuteV2Error("minute_v2_base_cross_sections_empty")
-        if int(group_stats[2]) != EXPECTED_DECISION_BARS or int(group_stats[3]) != EXPECTED_DECISION_BARS:
-            raise MinuteV2Error(
-                f"minute_v2_decision_grid_incomplete:{group_stats[2]}:{group_stats[3]}"
-            )
-        uncompressed_base_bytes = sum(_parquet_uncompressed_bytes(path) for path in base_parts)
-        compressed_base_bytes = sum(path.stat().st_size for path in base_parts)
-        expected_decision_groups = int(group_stats[0])
-        candidate_phase_started = time.perf_counter()
-        # First materialize every candidate event.  The expensive future-window
-        # calculation is performed once per symbol bucket below, rather than
-        # once per trading-day part.
-        for chunk_dates, base_part in zip(processing_chunks, base_parts, strict=True):
-            chunk_name = (
-                chunk_dates[0].replace("-", "")
-                if len(chunk_dates) == 1
-                else chunk_dates[0].replace("-", "") + "_" + chunk_dates[-1].replace("-", "")
-            )
-            stem = chunk_name + ".parquet"
-            event_part = checkpoint / "events" / stem
-            need_events = not _valid_part(event_part)
-            if not need_events:
-                reused_parts += 1
-                continue
-            connection.execute(
-                "CREATE OR REPLACE TEMP VIEW day_minute_features AS SELECT * FROM "
-                + _parquet_scan([base_part])
-            )
-            _copy_query(
-                connection,
-                event_query(
-                    feature_view="day_minute_features",
-                    config=current,
-                ),
-                event_part,
-                compression="SNAPPY",
-            )
-            built_parts += 1
-
-        event_parts = sorted((checkpoint / "events").glob("*.parquet"))
-        if len(event_parts) != len(processing_chunks):
-            raise MinuteV2Error(
-                f"minute_v2_event_parts_incomplete:{len(processing_chunks)}:{len(event_parts)}"
-            )
-        total_event_rows = sum(
-            int(pq.ParquetFile(path).metadata.num_rows) for path in event_parts
-        )
-        event_scan = _parquet_scan(event_parts)
-        # Buckets are tied to this month's event keys.  Keep the persistent
-        # cache namespace shared across months, but isolate each date range so
-        # one month's labels cannot overwrite another month's buckets.
-        label_bucket_directory = support_directory / (
-            f"label_buckets__{start_date}__{extended_end}"
-        )
-        label_bucket_directory.mkdir(parents=True, exist_ok=True)
-        label_bucket_paths: list[Path] = []
-        label_bucket_specs: list[dict[str, Any]] = []
-        label_cache_started = time.perf_counter()
-        future_label_paths = [
-            Path(str(value)).resolve()
-            for value in period_support["future_label_bars"]["paths"]
-        ]
-        for bucket in range(LABEL_BUCKET_COUNT):
-            bucket_name = f"labels_bucket_{bucket:02d}_of_{LABEL_BUCKET_COUNT:02d}.parquet"
-            bucket_path = label_bucket_directory / bucket_name
-            bucket_metadata = bucket_path.with_suffix(".json")
-            bucket_event_count = int(
-                connection.execute(
-                    f"SELECT count(*) FROM {event_scan} "
-                    f"WHERE hash(symbol)%{LABEL_BUCKET_COUNT}={bucket}"
-                ).fetchone()[0]
-            )
-            bucket_spec = {
-                "schema": LABEL_CACHE_SCHEMA,
-                "content_signature": checkpoint_spec["content_signature"],
-                "bucket": bucket,
-                "bucket_count": LABEL_BUCKET_COUNT,
-                "event_rows": bucket_event_count,
-                "event_parts": [
-                    {
-                        "name": path.name,
-                        "size": int(path.stat().st_size),
-                        "sha256": sha256_file(path),
-                    }
-                    for path in event_parts
-                ],
-            }
-            bucket_reused = _label_cache_is_valid(
-                bucket_path,
-                bucket_metadata,
-                expected_rows=bucket_event_count,
-                expected_spec=bucket_spec,
-            )
-            if not bucket_reused:
-                connection.execute(
-                    "CREATE OR REPLACE TEMP VIEW bucket_events AS SELECT * FROM "
-                    f"{event_scan} WHERE hash(symbol)%{LABEL_BUCKET_COUNT}={bucket}"
-                )
-                connection.execute(
-                    "CREATE OR REPLACE TEMP VIEW bucket_bars AS SELECT * FROM "
-                    + _parquet_scan([future_label_paths[bucket]])
-                )
-                bucket_artifact = _copy_query(
-                    connection,
-                    label_query(
-                        event_view="bucket_events",
-                        target_bars_view="minute_bars",
-                        extended_bars_view="bucket_bars",
-                        stock_days_view="label_stock_days",
-                        calendar_view="calendar_dates",
-                        config=current,
-                    ),
-                    bucket_path,
-                    compression="SNAPPY",
-                )
-                if not _valid_part(bucket_path, expected_rows=bucket_event_count):
-                    raise MinuteV2Error(
-                        "minute_v2_label_bucket_row_mismatch:"
-                        f"{bucket}:{bucket_event_count}"
-                    )
-                write_json(bucket_metadata, {**bucket_spec, "artifact": bucket_artifact})
-                built_parts += 1
-            else:
-                reused_parts += 1
-            label_bucket_paths.append(bucket_path)
-            label_bucket_specs.append(
-                {
-                    "path": str(bucket_path),
-                    "rows": bucket_event_count,
-                    "reused": bucket_reused,
-                }
-            )
-        label_cache_seconds = time.perf_counter() - label_cache_started
-        if sum(item["rows"] for item in label_bucket_specs) != total_event_rows:
-            raise MinuteV2Error("minute_v2_label_bucket_rows_incomplete")
-        label_cache_rows = sum(item["rows"] for item in label_bucket_specs)
-        label_cache_bytes = sum(path.stat().st_size for path in label_bucket_paths)
-        existing_label_parts = sorted((checkpoint / "labels").glob("*.parquet"))
-        label_cache_comparison = _assert_label_cache_matches_existing_parts(
-            connection,
-            cache_paths=label_bucket_paths,
-            existing_parts=existing_label_parts,
-        )
-        label_cache_reused = all(item["reused"] for item in label_bucket_specs)
-        label_bucket_scan = _parquet_scan(label_bucket_paths)
-
-        for chunk_dates, event_part in zip(processing_chunks, event_parts, strict=True):
-            date_values = ",".join(_sql_literal(value) for value in chunk_dates)
-            chunk_name = (
-                chunk_dates[0].replace("-", "")
-                if len(chunk_dates) == 1
-                else chunk_dates[0].replace("-", "") + "_" + chunk_dates[-1].replace("-", "")
-            )
-            label_part = checkpoint / "labels" / f"{chunk_name}.parquet"
-            if _valid_part(label_part):
-                reused_parts += 1
-            else:
-                _copy_query(
-                    connection,
-                    "SELECT * FROM "
-                    + label_bucket_scan
-                    + f" WHERE trade_date IN ({date_values}) "
-                    "ORDER BY trade_date,bar_time,symbol",
-                    label_part,
-                    compression="SNAPPY",
-                )
-                built_parts += 1
-            event_rows = int(pq.ParquetFile(event_part).metadata.num_rows)
-            label_rows = int(pq.ParquetFile(label_part).metadata.num_rows)
-            if event_rows != label_rows:
-                raise MinuteV2Error(
-                    f"minute_v2_chunk_event_label_mismatch:{chunk_name}:{event_rows}:{label_rows}"
-                )
-        candidate_phase_seconds = time.perf_counter() - candidate_phase_started
-        label_parts = sorted((checkpoint / "labels").glob("*.parquet"))
-        if len(event_parts) != len(processing_chunks) or len(label_parts) != len(processing_chunks):
-            raise MinuteV2Error(
-                "minute_v2_chunk_parts_incomplete:"
-                f"{len(processing_chunks)}:{len(event_parts)}:{len(label_parts)}"
-            )
-        artifacts: dict[str, dict[str, Any]] = {}
-        if keep_base:
-            if current.feature_storage == "full":
-                artifacts["base"] = _combine_parts(connection, base_parts, paths["base"])
-            else:
-                artifacts["base"] = _copy_query(
-                    connection,
-                    "SELECT " + ",".join(CORE_STORAGE_COLUMNS) + " FROM "
-                    + _parquet_scan(base_parts)
-                    + " ORDER BY trade_date,bar_time,symbol",
-                    paths["base"],
-                )
-                if current.feature_storage == "split":
-                    artifacts["optional_features"] = _copy_query(
-                        connection,
-                        "SELECT " + ",".join(OPTIONAL_STORAGE_COLUMNS) + " FROM "
-                        + _parquet_scan(base_parts)
-                        + " ORDER BY trade_date,bar_time,symbol",
-                        paths["optional_features"],
-                    )
-        artifacts["events"] = _combine_parts(connection, event_parts, paths["events"])
-        artifacts["labels"] = _combine_parts(connection, label_parts, paths["labels"])
-        verification = _verify_month_artifacts(
-            connection,
-            base=paths.get("base"),
-            optional=paths.get("optional_features"),
-            events=paths["events"],
-            labels=paths["labels"],
-            expected_decision_rows=expected_decision_rows,
-            expected_decision_groups=expected_decision_groups,
-            base_reference_parts=base_parts,
-            feature_storage=current.feature_storage,
-        )
-        if not keep_base:
-            _remove_stale_base_artifact(directory)
-            _remove_stale_optional_artifact(directory)
-        total_seconds = time.perf_counter() - build_started
-        benchmark = {
-            "feature_construction_seconds": feature_phase_seconds,
-            "sixty_minute_state_seconds": sixty_state_seconds,
-            "sixty_minute_state_rows": sixty_state_artifact["row_count"],
-            "sixty_minute_state_bytes": sixty_state_artifact["size"],
-            "sixty_minute_state_reused": sixty_state_reused,
-            "candidate_and_label_seconds": candidate_phase_seconds,
-            "all_event_label_cache_seconds": label_cache_seconds,
-            "all_event_label_cache_rows": label_cache_rows,
-            "all_event_label_cache_bytes": label_cache_bytes,
-            "all_event_label_cache_reused": label_cache_reused,
-            "all_event_label_cache_buckets": label_bucket_specs,
-            "existing_label_equivalence": label_cache_comparison,
-            "total_seconds": total_seconds,
-            "feature_rows_per_second": (
-                base_rows / feature_phase_seconds if feature_phase_seconds > 0 else None
-            ),
-            "base_uncompressed_bytes": uncompressed_base_bytes,
-            "base_compressed_bytes": compressed_base_bytes,
-            "base_parquet_compression_ratio": (
-                compressed_base_bytes / uncompressed_base_bytes
-                if uncompressed_base_bytes > 0
-                else None
-            ),
-            "decision_time_policy": "all 234 causal decision minutes per complete trading day",
-            "intermediate_compression": "SNAPPY for new day/support parts; final artifacts ZSTD",
-            "feature_storage": current.feature_storage,
-            "stored_core_columns": len(CORE_STORAGE_COLUMNS),
-            "stored_optional_columns": (
-                len(OPTIONAL_STORAGE_COLUMNS)
-                if current.feature_storage == "split"
-                else 0
-            ),
-        }
-        result = {
-            "schema": MONTH_SCHEMA,
-            "status": "ok",
-            "year": int(year),
-            "month": int(month),
-            "start_date": start_date,
-            "end_date": end_date,
-            "extended_label_end_date": extended_end,
-            "minute_history_start_date": minute_history_start,
-            "config": current.as_dict(),
-            "source": snapshot.as_dict(),
-            "build_spec": manifest_build_spec,
-            "stock_days": stock_day_stats,
-            "shared_support": {
-                "stock_days": {
-                    "rows": stock_day_artifact["row_count"],
-                    "bytes": stock_day_artifact["size"],
-                    "reused": stock_day_reused,
-                },
-                **{
-                    name: {
-                        "rows": value["row_count"],
-                        "bytes": value["size"],
-                        "reused": value["reused"],
-                    }
-                    for name, value in label_support_artifacts.items()
-                },
-                "period_support": {
-                    "period": period,
-                    "directory": period_support["directory"],
-                    "reused": all(
-                        bool(value.get("reused", False))
-                        for name, value in period_support.items()
-                        if isinstance(value, dict) and name != "period"
-                    ),
-                    "artifacts": {
-                        name: {
-                            "rows": value["row_count"],
-                            "bytes": value["size"],
-                            "reused": value.get("reused", False),
-                        }
-                        for name, value in period_support.items()
-                        if isinstance(value, dict) and "row_count" in value
-                    },
-                },
-            },
-            "support_cache": {
-                "schema": SUPPORT_CACHE_SCHEMA,
-                "signature": support_signature,
-                "directory": str(support_directory),
-                "persistent": True,
-                "period": period,
-            },
-            "complete_session_stock_days": complete_sessions,
-            "date_selection": {
-                "available_trading_days": len(available_dates),
-                "selected_trading_days": len(dates),
-                "selected_dates": dates,
-                "policy": (
-                    "all trading days"
-                    if len(dates) == len(available_dates)
-                    else "evenly spaced whole trading days for development; full market retained"
-                ),
-            },
-            "storage_policy": (
-                "complete causal base retained for audit"
-                if keep_base
-                else "full-market causal base computed transiently; causal stock candidates retained"
-            ),
-            "benchmark": benchmark,
-            "resource_settings": asdict(connection.settings),
-            "effective_duckdb_memory_limit_bytes": effective_memory_limit_bytes,
-            "day_part_build": {
-                "trading_days": len(dates),
-                "processing_chunks": len(processing_chunks),
-                "days_per_chunk": current.processing_days_per_chunk,
-                "resumed_checkpoint": resumed_checkpoint,
-                "reused_parts": reused_parts,
-                "built_parts": built_parts,
-            },
-            "artifacts": artifacts,
-            "verification": verification,
-        }
-        write_json(manifest_path, result)
         completed = True
+        return result
     finally:
         connection.close()
         _clean_runtime_directory(
             runtime,
             external=external_runtime,
-            month_directory=directory,
+            month_directory=preparation.directory,
         )
         if completed:
-            _safe_clean_generated(checkpoint, directory, expected_name="_parts")
-    return result
-
+            _safe_clean_generated(
+                checkpoint,
+                preparation.directory,
+                expected_name="_parts",
+            )
 
 def _month_sequence(start_year: int, end_year: int) -> list[tuple[int, int]]:
     if int(end_year) < int(start_year):

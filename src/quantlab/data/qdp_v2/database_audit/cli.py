@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 from quantlab.data.qdp_v2.manifest import (
     qdp_v2_root,
 )

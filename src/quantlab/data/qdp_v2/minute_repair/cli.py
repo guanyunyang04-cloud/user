@@ -6,7 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 
 from .candidate import (
     DEFAULT_BATCH_CALENDAR_DAYS,

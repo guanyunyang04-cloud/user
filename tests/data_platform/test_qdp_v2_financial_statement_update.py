@@ -4,7 +4,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-from quantlab.data.qdp_v2.financial_statement_update import (
+from quantlab.data.qdp_v2.financial_statement_update.config import (
     BALANCE_EXTENSION_NUMERIC_COLUMNS,
     BALANCE_METRICS,
     BALANCE_SEMANTIC_NUMERIC_COLUMNS,
@@ -12,11 +12,12 @@ from quantlab.data.qdp_v2.financial_statement_update import (
     START_DATE,
     STATEMENT_SPECS,
     V2_STATEMENT_SPECS,
+)
+from quantlab.data.qdp_v2.financial_statement_update.context import _in_scope_provider_rows, _report_periods
+from quantlab.data.qdp_v2.financial_statement_update.normalize import _normalize_statement_part
+from quantlab.data.qdp_v2.financial_statement_update.prepare import (
     _balance_extension_hash_sql,
     _balance_semantic_hash_sql,
-    _in_scope_provider_rows,
-    _normalize_statement_part,
-    _report_periods,
 )
 
 

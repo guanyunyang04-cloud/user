@@ -10,7 +10,7 @@ from typing import Any
 import duckdb
 
 from quantlab.data.core.paths import qdp_paths
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     atomic_write_json,
@@ -23,9 +23,7 @@ from quantlab.data.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quantlab.data.qdp_v2.research_event_update import (
-    _assert_credential_free,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _assert_credential_free
 from quantlab.data.qdp_v2.status import active_dataset_map
 
 from .config import (

@@ -11,8 +11,8 @@ from typing import Any
 import duckdb
 import pandas as pd
 
-from quantlab.data.core.json_io import json_safe
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.core.io import json_safe
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     dataset_manifest_for_id,
     qdp_v2_root,

@@ -21,9 +21,22 @@ data/research/*
 !data/research/daily/
 data/research/daily/*
 !data/research/daily/manifest.json
+# Minute-v2 builders leave caches and checkpoints beside local artifacts.
+data/research/**/*.partial
+data/research/**/_support_cache/
+data/research/**/_parts/
+data/research/*.json
 data/staging/
 runs/*
 !runs/.gitkeep
+
+# Runtime evidence is reproducible from the active manifest or source archive.
+research/records/**/audit/*.parquet
+research/records/**/backup_pre_repair/**/*.parquet
+research/records/**/prepared/**/*.parquet
+research/records/**/latest_signal_predictions.parquet
+research/records/**/top3_*.parquet
+research/records/**/*.log
 
 # Reproducible hot-money event-study data products are too large for GitHub.
 research/records/seq100/seq100_hot_money_event_study_v1_20260806/*.parquet

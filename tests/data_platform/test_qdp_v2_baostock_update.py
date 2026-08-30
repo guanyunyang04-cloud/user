@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import DataDomain
-from quantlab.data.providers import (
+from quantlab.data.domains.contracts.schema import DataDomain
+from quantlab.data.providers.baostock.frames import (
     _baostock_all_stock_frame,
     _baostock_bulk_daily_domain_frame,
     _baostock_status_frame_from_all_stock,

@@ -11,8 +11,9 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from quantlab.data.core.json_io import read_json
+from quantlab.core.io import read_optional_json
 from quantlab.data.core.paths import qdp_paths
+from quantlab.data.qdp_v2.active import ActiveDomain
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -31,10 +32,7 @@ from .common import (
     _time_token,
     _utc_now,
 )
-from .model import (
-    ActiveDomain,
-    QdpV2RepairError,
-)
+from .errors import QdpV2RepairError
 
 
 def _read_patch_request(
@@ -44,7 +42,7 @@ def _read_patch_request(
     candidate = Path(path).expanduser()
     if not candidate.is_absolute():
         candidate = qdp_paths(workspace_root).workspace_root / candidate
-    payload = read_json(candidate.resolve())
+    payload = read_optional_json(candidate.resolve())
     allowed = {"schema_version", "domain", "changes"}
     unknown = set(payload).difference(allowed)
     if unknown:

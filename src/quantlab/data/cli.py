@@ -4,7 +4,7 @@ import json
 import sys
 from typing import Any
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 from quantlab.data.progress import suppress_progress
 from quantlab.data.qdp_v2.cli import HELP_TEXT, dispatch
 

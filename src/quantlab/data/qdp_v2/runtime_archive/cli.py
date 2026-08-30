@@ -7,12 +7,13 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 
 from .archive import (
     restore_archive,
 )
 from .seal import (
+    _resolve_manifest_artifact_path,
     seal_workflows,
     verify_unit_manifest,
 )
@@ -48,10 +49,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.command == "verify":
         payload = verify_unit_manifest(args.manifest)
     else:
-        manifest = dict(json.loads(Path(args.manifest).resolve().read_text(encoding="utf-8")))
+        manifest_path = Path(args.manifest).resolve()
+        manifest = dict(json.loads(manifest_path.read_text(encoding="utf-8")))
         payload = restore_archive(
-            manifest["archive_path"],
-            manifest["ledger_path"],
+            _resolve_manifest_artifact_path(manifest["archive_path"], manifest_path),
+            _resolve_manifest_artifact_path(manifest["ledger_path"], manifest_path),
             target_root=args.target_root,
             overwrite=bool(args.overwrite),
         )

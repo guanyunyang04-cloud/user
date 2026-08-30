@@ -6,23 +6,21 @@ from pathlib import Path
 
 import pandas as pd
 
-from quantlab.data.core.paths import workspace_root
+from quantlab.core.paths import workspace_root
 from quantlab.data.qdp_v2.audit import audit_active
 from quantlab.data.qdp_v2.check import run_check
-from quantlab.data.qdp_v2.database_audit import (
-    EXPECTED_BAR_TIMES,
-    REQUIRED_DOMAINS,
-    _active_manifest,
-    _audit_temp_directory,
-    _bar_day_check,
+from quantlab.data.qdp_v2.database_audit.asof import _snapshot_manifest_as_of
+from quantlab.data.qdp_v2.database_audit.common import _audit_temp_directory
+from quantlab.data.qdp_v2.database_audit.config import REQUIRED_DOMAINS
+from quantlab.data.qdp_v2.database_audit.identity import _active_manifest
+from quantlab.data.qdp_v2.database_audit.latest import audit_latest_keys
+from quantlab.data.qdp_v2.database_audit.market import (
     _daily_intraday_consistency_check,
     _factor_semantic_check,
-    _ordered_intraday_primary_key_check,
-    _snapshot_manifest_as_of,
     _status_daily_partition_check,
-    audit_database,
-    audit_latest_keys,
 )
+from quantlab.data.qdp_v2.database_audit.orchestrator import audit_database
+from quantlab.data.qdp_v2.database_audit.physical import _bar_day_check, _ordered_intraday_primary_key_check
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.environment import (
     assert_yolos_environment,
@@ -30,6 +28,7 @@ from quantlab.data.qdp_v2.environment import (
 )
 from quantlab.data.qdp_v2.gc import lake_gc
 from quantlab.data.qdp_v2.manifest import (
+    EXPECTED_BAR_TIMES,
     DatasetManifest,
     ShardManifestEntry,
     _manifest_schema_from_arrow,
@@ -67,9 +66,29 @@ def test_workspace_root_does_not_depend_on_brain(tmp_path: Path, monkeypatch) ->
     nested = workspace / "research" / "records"
     nested.mkdir(parents=True)
     monkeypatch.chdir(nested)
+    monkeypatch.delenv("QUANTLAB_ROOT", raising=False)
     monkeypatch.delenv("QDP_WORKSPACE_ROOT", raising=False)
 
     assert workspace_root() == workspace.resolve()
+
+
+def test_workspace_root_accepts_legacy_qdp_environment_name(tmp_path: Path, monkeypatch) -> None:
+    workspace = _workspace(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("QUANTLAB_ROOT", raising=False)
+    monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(workspace))
+
+    assert workspace_root() == workspace.resolve()
+
+
+def test_workspace_root_prefers_current_environment_name(tmp_path: Path, monkeypatch) -> None:
+    primary = _workspace(tmp_path / "primary")
+    legacy = _workspace(tmp_path / "legacy")
+    monkeypatch.delenv("QDP_WORKSPACE_ROOT", raising=False)
+    monkeypatch.setenv("QUANTLAB_ROOT", str(primary))
+    monkeypatch.setenv("QDP_WORKSPACE_ROOT", str(legacy))
+
+    assert workspace_root() == primary.resolve()
 
 
 def _write_domain(

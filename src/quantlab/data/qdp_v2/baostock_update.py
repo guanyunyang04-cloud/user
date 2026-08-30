@@ -15,17 +15,12 @@ import pandas as pd
 from quantlab.data import identifiers as _identifiers
 from quantlab.data.core.paths import qdp_paths
 from quantlab.data.core.security_status import st_status_from_name
-from quantlab.data.domains.contracts import (
-    DataDomain,
-    DatePartitionFetchRequest,
-    DomainFetchRequest,
-)
-from quantlab.data.providers import BaostockProvider
+from quantlab.data.domains.contracts.requests import DatePartitionFetchRequest, DomainFetchRequest
+from quantlab.data.domains.contracts.schema import DataDomain
+from quantlab.data.providers.baostock.provider import BaostockProvider
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
-from quantlab.data.qdp_v2.repair import (
-    append_active_shard,
-    resolve_active_domain,
-)
+from quantlab.data.qdp_v2.repair.mutation import append_active_shard
 
 _identity_exchange = _identifiers.identity_exchange
 _security_id = _identifiers.security_id

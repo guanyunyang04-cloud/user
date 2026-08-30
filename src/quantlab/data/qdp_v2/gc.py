@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 from quantlab.data.qdp_v2.manifest import (
     iter_dataset_manifests,
     qdp_v2_root,

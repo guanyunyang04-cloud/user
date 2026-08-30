@@ -9,19 +9,24 @@ description = "Point-in-time A-share data and short-horizon research workspace."
 requires-python = ">=3.11"
 dependencies = [
   "duckdb",
-  "lightgbm",
   "numpy",
   "pandas",
   "psutil",
   "pyarrow",
-  "torch",
 ]
 
 [project.optional-dependencies]
+research = [
+  "lightgbm",
+  "torch",
+]
 sources = [
   "akshare",
   "baostock==0.9.3",
+  "efinance",
   "mootdx==0.11.7",
+  "requests",
+  "tdxpy",
 ]
 
 [project.scripts]

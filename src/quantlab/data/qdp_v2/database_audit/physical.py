@@ -12,7 +12,7 @@ from quantlab.data.qdp_v2.manifest import (
     EXPECTED_BAR_TIMES,
     ShardManifestEntry,
 )
-from quantlab.data.qdp_v2.repair import _sql_literal
+from quantlab.data.qdp_v2.repair.common import _sql_literal
 
 from .common import (
     _path_texts,

@@ -8,8 +8,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from quantlab.data.core.json_io import json_safe
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.core.io import json_safe
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
     qdp_v2_root,
@@ -113,9 +113,7 @@ def run_pending(
     prepare(workspace_root=workspace_root)
     result = commit(workspace_root=workspace_root)
     if seal_runtime:
-        from quantlab.data.qdp_v2.runtime_archive import (
-            seal_completed_workflow,
-        )
+        from quantlab.data.qdp_v2.runtime_archive.seal import seal_completed_workflow
 
         result = {
             **result,

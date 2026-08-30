@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 from quantlab.data.qdp_v2.manifest import (
     dataset_manifest_for_id,
     iter_dataset_manifests,

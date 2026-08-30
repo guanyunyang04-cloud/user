@@ -13,13 +13,11 @@ import numpy as np
 import pandas as pd
 import requests
 
+from quantlab.core.io import sha256_file as _sha256
 from quantlab.data.qdp_v2.manifest import (
     utc_now,
 )
-from quantlab.data.qdp_v2.research_event_update import (
-    _sha256,
-    _write_parquet,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _write_parquet
 
 from .config import (
     ENDPOINTS,

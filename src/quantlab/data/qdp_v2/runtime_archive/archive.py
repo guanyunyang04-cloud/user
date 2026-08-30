@@ -11,9 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.qdp_v2.research_event_update import (
-    _sha256,
-)
+from quantlab.core.io import sha256_file as _sha256
 
 from .config import (
     ArchiveUnit,

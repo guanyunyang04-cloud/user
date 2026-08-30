@@ -11,15 +11,13 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
-from quantlab.data.core.json_io import json_safe, read_json
+from quantlab.core.io import json_safe, read_optional_json
 from quantlab.data.core.paths import qdp_paths
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import atomic_write_json
-from quantlab.data.qdp_v2.repair import (
-    _sql_literal,
-    mutate_active_shards_from_parquet,
-    resolve_active_domain,
-)
+from quantlab.data.qdp_v2.repair.common import _sql_literal
+from quantlab.data.qdp_v2.repair.mutation import mutate_active_shards_from_parquet
 
 DOMAIN = "market_intraday_5m"
 DATA_COLUMNS = (
@@ -219,7 +217,7 @@ def _load_prepared_state(
 ) -> tuple[list[Path], dict[str, dict[str, Any]]]:
     if not state_path.is_file():
         return [], {}
-    state = read_json(state_path)
+    state = read_optional_json(state_path)
     expected_sources = [str(path.relative_to(workspace)) for path in source_paths]
     if (
         state.get("status") != "prepared"

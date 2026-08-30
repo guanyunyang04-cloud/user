@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
+
+from quantlab.core.paths import workspace_root
 
 
 @dataclass(frozen=True)
@@ -35,30 +36,6 @@ class QdpPaths:
         """Immutable external inputs kept outside the active QDP datasets."""
 
         return self.data_dir / "source_archives"
-
-
-def workspace_root(start: str | Path | None = None) -> Path:
-    env_root = os.environ.get("QDP_WORKSPACE_ROOT", "").strip()
-    if env_root:
-        return Path(env_root).resolve()
-    # A caller-supplied root is an exact isolation boundary.  In particular,
-    # fixtures and recovery probes nested below the production workspace must
-    # never inherit a parent brain or its active data pointers.
-    if start is not None:
-        return Path(start).resolve()
-
-    initial = Path.cwd().resolve()
-    for candidate in (initial, *initial.parents):
-        if _looks_like_workspace(candidate):
-            return candidate
-    return Path(__file__).resolve().parents[4]
-
-
-def _looks_like_workspace(path: Path) -> bool:
-    return any(
-        (path / marker).exists()
-        for marker in (".git", "AGENTS.md", "README.md", "src")
-    )
 
 
 def project_root(root: str | Path | None = None) -> Path:

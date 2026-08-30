@@ -18,8 +18,11 @@ class DataContractError(RuntimeError):
 
 def json_safe(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return {str(key): json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+        return {
+            str(key): json_safe(item)
+            for key, item in sorted(value.items(), key=lambda item: str(item[0]))
+        }
+    if isinstance(value, (list, tuple, set)):
         return [json_safe(item) for item in value]
     if isinstance(value, np.generic):
         return json_safe(value.item())
@@ -40,6 +43,15 @@ def read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise DataContractError(f"JSON root must be an object: {path}")
     return payload
+
+
+def read_optional_json(path: str | Path) -> dict[str, Any]:
+    """Read an optional JSON object while still rejecting corrupt content."""
+
+    resolved = Path(path)
+    if not resolved.is_file():
+        return {}
+    return read_json(resolved)
 
 
 def write_json(path: Path, payload: Mapping[str, Any]) -> None:

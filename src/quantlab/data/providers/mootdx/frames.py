@@ -8,11 +8,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from quantlab.data.domains.contracts import (
-    DataDomain,
-    normalize_domain_frame,
-    normalize_market_frame,
-)
+from quantlab.data.domains.contracts.dispatch import normalize_domain_frame
+from quantlab.data.domains.contracts.market import normalize_market_frame
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.provider_symbols import (
     is_mootdx_index_symbol as _is_mootdx_index_symbol,
 )

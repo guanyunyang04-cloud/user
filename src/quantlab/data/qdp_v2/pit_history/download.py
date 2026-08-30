@@ -12,14 +12,12 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.qdp_v2.auxiliary_update import _external_with_retry
+from quantlab.data.qdp_v2.active import resolve_active_domain
+from quantlab.data.qdp_v2.auxiliary_update.context import _external_with_retry
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
     utc_now,
-)
-from quantlab.data.qdp_v2.repair import (
-    resolve_active_domain,
 )
 
 from .config import (

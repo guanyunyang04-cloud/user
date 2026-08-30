@@ -4,8 +4,10 @@ import io
 
 import duckdb
 import pandas as pd
+import requests
 
-from quantlab.data.qdp_v2 import margin_eligibility_update as update
+from quantlab.data.qdp_v2.margin_eligibility_update import sources as update
+from quantlab.data.qdp_v2.margin_eligibility_update.prepare import _eligibility_query
 
 
 class _Response:
@@ -30,7 +32,7 @@ def test_szse_historical_mojibake_headers_use_verified_column_order(
         columns=[f"broken_{index}" for index in range(8)],
     )
     monkeypatch.setattr(
-        update.requests, "get", lambda *args, **kwargs: _Response(_xlsx(raw))
+        requests, "get", lambda *args, **kwargs: _Response(_xlsx(raw))
     )
 
     result = update._fetch_szse_excel("2011-01-04", endpoint="szse_detail")
@@ -51,7 +53,7 @@ def test_szse_eligibility_is_not_inferred_from_detail_balance(monkeypatch) -> No
         columns=[f"broken_{index}" for index in range(7)],
     )
     monkeypatch.setattr(
-        update.requests, "get", lambda *args, **kwargs: _Response(_xlsx(raw))
+        requests, "get", lambda *args, **kwargs: _Response(_xlsx(raw))
     )
 
     result = update._fetch_szse_excel("2011-01-04", endpoint="szse_eligibility")
@@ -101,7 +103,7 @@ def test_sse_detail_absence_is_unknown_not_known_ineligible() -> None:
         connection.register("official_detail", detail)
         connection.register("next_open_dates", next_open)
         result = connection.execute(
-            update._eligibility_query(universe_scan="universe", year=2024)
+                _eligibility_query(universe_scan="universe", year=2024)
         ).fetchdf()
 
     result = result.set_index("symbol")

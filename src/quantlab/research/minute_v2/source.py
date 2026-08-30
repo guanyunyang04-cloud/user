@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.qdp_v2 import resolve_active_domain
+from quantlab.data.qdp_v2.active import resolve_active_domain
 
 from .contracts import DAILY_WINDOWS, MinuteV2Config, MinuteV2Error
 

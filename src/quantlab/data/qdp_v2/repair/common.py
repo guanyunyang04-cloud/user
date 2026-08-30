@@ -9,9 +9,7 @@ from pathlib import Path
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
-from .model import (
-    _DATE_COLUMNS,
-)
+_DATE_COLUMNS = ("trade_date", "date", "datetime")
 
 
 def _date_column(columns: Sequence[str]) -> str:

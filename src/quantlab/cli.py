@@ -3,8 +3,21 @@ from __future__ import annotations
 import argparse
 import sys
 
-from quantlab.data.cli import main as data_main
-from quantlab.research.__main__ import main as research_main
+
+def data_main(argv: list[str] | None = None) -> int:
+    """Load the data command only after it has been selected."""
+
+    from quantlab.data.cli import main
+
+    return int(main(argv) or 0)
+
+
+def research_main(argv: list[str] | None = None) -> int:
+    """Load research dependencies only after the command has been selected."""
+
+    from quantlab.research.__main__ import main
+
+    return int(main(argv) or 0)
 
 
 def main(argv: list[str] | None = None) -> int:

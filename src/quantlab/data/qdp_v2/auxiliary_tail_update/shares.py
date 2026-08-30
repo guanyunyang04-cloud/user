@@ -9,21 +9,17 @@ from typing import Any
 
 import pandas as pd
 
-from quantlab.data.domains.contracts import (
-    DataDomain,
-)
-from quantlab.data.providers import (
-    MootdxOnlineProvider,
-    _mootdx_xdxr_domain_frame,
-)
-from quantlab.data.qdp_v2.auxiliary_update import (
+from quantlab.data.domains.contracts.schema import DataDomain
+from quantlab.data.providers.mootdx.frames import _mootdx_xdxr_domain_frame
+from quantlab.data.providers.mootdx.provider import MootdxOnlineProvider
+from quantlab.data.qdp_v2.auxiliary_update.context import (
     SECONDARY_VALIDATION_WORKERS,
     AuxiliaryContext,
-    _current_symbols,
     _external_with_retry,
     _paths,
     _scan_sql,
 )
+from quantlab.data.qdp_v2.auxiliary_update.corporate import _current_symbols
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 
 from .common import (

@@ -15,7 +15,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 import requests
 
-from quantlab.data.providers import _fetch_cninfo_announcements
+from quantlab.data.providers.cninfo import _fetch_cninfo_announcements
 
 from .config import (
     ANNOUNCEMENT_COLUMNS,

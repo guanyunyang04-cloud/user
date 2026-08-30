@@ -19,8 +19,9 @@ import psutil
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from quantlab.core.io import DataContractError, read_json, sha256_file, write_json
+from quantlab.core.io import DataContractError, read_json, write_json
 
+from .artifacts import artifact_matches as _training_artifact_matches
 from .builder import BUILD_IMPLEMENTATION_REVISION, BUILD_SPEC_SCHEMA, MONTH_SCHEMA
 from .contracts import (
     CORE_STORAGE_COLUMNS,
@@ -106,9 +107,6 @@ class PeriodPart:
     feature_storage: str = "full"
 
 
-_TRAINING_ARTIFACT_CHECK_CACHE: dict[tuple[str, int, int, int, int, int, str], bool] = {}
-
-
 def _strict_positive_integer(value: Any, error: str) -> int:
     """Accept integer counts without silently truncating floats or booleans."""
 
@@ -118,58 +116,6 @@ def _strict_positive_integer(value: Any, error: str) -> int:
     if result <= 0:
         raise MinuteV2Error(error)
     return result
-
-
-def _training_artifact_matches(path: Path, record: Any) -> bool:
-    if not isinstance(record, dict):
-        return False
-    try:
-        target = Path(path).resolve()
-        if not target.is_file():
-            return False
-        declared_path = Path(str(record.get("path", "")))
-        if not declared_path.is_absolute():
-            declared_path = (target.parent / declared_path).resolve()
-        else:
-            declared_path = declared_path.resolve()
-        if declared_path != target:
-            return False
-        size = record.get("size")
-        rows = record.get("row_count")
-        groups = record.get("row_group_count")
-        digest = record.get("sha256")
-        if (
-            type(size) is not int
-            or type(rows) is not int
-            or type(groups) is not int
-            or not isinstance(digest, str)
-        ):
-            return False
-        stat = target.stat()
-        if int(stat.st_size) != size:
-            return False
-        key = (
-            str(target),
-            int(stat.st_size),
-            int(getattr(stat, "st_mtime_ns", 0)),
-            int(getattr(stat, "st_ctime_ns", 0)),
-            rows,
-            groups,
-            digest,
-        )
-        if _TRAINING_ARTIFACT_CHECK_CACHE.get(key) is True:
-            return True
-        metadata = pq.ParquetFile(target).metadata
-        if (
-            int(metadata.num_rows) != rows
-            or int(metadata.num_row_groups) != groups
-            or sha256_file(target) != digest
-        ):
-            return False
-        _TRAINING_ARTIFACT_CHECK_CACHE[key] = True
-        return True
-    except Exception:
-        return False
 
 
 def _has_unfinished_month_build(directory: Path) -> bool:
@@ -266,7 +212,11 @@ def _period_parts(dataset_root: Path, start_year: int, end_year: int) -> list[Pe
                     raise MinuteV2Error(
                         f"minute_v2_training_artifact_missing:{year:04d}-{month:02d}:{name}"
                     )
-                if not _training_artifact_matches(path, raw_artifacts[name]):
+                if not _training_artifact_matches(
+                    path,
+                    raw_artifacts[name],
+                    base_directory=path.parent,
+                ):
                     raise MinuteV2Error(
                         f"minute_v2_training_artifact_changed:{manifest_path}:{name}"
                     )

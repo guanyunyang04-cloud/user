@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-08-19",
+  "updated_at": "2026-08-30",
   "current_model": "technical_tree158_raw60_equal_rank_development_benchmark",
   "selection_window": "five_expanding_forward_folds_2020_2025",
   "confirmation_window": "none_2026_outcomes_forbidden",
@@ -8,117 +8,117 @@
     {
       "id": "technical_repaired_input_baselines_20260819",
       "status": "current_development_benchmark_not_production",
-      "path": "daily_research/output/technical/ensemble_tree158_raw60/evaluation/result.json"
+      "path": "runs/daily/ensemble_tree158_raw60/evaluation/result.json"
     },
     {
       "id": "seq100_margin_residual_policy_v1_20260808",
       "status": "historical_candidate_not_production",
-      "path": "daily_research/research_records/seq100/seq100_margin_residual_policy_v1_20260808/result.json"
+      "path": "research/records/seq100/seq100_margin_residual_policy_v1_20260808/result.json"
     },
     {
       "id": "mathematical_market_model_20260806",
       "status": "completed_research_no_selection",
-      "path": "daily_research/research_records/seq100/mathematical_market_model_20260806/research_record.md"
+      "path": "research/records/seq100/mathematical_market_model_20260806/research_record.md"
     },
     {
       "id": "current_report",
       "status": "historical",
-      "path": "daily_research/research_records/seq100/current_report/result.json"
+      "path": "research/records/seq100/current_report/result.json"
     },
     {
       "id": "global_strategy_pool",
       "status": "historical_decision_evidence",
-      "path": "daily_research/research_records/seq100/global_strategy_pool/report.md"
+      "path": "research/records/seq100/global_strategy_pool/report.md"
     },
     {
       "id": "legal_structured_2023_2025",
       "status": "completed",
-      "path": "daily_research/research_records/seq100/legal_structured_2023_2025/research_summary.json"
+      "path": "research/records/seq100/legal_structured_2023_2025/research_summary.json"
     },
     {
       "id": "legal_structured_2026",
       "status": "completed_confirmation",
-      "path": "daily_research/research_records/seq100/legal_structured_2026/comparison_summary.json"
+      "path": "research/records/seq100/legal_structured_2026/comparison_summary.json"
     },
     {
       "id": "l35v2_2023_2025",
       "status": "selected_baseline_evidence",
-      "path": "daily_research/research_records/seq100/l35v2_2023_2025/summary.json"
+      "path": "research/records/seq100/l35v2_2023_2025/summary.json"
     },
     {
       "id": "l35v2_sixfold_2020_2025",
       "status": "completed_historical_durability",
-      "path": "daily_research/research_records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"
+      "path": "research/records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"
     },
     {
       "id": "l35v2_2026",
       "status": "completed_confirmation",
-      "path": "daily_research/research_records/seq100/l35v2_2026/comparison_summary.json"
+      "path": "research/records/seq100/l35v2_2026/comparison_summary.json"
     },
     {
       "id": "l35v2_2026_vintages",
       "status": "completed_diagnostic",
-      "path": "daily_research/research_records/seq100/l35v2_2026_vintages/comparison_summary.json"
+      "path": "research/records/seq100/l35v2_2026_vintages/comparison_summary.json"
     },
     {
       "id": "latest_signal_20260721",
       "status": "completed_read_only_signal",
-      "path": "daily_research/research_records/seq100/latest_signal_20260721/audit.json"
+      "path": "research/records/seq100/latest_signal_20260721/audit.json"
     },
     {
       "id": "path_prediction_audit_2020_2026",
       "status": "completed_read_only_audit",
-      "path": "daily_research/research_records/seq100/path_prediction_audit_2020_2026/report.html"
+      "path": "research/records/seq100/path_prediction_audit_2020_2026/report.html"
     },
     {
       "id": "pit_l35v2_survivorship_frozen_audit_2020_2025",
       "status": "completed_read_only_audit",
-      "path": "daily_research/research_records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/result.json"
+      "path": "research/records/seq100/pit_l35v2_survivorship_frozen_audit_2020_2025/result.json"
     },
     {
       "id": "signal_close_path_value_2x2_2023_2025",
       "status": "completed_deterministic_winner",
-      "path": "daily_research/research_records/seq100/signal_close_path_value_2x2_2023_2025/result.json"
+      "path": "research/records/seq100/signal_close_path_value_2x2_2023_2025/result.json"
     },
     {
       "id": "current_2026_best",
       "status": "completed_diagnostic",
-      "path": "daily_research/research_records/seq100/current_2026_best/result.json"
+      "path": "research/records/seq100/current_2026_best/result.json"
     },
     {
       "id": "training_window",
       "status": "retired",
-      "path": "daily_research/research_records/seq100/training_window_retired/comparison_summary.json"
+      "path": "research/records/seq100/training_window_retired/comparison_summary.json"
     },
     {
       "id": "global_tail",
       "status": "retired",
-      "path": "daily_research/research_records/seq100/global_tail_retired/retirement.json"
+      "path": "research/records/seq100/global_tail_retired/retirement.json"
     },
     {
       "id": "l35v3",
       "status": "retired",
-      "path": "daily_research/research_records/seq100/l35v3_retired/result.json"
+      "path": "research/records/seq100/l35v3_retired/result.json"
     },
     {
       "id": "seq100_pit_signal_quality_v1",
       "status": "research_design_insufficient",
-      "path": "daily_research/research_records/seq100/seq100_pit_signal_quality_v1/result.json"
+      "path": "research/records/seq100/seq100_pit_signal_quality_v1/result.json"
     },
     {
       "id": "seq100_path_label_learnability_v1",
       "status": "completed_target_candidate",
-      "path": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/result.json"
+      "path": "research/records/seq100/seq100_path_label_learnability_v1/result.json"
     },
     {
       "id": "seq100_short_horizon_target_reaudit_v1",
       "status": "completed_target_reassessment",
-      "path": "daily_research/research_records/seq100/seq100_short_horizon_target_reaudit_v1/result.json"
+      "path": "research/records/seq100/seq100_short_horizon_target_reaudit_v1/result.json"
     },
     {
       "id": "seq100_target_redundancy_audit_v1",
       "status": "completed_nonredundant_head_set",
-      "path": "daily_research/research_records/seq100/seq100_target_redundancy_audit_v1/result.json"
+      "path": "research/records/seq100/seq100_target_redundancy_audit_v1/result.json"
     }
   ]
 }

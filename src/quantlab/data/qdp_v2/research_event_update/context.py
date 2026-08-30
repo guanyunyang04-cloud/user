@@ -19,10 +19,10 @@ import pandas as pd
 import pyarrow.parquet as pq
 import requests
 
+from quantlab.core.io import json_safe
 from quantlab.core.io import sha256_file as _sha256
-from quantlab.data.core.json_io import json_safe
 from quantlab.data.core.paths import qdp_paths
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
     dataset_manifest_for_id,

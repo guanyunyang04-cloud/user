@@ -14,15 +14,15 @@ import pandas as pd
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 from quantlab.data.core.paths import qdp_paths
-from quantlab.data.qdp_v2.auxiliary_update import (
-    plan_auxiliary_update,
+from quantlab.data.qdp_v2.auxiliary_update.context import plan_auxiliary_update
+from quantlab.data.qdp_v2.auxiliary_update.orchestrator import (
     run_auxiliary_repair,
     run_auxiliary_update,
 )
 from quantlab.data.qdp_v2.baostock_update import run_baostock_core_update
-from quantlab.data.qdp_v2.database_audit import audit_latest_keys
+from quantlab.data.qdp_v2.database_audit.latest import audit_latest_keys
 from quantlab.data.qdp_v2.factor_update import run_factor_tail_update
 from quantlab.data.qdp_v2.manifest import (
     dataset_manifest_for_id,
@@ -31,12 +31,12 @@ from quantlab.data.qdp_v2.manifest import (
     read_dataset_manifest,
     write_active_manifest,
 )
-from quantlab.data.qdp_v2.pit_history import (
-    inventory_pit_history,
+from quantlab.data.qdp_v2.pit_history.context import inventory_pit_history
+from quantlab.data.qdp_v2.pit_history.orchestrator import (
     normalize_symbol_lifecycle_effectivity,
     run_pit_history_restore,
 )
-from quantlab.data.qdp_v2.recent_market_repair import (
+from quantlab.data.qdp_v2.recent_market_repair.entrypoints import (
     run_baostock_intraday_repair,
     run_recent_intraday_repair,
 )

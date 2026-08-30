@@ -7,24 +7,31 @@ from types import SimpleNamespace
 import numpy as np
 import pandas as pd
 import pytest
+import requests
 
-import quantlab.data.qdp_v2.research_event_update as research_update
-from quantlab.data import providers
-from quantlab.data.qdp_v2.research_event_update import (
-    ResearchEventUpdateError,
+from quantlab.data.providers import cninfo
+from quantlab.data.qdp_v2.research_event_update import context as research_context
+from quantlab.data.qdp_v2.research_event_update import report_download
+from quantlab.data.qdp_v2.research_event_update.announcement import (
     _announcement_raw_source_paths,
+    _cninfo_announcement_path,
     _eastmoney_announcement_path,
-    _merge_reports,
     _normalize_cninfo_announcements,
     _normalize_eastmoney_announcements,
-    _normalize_eastmoney_reports,
-    _normalize_tushare_report_year,
+)
+from quantlab.data.qdp_v2.research_event_update.config import ResearchEventUpdateError
+from quantlab.data.qdp_v2.research_event_update.context import (
     _parquet_safe_provider_frame,
     _report_source_key,
     _report_year_source_coverage,
-    report_download,
+    _write_state,
 )
-from quantlab.data.qdp_v2.research_event_update import context as research_context
+from quantlab.data.qdp_v2.research_event_update.report_download import download_tushare_reports
+from quantlab.data.qdp_v2.research_event_update.report_prepare import (
+    _merge_reports,
+    _normalize_eastmoney_reports,
+    _normalize_tushare_report_year,
+)
 
 
 def _open_dates() -> np.ndarray:
@@ -214,7 +221,7 @@ def test_report_daily_download_pages_confirms_empty_and_resumes_failure(
     monkeypatch.setattr(report_download, "_TushareClient", FakeClient)
 
     with pytest.raises(ResearchEventUpdateError, match="daily_tasks_incomplete:1"):
-        research_update.download_tushare_reports(
+        download_tushare_reports(
             workspace_root=tmp_path,
             max_workers=1,
         )
@@ -225,7 +232,7 @@ def test_report_daily_download_pages_confirms_empty_and_resumes_failure(
     assert calls[("2024-01-03", 0)] == 1
 
     fail_once["enabled"] = False
-    result = research_update.download_tushare_reports(
+    result = download_tushare_reports(
         workspace_root=tmp_path,
         max_workers=1,
     )
@@ -252,7 +259,7 @@ def test_report_state_atomic_replace_retries_transient_windows_lock(
     monkeypatch.setattr(research_context, "atomic_write_json", flaky_write)
     monkeypatch.setattr(research_context.time, "sleep", lambda seconds: None)
 
-    research_update._write_state(tmp_path, {"status": "downloading"})
+    _write_state(tmp_path, {"status": "downloading"})
 
     assert calls["count"] == 3
 
@@ -336,9 +343,9 @@ def test_cninfo_fetch_uses_org_id_and_reads_all_pages(monkeypatch) -> None:
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(providers.requests, "Session", FakeSession)
+    monkeypatch.setattr(requests, "Session", FakeSession)
 
-    result = providers._fetch_cninfo_announcements(
+    result = cninfo._fetch_cninfo_announcements(
         symbol="000001.SZ",
         start_date="2023-01-01",
         end_date="2023-01-31",
@@ -356,10 +363,6 @@ def test_cninfo_fetch_uses_org_id_and_reads_all_pages(monkeypatch) -> None:
 def test_announcement_source_paths_exclude_stale_non_fallback_cache(
     tmp_path,
 ) -> None:
-    from quantlab.data.qdp_v2.research_event_update import (
-        _cninfo_announcement_path,
-    )
-
     cninfo = _cninfo_announcement_path(tmp_path, "000001.SZ")
     selected_fallback = _eastmoney_announcement_path(tmp_path, "000002.SZ")
     stale_fallback = _eastmoney_announcement_path(tmp_path, "000003.SZ")

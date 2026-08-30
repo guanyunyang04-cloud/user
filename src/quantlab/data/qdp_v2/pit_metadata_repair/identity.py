@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from quantlab.data.core.json_io import json_safe
+from quantlab.core.io import json_safe
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     atomic_write_json,
@@ -16,8 +16,8 @@ from quantlab.data.qdp_v2.manifest import (
     resolve_manifest_path,
     utc_now,
 )
-from quantlab.data.qdp_v2.repair import (
-    _sql_literal,
+from quantlab.data.qdp_v2.repair.common import _sql_literal
+from quantlab.data.qdp_v2.repair.mutation import (
     mutate_active_shards_from_parquet,
     update_active_manifest_metadata,
 )

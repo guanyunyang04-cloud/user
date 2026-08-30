@@ -11,7 +11,8 @@ from typing import Any
 import pyarrow.parquet as pq
 
 from quantlab.core.io import atomic_copy_file
-from quantlab.data.domains.contracts import DataDomain
+from quantlab.core.io import sha256_file as _sha256
+from quantlab.data.domains.contracts.schema import DataDomain
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -19,10 +20,7 @@ from quantlab.data.qdp_v2.manifest import (
     qdp_v2_root,
     write_dataset_manifest,
 )
-from quantlab.data.qdp_v2.research_event_update import (
-    _assert_credential_free,
-    _sha256,
-)
+from quantlab.data.qdp_v2.research_event_update.context import _assert_credential_free
 
 from .config import (
     END_DATE,

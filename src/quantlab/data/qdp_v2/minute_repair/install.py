@@ -28,7 +28,7 @@ from quantlab.data.qdp_v2.manifest import (
     read_dataset_manifest,
     resolve_manifest_path,
 )
-from quantlab.data.qdp_v2.repair import (
+from quantlab.data.qdp_v2.repair.mutation import (
     mutate_active_shards_from_parquet,
     update_active_manifest_metadata,
 )

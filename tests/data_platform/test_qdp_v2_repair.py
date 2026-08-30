@@ -7,6 +7,8 @@ import pandas as pd
 import pyarrow.parquet as pq
 import pytest
 
+import quantlab.data.qdp_v2.repair.mutation as repair_mutation
+from quantlab.data.qdp_v2.active import resolve_active_domain
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
     ShardManifestEntry,
@@ -17,16 +19,14 @@ from quantlab.data.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quantlab.data.qdp_v2.repair import (
-    QdpV2RepairError,
+from quantlab.data.qdp_v2.repair.errors import QdpV2RepairError
+from quantlab.data.qdp_v2.repair.mutation import (
     append_active_shard,
     bulk_append_active_shards_from_parquet,
     mutate_active_shards_from_parquet,
     patch_active_cells,
     replace_active_table_from_parquet,
-    resolve_active_domain,
 )
-from quantlab.data.qdp_v2.repair import mutation as repair_mutation
 
 DOMAIN = "market_daily_raw"
 DATASET_ID = "market_daily_raw__repair_fixture"

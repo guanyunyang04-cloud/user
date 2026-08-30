@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from quantlab.data.qdp_v2.audit import VALUATION_REQUIRED_COLUMNS
-from quantlab.data.qdp_v2.auxiliary_update import AUXILIARY_DOMAINS
+from quantlab.data.qdp_v2.auxiliary_update.context import AUXILIARY_DOMAINS
 
 REQUIRED_DOMAINS = {
     "trading_calendar",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from quantlab.data.domains.contracts import build_intraday_daily_feature_frame
+from quantlab.data.domains.contracts.intraday import build_intraday_daily_feature_frame
 from quantlab.data.provider_symbols import (
     from_baostock_code,
     is_mootdx_index_symbol,

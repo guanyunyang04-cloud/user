@@ -10,7 +10,7 @@ from typing import Any
 import pyarrow.parquet as pq
 
 from quantlab.data.qdp_v2.audit import audit_active
-from quantlab.data.qdp_v2.auxiliary_update import AUXILIARY_DOMAINS
+from quantlab.data.qdp_v2.auxiliary_update.context import AUXILIARY_DOMAINS
 from quantlab.data.qdp_v2.duckdb_resources import open_guarded_duckdb
 from quantlab.data.qdp_v2.manifest import (
     DatasetManifest,
@@ -20,11 +20,9 @@ from quantlab.data.qdp_v2.manifest import (
     resolve_manifest_path,
     utc_now,
 )
-from quantlab.data.qdp_v2.pit_history import (
-    LIFECYCLE_NORMALIZE_DOMAINS,
-    PitHistoryError,
-    audit_symbol_lifecycle_effectivity,
-)
+from quantlab.data.qdp_v2.pit_history.config import LIFECYCLE_NORMALIZE_DOMAINS
+from quantlab.data.qdp_v2.pit_history.context import PitHistoryError
+from quantlab.data.qdp_v2.pit_history.lifecycle_audit import audit_symbol_lifecycle_effectivity
 from quantlab.data.qdp_v2.status import active_dataset_map
 
 from .auxiliary import (

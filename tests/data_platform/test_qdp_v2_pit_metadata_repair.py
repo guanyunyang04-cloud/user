@@ -16,10 +16,8 @@ from quantlab.data.qdp_v2.manifest import (
     write_active_manifest,
     write_dataset_manifest,
 )
-from quantlab.data.qdp_v2.pit_metadata_repair import (
-    PitMetadataRepairError,
-    run_repair,
-)
+from quantlab.data.qdp_v2.pit_metadata_repair.config import PitMetadataRepairError
+from quantlab.data.qdp_v2.pit_metadata_repair.orchestrator import run_repair
 from quantlab.data.qdp_v2.status import active_dataset_map
 
 
