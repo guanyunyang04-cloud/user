@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+import pandas as pd
+
+from quantlab.research.minute_ma_strategies import (
+    build_strategy_signals,
+    strategy_catalog,
+)
+
+
+def _state_rows() -> pd.DataFrame:
+    rows = []
+    closes = (10.2, 9.9, 10.1, 10.2, 10.3)
+    lows = (10.1, 9.8, 10.0, 10.1, 10.2)
+    highs = (10.3, 10.2, 10.2, 10.3, 10.4)
+    for index, (close, low, high) in enumerate(zip(closes, lows, highs, strict=True)):
+        rows.append(
+            {
+                "symbol": "A",
+                "trade_date": "2022-01-03",
+                "bar_time": f"09{31 + index:02d}00000",
+                "sixty_minute_bucket": 1,
+                "ma_period": 10,
+                "hour_sequence": 0,
+                "session_minute_ordinal": index,
+                "adjusted_close": close,
+                "adjusted_high": high,
+                "adjusted_low": low,
+                "amount": 100.0,
+                "causal_intersection_adjusted": 10.0,
+                "close_to_intersection_bps": (close / 10.0 - 1.0) * 10_000.0,
+                "range_distance_to_intersection_bps": 0.0 if low <= 10.0 <= high else (low / 10.0 - 1.0) * 10_000.0,
+                "touched_now": low <= 10.0 <= high,
+                "close_below_intersection": close < 10.0,
+                "previous_hour_close_adjusted": 10.0,
+                "prior_ma_slope_bps": 10.0,
+                "ma_alignment_score": 1.0,
+                "prior_true_touch_count_window": 0,
+                "up_down_amount_ratio": 2.0,
+                "bullish_ma_stack": True,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def test_catalog_keeps_unavailable_layers_explicit() -> None:
+    all_specs = strategy_catalog(include_unavailable=True)
+    active_specs = strategy_catalog(include_unavailable=False)
+    assert any(not spec.implemented for spec in all_specs)
+    assert all(spec.implemented for spec in active_specs)
+
+
+def test_random_control_is_stable_when_input_rows_are_reordered() -> None:
+    states = _state_rows()
+    first = build_strategy_signals(states, strategy_ids=["s0_random_matched"], random_seed=19)
+    second = build_strategy_signals(
+        states.sample(frac=1.0, random_state=3).reset_index(drop=True),
+        strategy_ids=["s0_random_matched"],
+        random_seed=19,
+    )
+    assert first["signal_time"].tolist() == second["signal_time"].tolist()
+
+
+def test_reclaim_and_stable_rules_use_causal_confirmation_minute() -> None:
+    states = _state_rows()
+    reclaim = build_strategy_signals(states, strategy_ids=["s1_touch_reclaim"])
+    stable = build_strategy_signals(states, strategy_ids=["s1_break_reclaim_stable3"])
+    assert reclaim["signal_time"].tolist() == ["093300000"]
+    assert stable["signal_time"].tolist() == ["093500000"]
+    assert reclaim["causal_only"].all()
+    assert stable["causal_only"].all()
+
+
+def test_reclaim_can_confirm_an_intrabar_touch_that_closes_back_above() -> None:
+    states = _state_rows().iloc[[0, 2, 3]].copy().reset_index(drop=True)
+    states.loc[1, "touched_now"] = True
+    states.loc[1, "close_below_intersection"] = False
+    states.loc[1, "adjusted_low"] = 9.9
+    result = build_strategy_signals(states, strategy_ids=["s1_touch_reclaim"])
+    assert result["signal_time"].tolist() == ["093300000"]
+
+
+def test_filtered_rule_can_use_a_later_reclaim_episode() -> None:
+    states = _state_rows()
+    # The first reclaim is deliberately rejected by the slope filter.  A
+    # later break/reclaim is a separate episode and should still be tested.
+    states.loc[2, "prior_ma_slope_bps"] = -5.0
+    states.loc[3, "close_below_intersection"] = True
+    states.loc[3, "touched_now"] = True
+    states.loc[3, "adjusted_low"] = 9.8
+    states.loc[4, "close_below_intersection"] = False
+    states.loc[4, "touched_now"] = False
+    states.loc[4, "prior_ma_slope_bps"] = 5.0
+    result = build_strategy_signals(states, strategy_ids=["s2_reclaim_positive_slope"])
+    assert result["signal_time"].tolist() == ["093500000"]
+
+
+def test_posthoc_rule_is_marked_non_executable() -> None:
+    spec = next(spec for spec in strategy_catalog() if spec.strategy_id == "s1_posthoc_catchup_diagnostic")
+    assert spec.causal is False
+    assert spec.executable is False
+    assert spec.control is True

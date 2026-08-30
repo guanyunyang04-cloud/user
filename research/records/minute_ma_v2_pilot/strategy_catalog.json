@@ -1,0 +1,412 @@
+{
+  "schema_version": "minute_ma_strategy_catalog_v4",
+  "strategies": [
+    {
+      "strategy_id": "s0_random_matched",
+      "family": "S0",
+      "description": "Deterministic random minute within each eligible stock-hour; control only.",
+      "signal_rule": "random_minute",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": true,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s0_strong_no_ma",
+      "family": "S0",
+      "description": "First minute closing at or above the previous completed hour close; no MA condition.",
+      "signal_rule": "strong_without_ma",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": true,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s0_distance_only",
+      "family": "S0",
+      "description": "First close within the configured distance of the causal MA intersection; no reversal condition.",
+      "signal_rule": "distance_only",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": true,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s1_touch_immediate",
+      "family": "S1",
+      "description": "First actual intrabar touch, entered at the next minute open.",
+      "signal_rule": "touch_immediate",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s1_touch_reclaim",
+      "family": "S1",
+      "description": "Touch or break followed by the first causal close back above the intersection.",
+      "signal_rule": "touch_reclaim",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s1_near_reversal",
+      "family": "S1",
+      "description": "Near-touch followed by a causal upward reversal above the intersection.",
+      "signal_rule": "near_reversal",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s1_break_reclaim_stable3",
+      "family": "S1",
+      "description": "Break/touch followed by three consecutive closes above the intersection.",
+      "signal_rule": "break_reclaim_stable",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 3,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s1_posthoc_catchup_diagnostic",
+      "family": "S1",
+      "description": "End-of-hour MA catch-up, retained only as a non-causal diagnostic control.",
+      "signal_rule": "posthoc_catchup",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": false,
+      "executable": false,
+      "control": true,
+      "implemented": true,
+      "required_columns": [],
+      "filters": []
+    },
+    {
+      "strategy_id": "s2_reclaim_positive_slope",
+      "family": "S2",
+      "description": "S1 reclaim with a positive prior completed-MA slope.",
+      "signal_rule": "touch_reclaim",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": [
+        "positive_slope"
+      ]
+    },
+    {
+      "strategy_id": "s2_reclaim_bull_stack",
+      "family": "S2",
+      "description": "S1 reclaim while the causal moving averages are bullishly stacked.",
+      "signal_rule": "touch_reclaim",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": [
+        "bullish_stack"
+      ]
+    },
+    {
+      "strategy_id": "s2_first_touch_reclaim",
+      "family": "S2",
+      "description": "S1 reclaim when no true touch occurred in the preceding configured window.",
+      "signal_rule": "touch_reclaim",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": [
+        "first_touch"
+      ]
+    },
+    {
+      "strategy_id": "s4_reclaim_volume_proxy",
+      "family": "S4",
+      "description": "S1 reclaim with cumulative up-amount at least as large as down-amount.",
+      "signal_rule": "touch_reclaim",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": true,
+      "required_columns": [],
+      "filters": [
+        "amount_confirm"
+      ]
+    },
+    {
+      "strategy_id": "s3_market_regime_gate",
+      "family": "S3",
+      "description": "Reserved for a point-in-time market-regime gate; source fields are not in the MA table.",
+      "signal_rule": "touch_reclaim",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": false,
+      "required_columns": [
+        "market_regime"
+      ],
+      "filters": []
+    },
+    {
+      "strategy_id": "s3_sector_sync_gate",
+      "family": "S3",
+      "description": "Reserved for point-in-time sector breadth and leader synchronisation fields.",
+      "signal_rule": "touch_reclaim",
+      "ma_periods": [
+        10,
+        20,
+        40,
+        60,
+        120,
+        240
+      ],
+      "stable_minutes": 0,
+      "near_touch_bps": 25.0,
+      "causal": true,
+      "executable": true,
+      "control": false,
+      "implemented": false,
+      "required_columns": [
+        "sector_breadth",
+        "sector_leader_sync"
+      ],
+      "filters": []
+    }
+  ],
+  "run_status": [
+    {
+      "strategy_id": "s0_random_matched",
+      "status": "ran_executable_event_study",
+      "signal_count": 2304,
+      "reason": null
+    },
+    {
+      "strategy_id": "s0_strong_no_ma",
+      "status": "ran_executable_event_study",
+      "signal_count": 2076,
+      "reason": null
+    },
+    {
+      "strategy_id": "s0_distance_only",
+      "status": "ran_executable_event_study",
+      "signal_count": 375,
+      "reason": null
+    },
+    {
+      "strategy_id": "s1_touch_immediate",
+      "status": "ran_executable_event_study",
+      "signal_count": 314,
+      "reason": null
+    },
+    {
+      "strategy_id": "s1_touch_reclaim",
+      "status": "ran_executable_event_study",
+      "signal_count": 285,
+      "reason": null
+    },
+    {
+      "strategy_id": "s1_near_reversal",
+      "status": "ran_executable_event_study",
+      "signal_count": 331,
+      "reason": null
+    },
+    {
+      "strategy_id": "s1_break_reclaim_stable3",
+      "status": "ran_executable_event_study",
+      "signal_count": 241,
+      "reason": null
+    },
+    {
+      "strategy_id": "s1_posthoc_catchup_diagnostic",
+      "status": "ran_diagnostic_only",
+      "signal_count": 71,
+      "reason": "non-causal end-of-hour diagnostic; excluded from executable summary"
+    },
+    {
+      "strategy_id": "s2_reclaim_positive_slope",
+      "status": "ran_executable_event_study",
+      "signal_count": 112,
+      "reason": null
+    },
+    {
+      "strategy_id": "s2_reclaim_bull_stack",
+      "status": "ran_executable_event_study",
+      "signal_count": 1,
+      "reason": null
+    },
+    {
+      "strategy_id": "s2_first_touch_reclaim",
+      "status": "ran_executable_event_study",
+      "signal_count": 9,
+      "reason": null
+    },
+    {
+      "strategy_id": "s4_reclaim_volume_proxy",
+      "status": "ran_executable_event_study",
+      "signal_count": 133,
+      "reason": null
+    },
+    {
+      "strategy_id": "s3_market_regime_gate",
+      "status": "skipped_unavailable",
+      "signal_count": 0,
+      "reason": "required point-in-time market/sector fields are not joined"
+    },
+    {
+      "strategy_id": "s3_sector_sync_gate",
+      "status": "skipped_unavailable",
+      "signal_count": 0,
+      "reason": "required point-in-time market/sector fields are not joined"
+    }
+  ]
+}

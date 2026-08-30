@@ -151,6 +151,21 @@ The representative check covered 12 dates in 2022-2024 and eight fixed stocks:
 checks passed. This validates data definitions and reproducibility only; it is
 not a strategy or profitability result, and 2025 was not read.
 
+## Minute-MA rule study
+
+The finite rule registry is `src/quantlab/research/minute_ma_strategies.py`.
+It keeps S0 controls, causal S1 touch/reclaim variants, S2 slope/stack/first-
+touch filters, and an S4 volume-ratio proxy as separate versioned rules. The
+posthoc catch-up rule is diagnostic-only; S3 market and sector gates are listed
+but unavailable until point-in-time breadth fields are joined. Forward outcomes
+and compact statistics live in
+`src/quantlab/research/minute_ma_event_study.py`; they use next-minute-open
+entry, explicit percentage costs, missingness flags, and no inventory replay.
+
+The representative strategy pilot is recorded in
+`research/records/minute_ma_v2_pilot/`. Its eight-symbol/12-date scope is a
+development-chain check, not evidence of full-universe profitability.
+
 ## Artifact policy
 
 Retain the rev5 compatibility benchmark as historical evidence and keep it
