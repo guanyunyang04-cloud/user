@@ -3,11 +3,11 @@
   "status": "frozen_initial_contract",
   "purpose": "Test whether causally mature no-fixed-horizon buy action values can be estimated from signal-close observables by transparent past-only baselines before any account replay or deep model is attempted.",
   "source": {
-    "causal_prefix_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/manifest.json",
+    "causal_prefix_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/manifest.json",
     "expected_causal_prefix_manifest_sha256": "790a2b72570dc63ad5c24e777f13ea6a98f0d04761ddaadd784180df9fa3f63c",
-    "causal_prefix_validation": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/validation.json",
+    "causal_prefix_validation": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/validation.json",
     "expected_causal_prefix_validation_sha256": "0c8d29a9853c2cab6547426fde06b214e67fe3963374a86ee6ec5f475dc2f3b2",
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
     "expected_model_input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
     "feature_variant": "compact_core",
     "expected_feature_count": 557,
@@ -125,5 +125,5 @@
     "deep_model_selection_allowed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1"
+  "output_root": "runs/studies/seq100_dynamic_action_value_baselines_v1"
 }

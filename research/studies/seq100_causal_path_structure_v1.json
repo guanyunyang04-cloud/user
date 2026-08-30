@@ -3,15 +3,15 @@
   "status": "frozen_initial_contract",
   "purpose": "Build a strictly causal, prefix-invariant, multi-scale path grammar and test whether nested pullbacks, reacceleration, consolidation breakouts, retests, false-breakout reentry, and exhaustion distinguish positive continuous action value from same-date risk-matched failures.",
   "source": {
-    "turning_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
+    "turning_manifest": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
     "expected_turning_manifest_sha256": "1c72a89fca93d25b7d37b21394a0da6c2842860b0fb173e35d2cef721c24eeb9",
     "expected_dense_fingerprint": "0dca220d4c70ad4905c00ed5b7762d05e8876f8c8b2d947736a4ecddb576d9fd",
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
     "expected_model_input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
     "expected_row_index_rows": 4191476,
-    "distribution_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+    "distribution_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
     "expected_distribution_manifest_sha256": "436225ca89c478365a998d4190505b95e772428695d5d4cd207696a7c4a94da9",
-    "distribution_validation": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+    "distribution_validation": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
     "expected_distribution_validation_sha256": "7ab6a8de508452b414e2162e612c9433e2cb828c16a7b5e0bdc347a39666f3b8",
     "quality_pool_name": "quality_liquidity_pit",
     "maximum_outcome_date": "2025-12-31",
@@ -106,5 +106,5 @@
     "production_policy_selection_allowed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_causal_path_structure_v1"
+  "output_root": "runs/studies/seq100_causal_path_structure_v1"
 }

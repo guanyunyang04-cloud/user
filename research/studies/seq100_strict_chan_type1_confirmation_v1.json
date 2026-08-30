@@ -3,7 +3,7 @@
   "status": "frozen_single_hypothesis_confirmation",
   "purpose": "Confirm or reject the sole exploratory survivor: primary type-1 amount-per-bar divergence, buy side, next-session open entry, H10 close exit.",
   "source": {
-    "sample_study": "daily_research/studies/seq100_strict_chan_type1_confirmation_sample_v1.json",
+    "sample_study": "research/studies/seq100_strict_chan_type1_confirmation_sample_v1.json",
     "profile": "primary",
     "side": "buy",
     "point_types": [1],

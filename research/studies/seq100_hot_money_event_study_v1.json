@@ -3,7 +3,7 @@
   "status": "frozen_preflight_contract",
   "purpose": "Estimate conditional forward distributions after observable participation shocks, breakouts, retests and rebreakouts without claiming direct identification of main-player orders.",
   "source": {
-    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "qdp_active_manifest": "data/qdp/qdp_v2/active/active.json",
     "daily_domain": "market_daily_raw",
     "minute_domain": "market_intraday_5m",
     "maximum_outcome_date": "2025-12-31",

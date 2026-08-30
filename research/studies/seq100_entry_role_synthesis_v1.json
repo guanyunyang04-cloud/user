@@ -2,10 +2,10 @@
   "study_id": "seq100_entry_role_synthesis_v1",
   "objective": "Reassess existing OOS MFE feature variants by role and test state/risk coordinates conditionally inside high predicted MFE candidates without retraining or score fusion.",
   "sources": {
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
-    "path_study_config": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
-    "path_output_root": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1"
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "path_study_config": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+    "path_output_root": "legacy://daily_research/output/path_policy/studies/seq100_path_label_learnability_v1"
   },
   "folds": {
     "fold_years": [
@@ -138,5 +138,5 @@
     "account_policy",
     "post_entry_state_update_model"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1"
+  "output_dir": "runs/studies/seq100_entry_role_synthesis_v1"
 }

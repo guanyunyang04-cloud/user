@@ -31,7 +31,7 @@
     "same_day_forbidden_statuses": ["st", "suspended", "delisted"]
   },
   "source_artifacts": {
-    "report_annual_statistics_path": "quant_data_platform/data/qdp_runtime/research_report_rc_backfill_v2/prepared/report_annual_statistics.parquet"
+    "report_annual_statistics_path": "data/qdp/qdp_runtime/research_report_rc_backfill_v2/prepared/report_annual_statistics.parquet"
   },
   "qdp_dataset_ids": {
     "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",

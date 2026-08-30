@@ -2,9 +2,9 @@
   "study_id": "seq100_post_entry_capacity_audit_v1",
   "objective": "select one A-only fixed LightGBM capacity per remaining target from 2021-2022 evidence, uniform across D1/D3/D5 and isolated from 2023-2025",
   "sources": {
-    "post_entry_config": "daily_research/studies/seq100_post_entry_ab_v2.json",
-    "post_entry_output_root": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v2",
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json"
+    "post_entry_config": "research/studies/seq100_post_entry_ab_v2.json",
+    "post_entry_output_root": "legacy://daily_research/output/path_policy/studies/seq100_post_entry_ab_v2",
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json"
   },
   "folds": {
     "selection_years": [2021, 2022],
@@ -96,5 +96,5 @@
     "deep model",
     "reinforcement learning"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1"
+  "output_dir": "runs/studies/seq100_post_entry_capacity_audit_v1"
 }

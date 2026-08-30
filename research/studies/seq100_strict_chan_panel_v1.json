@@ -3,7 +3,7 @@
   "status": "frozen_panel_contract",
   "purpose": "Build a resumable full-market five-minute strict Chan structure panel before any outcome or profit study.",
   "data_contract": {
-    "qdp_root": "quant_data_platform/data/qdp_v2",
+    "qdp_root": "legacy://quant_data_platform/data/qdp_v2",
     "datasets": {
       "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
       "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",

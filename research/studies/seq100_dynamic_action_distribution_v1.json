@@ -3,11 +3,11 @@
   "status": "frozen_initial_contract",
   "purpose": "Determine whether causally observable active states contain separable information about positive opportunity probability, upside contribution, and downside contribution, and whether winners can be distinguished from matched failures before any account replay or deep sequence model is attempted.",
   "source": {
-    "baseline_study": "daily_research/studies/seq100_dynamic_action_value_baselines_v1.json",
+    "baseline_study": "research/studies/seq100_dynamic_action_value_baselines_v1.json",
     "expected_baseline_study_sha256": "15be1d93a66a9b94a9ebc19353ef457ce4af2989c0c45b81bec80e19482b82a5",
-    "baseline_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/manifest.json",
+    "baseline_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/manifest.json",
     "expected_baseline_manifest_sha256": "e4c805abda94bf51274861aa99a88fc1f0a972f9839d7ed694d371c30889cb7f",
-    "baseline_validation": "daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/validation.json",
+    "baseline_validation": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/validation.json",
     "expected_baseline_validation_sha256": "98612aeff5e3b8e230a0e0f8ea9e2346d5829b34693c6c5a58e6dee90dcf7948",
     "feature_variant": "compact_core",
     "expected_feature_count": 557,
@@ -206,5 +206,5 @@
     "deep_model_selection_allowed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1"
+  "output_root": "runs/studies/seq100_dynamic_action_distribution_v1"
 }

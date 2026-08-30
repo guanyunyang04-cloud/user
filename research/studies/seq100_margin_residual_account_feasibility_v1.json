@@ -11,12 +11,12 @@
     "profit_claim_allowed": false
   },
   "source": {
-    "margin_policy_study": "daily_research/studies/seq100_margin_residual_policy_v1.json",
-    "development_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+    "margin_policy_study": "research/studies/seq100_margin_residual_policy_v1.json",
+    "development_summary": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
     "development_summary_sha256": "e91bb273686ef0cc17f94d020914ac2f2a03a45f0d176ae525a52d52ab647ff3",
-    "confirmation_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+    "confirmation_summary": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
     "confirmation_summary_sha256": "26242ecb01c89789b8af9b4fd15cdd3f6c955577ea74110b05506e3842897c0a",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
     "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
     "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
@@ -79,6 +79,6 @@
     "production_policy_selected": false,
     "account_optimization_performed": false,
     "profit_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_margin_residual_account_feasibility_v1"
+    "output_root": "runs/studies/seq100_margin_residual_account_feasibility_v1"
   }
 }

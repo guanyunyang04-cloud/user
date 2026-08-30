@@ -10,13 +10,13 @@
     "future_2026_rows_are_forbidden": true
   },
   "source": {
-    "path_diagnostic_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/summary.json",
+    "path_diagnostic_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/summary.json",
     "path_diagnostic_summary_sha256": "98645bc509451c2e00c044ab33d84009dc5e54c1c3047a842a8ce6596859cd77",
-    "selected_paths": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/selected_paths.parquet",
+    "selected_paths": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/selected_paths.parquet",
     "selected_paths_sha256": "fd98abdfd4a6ac88fa3fd0a40286172622430010a794e713cd5b6dd5148fa419",
-    "exact_account_study": "daily_research/studies/seq100_exact_value_growth_account_v1.json",
+    "exact_account_study": "research/studies/seq100_exact_value_growth_account_v1.json",
     "exact_account_study_sha256": "84f8820c550b6c77b7b11fbaba2bb7373e9f4d9ef09871b0e1d95367b5e27029",
-    "exact_account_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+    "exact_account_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
     "exact_account_summary_sha256": "98cfd971cf34116e2bdb0cb00c701eca3cff36a6a27c1b9a40355d29ef18ffb5",
     "maximum_outcome_date": "2025-12-31",
     "forbidden_year": 2026
@@ -61,6 +61,6 @@
   "decision_boundary": {
     "production_claim_allowed": false,
     "forward_confirmation_required": true,
-    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1"
+    "output_root": "runs/studies/seq100_exact_value_growth_exit_challenge_v1"
   }
 }

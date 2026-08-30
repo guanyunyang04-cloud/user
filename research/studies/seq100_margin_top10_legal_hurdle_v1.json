@@ -10,13 +10,13 @@
     "stable_profit_or_production_claim_allowed": false
   },
   "source": {
-    "parent_study": "daily_research/studies/seq100_margin_top10_two_stage_v1.json",
+    "parent_study": "research/studies/seq100_margin_top10_two_stage_v1.json",
     "parent_study_sha256": "c30460635a332b644553baf45204a3db107f3829bb26327668101462462cce9f",
-    "prepared_manifest": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/prepared/manifest.json",
+    "prepared_manifest": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/prepared/manifest.json",
     "prepared_manifest_sha256": "c21498d71a6cfb410277d74f3ed1a3cca2f9478934e075f94f4b5d7e431a9c1a",
-    "parent_summary": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/summary.json",
+    "parent_summary": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/summary.json",
     "parent_summary_sha256": "379ce1e8b713389360a44f8a9958734d1a0fb180631e3303aa3aba93952f388e",
-    "candidate_oof_scores": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/candidate_oof_scores.parquet",
+    "candidate_oof_scores": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/candidate_oof_scores.parquet",
     "candidate_oof_scores_sha256": "760fab393c23e89fd057dc0f39dc718d066118713b72b419925e2909a4a8dee3",
     "maximum_outcome_date": "2025-12-31",
     "forbidden_year": 2026
@@ -100,6 +100,6 @@
   "decision_boundary": {
     "historical_result_is_adaptive_not_independent_confirmation": true,
     "account_replay_allowed_only_after_entry_gate": true,
-    "output_root": "daily_research/output/path_policy/studies/seq100_margin_top10_legal_hurdle_v1"
+    "output_root": "runs/studies/seq100_margin_top10_legal_hurdle_v1"
   }
 }

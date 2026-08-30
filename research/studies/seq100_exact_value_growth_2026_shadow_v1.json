@@ -15,7 +15,7 @@
     "candidate_attachment_sha256": "d451cd535675de3f30a4dc7e62a6fd9bc4cd82bba8a7c44146540bca100a6ba1",
     "method_attachment": "C:/Users/ASUS/.codex/attachments/46b1987c-c9ff-4e96-afd2-27fb8e0cc761/pasted-text.txt",
     "method_attachment_sha256": "c757ac9b80bfea05fe13ab0ba554e395f190b3cdd0128745c2f855a55ec62eab",
-    "historical_account_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+    "historical_account_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
     "historical_account_summary_sha256": "98cfd971cf34116e2bdb0cb00c701eca3cff36a6a27c1b9a40355d29ef18ffb5"
   },
   "freeze": {
@@ -54,6 +54,6 @@
     "realized_fill_count": 0,
     "realized_exit_count": 0,
     "performance_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1"
+    "output_root": "runs/studies/seq100_exact_value_growth_2026_shadow_v1"
   }
 }

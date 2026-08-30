@@ -19,21 +19,21 @@
     "title": "A股主板 Quality × Value × Earnings Revision × Confirmation 选股与估值研究框架"
   },
   "source": {
-    "exact_policy_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+    "exact_policy_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
     "exact_policy_summary_sha256": "349005a7505ead306db2892061765423d390e065ac043e77b68e969d213e325d",
-    "candidate_features": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+    "candidate_features": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
     "candidate_features_sha256": "91956712b39db71eec6175cd25b5cf48c96a576f635789bb906b7c00f15b996b",
-    "old_selections": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+    "old_selections": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
     "old_selections_sha256": "57db1504724912c874d19bd0a7cc24a1abf474b58e8bc69926a93c1b5c73b447",
-    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
     "input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
     "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
-    "income_statement_quarterly": "quant_data_platform/data/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
+    "income_statement_quarterly": "data/qdp/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
     "income_statement_quarterly_sha256": "5f863d3f3b37779414651bc8860e48b1f1a8bd767525d1c85b624303e5b9314c",
-    "membership_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+    "membership_root": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
     "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
     "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
     "formal_start_date": "2012-01-01",
@@ -216,6 +216,6 @@
     "target_price_backtest_claim_allowed": false,
     "live_alpha_claim_allowed": false,
     "production_strategy_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_qver_confirmation_effect_v1"
+    "output_root": "runs/studies/seq100_qver_confirmation_effect_v1"
   }
 }

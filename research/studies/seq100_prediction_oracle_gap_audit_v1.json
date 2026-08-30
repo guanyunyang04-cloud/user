@@ -2,12 +2,12 @@
   "study_id": "seq100_prediction_oracle_gap_audit_v1",
   "objective": "decompose the 2023-2025 gap between rolling-OOS v4 predictions and the true-label economic ceiling into MFE selection, auxiliary-coordinate, exit-realization and capacity components on candidate-aligned common support",
   "sources": {
-    "v4_economic_study": "daily_research/studies/seq100_v4_economic_realizability_v1.json",
-    "v4_signal_book_manifest": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
-    "v4_economic_result": "daily_research/research_records/seq100/seq100_v4_economic_realizability_v1/result.json",
-    "oracle_study": "daily_research/studies/seq100_true_label_economic_ceiling_v1.json",
-    "oracle_book_manifest": "daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json",
-    "oracle_result": "daily_research/research_records/seq100/seq100_true_label_economic_ceiling_v1/result.json"
+    "v4_economic_study": "research/studies/seq100_v4_economic_realizability_v1.json",
+    "v4_signal_book_manifest": "legacy://daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
+    "v4_economic_result": "research/records/seq100/seq100_v4_economic_realizability_v1/result.json",
+    "oracle_study": "research/studies/seq100_true_label_economic_ceiling_v1.json",
+    "oracle_book_manifest": "legacy://daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json",
+    "oracle_result": "research/records/seq100/seq100_true_label_economic_ceiling_v1/result.json"
   },
   "period": {
     "signal_years": [
@@ -269,8 +269,8 @@
     "dominant_loss_rule": "largest median fixed-notional terminal-return gain across matched base-cost configurations; report signs and full distributions rather than select a policy"
   },
   "outputs": {
-    "output_dir": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1",
-    "record_dir": "daily_research/research_records/seq100/seq100_prediction_oracle_gap_audit_v1"
+    "output_dir": "runs/studies/seq100_prediction_oracle_gap_audit_v1",
+    "record_dir": "runs/studies/records/seq100/seq100_prediction_oracle_gap_audit_v1"
   },
   "interfaces": [
     "--status",

@@ -11,9 +11,9 @@
     "cash_is_an_admissible_future_action": true
   },
   "source": {
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
-    "membership_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "membership_root": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
     "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
     "expected_row_count": 4191476,
     "expected_symbol_count": 3419,
@@ -142,6 +142,6 @@
     "future_utility": "expected log wealth minus CVaR under state-dependent costs, turnover, capacity, and cash constraints",
     "minimum_final_gate": "selection-adjusted 95 percent lower confidence bound of net utility improvement is positive on an unused confirmation period",
     "profit_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1"
+    "output_root": "runs/studies/seq100_stock_distribution_v1"
   }
 }

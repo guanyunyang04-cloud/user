@@ -3,11 +3,11 @@
   "status": "frozen_initial_contract",
   "purpose": "Learn economically meaningful bottoms, tops, pullbacks and failed rebounds from continuous adjusted paths without making a fixed D horizon the market object.",
   "source": {
-    "atlas_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+    "atlas_manifest": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
     "expected_atlas_fingerprint": "e6a716e509ed570adfcca2ebad60c8a992459c31a0c457cb05236117263df11b",
-    "rule_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+    "rule_manifest": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
     "expected_rule_fingerprint": "30e36c2b94f1ab6299243eca564ecad4d97613dd08a761fe483177f7d27f553c",
-    "neutral_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1/manifest.json",
+    "neutral_manifest": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1/manifest.json",
     "expected_neutral_fingerprint": "0b76e54341dcb2493bc3d76be9052a009a73296d32075168c914d2e3b42963b9",
     "maximum_outcome_date": "2025-12-31",
     "forbidden_year": 2026
@@ -63,5 +63,5 @@
     "duckdb_memory_limit": "512MB",
     "duckdb_threads": 1
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1"
+  "output_root": "runs/studies/seq100_turning_path_atlas_v1"
 }

@@ -2,12 +2,12 @@
   "study_id": "seq100_quality_liquidity_policy_targets",
   "purpose": "Policy-aligned D10/D20 targets for the fixed TP8 plus timeout execution rule.",
   "sources": {
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "canonical_model_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
-    "execution_study": "daily_research/studies/seq100_quality_liquidity_execution.json",
-    "execution_output": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
-    "profit_timeout_study": "daily_research/studies/seq100_quality_liquidity_profit_timeout.json",
-    "profit_timeout_output": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution/profit_timeout"
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "canonical_model_root": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+    "execution_study": "research/studies/seq100_quality_liquidity_execution.json",
+    "execution_output": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+    "profit_timeout_study": "research/studies/seq100_quality_liquidity_profit_timeout.json",
+    "profit_timeout_output": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_execution/profit_timeout"
   },
   "period": {
     "research_years": [
@@ -94,7 +94,7 @@
     "scan_other_parameters": false
   },
   "outputs": {
-    "output_dir": "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets",
+    "output_dir": "runs/studies/seq100_quality_liquidity_policy_targets",
     "html_report": false,
     "expected_training_task_count": 18,
     "expected_new_replay_task_count": 32,

@@ -1,0 +1,3561 @@
+{
+  "schema": "quantlab.research_study_path_migration/1",
+  "workspace_root": ".",
+  "study_directory": "research/studies",
+  "legacy_uri_prefix": "legacy://",
+  "summary": {
+    "study_files": 100,
+    "files_changed": 95,
+    "references_migrated": 425,
+    "workspace_resolved": 90,
+    "workspace_output": 81,
+    "provenance_only": 254
+  },
+  "files": [
+    {
+      "path": "research/studies/l35v2_batch1024.json",
+      "original_sha256": "beada5bc15e4bb3fc861e636a87c082c8c1b42d82b9465f5c7450f89a5280068",
+      "references": [
+        {
+          "json_path": "/prior_evidence",
+          "original": "daily_research/research_records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json",
+          "replacement": "research/records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/pit_l35v2_oof_trees_v1.json",
+      "original_sha256": "64a5c3f7aaa2189dcc77689c6ae25f129ea9753432190fa96c071cbc327a5312",
+      "references": [
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_pit_l35v2_oof_trees_v1",
+          "replacement": "runs/studies/seq100_pit_l35v2_oof_trees_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_pit_l35v2_oof_trees_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_causal_exit_baselines_v1.json",
+      "original_sha256": "07c3865bd6efcd25efea1f811c98016919c6bf67fdc9400df8bbfaae62300fd4",
+      "references": [
+        {
+          "json_path": "/source/pattern_strategy_study",
+          "original": "daily_research/studies/seq100_causal_pattern_strategy_probe_v1.json",
+          "replacement": "research/studies/seq100_causal_pattern_strategy_probe_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_causal_pattern_strategy_probe_v1.json"
+        },
+        {
+          "json_path": "/source/pattern_strategy_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/dynamic_oracle_study",
+          "original": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+          "replacement": "research/studies/seq100_dynamic_oracle_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_dynamic_oracle_v1.json"
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1",
+          "replacement": "runs/studies/seq100_causal_exit_baselines_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_causal_exit_baselines_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_causal_path_structure_v1.json",
+      "original_sha256": "359da0aa0998d11ddb551bdf6e723d23be335223dc7a89885dcd01cf7e8749e6",
+      "references": [
+        {
+          "json_path": "/source/turning_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/distribution_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/distribution_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_path_structure_v1",
+          "replacement": "runs/studies/seq100_causal_path_structure_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_causal_path_structure_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_causal_pattern_strategy_probe_v1.json",
+      "original_sha256": "387b66a688e9271484bea1bda3295795588557448f6fc1320555c9883b256762",
+      "references": [
+        {
+          "json_path": "/source/path_structure_study",
+          "original": "daily_research/studies/seq100_causal_path_structure_v1.json",
+          "replacement": "research/studies/seq100_causal_path_structure_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_causal_path_structure_v1.json"
+        },
+        {
+          "json_path": "/source/path_structure_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/dynamic_oracle_study",
+          "original": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+          "replacement": "research/studies/seq100_dynamic_oracle_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_dynamic_oracle_v1.json"
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_pattern_strategy_probe_v1",
+          "replacement": "runs/studies/seq100_causal_pattern_strategy_probe_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_causal_pattern_strategy_probe_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_causal_retest_state_v1.json",
+      "original_sha256": "e37a5699d046307d9197cce186d14f3c4b94c915c95fe00d8333c20b52b62b99",
+      "references": [
+        {
+          "json_path": "/source/path_structure_study",
+          "original": "daily_research/studies/seq100_causal_path_structure_v1.json",
+          "replacement": "research/studies/seq100_causal_path_structure_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_causal_path_structure_v1.json"
+        },
+        {
+          "json_path": "/source/path_structure_module",
+          "original": "daily_research/path_policy/seq100_causal_path_structure.py",
+          "replacement": "legacy://daily_research/path_policy/seq100_causal_path_structure.py",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/path_structure_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/path_structure_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/distribution_study",
+          "original": "daily_research/studies/seq100_dynamic_action_distribution_v1.json",
+          "replacement": "research/studies/seq100_dynamic_action_distribution_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_dynamic_action_distribution_v1.json"
+        },
+        {
+          "json_path": "/source/distribution_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/distribution_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_retest_state_v1",
+          "replacement": "runs/studies/seq100_causal_retest_state_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_causal_retest_state_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_causal_value_policy_v1.json",
+      "original_sha256": "975e089f79b6153df672d200da8be6738890925c86bb78e3f7025dfe98f06b74",
+      "references": [
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/research_report",
+          "original": "quant_data_platform/data/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet",
+          "replacement": "data/qdp/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet"
+        },
+        {
+          "json_path": "/source/research_report_forecast",
+          "original": "quant_data_platform/data/qdp_v2/datasets/research_report_forecast/research_report_forecast__d1b0976bfcbdd7a2ef97083a/shards/part-0000.parquet",
+          "replacement": "legacy://quant_data_platform/data/qdp_v2/datasets/research_report_forecast/research_report_forecast__d1b0976bfcbdd7a2ef97083a/shards/part-0000.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1",
+          "replacement": "runs/studies/seq100_causal_value_policy_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_causal_value_policy_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_d5_target_match_tree_control_v1.json",
+      "original_sha256": "d9d9f75418c407e7c76330adca56d1a60ce0ec4cbe691d7894920abcc57eb460",
+      "references": [
+        {
+          "json_path": "/sources/model_study",
+          "original": "daily_research/studies/seq100_full_market_multitask_forecast_v1.json",
+          "replacement": "research/studies/seq100_full_market_multitask_forecast_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_full_market_multitask_forecast_v1.json"
+        },
+        {
+          "json_path": "/sources/model_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/d10_tree_evaluation_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d10_rank__strong_127__price_path_core_183/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d10_rank__strong_127__price_path_core_183/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/d5_tree_account_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_account_replay/exact_net_return_d5_rank__strong_127__price_path_core_183/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_account_replay/exact_net_return_d5_rank__strong_127__price_path_core_183/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_d5_target_match_tree_control_v1_short",
+          "replacement": "runs/studies/seq100_d5_target_match_tree_control_v1_short",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_d5_target_match_tree_control_v1_short"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_daily_action_value_v1.json",
+      "original_sha256": "e975077577672488dc1bd696deee025c5c738aba64c60c8a9f2117f2aaaddb07",
+      "references": [
+        {
+          "json_path": "/source/phase_analysis_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/phase_belief_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/continuation_prediction_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_continuation_value_v1/prediction_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_continuation_value_v1/prediction_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/corrected_pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/reference_positions/0/trade_file",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__rolling_phase_boundary__base/trades.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__rolling_phase_boundary__base/trades.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/reference_positions/1/trade_file",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__fixed_d20__base/trades.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__fixed_d20__base/trades.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_action_value_v1",
+          "replacement": "runs/studies/seq100_daily_action_value_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_daily_action_value_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_daily_continuation_value_v1.json",
+      "original_sha256": "aec50957783ccc7aeda6a49c6087fc5c017cfd084365cc4165c292cda821a100",
+      "references": [
+        {
+          "json_path": "/source/path_neighbor_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/phase_belief_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/corrected_pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_continuation_value_v1",
+          "replacement": "runs/studies/seq100_daily_continuation_value_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_daily_continuation_value_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_daily_path_neighbors_v1.json",
+      "original_sha256": "9da24194b5be71b630aeb0004e16d8d86813b71ac9cbbad03a493a6a8a68a0da",
+      "references": [
+        {
+          "json_path": "/source/quality_turning_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/hot_path_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/turning_atlas_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1",
+          "replacement": "runs/studies/seq100_daily_path_neighbors_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_daily_path_neighbors_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_daily_phase_execution_v1.json",
+      "original_sha256": "fa94cc3fba3bf096eb5bbf6f8a0760e7362a9b3a2b38ba9dae2e8238ca290af7",
+      "references": [
+        {
+          "json_path": "/source/path_neighbor_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/corrected_pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1",
+          "replacement": "runs/studies/seq100_daily_phase_execution_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_daily_phase_execution_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_dynamic_action_distribution_v1.json",
+      "original_sha256": "9f898ca167a5b14a10f1f5e5a1921f0ba4382a76450390a21324dd54688537c7",
+      "references": [
+        {
+          "json_path": "/source/baseline_study",
+          "original": "daily_research/studies/seq100_dynamic_action_value_baselines_v1.json",
+          "replacement": "research/studies/seq100_dynamic_action_value_baselines_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_dynamic_action_value_baselines_v1.json"
+        },
+        {
+          "json_path": "/source/baseline_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/baseline_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1",
+          "replacement": "runs/studies/seq100_dynamic_action_distribution_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_dynamic_action_distribution_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_dynamic_action_value_baselines_v1.json",
+      "original_sha256": "15be1d93a66a9b94a9ebc19353ef457ce4af2989c0c45b81bec80e19482b82a5",
+      "references": [
+        {
+          "json_path": "/source/causal_prefix_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/causal_prefix_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_value_baselines_v1",
+          "replacement": "runs/studies/seq100_dynamic_action_value_baselines_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_dynamic_action_value_baselines_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_dynamic_oracle_causal_prefix_v1.json",
+      "original_sha256": "b1bd4fe6475a0ee3878fd222e4a9943788a28eb11b41539c35aa495e87dbe121",
+      "references": [
+        {
+          "json_path": "/source/oracle_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/resolution_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/resolution_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/oracle_study",
+          "original": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+          "replacement": "research/studies/seq100_dynamic_oracle_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_dynamic_oracle_v1.json"
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1",
+          "replacement": "runs/studies/seq100_dynamic_oracle_causal_prefix_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_dynamic_oracle_causal_prefix_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_dynamic_oracle_observable_audit_v1.json",
+      "original_sha256": "e3f5c1264eef8bd216c89c4db9edac98397183395ea57fc7c5c9bcd719555654",
+      "references": [
+        {
+          "json_path": "/source/oracle_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_observable_audit_v1",
+          "replacement": "runs/studies/seq100_dynamic_oracle_observable_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_dynamic_oracle_observable_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_dynamic_oracle_resolution_v1.json",
+      "original_sha256": "44522d7cf8e775c6a26cb7e855c1162a16618fc49eea078b2524bef33dc2ab2c",
+      "references": [
+        {
+          "json_path": "/source/oracle_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/market_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/market_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/market_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/oracle_study",
+          "original": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+          "replacement": "research/studies/seq100_dynamic_oracle_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_dynamic_oracle_v1.json"
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1",
+          "replacement": "runs/studies/seq100_dynamic_oracle_resolution_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_dynamic_oracle_resolution_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_dynamic_oracle_v1.json",
+      "original_sha256": "7648b60cd4d01424b3d0a4e3fdefb7c3faebc9dbcbc86b1cf087b7bf84d059c6",
+      "references": [
+        {
+          "json_path": "/source/corrected_pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/quality_training_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1",
+          "replacement": "runs/studies/seq100_dynamic_oracle_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_dynamic_oracle_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_entry_contract_oos_v2.json",
+      "original_sha256": "4f682bca0297129624471ed59c31b31ba9bad0617e1d5e24a84e0d9dd166e3d8",
+      "references": [
+        {
+          "json_path": "/sources/path_study_config",
+          "original": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
+          "replacement": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_path_label_learnability_v1/config.json"
+        },
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/union_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_union_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_union_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_union_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/union_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_union_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_union_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/atlas_script",
+          "original": "tmp/seq100_future_horizon_atlas.py",
+          "replacement": "legacy://tmp/seq100_future_horizon_atlas.py",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/atlas_output_root",
+          "original": "tmp/seq100_future_horizon_atlas/attempt_001",
+          "replacement": "legacy://tmp/seq100_future_horizon_atlas/attempt_001",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/learnability_input_script",
+          "original": "tmp/seq100_learnability_inputs.py",
+          "replacement": "legacy://tmp/seq100_learnability_inputs.py",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2",
+          "replacement": "runs/studies/seq100_entry_contract_oos_v2",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_entry_contract_oos_v2"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_entry_fixed_capacity_audit_v1.json",
+      "original_sha256": "aa51aa7fe0473dc3c385615ec69afbebe3be00af0cbc90f3329094d88c004cbb",
+      "references": [
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/entry_contract_v2_config",
+          "original": "daily_research/studies/seq100_entry_contract_oos_v2.json",
+          "replacement": "research/studies/seq100_entry_contract_oos_v2.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_entry_contract_oos_v2.json"
+        },
+        {
+          "json_path": "/sources/entry_contract_v2_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/entry_contract_v3_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3/contract_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3/contract_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/final_capacity_config",
+          "original": "daily_research/studies/seq100_mfe_final_head_capacity_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_final_head_capacity_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_final_head_capacity_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/final_capacity_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/contract_v4/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4",
+          "replacement": "runs/studies/seq100_entry_contract_oos_v4",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_entry_contract_oos_v4"
+        },
+        {
+          "json_path": "/contract_v4/research_record_root",
+          "original": "daily_research/research_records/seq100/seq100_entry_contract_oos_v4",
+          "replacement": "research/records/seq100/seq100_entry_contract_oos_v4",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_entry_contract_oos_v4"
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1",
+          "replacement": "runs/studies/seq100_entry_fixed_capacity_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_entry_fixed_capacity_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_entry_role_synthesis_v1.json",
+      "original_sha256": "9d3f7d521bc6cb711f63cd83db84e1918383e9a60615e8fac67de7277d4d877e",
+      "references": [
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/path_study_config",
+          "original": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
+          "replacement": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_path_label_learnability_v1/config.json"
+        },
+        {
+          "json_path": "/sources/path_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_path_label_learnability_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1",
+          "replacement": "runs/studies/seq100_entry_role_synthesis_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_entry_role_synthesis_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_2026_d120_shadow_v1.json",
+      "original_sha256": "46e59604dd170420290730c1df39abacbe80e48982c00581a150edeabffac47a",
+      "references": [
+        {
+          "json_path": "/source/original_shadow_study",
+          "original": "daily_research/studies/seq100_exact_value_growth_2026_shadow_v1.json",
+          "replacement": "research/studies/seq100_exact_value_growth_2026_shadow_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_exact_value_growth_2026_shadow_v1.json"
+        },
+        {
+          "json_path": "/source/original_shadow_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/original_frozen_orders",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/frozen_orders.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/frozen_orders.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/historical_exit_challenge_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_d120_shadow_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_2026_d120_shadow_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_2026_d120_shadow_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_2026_shadow_v1.json",
+      "original_sha256": "a48303b3503fcff2965766fa7d493888fbe3b516df3644a26b96b98c87d20b85",
+      "references": [
+        {
+          "json_path": "/source/historical_account_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_2026_shadow_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_2026_shadow_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_account_v1.json",
+      "original_sha256": "84f8820c550b6c77b7b11fbaba2bb7373e9f4d9ef09871b0e1d95367b5e27029",
+      "references": [
+        {
+          "json_path": "/source/exact_policy_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/selections",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_account_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_account_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_exit_challenge_v1.json",
+      "original_sha256": "3bf067065d02d502c71b96ad065afe179d40a618bdc509066c68f26153aabc75",
+      "references": [
+        {
+          "json_path": "/source/path_diagnostic_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/selected_paths",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/selected_paths.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/selected_paths.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/exact_account_study",
+          "original": "daily_research/studies/seq100_exact_value_growth_account_v1.json",
+          "replacement": "research/studies/seq100_exact_value_growth_account_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_exact_value_growth_account_v1.json"
+        },
+        {
+          "json_path": "/source/exact_account_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_exit_challenge_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_exit_challenge_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_path_exit_v1.json",
+      "original_sha256": "aed6b97ffd29c968409b5f8acb312d30e8c540f84ec1c6e89bbf96656290fb28",
+      "references": [
+        {
+          "json_path": "/source/exact_policy_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/selections",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/exact_account_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/risk_budget_trades",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/risk_budget_trades.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/risk_budget_trades.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/qdp_active_manifest",
+          "original": "quant_data_platform/data/qdp_v2/active/active.json",
+          "replacement": "data/qdp/qdp_v2/active/active.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/active/active.json"
+        },
+        {
+          "json_path": "/source/intraday_manifest",
+          "original": "quant_data_platform/data/qdp_v2/datasets/market_intraday_5m/market_intraday_5m__2c071f88738b5cdea4695f16/dataset.json",
+          "replacement": "data/qdp/qdp_v2/datasets/market_intraday_5m/market_intraday_5m__2c071f88738b5cdea4695f16/dataset.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/market_intraday_5m/market_intraday_5m__2c071f88738b5cdea4695f16/dataset.json"
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_path_exit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_path_exit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_policy_v1.json",
+      "original_sha256": "b50e0acb7337dd975a7f99953bb422be47036373f2df12939494499b303a6657",
+      "references": [
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/ttm_candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/ttm_candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/ttm_candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/income_statement_quarterly",
+          "original": "quant_data_platform/data/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
+          "replacement": "data/qdp/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet"
+        },
+        {
+          "json_path": "/source/balance_sheet_quarterly",
+          "original": "quant_data_platform/data/qdp_v2/datasets/balance_sheet_quarterly/balance_sheet_quarterly__b0126161d6d748babe789a48/shards/part-0000.parquet",
+          "replacement": "data/qdp/qdp_v2/datasets/balance_sheet_quarterly/balance_sheet_quarterly__b0126161d6d748babe789a48/shards/part-0000.parquet",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/balance_sheet_quarterly/balance_sheet_quarterly__b0126161d6d748babe789a48/shards/part-0000.parquet"
+        },
+        {
+          "json_path": "/source/research_report",
+          "original": "quant_data_platform/data/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet",
+          "replacement": "data/qdp/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet"
+        },
+        {
+          "json_path": "/source/research_report_forecast",
+          "original": "quant_data_platform/data/qdp_v2/datasets/research_report_forecast/research_report_forecast__d1b0976bfcbdd7a2ef97083a/shards/part-0000.parquet",
+          "replacement": "legacy://quant_data_platform/data/qdp_v2/datasets/research_report_forecast/research_report_forecast__d1b0976bfcbdd7a2ef97083a/shards/part-0000.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_policy_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_policy_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_top3_portfolio_v1.json",
+      "original_sha256": "04fa368687b9babb3644967983cfcc8c4640726f70b18f127838e98f2f190596",
+      "references": [
+        {
+          "json_path": "/source/path_diagnostic_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/selected_paths",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/selected_paths.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1/selected_paths.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/exact_account_study",
+          "original": "daily_research/studies/seq100_exact_value_growth_account_v1.json",
+          "replacement": "research/studies/seq100_exact_value_growth_account_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_exact_value_growth_account_v1.json"
+        },
+        {
+          "json_path": "/source/exact_account_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/exit_challenge_study",
+          "original": "daily_research/studies/seq100_exact_value_growth_exit_challenge_v1.json",
+          "replacement": "research/studies/seq100_exact_value_growth_exit_challenge_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_exact_value_growth_exit_challenge_v1.json"
+        },
+        {
+          "json_path": "/source/exit_challenge_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_top3_portfolio_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_top3_portfolio_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_top3_portfolio_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exact_value_growth_top3_risk_frontier_v1.json",
+      "original_sha256": "f14b9e6fc92809daf7c12d6d7d299e7b9bb394a969470bec8e3036ba64f28e5e",
+      "references": [
+        {
+          "json_path": "/source/top3_study",
+          "original": "daily_research/studies/seq100_exact_value_growth_top3_portfolio_v1.json",
+          "replacement": "research/studies/seq100_exact_value_growth_top3_portfolio_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_exact_value_growth_top3_portfolio_v1.json"
+        },
+        {
+          "json_path": "/source/top3_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_top3_portfolio_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_top3_portfolio_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_top3_risk_frontier_v1",
+          "replacement": "runs/studies/seq100_exact_value_growth_top3_risk_frontier_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exact_value_growth_top3_risk_frontier_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_exit_stopping_ceiling_v1.json",
+      "original_sha256": "81f6699ca27ebe3abdb290105a058e7d75fdccb32d5ddc1e1f9cf0622b060c85",
+      "references": [
+        {
+          "json_path": "/source/mechanical_study",
+          "original": "daily_research/studies/seq100_causal_exit_baselines_v1.json",
+          "replacement": "research/studies/seq100_causal_exit_baselines_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_causal_exit_baselines_v1.json"
+        },
+        {
+          "json_path": "/source/mechanical_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/entry_records",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/entry_records.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/entry_records.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/mechanical_policy_results_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/mechanical_policy_results_root",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/dynamic_oracle_study",
+          "original": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+          "replacement": "research/studies/seq100_dynamic_oracle_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_dynamic_oracle_v1.json"
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_exit_stopping_ceiling_v1",
+          "replacement": "runs/studies/seq100_exit_stopping_ceiling_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_exit_stopping_ceiling_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_full_market_dual_gate_d3_candidate_v1.json",
+      "original_sha256": "c0fee3a23a50593a9ed5247a22ecfc97c251f0f368049bc0ffe4e5eec81cb19a",
+      "references": [
+        {
+          "json_path": "/authoritative_sources/ensemble_evaluation/path",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/sequence_ensemble_evaluation/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/sequence_ensemble_evaluation/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/authoritative_sources/dual_horizon_challenge/path",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/dual_market_horizon_challenge/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/dual_market_horizon_challenge/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/authoritative_sources/market_regime/path",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/market_regime_evaluation/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/market_regime_evaluation/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/authoritative_sources/direct_d3_rank/path",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_rank__strong_127__causal_nested/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_rank__strong_127__causal_nested/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/authoritative_sources/d3_q10/path",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_q10__strong_127__causal_nested/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_q10__strong_127__causal_nested/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_full_market_multitask_forecast_v1.json",
+      "original_sha256": "f3a19de5ba7ebabce6d19173d1fddf0b68dc345bf5760ce78f3e64c6b105cb46",
+      "references": [
+        {
+          "json_path": "/sources/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+          "replacement": "runs/studies/seq100_full_market_multitask_forecast_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_full_market_multitask_forecast_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_hierarchical_residual_policy_v1.json",
+      "original_sha256": "62cdf7dfce5c7e1e534dd6de9e8214a3bfed4bea2a86796984c5be08f4bc78b1",
+      "references": [
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/development_run_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_hierarchical_residual_policy_v1",
+          "replacement": "runs/studies/seq100_hierarchical_residual_policy_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_hierarchical_residual_policy_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_hot_money_event_study_v1.json",
+      "original_sha256": "e4fa79d45fb34f68ec521772ca12b5cf93aeb7eaf14080649d58e2954c737b99",
+      "references": [
+        {
+          "json_path": "/source/qdp_active_manifest",
+          "original": "quant_data_platform/data/qdp_v2/active/active.json",
+          "replacement": "data/qdp/qdp_v2/active/active.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/active/active.json"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_hot_path_atlas_v1.json",
+      "original_sha256": "523cb79319ec9c41cfd052c8c143f663d0fa4c8181617bec828b8dc062ee13f0",
+      "references": [
+        {
+          "json_path": "/source/qdp_active_manifest",
+          "original": "quant_data_platform/data/qdp_v2/active/active.json",
+          "replacement": "data/qdp/qdp_v2/active/active.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/active/active.json"
+        },
+        {
+          "json_path": "/source/formal_quality_pool_index",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1",
+          "replacement": "runs/studies/seq100_hot_path_atlas_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_hot_path_atlas_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_hot_path_neutral_v1.json",
+      "original_sha256": "4914aedf1100108d86e8ebbfa15a60a53af23f0b196445777f9f8efefa7b62ea",
+      "references": [
+        {
+          "json_path": "/source/pair_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_pairs_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_pairs_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/rule_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/atlas_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/qdp_active_manifest",
+          "original": "quant_data_platform/data/qdp_v2/active/active.json",
+          "replacement": "data/qdp/qdp_v2/active/active.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/active/active.json"
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1",
+          "replacement": "runs/studies/seq100_hot_path_neutral_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_hot_path_neutral_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_hot_path_pairs_v1.json",
+      "original_sha256": "75fc2a529af8e9e247657824ab76378b9b9ba63b3a32a7ead709892f913f246b",
+      "references": [
+        {
+          "json_path": "/source/rule_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_pairs_v1",
+          "replacement": "runs/studies/seq100_hot_path_pairs_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_hot_path_pairs_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_hot_path_rules_v1.json",
+      "original_sha256": "0724519aeaca2bf8f97b512f7bac96eaa1729f545612b60b276c5b13aaebd048",
+      "references": [
+        {
+          "json_path": "/source/atlas_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_rules_v1",
+          "replacement": "runs/studies/seq100_hot_path_rules_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_hot_path_rules_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_hot_path_state_v1.json",
+      "original_sha256": "b07bae84ab7e1cf1faa1d467c53d0711d566769bf27f34a87a8ea1d5f91ed9a2",
+      "references": [
+        {
+          "json_path": "/source/atlas_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/atlas_analysis_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/analysis/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/analysis/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/path_cluster_assignments",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/analysis/path_cluster_assignments.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/analysis/path_cluster_assignments.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/qdp_active_manifest",
+          "original": "quant_data_platform/data/qdp_v2/active/active.json",
+          "replacement": "data/qdp/qdp_v2/active/active.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/active/active.json"
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_state_v1",
+          "replacement": "runs/studies/seq100_hot_path_state_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_hot_path_state_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_margin_residual_account_feasibility_v1.json",
+      "original_sha256": "460999e93e9dfcfe8e0191964d2428ffd37e27f0cbb21cca304a8b4aaa40aaa7",
+      "references": [
+        {
+          "json_path": "/source/margin_policy_study",
+          "original": "daily_research/studies/seq100_margin_residual_policy_v1.json",
+          "replacement": "research/studies/seq100_margin_residual_policy_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_margin_residual_policy_v1.json"
+        },
+        {
+          "json_path": "/source/development_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/confirmation_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_residual_account_feasibility_v1",
+          "replacement": "runs/studies/seq100_margin_residual_account_feasibility_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_margin_residual_account_feasibility_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_margin_residual_policy_v1.json",
+      "original_sha256": "2be7ab5bc42df22ff0cc012b893e4f88be3c5971217348938aff0a82f2bdba3a",
+      "references": [
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/training_ready_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/frozen_2017_2022_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1",
+          "replacement": "runs/studies/seq100_margin_residual_policy_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_margin_residual_policy_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_margin_top10_adaptive_entry_v1.json",
+      "original_sha256": "8f1677026dae158e08d056bd8a82aa828dbb2282eee8da3f00d6069a2769166e",
+      "references": [
+        {
+          "json_path": "/source/quality_liquidity_pit_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/qdp_active_manifest",
+          "original": "quant_data_platform/data/qdp_v2/active/active.json",
+          "replacement": "data/qdp/qdp_v2/active/active.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/active/active.json"
+        },
+        {
+          "json_path": "/source/margin_detail_manifest",
+          "original": "quant_data_platform/data/qdp_v2/datasets/margin_detail/margin_detail__2ed8aba21121548425f56b7c/dataset.json",
+          "replacement": "data/qdp/qdp_v2/datasets/margin_detail/margin_detail__2ed8aba21121548425f56b7c/dataset.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/margin_detail/margin_detail__2ed8aba21121548425f56b7c/dataset.json"
+        },
+        {
+          "json_path": "/source/market_daily_manifest",
+          "original": "quant_data_platform/data/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json",
+          "replacement": "data/qdp/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json"
+        },
+        {
+          "json_path": "/source/adjust_factor_manifest",
+          "original": "quant_data_platform/data/qdp_v2/datasets/adjust_factor/adjust_factor__98fbecd479934dda685046f0/dataset.json",
+          "replacement": "data/qdp/qdp_v2/datasets/adjust_factor/adjust_factor__98fbecd479934dda685046f0/dataset.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/adjust_factor/adjust_factor__98fbecd479934dda685046f0/dataset.json"
+        },
+        {
+          "json_path": "/source/prior_margin_probe_record",
+          "original": "daily_research/research_records/seq100/seq100_margin_balance_probe_20260808/research_record.md",
+          "replacement": "research/records/seq100/seq100_margin_balance_probe_20260808/research_record.md",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_margin_balance_probe_20260808/research_record.md"
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_adaptive_entry_v1",
+          "replacement": "runs/studies/seq100_margin_top10_adaptive_entry_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_margin_top10_adaptive_entry_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_margin_top10_current_cross_v1.json",
+      "original_sha256": "7e23b25968d15507b05ce0223ee29a2f0672108705fc36bccc997c19b0cd1710",
+      "references": [
+        {
+          "json_path": "/source/base_study",
+          "original": "daily_research/studies/seq100_margin_top10_adaptive_entry_v1.json",
+          "replacement": "research/studies/seq100_margin_top10_adaptive_entry_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_margin_top10_adaptive_entry_v1.json"
+        },
+        {
+          "json_path": "/source/base_implementation",
+          "original": "daily_research/path_policy/seq100_margin_top10_adaptive_entry.py",
+          "replacement": "legacy://daily_research/path_policy/seq100_margin_top10_adaptive_entry.py",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/prior_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_adaptive_entry_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_adaptive_entry_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1",
+          "replacement": "runs/studies/seq100_margin_top10_current_cross_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_margin_top10_current_cross_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_margin_top10_legal_hurdle_v1.json",
+      "original_sha256": "a0b6ee00459f884c36f89570c96a36a8a113c8e66ee8bb5d9c720abc0af9e8ac",
+      "references": [
+        {
+          "json_path": "/source/parent_study",
+          "original": "daily_research/studies/seq100_margin_top10_two_stage_v1.json",
+          "replacement": "research/studies/seq100_margin_top10_two_stage_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_margin_top10_two_stage_v1.json"
+        },
+        {
+          "json_path": "/source/prepared_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/prepared/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/prepared/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/parent_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_oof_scores",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/candidate_oof_scores.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1/candidate_oof_scores.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_legal_hurdle_v1",
+          "replacement": "runs/studies/seq100_margin_top10_legal_hurdle_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_margin_top10_legal_hurdle_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_margin_top10_two_stage_v1.json",
+      "original_sha256": "c30460635a332b644553baf45204a3db107f3829bb26327668101462462cce9f",
+      "references": [
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/transparent_coordinate_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/margin_candidate_panel",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/candidates.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/candidates.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/margin_candidate_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/margin_candidate_study",
+          "original": "daily_research/studies/seq100_margin_top10_current_cross_v1.json",
+          "replacement": "research/studies/seq100_margin_top10_current_cross_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_margin_top10_current_cross_v1.json"
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/qdp_active_manifest",
+          "original": "quant_data_platform/data/qdp_v2/active/active.json",
+          "replacement": "data/qdp/qdp_v2/active/active.json",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/active/active.json"
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1",
+          "replacement": "runs/studies/seq100_margin_top10_two_stage_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_margin_top10_two_stage_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_margin_value_overlay_v1.json",
+      "original_sha256": "814b5ef8b320996c53537b8542eaf2dcf72681839b9acef3356f0985bfc4d263",
+      "references": [
+        {
+          "json_path": "/source/margin_study",
+          "original": "daily_research/studies/seq100_margin_residual_policy_v1.json",
+          "replacement": "research/studies/seq100_margin_residual_policy_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_margin_residual_policy_v1.json"
+        },
+        {
+          "json_path": "/source/development_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/confirmation_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_margin_value_overlay_v1",
+          "replacement": "runs/studies/seq100_margin_value_overlay_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_margin_value_overlay_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_mathematical_market_model_v1.json",
+      "original_sha256": "a5bc8b5e1bb9a34b3953af3ba3ac7451ec2c18bb2b5b1de66865afa419ff3c31",
+      "references": [
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/research_record",
+          "original": "daily_research/research_records/seq100/mathematical_market_model_20260806/research_record.md",
+          "replacement": "research/records/seq100/mathematical_market_model_20260806/research_record.md",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/mathematical_market_model_20260806/research_record.md"
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mathematical_market_model",
+          "replacement": "runs/studies/seq100_mathematical_market_model",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_mathematical_market_model"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_mfe_capacity_stability_audit_v1.json",
+      "original_sha256": "4c66b5f6c2d47f213582a79ba45ad1dbaaa7f4975c3070a1790c100a8b8b39f8",
+      "references": [
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1",
+          "replacement": "runs/studies/seq100_mfe_capacity_stability_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_mfe_capacity_stability_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+      "original_sha256": "7f0cee2207d21f335beda8e6e2ec822c9d6f0e4c2b562b920198906ff57662b2",
+      "references": [
+        {
+          "json_path": "/data/label_manifest/path",
+          "original": "tmp/seq100_learnability_inputs/attempt_001/label_manifest.json",
+          "replacement": "legacy://tmp/seq100_learnability_inputs/attempt_001/label_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/data/base_feature_manifest/path",
+          "original": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+          "replacement": "legacy://tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/data/source_pack_manifest/path",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/data/source_feature_panels/daily_raw/path",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/daily_raw.float32.dat",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/daily_raw.float32.dat",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/data/source_feature_panels/turnover/path",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/turnover.float32.dat",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/turnover.float32.dat",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "runs/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_mfe_feature_family_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_mfe_feature_union_audit_v1.json",
+      "original_sha256": "efd9a96b10ffc02d30ca2ffe44fc383d5e5fe1bf044880dce76165e80c87759e",
+      "references": [
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_union_audit_v1",
+          "replacement": "runs/studies/seq100_mfe_feature_union_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_mfe_feature_union_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_mfe_final_head_capacity_audit_v1.json",
+      "original_sha256": "6021d96e5e5c8d7356720e934a37d18ebf3cafa621d7c7517c1e4cd333966ac8",
+      "references": [
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/prior_capacity_study_config",
+          "original": "daily_research/studies/seq100_mfe_capacity_stability_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_capacity_stability_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_capacity_stability_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/prior_capacity_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/entry_contract_v2_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/post_entry_v1_result",
+          "original": "daily_research/research_records/seq100/seq100_post_entry_ab_v1/result.json",
+          "replacement": "research/records/seq100/seq100_post_entry_ab_v1/result.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_post_entry_ab_v1/result.json"
+        },
+        {
+          "json_path": "/contract_v3/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3",
+          "replacement": "runs/studies/seq100_entry_contract_oos_v3",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_entry_contract_oos_v3"
+        },
+        {
+          "json_path": "/contract_v3/research_record_root",
+          "original": "daily_research/research_records/seq100/seq100_entry_contract_oos_v3",
+          "replacement": "research/records/seq100/seq100_entry_contract_oos_v3",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_entry_contract_oos_v3"
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1",
+          "replacement": "runs/studies/seq100_mfe_final_head_capacity_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_mfe_final_head_capacity_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_mfe_objective_alignment_v1.json",
+      "original_sha256": "113a235c4fd61b3c994f419bd580c1a7543232fa0a1326d87346aa5fc0a2fa3a",
+      "references": [
+        {
+          "json_path": "/source/study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/source/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_objective_alignment_v1",
+          "replacement": "runs/studies/seq100_mfe_objective_alignment_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_mfe_objective_alignment_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_multi_horizon_distribution_incremental_v1.json",
+      "original_sha256": "5700a78f15557688f252bb38785cf3b1ec2e05b2e004dc3360a6ef50ec260410",
+      "references": [
+        {
+          "json_path": "/sources/model_study",
+          "original": "daily_research/studies/seq100_multi_horizon_distribution_v1.json",
+          "replacement": "research/studies/seq100_multi_horizon_distribution_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_multi_horizon_distribution_v1.json"
+        },
+        {
+          "json_path": "/sources/model_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/current_core_evaluation",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/current_core_account",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_incremental_v1",
+          "replacement": "runs/studies/seq100_multi_horizon_distribution_incremental_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_multi_horizon_distribution_incremental_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_multi_horizon_distribution_v1.json",
+      "original_sha256": "0a968f905491b3be6cd7d5b7f351b5b1ecb2f3ebed3784b0020f6407166ceacc",
+      "references": [
+        {
+          "json_path": "/sources/base_study",
+          "original": "daily_research/studies/seq100_full_market_multitask_forecast_v1.json",
+          "replacement": "research/studies/seq100_full_market_multitask_forecast_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_full_market_multitask_forecast_v1.json"
+        },
+        {
+          "json_path": "/sources/base_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1",
+          "replacement": "runs/studies/seq100_multi_horizon_distribution_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_multi_horizon_distribution_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_payoff_episode_audit_v1.json",
+      "original_sha256": "c9338fbcd50a367bfde27c19268fa013164e0a81ccd77ebaf2bd0750b169ecc5",
+      "references": [
+        {
+          "json_path": "/sources/account_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_payoff_episode_audit_v1",
+          "replacement": "runs/studies/seq100_payoff_episode_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_payoff_episode_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_payoff_portfolio_policy_replay_v1.json",
+      "original_sha256": "8072471ef26b04de55e81d470110e64b3f13cb066da51f7d42916ea2f259403a",
+      "references": [
+        {
+          "json_path": "/sources/model_study",
+          "original": "daily_research/studies/seq100_full_market_multitask_forecast_v1.json",
+          "replacement": "research/studies/seq100_full_market_multitask_forecast_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_full_market_multitask_forecast_v1.json"
+        },
+        {
+          "json_path": "/sources/model_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/d10_evaluation_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_payoff_portfolio_policy_replay_v1_short",
+          "replacement": "runs/studies/seq100_payoff_portfolio_policy_replay_v1_short",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_payoff_portfolio_policy_replay_v1_short"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_post_entry_ab_v1.json",
+      "original_sha256": "ead43a7b6545883888a557ac8e1512918af0a51943f500fd14b10ae7d8138172",
+      "references": [
+        {
+          "json_path": "/sources/entry_contract_config",
+          "original": "daily_research/studies/seq100_entry_contract_oos_v2.json",
+          "replacement": "research/studies/seq100_entry_contract_oos_v2.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_entry_contract_oos_v2.json"
+        },
+        {
+          "json_path": "/sources/entry_contract_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/path_study_config",
+          "original": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
+          "replacement": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_path_label_learnability_v1/config.json"
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v1",
+          "replacement": "runs/studies/seq100_post_entry_ab_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_post_entry_ab_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_post_entry_ab_v2.json",
+      "original_sha256": "ee5e60ce848d48e79880ed617fa4da9abe9d2b86a25d2932d42173778851d0d8",
+      "references": [
+        {
+          "json_path": "/sources/entry_contract_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/entry_contract_config",
+          "original": "daily_research/studies/seq100_entry_fixed_capacity_audit_v1.json",
+          "replacement": "research/studies/seq100_entry_fixed_capacity_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_entry_fixed_capacity_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/path_study_config",
+          "original": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
+          "replacement": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_path_label_learnability_v1/config.json"
+        },
+        {
+          "json_path": "/sources/post_entry_v1_config",
+          "original": "daily_research/studies/seq100_post_entry_ab_v1.json",
+          "replacement": "research/studies/seq100_post_entry_ab_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_post_entry_ab_v1.json"
+        },
+        {
+          "json_path": "/sources/post_entry_v1_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_post_entry_ab_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/capacity_decision",
+          "original": "daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1/decision.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1/decision.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v2",
+          "replacement": "runs/studies/seq100_post_entry_ab_v2",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_post_entry_ab_v2"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_post_entry_capacity_audit_v1.json",
+      "original_sha256": "b3740bc30be52a18ea22eb8cb09be10f3fc51ae572e63b18fc5fbf090903ac1e",
+      "references": [
+        {
+          "json_path": "/sources/post_entry_config",
+          "original": "daily_research/studies/seq100_post_entry_ab_v2.json",
+          "replacement": "research/studies/seq100_post_entry_ab_v2.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_post_entry_ab_v2.json"
+        },
+        {
+          "json_path": "/sources/post_entry_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v2",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_post_entry_ab_v2",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/feature_study_config",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1",
+          "replacement": "runs/studies/seq100_post_entry_capacity_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_post_entry_capacity_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_post_entry_incremental_information_v1.json",
+      "original_sha256": "fe54adc5099441e21f128a7cffe95adda5199ab99f67020a859883753d442b4f",
+      "references": [
+        {
+          "json_path": "/sources/entry_role_study",
+          "original": "daily_research/studies/seq100_entry_role_synthesis_v1.json",
+          "replacement": "research/studies/seq100_entry_role_synthesis_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_entry_role_synthesis_v1.json"
+        },
+        {
+          "json_path": "/sources/entry_role_decision",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/decision.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/decision.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/feature_study",
+          "original": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "replacement": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_mfe_feature_family_audit_v1.json"
+        },
+        {
+          "json_path": "/sources/feature_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/path_study",
+          "original": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
+          "replacement": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_path_label_learnability_v1/config.json"
+        },
+        {
+          "json_path": "/sources/path_output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_path_label_learnability_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_post_entry_incremental_information_v1",
+          "replacement": "runs/studies/seq100_post_entry_incremental_information_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_post_entry_incremental_information_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_prediction_oracle_gap_audit_v1.json",
+      "original_sha256": "279715c6846b3257e0157dc2681239bba2b98f8c9111a57226c53453f7ebc052",
+      "references": [
+        {
+          "json_path": "/sources/v4_economic_study",
+          "original": "daily_research/studies/seq100_v4_economic_realizability_v1.json",
+          "replacement": "research/studies/seq100_v4_economic_realizability_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_v4_economic_realizability_v1.json"
+        },
+        {
+          "json_path": "/sources/v4_signal_book_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/v4_economic_result",
+          "original": "daily_research/research_records/seq100/seq100_v4_economic_realizability_v1/result.json",
+          "replacement": "research/records/seq100/seq100_v4_economic_realizability_v1/result.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_v4_economic_realizability_v1/result.json"
+        },
+        {
+          "json_path": "/sources/oracle_study",
+          "original": "daily_research/studies/seq100_true_label_economic_ceiling_v1.json",
+          "replacement": "research/studies/seq100_true_label_economic_ceiling_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_true_label_economic_ceiling_v1.json"
+        },
+        {
+          "json_path": "/sources/oracle_book_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/oracle_result",
+          "original": "daily_research/research_records/seq100/seq100_true_label_economic_ceiling_v1/result.json",
+          "replacement": "research/records/seq100/seq100_true_label_economic_ceiling_v1/result.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_true_label_economic_ceiling_v1/result.json"
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_prediction_oracle_gap_audit_v1",
+          "replacement": "runs/studies/seq100_prediction_oracle_gap_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_prediction_oracle_gap_audit_v1"
+        },
+        {
+          "json_path": "/outputs/record_dir",
+          "original": "daily_research/research_records/seq100/seq100_prediction_oracle_gap_audit_v1",
+          "replacement": "runs/studies/records/seq100/seq100_prediction_oracle_gap_audit_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/records/seq100/seq100_prediction_oracle_gap_audit_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_d1_execution.json",
+      "original_sha256": "073d097883972cb210ac4bdd76b795d3cd9b8273ae1e39255a73290b768bdf10",
+      "references": [
+        {
+          "json_path": "/sources/model_root",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/row_index",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/close_d1_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/close_to_close_d1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/close_to_close_d1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/d1_execution",
+          "replacement": "runs/studies/seq100_quality_liquidity_model/direct_returns/d1_execution",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_quality_liquidity_model/direct_returns/d1_execution"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_data_prep.json",
+      "original_sha256": "6518e455f72e2de06329dbd238c8f8cbf8d7d6ac10c936b5506c330da10635d7",
+      "references": [
+        {
+          "json_path": "/source_artifacts/report_annual_statistics_path",
+          "original": "quant_data_platform/data/qdp_runtime/research_report_rc_backfill_v2/prepared/report_annual_statistics.parquet",
+          "replacement": "data/qdp/qdp_runtime/research_report_rc_backfill_v2/prepared/report_annual_statistics.parquet",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_runtime/research_report_rc_backfill_v2/prepared/report_annual_statistics.parquet"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_execution.json",
+      "original_sha256": "e77be620ae620236f978a589544953aa5658259361f6c18653a2d3c386675d8b",
+      "references": [
+        {
+          "json_path": "/sources/model_root",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/row_index",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+          "replacement": "runs/studies/seq100_quality_liquidity_execution",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_quality_liquidity_execution"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_policy_targets.json",
+      "original_sha256": "2b19e6b537315ce010d4c27c3018c005926a6d44dce7126a0add52d14c09e402",
+      "references": [
+        {
+          "json_path": "/sources/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/canonical_model_root",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/execution_study",
+          "original": "daily_research/studies/seq100_quality_liquidity_execution.json",
+          "replacement": "research/studies/seq100_quality_liquidity_execution.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_quality_liquidity_execution.json"
+        },
+        {
+          "json_path": "/sources/execution_output",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/profit_timeout_study",
+          "original": "daily_research/studies/seq100_quality_liquidity_profit_timeout.json",
+          "replacement": "research/studies/seq100_quality_liquidity_profit_timeout.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_quality_liquidity_profit_timeout.json"
+        },
+        {
+          "json_path": "/sources/profit_timeout_output",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution/profit_timeout",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_execution/profit_timeout",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_policy_targets",
+          "replacement": "runs/studies/seq100_quality_liquidity_policy_targets",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_quality_liquidity_policy_targets"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_profit_timeout.json",
+      "original_sha256": "2ae8d5c93fb1fea72e8017556656ada5d010e2d1c4d2ecd9fff23b3d17bbcfd7",
+      "references": [
+        {
+          "json_path": "/sources/execution_study",
+          "original": "daily_research/studies/seq100_quality_liquidity_execution.json",
+          "replacement": "research/studies/seq100_quality_liquidity_execution.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_quality_liquidity_execution.json"
+        },
+        {
+          "json_path": "/sources/execution_output",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution/profit_timeout",
+          "replacement": "runs/studies/seq100_quality_liquidity_execution/profit_timeout",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_quality_liquidity_execution/profit_timeout"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_t1_execution.json",
+      "original_sha256": "0781beda26018f39efd31b60b0ab971b6bf52bff0fd3f6c6c5c2e1d217740201",
+      "references": [
+        {
+          "json_path": "/sources/model_root",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/row_index",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/close_d1_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/close_to_close_d1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/close_to_close_d1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_return_models/execution",
+          "replacement": "runs/studies/seq100_quality_liquidity_t1_return_models/execution",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_quality_liquidity_t1_return_models/execution"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_t1_return_models.json",
+      "original_sha256": "fb713f292065cf3f699dda7a6b2aa782c3f4760cebb99e739711432768bdd401",
+      "references": [
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/t1_target_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_targets/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_targets/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/frozen_g1_root",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_quality_liquidity_t1_targets.json",
+      "original_sha256": "639980734eaf382157f495ac472d738cec405d54c6a85d320c37d55cd3ce351e",
+      "references": [
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_qver_confirmation_effect_v1.json",
+      "original_sha256": "d8adf0fc4f05ab3be330bbefeb1722ed8c2bb1dbdf954d4bbfecb887e6c5d6bc",
+      "references": [
+        {
+          "json_path": "/source/exact_policy_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/old_selections",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/income_statement_quarterly",
+          "original": "quant_data_platform/data/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
+          "replacement": "data/qdp/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/income_statement_quarterly/income_statement_quarterly__5f863d3f3b37779414651bc8/shards/part-0000.parquet"
+        },
+        {
+          "json_path": "/source/membership_root",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_qver_confirmation_effect_v1",
+          "replacement": "runs/studies/seq100_qver_confirmation_effect_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_qver_confirmation_effect_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_qver_risk_overlay_validation_v1.json",
+      "original_sha256": "f9f7c8aa52490c647006b95f009156ae8718e67310d868499cd91c774591a8b7",
+      "references": [
+        {
+          "json_path": "/source/qver_study",
+          "original": "daily_research/studies/seq100_qver_confirmation_effect_v1.json",
+          "replacement": "research/studies/seq100_qver_confirmation_effect_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_qver_confirmation_effect_v1.json"
+        },
+        {
+          "json_path": "/source/qver_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_qver_confirmation_effect_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_qver_confirmation_effect_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/exact_account_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_qver_risk_overlay_validation_v1",
+          "replacement": "runs/studies/seq100_qver_risk_overlay_validation_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_qver_risk_overlay_validation_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_stock_bad_tail_v1.json",
+      "original_sha256": "21beb8c69ee11d1db1fcc8870929629fc46aa2f37b33ba9516469f9f0173d9d8",
+      "references": [
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/stock_distribution_label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1",
+          "replacement": "runs/studies/seq100_stock_bad_tail_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_stock_bad_tail_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_stock_distribution_v1.json",
+      "original_sha256": "10db616224a239b4b912741ec10812df2d6d9839a062f1b07245c1e6858173a4",
+      "references": [
+        {
+          "json_path": "/source/model_input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/membership_root",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_data_prep/membership",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1",
+          "replacement": "runs/studies/seq100_stock_distribution_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_stock_distribution_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_audit_v1.json",
+      "original_sha256": "2d6fdc23212cd58fc3259cb4c0c45b3c8d4a401d3d49c482c954861fa62a5858",
+      "references": [
+        {
+          "json_path": "/quality_pool_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_coordinate_screen_v1.json",
+      "original_sha256": "a485085d2c946665a3ffc14d4b0c09893aebfdd2305745e0dbb895038e48167e",
+      "references": [
+        {
+          "json_path": "/source/exploratory_outcome_root",
+          "original": "daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/confirmation_outcome_root",
+          "original": "daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/coordinate_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/coordinate_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_definition_v1.json",
+      "original_sha256": "4c2a00c36a6c2268e3934b279e73d9fbd9ee84605d4bf68f056226960d87aeed",
+      "references": [
+        {
+          "json_path": "/data_contract/qdp_root",
+          "original": "quant_data_platform/data/qdp_v2",
+          "replacement": "legacy://quant_data_platform/data/qdp_v2",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_outcome_probe_v1.json",
+      "original_sha256": "d028c6d23b5d8d188b7f5b299c2c92a6ece33ff5389c925876295576c55d9ddb",
+      "references": [
+        {
+          "json_path": "/source/stratified_audit_output",
+          "original": "daily_research/output/path_policy/studies/seq100_strict_chan_stratified_audit_v1",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_stratified_audit_v1",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_outcome_sample_v1.json",
+      "original_sha256": "622f577abe2105b18928c1e508a868a16ca37755fd5e598668f4d3af53e16fd5",
+      "references": [
+        {
+          "json_path": "/quality_pool_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_outcome_screen_v1.json",
+      "original_sha256": "1aace0a6090f2a805d217c1858ca3a20e2cddf916617418cc4a188fa0525a687",
+      "references": [
+        {
+          "json_path": "/source/sample_study",
+          "original": "daily_research/studies/seq100_strict_chan_outcome_sample_v1.json",
+          "replacement": "research/studies/seq100_strict_chan_outcome_sample_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_strict_chan_outcome_sample_v1.json"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_panel_v1.json",
+      "original_sha256": "dade100da23e1f093e4fb9403fea284ba574c242937bfbd3066d611ab273eba9",
+      "references": [
+        {
+          "json_path": "/data_contract/qdp_root",
+          "original": "quant_data_platform/data/qdp_v2",
+          "replacement": "legacy://quant_data_platform/data/qdp_v2",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_stratified_audit_v1.json",
+      "original_sha256": "bf05c4f82ccf5c67eacaf573cccf4e103bc90cb2535b780f54fbf2fb650059d2",
+      "references": [
+        {
+          "json_path": "/quality_pool_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_structure_increment_sample_v1.json",
+      "original_sha256": "2c077be432ea42ccaa4c62b643c56465fd372aea7e880dd2d2c59d36d5794121",
+      "references": [
+        {
+          "json_path": "/quality_pool_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/selection/exclude_selected_cases/0",
+          "original": "daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/selection/exclude_selected_cases/1",
+          "original": "daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1/sample/selected_cases.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1/sample/selected_cases.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_structure_increment_v1.json",
+      "original_sha256": "c5449b4b4c567d46d840fcfc412e0337f17df5ddb5aff49456a03730f7217481",
+      "references": [
+        {
+          "json_path": "/source/sample_study",
+          "original": "daily_research/studies/seq100_strict_chan_structure_increment_sample_v1.json",
+          "replacement": "research/studies/seq100_strict_chan_structure_increment_sample_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_strict_chan_structure_increment_sample_v1.json"
+        },
+        {
+          "json_path": "/source/coordinate_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/coordinate_validation",
+          "original": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_type1_confirmation_sample_v1.json",
+      "original_sha256": "06c8c0ce0ce80c6cbd06edbcc68cd459889480a32602cdb4ba4bfb432e84767c",
+      "references": [
+        {
+          "json_path": "/quality_pool_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/selection/exclude_selected_cases",
+          "original": "daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_strict_chan_type1_confirmation_v1.json",
+      "original_sha256": "6d59084300bfee0d99b18c8cc5a397cc3ac3d16f9f98bed7fd94dd37c8b314c3",
+      "references": [
+        {
+          "json_path": "/source/sample_study",
+          "original": "daily_research/studies/seq100_strict_chan_type1_confirmation_sample_v1.json",
+          "replacement": "research/studies/seq100_strict_chan_type1_confirmation_sample_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_strict_chan_type1_confirmation_sample_v1.json"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_true_label_economic_ceiling_v1.json",
+      "original_sha256": "e3e407a7336824b7808b30a61a2639780607d2b897b46dbf9ee491e4d2e42460",
+      "references": [
+        {
+          "json_path": "/sources/v4_economic_study",
+          "original": "daily_research/studies/seq100_v4_economic_realizability_v1.json",
+          "replacement": "research/studies/seq100_v4_economic_realizability_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_v4_economic_realizability_v1.json"
+        },
+        {
+          "json_path": "/sources/v4_signal_book_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1/signal_book/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/v4_economic_result",
+          "original": "daily_research/research_records/seq100/seq100_v4_economic_realizability_v1/result.json",
+          "replacement": "research/records/seq100/seq100_v4_economic_realizability_v1/result.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_v4_economic_realizability_v1/result.json"
+        },
+        {
+          "json_path": "/sources/entry_contract_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/base_feature_manifest",
+          "original": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+          "replacement": "legacy://tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/label_manifest",
+          "original": "tmp/seq100_learnability_inputs/attempt_001/label_manifest.json",
+          "replacement": "legacy://tmp/seq100_learnability_inputs/attempt_001/label_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1",
+          "replacement": "runs/studies/seq100_true_label_economic_ceiling_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_true_label_economic_ceiling_v1"
+        },
+        {
+          "json_path": "/outputs/record_dir",
+          "original": "daily_research/research_records/seq100/seq100_true_label_economic_ceiling_v1",
+          "replacement": "runs/studies/records/seq100/seq100_true_label_economic_ceiling_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/records/seq100/seq100_true_label_economic_ceiling_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_ttm_fcf_rotation_account_v1.json",
+      "original_sha256": "e4bdc06311495ebef9de97aeaa68cb854c9250da7355447fa7d8edd59f7a3372",
+      "references": [
+        {
+          "json_path": "/source/ttm_value_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/variant_selections",
+          "original": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/variant_selections.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/variant_selections.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_ttm_fcf_rotation_account_v1",
+          "replacement": "runs/studies/seq100_ttm_fcf_rotation_account_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_ttm_fcf_rotation_account_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_ttm_value_account_v1.json",
+      "original_sha256": "9200f9c23a69286d5316e9cd2733374730e214bb021f3a31aa40a57400fdbdab",
+      "references": [
+        {
+          "json_path": "/source/causal_value_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/cash_flow_statement_quarterly",
+          "original": "quant_data_platform/data/qdp_v2/datasets/cash_flow_statement_quarterly/cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6/shards/part-0000.parquet",
+          "replacement": "data/qdp/qdp_v2/datasets/cash_flow_statement_quarterly/cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6/shards/part-0000.parquet",
+          "status": "workspace_resolved",
+          "resolved_path": "data/qdp/qdp_v2/datasets/cash_flow_statement_quarterly/cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6/shards/part-0000.parquet"
+        },
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1",
+          "replacement": "runs/studies/seq100_ttm_value_account_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_ttm_value_account_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_turning_path_atlas_v1.json",
+      "original_sha256": "5bcd249a3b8e08702bb804938b93d60b5901bb8d29a92aaeb084cebf5e2ebcfb",
+      "references": [
+        {
+          "json_path": "/source/atlas_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/rule_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_rules_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/neutral_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_neutral_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1",
+          "replacement": "runs/studies/seq100_turning_path_atlas_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_turning_path_atlas_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_turning_path_online_v1.json",
+      "original_sha256": "f0ea2f533f5fbcf46dc6ce8ba4c0ffd663d28ec09b242a4f959e5432ff85051d",
+      "references": [
+        {
+          "json_path": "/source/quality_pool_analysis_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_online_v1",
+          "replacement": "runs/studies/seq100_turning_path_online_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_turning_path_online_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_turning_path_quality_pool_v1.json",
+      "original_sha256": "bccd3d69f355de928e8af381bc70eb2b621f0d3f41fb842af9268f5c279c2f07",
+      "references": [
+        {
+          "json_path": "/source/turning_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/turning_analysis_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/training_ready_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/quality_pool_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1",
+          "replacement": "runs/studies/seq100_turning_path_quality_pool_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_turning_path_quality_pool_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_v4_economic_realizability_v1.json",
+      "original_sha256": "878cb84bc54f282927ff3cca6e5dd0c6c2f7ec060032b6f62c55db6cea3e340d",
+      "references": [
+        {
+          "json_path": "/sources/entry_contract_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/base_feature_manifest",
+          "original": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+          "replacement": "legacy://tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/pack_manifest",
+          "original": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "replacement": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/post_entry_result",
+          "original": "daily_research/research_records/seq100/seq100_post_entry_ab_v2/result.json",
+          "replacement": "research/records/seq100/seq100_post_entry_ab_v2/result.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/records/seq100/seq100_post_entry_ab_v2/result.json"
+        },
+        {
+          "json_path": "/outputs/output_dir",
+          "original": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1",
+          "replacement": "runs/studies/seq100_v4_economic_realizability_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_v4_economic_realizability_v1"
+        },
+        {
+          "json_path": "/outputs/record_dir",
+          "original": "daily_research/research_records/seq100/seq100_v4_economic_realizability_v1",
+          "replacement": "runs/studies/records/seq100/seq100_v4_economic_realizability_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/records/seq100/seq100_v4_economic_realizability_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_v4_pit_stock_pool_audit_v1.json",
+      "original_sha256": "db684154e4960fb6f945f55c570bda401ef4897964ef6eed9b53a80209e2b577",
+      "references": [
+        {
+          "json_path": "/sources/economic_study",
+          "original": "daily_research/studies/seq100_v4_economic_realizability_v1.json",
+          "replacement": "research/studies/seq100_v4_economic_realizability_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_v4_economic_realizability_v1.json"
+        },
+        {
+          "json_path": "/sources/entry_contract",
+          "original": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/sources/oracle_book",
+          "original": "daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_value_definition_robustness_v1.json",
+      "original_sha256": "49b1b5fdbc7ab46421eb8347a812b44e97924c28ae614114d3ef04845d3bd1d6",
+      "references": [
+        {
+          "json_path": "/source/causal_value_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/parent_selections",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/selections.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/selections.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_value_definition_robustness_v1",
+          "replacement": "runs/studies/seq100_value_definition_robustness_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_value_definition_robustness_v1"
+        }
+      ]
+    },
+    {
+      "path": "research/studies/seq100_value_staggered_account_v1.json",
+      "original_sha256": "317a5e58bc86bc296785e799d537b721f623c5acb6c3e54cecc8de7004850bb7",
+      "references": [
+        {
+          "json_path": "/source/causal_value_study",
+          "original": "daily_research/studies/seq100_causal_value_policy_v1.json",
+          "replacement": "research/studies/seq100_causal_value_policy_v1.json",
+          "status": "workspace_resolved",
+          "resolved_path": "research/studies/seq100_causal_value_policy_v1.json"
+        },
+        {
+          "json_path": "/source/causal_value_summary",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/candidate_features",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/selections",
+          "original": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/selections.parquet",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/selections.parquet",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/input_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/source/label_manifest",
+          "original": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "replacement": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+          "status": "provenance_only",
+          "resolved_path": null
+        },
+        {
+          "json_path": "/decision_boundary/output_root",
+          "original": "daily_research/output/path_policy/studies/seq100_value_staggered_account_v1",
+          "replacement": "runs/studies/seq100_value_staggered_account_v1",
+          "status": "workspace_output",
+          "resolved_path": "runs/studies/seq100_value_staggered_account_v1"
+        }
+      ]
+    }
+  ]
+}

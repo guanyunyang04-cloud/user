@@ -3,17 +3,17 @@
   "objective": "identify which causal technical feature families add stable out-of-sample information to the nonredundant MFE D10 and D20 opportunity heads",
   "data": {
     "label_manifest": {
-      "path": "tmp/seq100_learnability_inputs/attempt_001/label_manifest.json"
+      "path": "legacy://tmp/seq100_learnability_inputs/attempt_001/label_manifest.json"
     },
     "base_feature_manifest": {
-      "path": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json"
+      "path": "legacy://tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json"
     },
     "source_pack_manifest": {
-      "path": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
+      "path": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
     },
     "source_feature_panels": {
       "daily_raw": {
-        "path": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/daily_raw.float32.dat",
+        "path": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/daily_raw.float32.dat",
         "size": 714174396,
         "shape": [
           4017,
@@ -23,7 +23,7 @@
         "dtype": "float32"
       },
       "turnover": {
-        "path": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/turnover.float32.dat",
+        "path": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/panels/turnover.float32.dat",
         "size": 109872984,
         "shape": [
           4017,
@@ -203,5 +203,5 @@
     "stop_loss",
     "successor_architecture"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1"
+  "output_dir": "runs/studies/seq100_mfe_feature_family_audit_v1"
 }

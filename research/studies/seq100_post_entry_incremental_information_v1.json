@@ -2,12 +2,12 @@
   "study_id": "seq100_post_entry_incremental_information_v1",
   "objective": "test whether original entry information and realized D1/D3/D5 path add stable conditional information beyond recomputing the frozen five-block entry contract at the current close",
   "sources": {
-    "entry_role_study": "daily_research/studies/seq100_entry_role_synthesis_v1.json",
-    "entry_role_decision": "daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/decision.json",
-    "feature_study": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
-    "path_study": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
-    "path_output_root": "daily_research/output/path_policy/studies/seq100_path_label_learnability_v1"
+    "entry_role_study": "research/studies/seq100_entry_role_synthesis_v1.json",
+    "entry_role_decision": "legacy://daily_research/output/path_policy/studies/seq100_entry_role_synthesis_v1/decision.json",
+    "feature_study": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "path_study": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+    "path_output_root": "legacy://daily_research/output/path_policy/studies/seq100_path_label_learnability_v1"
   },
   "folds": {
     "fold_years": [
@@ -174,5 +174,5 @@
     "account_policy",
     "reinforcement_learning"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_post_entry_incremental_information_v1"
+  "output_dir": "runs/studies/seq100_post_entry_incremental_information_v1"
 }

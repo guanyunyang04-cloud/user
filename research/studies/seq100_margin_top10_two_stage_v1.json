@@ -11,20 +11,20 @@
         "production_or_stable_profit_claim_allowed": false
     },
     "source": {
-        "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+        "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
         "model_input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
         "model_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
-        "transparent_coordinate_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+        "transparent_coordinate_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
         "transparent_coordinate_manifest_sha256": "436225ca89c478365a998d4190505b95e772428695d5d4cd207696a7c4a94da9",
-        "margin_candidate_panel": "daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/candidates.parquet",
+        "margin_candidate_panel": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/candidates.parquet",
         "margin_candidate_panel_sha256": "cf112f10425f101457fafdeeded467d7b37ec64634ccfe366e80f491aff5ae01",
-        "margin_candidate_summary": "daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/summary.json",
+        "margin_candidate_summary": "legacy://daily_research/output/path_policy/studies/seq100_margin_top10_current_cross_v1/summary.json",
         "margin_candidate_summary_sha256": "06ae14795677606f62a2120b43bec7b93fd02b0144ec71fe1fe06b26928b29a6",
-        "margin_candidate_study": "daily_research/studies/seq100_margin_top10_current_cross_v1.json",
+        "margin_candidate_study": "research/studies/seq100_margin_top10_current_cross_v1.json",
         "margin_candidate_study_sha256": "7e23b25968d15507b05ce0223ee29a2f0672108705fc36bccc997c19b0cd1710",
-        "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+        "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
         "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
-        "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+        "qdp_active_manifest": "data/qdp/qdp_v2/active/active.json",
         "margin_detail_dataset_id": "margin_detail__2ed8aba21121548425f56b7c",
         "research_start_date": "2012-01-01",
         "maximum_outcome_date": "2025-12-31",
@@ -155,6 +155,6 @@
         "historical_result_is_adaptive_not_independent_confirmation": true,
         "deep_model_allowed_only_after_table_baseline_increment": true,
         "live_scorer_allowed_only_after_historical_entry_gate": true,
-        "output_root": "daily_research/output/path_policy/studies/seq100_margin_top10_two_stage_v1"
+        "output_root": "runs/studies/seq100_margin_top10_two_stage_v1"
     }
 }

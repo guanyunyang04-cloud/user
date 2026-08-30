@@ -2,11 +2,11 @@
   "study_id": "seq100_quality_liquidity_d1_execution",
   "purpose": "T+1 continuous-account execution research for the canonical g_1 D1 return model.",
   "sources": {
-    "model_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "row_index": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
-    "close_d1_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/close_to_close_d1/manifest.json"
+    "model_root": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "row_index": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "close_d1_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/close_to_close_d1/manifest.json"
   },
   "period": {
     "signal_years": [2023, 2024, 2025],
@@ -78,7 +78,7 @@
     "minimum_stable_variants_per_slot": 2
   },
   "outputs": {
-    "output_dir": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns/d1_execution",
+    "output_dir": "runs/studies/seq100_quality_liquidity_model/direct_returns/d1_execution",
     "expected_task_count": 140,
     "html_report": false
   }

@@ -10,8 +10,8 @@
     "stable_profit_claim_allowed": false
   },
   "sources": {
-    "account_manifest": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "account_manifest": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "maximum_outcome_date": "2025-12-31",
     "forbidden_year": 2026
   },
@@ -26,6 +26,6 @@
     "top_fractions": [0.01, 0.05, 0.1]
   },
   "outputs": {
-    "output_root": "daily_research/output/path_policy/studies/seq100_payoff_episode_audit_v1"
+    "output_root": "runs/studies/seq100_payoff_episode_audit_v1"
   }
 }

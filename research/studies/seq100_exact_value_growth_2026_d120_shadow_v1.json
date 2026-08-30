@@ -11,13 +11,13 @@
     "profit_guarantee_allowed": false
   },
   "source": {
-    "original_shadow_study": "daily_research/studies/seq100_exact_value_growth_2026_shadow_v1.json",
+    "original_shadow_study": "research/studies/seq100_exact_value_growth_2026_shadow_v1.json",
     "original_shadow_study_sha256": "a48303b3503fcff2965766fa7d493888fbe3b516df3644a26b96b98c87d20b85",
-    "original_shadow_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/summary.json",
+    "original_shadow_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/summary.json",
     "original_shadow_summary_sha256": "6574d88792aba1d60f18190825f43db91787d54afc803bce73838a832256feb1",
-    "original_frozen_orders": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/frozen_orders.parquet",
+    "original_frozen_orders": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_shadow_v1/frozen_orders.parquet",
     "original_frozen_orders_sha256": "a8f2fc1f2aa7fb8256efd03104c644e8125126ea8ffea4079ab3323ca6a9da45",
-    "historical_exit_challenge_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1/summary.json",
+    "historical_exit_challenge_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_exit_challenge_v1/summary.json",
     "historical_exit_challenge_summary_sha256": "0aa2a90647f8fd42de18b58c1c859ad5b6089ed6d042b0d21341a3beb0deb049"
   },
   "freeze": {
@@ -42,6 +42,6 @@
     "realized_fill_count": 0,
     "realized_exit_count": 0,
     "performance_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_2026_d120_shadow_v1"
+    "output_root": "runs/studies/seq100_exact_value_growth_2026_d120_shadow_v1"
   }
 }

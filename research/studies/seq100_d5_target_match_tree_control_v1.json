@@ -9,10 +9,10 @@
     "stable_profit_claim_allowed": false
   },
   "sources": {
-    "model_study": "daily_research/studies/seq100_full_market_multitask_forecast_v1.json",
-    "model_output_root": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
-    "d10_tree_evaluation_manifest": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d10_rank__strong_127__price_path_core_183/manifest.json",
-    "d5_tree_account_manifest": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_account_replay/exact_net_return_d5_rank__strong_127__price_path_core_183/manifest.json",
+    "model_study": "research/studies/seq100_full_market_multitask_forecast_v1.json",
+    "model_output_root": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+    "d10_tree_evaluation_manifest": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d10_rank__strong_127__price_path_core_183/manifest.json",
+    "d5_tree_account_manifest": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_account_replay/exact_net_return_d5_rank__strong_127__price_path_core_183/manifest.json",
     "maximum_outcome_date": "2025-12-31",
     "forbidden_year": 2026
   },
@@ -25,6 +25,6 @@
     "winner_cap_diagnostic": 0.1
   },
   "outputs": {
-    "output_root": "daily_research/output/path_policy/studies/seq100_d5_target_match_tree_control_v1_short"
+    "output_root": "runs/studies/seq100_d5_target_match_tree_control_v1_short"
   }
 }

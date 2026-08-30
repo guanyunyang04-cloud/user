@@ -11,13 +11,13 @@
     "forbidden_2026_data_remain_untouched": true
   },
   "source": {
-    "ttm_value_summary": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/summary.json",
+    "ttm_value_summary": "legacy://daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/summary.json",
     "ttm_value_summary_sha256": "c6f449467d6ddfadca7c2b26c72d540a5c2d17e657ebb00ae6871729e128bbc8",
-    "variant_selections": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/variant_selections.parquet",
+    "variant_selections": "legacy://daily_research/output/path_policy/studies/seq100_ttm_value_account_v1/variant_selections.parquet",
     "variant_selections_sha256": "84c358878078462ba27d0a9083501d420c99a299be3a44d499bfa878d5ab484d",
-    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
     "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
     "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
@@ -65,6 +65,6 @@
     "account_optimization_performed": false,
     "live_alpha_claim_allowed": false,
     "production_strategy_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_ttm_fcf_rotation_account_v1"
+    "output_root": "runs/studies/seq100_ttm_fcf_rotation_account_v1"
   }
 }

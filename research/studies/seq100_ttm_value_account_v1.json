@@ -10,14 +10,14 @@
     "forbidden_2026_data_remain_untouched": true
   },
   "source": {
-    "causal_value_summary": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
+    "causal_value_summary": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/summary.json",
     "causal_value_summary_sha256": "770309129f20431af9256e956a39cd1a1a35d8689dbf59654df4242d6d726cb8",
-    "candidate_features": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
+    "candidate_features": "legacy://daily_research/output/path_policy/studies/seq100_causal_value_policy_v1/candidate_features.parquet",
     "candidate_features_sha256": "03651267b85ceff27e1cb3b525ac2ca910eb3dff291592f4833632979b4d629d",
-    "cash_flow_statement_quarterly": "quant_data_platform/data/qdp_v2/datasets/cash_flow_statement_quarterly/cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6/shards/part-0000.parquet",
+    "cash_flow_statement_quarterly": "data/qdp/qdp_v2/datasets/cash_flow_statement_quarterly/cash_flow_statement_quarterly__40eb6f72f971ff6f7860e8d6/shards/part-0000.parquet",
     "cash_flow_statement_quarterly_sha256": "40eb6f72f971ff6f7860e8d63eb8ac3eaceea234e043eddc927be77581db6b96",
-    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
     "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
     "expected_row_count": 4191476,
     "maximum_outcome_date": "2025-12-31",
@@ -56,6 +56,6 @@
   "decision_boundary": {
     "live_alpha_claim_allowed": false,
     "production_strategy_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_ttm_value_account_v1"
+    "output_root": "runs/studies/seq100_ttm_value_account_v1"
   }
 }

@@ -3,7 +3,7 @@
   "status": "frozen_outcome_blind_expanded_sample",
   "parent_study_id": "seq100_strict_chan_definition_v1",
   "purpose": "Freeze a larger outcome-blind sample for an efficient strict-Chan buy-point path screen after parser correctness has passed.",
-  "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+  "quality_pool_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
   "boundaries": {
     "future_path_test_performed": false,
     "return_test_performed": false,

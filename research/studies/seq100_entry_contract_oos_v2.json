@@ -2,14 +2,14 @@
   "study_id": "seq100_entry_contract_oos_v2",
   "objective": "build a candidate-aligned strictly out-of-year five-block Seq100 entry contract for post-entry model challenges",
   "sources": {
-    "path_study_config": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
-    "union_study_config": "daily_research/studies/seq100_mfe_feature_union_audit_v1.json",
-    "union_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_union_audit_v1",
-    "atlas_script": "tmp/seq100_future_horizon_atlas.py",
-    "atlas_output_root": "tmp/seq100_future_horizon_atlas/attempt_001",
-    "learnability_input_script": "tmp/seq100_learnability_inputs.py"
+    "path_study_config": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "union_study_config": "research/studies/seq100_mfe_feature_union_audit_v1.json",
+    "union_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_union_audit_v1",
+    "atlas_script": "legacy://tmp/seq100_future_horizon_atlas.py",
+    "atlas_output_root": "legacy://tmp/seq100_future_horizon_atlas/attempt_001",
+    "learnability_input_script": "legacy://tmp/seq100_learnability_inputs.py"
   },
   "folds": {
     "contract_years": [2020, 2021, 2022, 2023, 2024, 2025],
@@ -120,5 +120,5 @@
     "stop_loss",
     "account_policy"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2"
+  "output_dir": "runs/studies/seq100_entry_contract_oos_v2"
 }

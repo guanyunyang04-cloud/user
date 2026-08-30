@@ -3,7 +3,7 @@
   "status": "frozen_independent_confirmation_sample",
   "parent_study_id": "seq100_strict_chan_definition_v1",
   "purpose": "Select an independent outcome-blind confirmation sample after the exploratory screen retained only primary type-1 amount-per-bar divergence at H10.",
-  "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+  "quality_pool_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
   "boundaries": {
     "future_path_test_performed": false,
     "return_test_performed": false,
@@ -18,7 +18,7 @@
     "population": "quality_liquidity_pit",
     "population_symbol_suffix_contract": [".SH", ".SZ"],
     "selection_columns": ["symbol", "trade_date"],
-    "exclude_selected_cases": "daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
+    "exclude_selected_cases": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
     "forbidden_selection_inputs": [
       "future_return",
       "action_value",

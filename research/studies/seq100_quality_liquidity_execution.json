@@ -2,10 +2,10 @@
   "study_id": "seq100_quality_liquidity_execution",
   "purpose": "Retrospective 2023-2025 economic execution research for the canonical 557-field rolling model.",
   "sources": {
-    "model_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "row_index": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
+    "model_root": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "row_index": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json"
   },
   "period": {
     "signal_years": [2023, 2024, 2025],
@@ -98,7 +98,7 @@
     "single_cell_winner_forbidden": true
   },
   "outputs": {
-    "output_dir": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution",
+    "output_dir": "runs/studies/seq100_quality_liquidity_execution",
     "expected_task_count": 72,
     "html_report": false
   }

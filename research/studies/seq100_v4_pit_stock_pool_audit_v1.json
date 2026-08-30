@@ -31,9 +31,9 @@
     "dual_mfe": "rank of the minimum of the two in-pool MFE ranks"
   },
   "sources": {
-    "economic_study": "daily_research/studies/seq100_v4_economic_realizability_v1.json",
-    "entry_contract": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
-    "oracle_book": "daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json"
+    "economic_study": "research/studies/seq100_v4_economic_realizability_v1.json",
+    "entry_contract": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+    "oracle_book": "legacy://daily_research/output/path_policy/studies/seq100_true_label_economic_ceiling_v1/oracle_book/manifest.json"
   },
   "account_replay": {
     "reuse_all_pit_tasks": true,

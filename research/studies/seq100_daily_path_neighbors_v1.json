@@ -3,11 +3,11 @@
   "status": "frozen_initial_contract",
   "purpose": "Test whether causal multi-scale path sequences identify whether the next confirmed turning extreme is still ahead, and estimate its natural-time path outcomes, for every point-in-time quality-liquidity stock day.",
   "source": {
-    "quality_turning_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
+    "quality_turning_manifest": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
     "expected_quality_turning_fingerprint": "fa818cd219d2d68acc727736f3a7b7accaa89e10da434b2af70c7f3a1705f4bc",
-    "hot_path_manifest": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
+    "hot_path_manifest": "legacy://daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1/manifest.json",
     "expected_hot_path_fingerprint": "e6a716e509ed570adfcca2ebad60c8a992459c31a0c457cb05236117263df11b",
-    "turning_atlas_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
+    "turning_atlas_manifest": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
     "expected_turning_atlas_fingerprint": "0dca220d4c70ad4905c00ed5b7762d05e8876f8c8b2d947736a4ecddb576d9fd",
     "quality_pool_name": "quality_liquidity_pit",
     "maximum_outcome_date": "2025-12-31",
@@ -97,5 +97,5 @@
     "execution_backtest_performed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1"
+  "output_root": "runs/studies/seq100_daily_path_neighbors_v1"
 }

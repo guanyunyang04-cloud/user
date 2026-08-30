@@ -12,11 +12,11 @@
     "forbidden_2026_data_remain_untouched": true
   },
   "source": {
-    "margin_study": "daily_research/studies/seq100_margin_residual_policy_v1.json",
+    "margin_study": "research/studies/seq100_margin_residual_policy_v1.json",
     "margin_study_sha256": "2be7ab5bc42df22ff0cc012b893e4f88be3c5971217348938aff0a82f2bdba3a",
-    "development_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
+    "development_summary": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/development/summary.json",
     "development_summary_sha256": "e91bb273686ef0cc17f94d020914ac2f2a03a45f0d176ae525a52d52ab647ff3",
-    "confirmation_summary": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
+    "confirmation_summary": "legacy://daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1/confirmation/summary.json",
     "confirmation_summary_sha256": "26242ecb01c89789b8af9b4fd15cdd3f6c955577ea74110b05506e3842897c0a",
     "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
     "expected_row_count": 4191476,
@@ -73,6 +73,6 @@
   "decision_boundary": {
     "account_replay_performed": false,
     "live_alpha_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_margin_value_overlay_v1"
+    "output_root": "runs/studies/seq100_margin_value_overlay_v1"
   }
 }

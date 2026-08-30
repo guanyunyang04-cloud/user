@@ -3,7 +3,7 @@
   "status": "frozen_outcome_probe_contract",
   "purpose": "Measure post-confirmation paths of strict-parser buy-point candidates on the frozen outcome-blind stratified cases.",
   "source": {
-    "stratified_audit_output": "daily_research/output/path_policy/studies/seq100_strict_chan_stratified_audit_v1",
+    "stratified_audit_output": "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_stratified_audit_v1",
     "profiles": [
       "primary",
       "strict_containment",

@@ -3,7 +3,7 @@
   "status": "frozen_initial_contract",
   "purpose": "Test whether causal path geometry and signal-time activity/price state reduce uncertainty about multi-scale turning outcomes inside the established point-in-time quality-liquidity pool.",
   "source": {
-    "quality_pool_analysis_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
+    "quality_pool_analysis_manifest": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1/analysis_manifest.json",
     "expected_quality_pool_fingerprint": "fa818cd219d2d68acc727736f3a7b7accaa89e10da434b2af70c7f3a1705f4bc",
     "quality_pool_name": "quality_liquidity_pit",
     "maximum_outcome_date": "2025-12-31",
@@ -103,5 +103,5 @@
     "profit_claim_allowed": false,
     "causal_effect_claim_allowed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_turning_path_online_v1"
+  "output_root": "runs/studies/seq100_turning_path_online_v1"
 }

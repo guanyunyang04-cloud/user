@@ -2,8 +2,8 @@
   "study_id": "seq100_mfe_capacity_stability_audit_v1",
   "objective": "replace single-prior-year MFE tree selection with a bounded pre-2023 multi-origin fixed-capacity audit for the two frozen final heads",
   "sources": {
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1"
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1"
   },
   "folds": {
     "capacity_selection_years": [2019, 2020, 2021, 2022],
@@ -64,5 +64,5 @@
     "stop loss",
     "account policy"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1"
+  "output_dir": "runs/studies/seq100_mfe_capacity_stability_audit_v1"
 }

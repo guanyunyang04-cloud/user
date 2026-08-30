@@ -12,10 +12,10 @@
     "no_2026_outcome_may_be_read": true
   },
   "sources": {
-    "model_study": "daily_research/studies/seq100_multi_horizon_distribution_v1.json",
-    "model_output_root": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1",
-    "current_core_evaluation": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
-    "current_core_account": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+    "model_study": "research/studies/seq100_multi_horizon_distribution_v1.json",
+    "model_output_root": "legacy://daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_v1",
+    "current_core_evaluation": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_evaluation/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
+    "current_core_account": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_ensemble_account_replay/horizon_10/lookback_16/sequence_outer_early_stop__tree_outer_early_stop__tree_features_price_path_core_183/manifest.json",
     "maximum_outcome_date": "2025-12-31",
     "forbidden_year": 2026
   },
@@ -51,6 +51,6 @@
     "binary_metrics": ["date_equal_brier", "training_prior_brier_skill"]
   },
   "outputs": {
-    "output_root": "daily_research/output/path_policy/studies/seq100_multi_horizon_distribution_incremental_v1"
+    "output_root": "runs/studies/seq100_multi_horizon_distribution_incremental_v1"
   }
 }

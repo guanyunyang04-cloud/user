@@ -15,15 +15,15 @@
     "forbidden_2026_data_remain_untouched": true
   },
   "source": {
-    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
     "input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
     "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
-    "research_report": "quant_data_platform/data/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet",
+    "research_report": "data/qdp/qdp_v2/datasets/research_report/research_report__450fc61384a81476d25f0bd0/shards/part-0000.parquet",
     "research_report_sha256": "450fc61384a81476d25f0bd0d50449b7db2c9fdfea00fde5eddf835ca8d5bb7b",
-    "research_report_forecast": "quant_data_platform/data/qdp_v2/datasets/research_report_forecast/research_report_forecast__d1b0976bfcbdd7a2ef97083a/shards/part-0000.parquet",
+    "research_report_forecast": "legacy://quant_data_platform/data/qdp_v2/datasets/research_report_forecast/research_report_forecast__d1b0976bfcbdd7a2ef97083a/shards/part-0000.parquet",
     "research_report_forecast_sha256": "d1b0976bfcbdd7a2ef97083a8f718a98783032ac99425e1b5d1c40191374ca55",
     "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
     "expected_row_count": 4191476,
@@ -124,6 +124,6 @@
     "account_replay_performed": false,
     "portfolio_optimization_performed": false,
     "live_alpha_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_causal_value_policy_v1"
+    "output_root": "runs/studies/seq100_causal_value_policy_v1"
   }
 }

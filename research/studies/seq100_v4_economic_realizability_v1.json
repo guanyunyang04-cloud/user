@@ -2,10 +2,10 @@
     "study_id": "seq100_v4_economic_realizability_v1",
     "objective": "test whether the frozen rank-first v4 entry contract can produce robust net economic value in a continuous 2023-2025 executable account without selecting a single policy winner",
     "sources": {
-        "entry_contract_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
-        "base_feature_manifest": "tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
-        "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
-        "post_entry_result": "daily_research/research_records/seq100/seq100_post_entry_ab_v2/result.json"
+        "entry_contract_manifest": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+        "base_feature_manifest": "legacy://tmp/seq100_learnability_inputs/attempt_001/base_feature_manifest.json",
+        "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+        "post_entry_result": "research/records/seq100/seq100_post_entry_ab_v2/result.json"
     },
     "period": {
         "signal_years": [2023, 2024, 2025],
@@ -102,8 +102,8 @@
         "minimum_positive_excess_years": 2
     },
     "outputs": {
-        "output_dir": "daily_research/output/path_policy/studies/seq100_v4_economic_realizability_v1",
-        "record_dir": "daily_research/research_records/seq100/seq100_v4_economic_realizability_v1",
+        "output_dir": "runs/studies/seq100_v4_economic_realizability_v1",
+        "record_dir": "runs/studies/records/seq100/seq100_v4_economic_realizability_v1",
         "expected_task_count": 672
     },
     "interfaces": [

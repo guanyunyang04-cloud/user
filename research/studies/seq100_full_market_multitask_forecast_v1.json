@@ -10,7 +10,7 @@
         "stable_profit_claim_allowed": false
     },
     "sources": {
-        "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+        "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
         "research_start_date": "2012-01-01",
         "maximum_outcome_date": "2025-12-31",
         "forbidden_year": 2026
@@ -131,7 +131,7 @@
         "legacy_training_mode": "causal_nested"
     },
     "outputs": {
-        "output_root": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1",
+        "output_root": "runs/studies/seq100_full_market_multitask_forecast_v1",
         "first_training_targets": ["next_close_up", "legal_exit_return_d2"]
     }
 }

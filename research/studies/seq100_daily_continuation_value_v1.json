@@ -3,13 +3,13 @@
   "status": "frozen_initial_contract",
   "purpose": "Estimate the causal one-step wealth value of continuing to hold versus requesting the next legal close exit, then test it as a repeatedly updated stopping rule.",
   "source": {
-    "path_neighbor_manifest": "daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1/analysis_manifest.json",
+    "path_neighbor_manifest": "legacy://daily_research/output/path_policy/studies/seq100_daily_path_neighbors_v1/analysis_manifest.json",
     "expected_path_neighbor_fingerprint": "01e4e981cf081d6f1ffb5ed6ac74043af9ee4a5b29cee00923ca359c61037ea0",
     "expected_path_neighbor_manifest_sha256": "4b33018fabf75ed8bf78db7de454fbbda34671f49beb5ed2083d1a4aa89a9219",
     "expected_prototype_models_sha256": "7f016a0a7693d78b4ec1bfe93c10286b78c9a0970e6173d81dce16a87c4ebde7",
-    "phase_belief_manifest": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
+    "phase_belief_manifest": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
     "expected_phase_belief_rows": 2645179,
-    "corrected_pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "corrected_pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "expected_corrected_pack_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
     "quality_pool_name": "quality_liquidity_pit",
     "maximum_outcome_date": "2025-12-31",
@@ -87,5 +87,5 @@
     "production_policy_selection_allowed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_daily_continuation_value_v1"
+  "output_root": "runs/studies/seq100_daily_continuation_value_v1"
 }

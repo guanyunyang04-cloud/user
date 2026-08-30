@@ -2,8 +2,8 @@
   "study_id": "seq100_mfe_objective_alignment_v1",
   "objective": "compare row-wise magnitude, smooth upper-tail magnitude, and date-grouped ranking objectives for MFE D10 and D20 entry opportunity",
   "source": {
-    "study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
     "baseline_variant": "baseline"
   },
   "labels": {
@@ -87,5 +87,5 @@
     "leverage",
     "stop_loss"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_objective_alignment_v1"
+  "output_dir": "runs/studies/seq100_mfe_objective_alignment_v1"
 }

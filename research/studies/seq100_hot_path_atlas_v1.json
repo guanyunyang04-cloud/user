@@ -11,8 +11,8 @@
     "profit_claim_allowed": false
   },
   "source": {
-    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
-    "formal_quality_pool_index": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
+    "qdp_active_manifest": "data/qdp/qdp_v2/active/active.json",
+    "formal_quality_pool_index": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/row_index.parquet",
     "required_domains": [
       "market_daily_raw",
       "adjust_factor",
@@ -107,5 +107,5 @@
     "duckdb_threads": 1,
     "year_partitioned_outputs": true
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_hot_path_atlas_v1"
+  "output_root": "runs/studies/seq100_hot_path_atlas_v1"
 }

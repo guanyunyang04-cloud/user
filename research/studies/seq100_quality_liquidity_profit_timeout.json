@@ -2,8 +2,8 @@
   "study_id": "seq100_quality_liquidity_profit_timeout",
   "purpose": "Retrospective 2023-2025 finite-capital take-profit and timeout execution research for the canonical 557-field model.",
   "sources": {
-    "execution_study": "daily_research/studies/seq100_quality_liquidity_execution.json",
-    "execution_output": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution"
+    "execution_study": "research/studies/seq100_quality_liquidity_execution.json",
+    "execution_output": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_execution"
   },
   "period": {
     "signal_years": [2023, 2024, 2025],
@@ -61,7 +61,7 @@
     "production_selection_allowed": false
   },
   "outputs": {
-    "output_dir": "daily_research/output/path_policy/studies/seq100_quality_liquidity_execution/profit_timeout",
+    "output_dir": "runs/studies/seq100_quality_liquidity_execution/profit_timeout",
     "expected_task_count": 32,
     "html_report": false
   }

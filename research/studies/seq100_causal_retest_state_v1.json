@@ -3,19 +3,19 @@
   "status": "frozen_initial_contract",
   "purpose": "Represent an upward center breakout and its subsequent retest as a continuous causal state, then test whether that state adds stable out-of-sample information about dynamic buy advantage beyond the existing 66-coordinate active-state baseline.",
   "source": {
-    "path_structure_study": "daily_research/studies/seq100_causal_path_structure_v1.json",
+    "path_structure_study": "research/studies/seq100_causal_path_structure_v1.json",
     "expected_path_structure_study_sha256": "359da0aa0998d11ddb551bdf6e723d23be335223dc7a89885dcd01cf7e8749e6",
-    "path_structure_module": "daily_research/path_policy/seq100_causal_path_structure.py",
+    "path_structure_module": "legacy://daily_research/path_policy/seq100_causal_path_structure.py",
     "expected_path_structure_module_sha256": "08499e6038e314f6fcede768d45e04418a7fe482fda9b254ce5130945ab34d57",
-    "path_structure_manifest": "daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/manifest.json",
+    "path_structure_manifest": "legacy://daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/manifest.json",
     "expected_path_structure_manifest_sha256": "3a85cf33f8a90dbce53e59e07adbab66cb896036929ae78745b505c47fae80b5",
-    "path_structure_validation": "daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/validation.json",
+    "path_structure_validation": "legacy://daily_research/output/path_policy/studies/seq100_causal_path_structure_v1/validation.json",
     "expected_path_structure_validation_sha256": "9e0308f3923a50bb510fdbdfb12142aa5f703ba1164bdd126e4968708ffdccf4",
-    "distribution_study": "daily_research/studies/seq100_dynamic_action_distribution_v1.json",
+    "distribution_study": "research/studies/seq100_dynamic_action_distribution_v1.json",
     "expected_distribution_study_sha256": "9f898ca167a5b14a10f1f5e5a1921f0ba4382a76450390a21324dd54688537c7",
-    "distribution_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+    "distribution_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
     "expected_distribution_manifest_sha256": "436225ca89c478365a998d4190505b95e772428695d5d4cd207696a7c4a94da9",
-    "distribution_validation": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+    "distribution_validation": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
     "expected_distribution_validation_sha256": "7ab6a8de508452b414e2162e612c9433e2cb828c16a7b5e0bdc347a39666f3b8",
     "quality_pool_name": "quality_liquidity_pit",
     "expected_panel_rows": 4191476,
@@ -190,5 +190,5 @@
     "deep_model_selection_allowed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_causal_retest_state_v1"
+  "output_root": "runs/studies/seq100_causal_retest_state_v1"
 }

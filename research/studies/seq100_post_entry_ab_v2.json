@@ -2,13 +2,13 @@
   "study_id": "seq100_post_entry_ab_v2",
   "objective": "test whether entry memory and realized D1/D3/D5 paths improve five remaining-opportunity, risk, and state targets beyond daily recomputation of the strict v4 entry contract",
   "sources": {
-    "entry_contract_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
-    "entry_contract_config": "daily_research/studies/seq100_entry_fixed_capacity_audit_v1.json",
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "path_study_config": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json",
-    "post_entry_v1_config": "daily_research/studies/seq100_post_entry_ab_v1.json",
-    "post_entry_v1_output_root": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v1",
-    "capacity_decision": "daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1/decision.json"
+    "entry_contract_manifest": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4/contract_manifest.json",
+    "entry_contract_config": "research/studies/seq100_entry_fixed_capacity_audit_v1.json",
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "path_study_config": "research/records/seq100/seq100_path_label_learnability_v1/config.json",
+    "post_entry_v1_config": "research/studies/seq100_post_entry_ab_v1.json",
+    "post_entry_v1_output_root": "legacy://daily_research/output/path_policy/studies/seq100_post_entry_ab_v1",
+    "capacity_decision": "legacy://daily_research/output/path_policy/studies/seq100_post_entry_capacity_audit_v1/decision.json"
   },
   "folds": {
     "test_years": [2023, 2024, 2025],
@@ -205,5 +205,5 @@
     "deep model",
     "reinforcement learning"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v2"
+  "output_dir": "runs/studies/seq100_post_entry_ab_v2"
 }

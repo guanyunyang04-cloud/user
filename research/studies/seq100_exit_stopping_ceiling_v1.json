@@ -3,15 +3,15 @@
   "status": "frozen_future_informed_diagnostic",
   "purpose": "Measure the exact legal within-episode stopping headroom of the frozen causal K-line entries before fitting any sell-versus-hold learner; this is a hindsight ceiling, never a causal return or policy.",
   "source": {
-    "mechanical_study": "daily_research/studies/seq100_causal_exit_baselines_v1.json",
-    "mechanical_manifest": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/manifest.json",
+    "mechanical_study": "research/studies/seq100_causal_exit_baselines_v1.json",
+    "mechanical_manifest": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/manifest.json",
     "expected_mechanical_manifest_sha256": "608d2f5ab434acb5dcde76dcc5c95a3a9726dc5e649f8272cb3bb223b7aeca0c",
-    "entry_records": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/entry_records.parquet",
+    "entry_records": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/entry_records.parquet",
     "expected_entry_records_sha256": "6be5c57cb87ca2d458c808f74bb7fbc897b9f6b8b991be810dc5ff9de1d60bc6",
-    "mechanical_policy_results_manifest": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results_manifest.json",
+    "mechanical_policy_results_manifest": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results_manifest.json",
     "expected_mechanical_policy_results_manifest_sha256": "fe2c9541a55a992fa88cbe6b11268be22c8ab47b5070e4a2e09e1881efdf1d23",
-    "mechanical_policy_results_root": "daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results",
-    "dynamic_oracle_study": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+    "mechanical_policy_results_root": "legacy://daily_research/output/path_policy/studies/seq100_causal_exit_baselines_v1/policy_results",
+    "dynamic_oracle_study": "research/studies/seq100_dynamic_oracle_v1.json",
     "quality_pool_name": "quality_liquidity_pit",
     "maximum_outcome_date": "2025-12-31",
     "forbidden_year": 2026
@@ -54,5 +54,5 @@
     "reserve_memory_mb": 2048,
     "maximum_threads": 8
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_exit_stopping_ceiling_v1"
+  "output_root": "runs/studies/seq100_exit_stopping_ceiling_v1"
 }

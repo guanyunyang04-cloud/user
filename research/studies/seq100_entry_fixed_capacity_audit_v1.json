@@ -2,13 +2,13 @@
   "study_id": "seq100_entry_fixed_capacity_audit_v1",
   "objective": "freeze rank-first fixed-512 MFE heads, safety-gate fixed-256 state and risk heads, and materialize the strict 2020-2025 v4 entry contract",
   "sources": {
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
-    "entry_contract_v2_config": "daily_research/studies/seq100_entry_contract_oos_v2.json",
-    "entry_contract_v2_output_root": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2",
-    "entry_contract_v3_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3/contract_manifest.json",
-    "final_capacity_config": "daily_research/studies/seq100_mfe_final_head_capacity_audit_v1.json",
-    "final_capacity_output_root": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1"
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "entry_contract_v2_config": "research/studies/seq100_entry_contract_oos_v2.json",
+    "entry_contract_v2_output_root": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2",
+    "entry_contract_v3_manifest": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3/contract_manifest.json",
+    "final_capacity_config": "research/studies/seq100_mfe_final_head_capacity_audit_v1.json",
+    "final_capacity_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1"
   },
   "folds": {
     "contract_years": [2020, 2021, 2022, 2023, 2024, 2025],
@@ -122,8 +122,8 @@
   },
   "contract_v4": {
     "study_id": "seq100_entry_contract_oos_v4",
-    "output_root": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v4",
-    "research_record_root": "daily_research/research_records/seq100/seq100_entry_contract_oos_v4",
+    "output_root": "runs/studies/seq100_entry_contract_oos_v4",
+    "research_record_root": "research/records/seq100/seq100_entry_contract_oos_v4",
     "candidate_count": 4337640,
     "replace_mfe_columns": [0, 1],
     "conditionally_replace_state_and_risk": true,
@@ -147,5 +147,5 @@
     "deep model",
     "reinforcement learning"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_entry_fixed_capacity_audit_v1"
+  "output_dir": "runs/studies/seq100_entry_fixed_capacity_audit_v1"
 }

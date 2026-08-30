@@ -3,11 +3,11 @@
   "status": "frozen_initial_contract",
   "purpose": "Separate policy-conditional branch coalescence from genuinely prefix-stable action values before any expanding-history learner uses the dynamic oracle as a teacher.",
   "source": {
-    "oracle_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+    "oracle_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
     "expected_oracle_manifest_sha256": "531a92166f1caedebad6f7a265d02504f0122f8cad794bde2ba39cee5be3af46",
-    "market_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/market_manifest.json",
+    "market_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/market_manifest.json",
     "expected_market_manifest_sha256": "1c9f28f6765e95003109397005a60e1d9374db1024ff8c838862ee123bb80bcb",
-    "oracle_study": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+    "oracle_study": "research/studies/seq100_dynamic_oracle_v1.json",
     "expected_oracle_study_sha256": "7648b60cd4d01424b3d0a4e3fdefb7c3faebc9dbcbc86b1cf087b7bf84d059c6",
     "quality_pool_name": "quality_liquidity_pit",
     "forbidden_year": 2026
@@ -48,5 +48,5 @@
     "production_policy_selection_allowed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1"
+  "output_root": "runs/studies/seq100_dynamic_oracle_resolution_v1"
 }

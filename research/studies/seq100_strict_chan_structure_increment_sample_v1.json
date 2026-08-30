@@ -3,7 +3,7 @@
   "status": "frozen_outcome_blind_structure_increment_sample",
   "parent_study_id": "seq100_strict_chan_definition_v1",
   "purpose": "Freeze a substantially larger outcome-blind sample for strict-Chan structure-attribute and matched-control research.",
-  "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+  "quality_pool_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
   "boundaries": {
     "future_path_test_performed": false,
     "return_test_performed": false,
@@ -19,8 +19,8 @@
     "population_symbol_suffix_contract": [".SH", ".SZ"],
     "selection_columns": ["symbol", "trade_date"],
     "exclude_selected_cases": [
-      "daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
-      "daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1/sample/selected_cases.parquet"
+      "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_outcome_screen_v1/sample/selected_cases.parquet",
+      "legacy://daily_research/output/path_policy/studies/seq100_strict_chan_type1_confirmation_v1/sample/selected_cases.parquet"
     ],
     "forbidden_selection_inputs": [
       "future_return",

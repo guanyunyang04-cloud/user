@@ -2,12 +2,12 @@
   "study_id": "seq100_mfe_final_head_capacity_audit_v1",
   "objective": "close LightGBM MFE capacity research by comparing final-head prior-year tuning with formal fixed-256 and fixed-512 challengers",
   "sources": {
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "feature_output_root": "daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
-    "prior_capacity_study_config": "daily_research/studies/seq100_mfe_capacity_stability_audit_v1.json",
-    "prior_capacity_output_root": "daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1",
-    "entry_contract_v2_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
-    "post_entry_v1_result": "daily_research/research_records/seq100/seq100_post_entry_ab_v1/result.json"
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "feature_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_feature_family_audit_v1",
+    "prior_capacity_study_config": "research/studies/seq100_mfe_capacity_stability_audit_v1.json",
+    "prior_capacity_output_root": "legacy://daily_research/output/path_policy/studies/seq100_mfe_capacity_stability_audit_v1",
+    "entry_contract_v2_manifest": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+    "post_entry_v1_result": "research/records/seq100/seq100_post_entry_ab_v1/result.json"
   },
   "folds": {
     "model_years": [2023, 2024, 2025],
@@ -89,8 +89,8 @@
     "long_outer_minimum_iteration": 512
   },
   "contract_v3": {
-    "output_root": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v3",
-    "research_record_root": "daily_research/research_records/seq100/seq100_entry_contract_oos_v3",
+    "output_root": "runs/studies/seq100_entry_contract_oos_v3",
+    "research_record_root": "research/records/seq100/seq100_entry_contract_oos_v3",
     "replace_only_adopted_mfe_columns": true,
     "reuse_v2_state_and_risk": true,
     "post_entry_effect": "if v3 is materialized, seq100_post_entry_ab_v1 remains a v2-only result and must be revalidated before later holding research"
@@ -113,5 +113,5 @@
     "stop loss",
     "account policy"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_mfe_final_head_capacity_audit_v1"
+  "output_dir": "runs/studies/seq100_mfe_final_head_capacity_audit_v1"
 }

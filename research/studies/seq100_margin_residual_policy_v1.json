@@ -13,11 +13,11 @@
     "forbidden_2026_data_remain_untouched": true
   },
   "source": {
-    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
-    "training_ready_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+    "input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "training_ready_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
     "training_ready_manifest_sha256": "46f6e2ab8d1276758cce205660f45b454e10823d8533f64794327a55cbfa535e",
-    "frozen_2017_2022_summary": "daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
+    "frozen_2017_2022_summary": "legacy://daily_research/output/path_policy/studies/seq100_stock_bad_tail_v1/experiments/development_2017_2022/summary.json",
     "frozen_2017_2022_summary_sha256": "61d0d4f3025b9a884e9620e2e7d10ebb7c522f1bc38f9d6f115f24e7ecd82468",
     "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
     "expected_label_fingerprint": "c93cf15be7f58642b34e086c0c25e00b56a4f46de514d01a35b3132f2e0bc65d",
@@ -100,6 +100,6 @@
     "account_replay_performed": false,
     "portfolio_optimization_performed": false,
     "profit_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_margin_residual_policy_v1"
+    "output_root": "runs/studies/seq100_margin_residual_policy_v1"
   }
 }

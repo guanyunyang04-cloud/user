@@ -3,11 +3,11 @@
   "status": "frozen_initial_contract",
   "purpose": "Study continuous turning paths only at decision dates belonging to the established point-in-time quality-liquidity pool, without truncating the underlying stock price history.",
   "source": {
-    "turning_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
-    "turning_analysis_manifest": "daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
+    "turning_manifest": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/manifest.json",
+    "turning_analysis_manifest": "legacy://daily_research/output/path_policy/studies/seq100_turning_path_atlas_v1/analysis_manifest.json",
     "expected_turning_fingerprint": "0dca220d4c70ad4905c00ed5b7762d05e8876f8c8b2d947736a4ecddb576d9fd",
-    "training_ready_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
-    "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+    "training_ready_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/manifest.json",
+    "quality_pool_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
     "quality_pool_name": "quality_liquidity_pit",
     "expected_quality_pool_hash": "21e2bd2af1281d07d515f781f3f4a7b9e8a8a6545034bc818e4bf0d6e180d950",
     "expected_quality_pool_rows": 4191601,
@@ -52,5 +52,5 @@
     "duckdb_reserve_logical_cores": 2,
     "duckdb_memory_per_thread_mb": 512
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_turning_path_quality_pool_v1"
+  "output_root": "runs/studies/seq100_turning_path_quality_pool_v1"
 }

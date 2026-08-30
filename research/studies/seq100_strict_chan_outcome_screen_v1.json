@@ -3,7 +3,7 @@
   "status": "frozen_expanded_diagnostic_screen",
   "purpose": "Quickly reject or retain strict-Chan buy-point families before expensive full-market panel and account replay.",
   "source": {
-    "sample_study": "daily_research/studies/seq100_strict_chan_outcome_sample_v1.json",
+    "sample_study": "research/studies/seq100_strict_chan_outcome_sample_v1.json",
     "profile": "primary",
     "side": "buy",
     "signal_window": "display_start_date_through_display_end_date",

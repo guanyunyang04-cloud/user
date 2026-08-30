@@ -3,13 +3,13 @@
   "status": "frozen_initial_contract",
   "purpose": "Estimate the relative wealth value of holding an existing legal position versus requesting a legal exit and replacing it with the next-date causal candidate, without fixing a total holding horizon.",
   "source": {
-    "phase_analysis_manifest": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/analysis_manifest.json",
+    "phase_analysis_manifest": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/analysis_manifest.json",
     "expected_phase_analysis_sha256": "371e5c68deba14c9716fca9c4c84442316713d95d637264249bb6fae86a167d1",
-    "phase_belief_manifest": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
+    "phase_belief_manifest": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/belief_manifest.json",
     "expected_phase_belief_sha256": "771fd4e4da918381ec1be2021d71dd6e08685cde710959d751e9ff2f8e70f545",
-    "continuation_prediction_manifest": "daily_research/output/path_policy/studies/seq100_daily_continuation_value_v1/prediction_manifest.json",
+    "continuation_prediction_manifest": "legacy://daily_research/output/path_policy/studies/seq100_daily_continuation_value_v1/prediction_manifest.json",
     "expected_continuation_prediction_sha256": "3f02ecf747869805fb7c4db5bb0fc6a1c31c09443f3682f93c596dc4e4c1dd62",
-    "corrected_pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "corrected_pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "expected_corrected_pack_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
     "quality_pool_name": "quality_liquidity_pit",
     "maximum_outcome_date": "2025-12-31",
@@ -39,12 +39,12 @@
   "reference_positions": [
     {
       "name": "rolling_phase_boundary",
-      "trade_file": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__rolling_phase_boundary__base/trades.parquet",
+      "trade_file": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__rolling_phase_boundary__base/trades.parquet",
       "sampling_role": "dynamic_reference"
     },
     {
       "name": "fixed_d20_reference",
-      "trade_file": "daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__fixed_d20__base/trades.parquet",
+      "trade_file": "legacy://daily_research/output/path_policy/studies/seq100_daily_phase_execution_v1/tasks/geometry_combined__fixed_d20__base/trades.parquet",
       "sampling_role": "duration_sensitivity_reference"
     }
   ],
@@ -99,5 +99,5 @@
     "production_policy_selected": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_daily_action_value_v1"
+  "output_root": "runs/studies/seq100_daily_action_value_v1"
 }

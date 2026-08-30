@@ -15,7 +15,7 @@
     ]
   },
   "source": {
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
     "expected_input_fingerprint": "a2bea9ed174b0a04ea2e97af475e9b4f1da79d739288a0cd92114998e31784ae",
     "expected_candidate_rows": 4191476,
     "expected_market_dates": 3400,
@@ -92,7 +92,7 @@
     "execution_search_performed": false,
     "profit_claim_allowed": false,
     "next_requirement": "derive an executable stock-return distribution and cost-based minimum useful effect before any portfolio decision",
-    "research_record": "daily_research/research_records/seq100/mathematical_market_model_20260806/research_record.md",
-    "output_root": "daily_research/output/path_policy/studies/seq100_mathematical_market_model"
+    "research_record": "research/records/seq100/mathematical_market_model_20260806/research_record.md",
+    "output_root": "runs/studies/seq100_mathematical_market_model"
   }
 }

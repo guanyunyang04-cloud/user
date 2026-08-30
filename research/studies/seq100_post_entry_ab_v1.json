@@ -2,10 +2,10 @@
   "study_id": "seq100_post_entry_ab_v1",
   "objective": "test whether original entry memory and realized D1/D3/D5 path improve holding-specific risk and state prediction beyond the current strict-OOS entry contract",
   "sources": {
-    "entry_contract_config": "daily_research/studies/seq100_entry_contract_oos_v2.json",
-    "entry_contract_manifest": "daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
-    "feature_study_config": "daily_research/studies/seq100_mfe_feature_family_audit_v1.json",
-    "path_study_config": "daily_research/research_records/seq100/seq100_path_label_learnability_v1/config.json"
+    "entry_contract_config": "research/studies/seq100_entry_contract_oos_v2.json",
+    "entry_contract_manifest": "legacy://daily_research/output/path_policy/studies/seq100_entry_contract_oos_v2/contract_manifest.json",
+    "feature_study_config": "research/studies/seq100_mfe_feature_family_audit_v1.json",
+    "path_study_config": "research/records/seq100/seq100_path_label_learnability_v1/config.json"
   },
   "folds": {
     "test_years": [2023, 2024, 2025],
@@ -170,5 +170,5 @@
     "account_policy",
     "reinforcement_learning"
   ],
-  "output_dir": "daily_research/output/path_policy/studies/seq100_post_entry_ab_v1"
+  "output_dir": "runs/studies/seq100_post_entry_ab_v1"
 }

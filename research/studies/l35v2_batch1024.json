@@ -27,5 +27,5 @@
     "batch768_fallback"
   ],
   "selection": "strictly higher 2023-2025 double-slippage continuous-account annualized log growth",
-  "prior_evidence": "daily_research/research_records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"
+  "prior_evidence": "research/records/seq100/l35v2_sixfold_2020_2025/comparison_summary.json"
 }

@@ -68,23 +68,23 @@
   },
   "authoritative_sources": {
     "ensemble_evaluation": {
-      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/sequence_ensemble_evaluation/manifest.json",
+      "path": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/sequence_ensemble_evaluation/manifest.json",
       "sha256": "1a451e207d2ff40a3dcf119943936dd0903539c5f822a4f496e1a9b98fba88ab"
     },
     "dual_horizon_challenge": {
-      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/dual_market_horizon_challenge/manifest.json",
+      "path": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/dual_market_horizon_challenge/manifest.json",
       "sha256": "a830734a171d2bc9106f40b4cb8f18f81db028f1d5147e7d42834ac0522f45ec"
     },
     "market_regime": {
-      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/market_regime_evaluation/manifest.json",
+      "path": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/market_regime_evaluation/manifest.json",
       "sha256": "aea211e7ce329939efd953e4c63863c063acf56ca0c427a4881c251cbed0120e"
     },
     "direct_d3_rank": {
-      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_rank__strong_127__causal_nested/manifest.json",
+      "path": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_rank__strong_127__causal_nested/manifest.json",
       "sha256": "81f971ce36a34935a757d5fec8c5c7ac750fecd489da1126dec9e1564c09933d"
     },
     "d3_q10": {
-      "path": "daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_q10__strong_127__causal_nested/manifest.json",
+      "path": "legacy://daily_research/output/path_policy/studies/seq100_full_market_multitask_forecast_v1/payoff_evaluation/exact_net_return_d3_q10__strong_127__causal_nested/manifest.json",
       "sha256": "2736041d611fa6d88b1f41871afee0d1f0c5fe9aa15eb5ea55c6b8a21b550c3e"
     }
   },

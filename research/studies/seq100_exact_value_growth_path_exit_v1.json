@@ -11,25 +11,25 @@
     "historical_success_cannot_modify_the_forward_shadow_rule": true
   },
   "source": {
-    "exact_policy_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+    "exact_policy_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
     "exact_policy_summary_sha256": "349005a7505ead306db2892061765423d390e065ac043e77b68e969d213e325d",
-    "candidate_features": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+    "candidate_features": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
     "candidate_features_sha256": "91956712b39db71eec6175cd25b5cf48c96a576f635789bb906b7c00f15b996b",
-    "selections": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+    "selections": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
     "selections_sha256": "57db1504724912c874d19bd0a7cc24a1abf474b58e8bc69926a93c1b5c73b447",
-    "exact_account_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
+    "exact_account_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/summary.json",
     "exact_account_summary_sha256": "98cfd971cf34116e2bdb0cb00c701eca3cff36a6a27c1b9a40355d29ef18ffb5",
-    "risk_budget_trades": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/risk_budget_trades.parquet",
+    "risk_budget_trades": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1/risk_budget_trades.parquet",
     "risk_budget_trades_sha256": "d6ab2bcd80c7352af6e7016ef86ecd5a5a9473ada731fffe2f6e14235684d13c",
-    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
     "input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
     "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
-    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "qdp_active_manifest": "data/qdp/qdp_v2/active/active.json",
     "qdp_active_manifest_sha256": "f86fdc977d111439621638c4ac96801ef7e75d71bf07da2cc5354d90c0bbbd2a",
-    "intraday_manifest": "quant_data_platform/data/qdp_v2/datasets/market_intraday_5m/market_intraday_5m__2c071f88738b5cdea4695f16/dataset.json",
+    "intraday_manifest": "data/qdp/qdp_v2/datasets/market_intraday_5m/market_intraday_5m__2c071f88738b5cdea4695f16/dataset.json",
     "intraday_manifest_sha256": "cde45e502a3aec4e0ce441ea614350eff267b491c506d86f879488af979f4fa3",
     "intraday_dataset_id": "market_intraday_5m__2c071f88738b5cdea4695f16",
     "formal_start_date": "2012-01-01",
@@ -145,6 +145,6 @@
     "account_rule_modified": false,
     "forward_shadow_rule_modified": false,
     "production_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_path_exit_v1"
+    "output_root": "runs/studies/seq100_exact_value_growth_path_exit_v1"
   }
 }

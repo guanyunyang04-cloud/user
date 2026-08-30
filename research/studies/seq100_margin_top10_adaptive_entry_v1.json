@@ -11,23 +11,23 @@
     "production_claim_allowed": false
   },
   "source": {
-    "quality_liquidity_pit_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+    "quality_liquidity_pit_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
     "quality_liquidity_pit_manifest_sha256": "79f2886ffe053f9d3502f6dbc002702dcecc995dbda714ce135280bfc9298613",
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
     "model_input_manifest_sha256": "a7b4126d1969001b8980c7679480d0fa5728c9d81cc32ddab55b833d16a676f1",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
     "label_manifest_sha256": "984819ce7698f3bbfda3e674e6ec88c5a61fb427535f1363d9f947f2b7082ec8",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
-    "qdp_active_manifest": "quant_data_platform/data/qdp_v2/active/active.json",
+    "qdp_active_manifest": "data/qdp/qdp_v2/active/active.json",
     "qdp_active_manifest_sha256": "f86fdc977d111439621638c4ac96801ef7e75d71bf07da2cc5354d90c0bbbd2a",
-    "margin_detail_manifest": "quant_data_platform/data/qdp_v2/datasets/margin_detail/margin_detail__2ed8aba21121548425f56b7c/dataset.json",
+    "margin_detail_manifest": "data/qdp/qdp_v2/datasets/margin_detail/margin_detail__2ed8aba21121548425f56b7c/dataset.json",
     "margin_detail_manifest_sha256": "f25564f17c028ee176246b8f87fcb7a97f9b4486b1feb5ced9dc556e6a8fc0e6",
-    "market_daily_manifest": "quant_data_platform/data/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json",
+    "market_daily_manifest": "data/qdp/qdp_v2/datasets/market_daily_raw/market_daily_raw__0559f722eb9142e5f476854a/dataset.json",
     "market_daily_manifest_sha256": "e6a8a7998512d5ea545c9bd59c728f8f8b6d54bc8aecd4fed1c7285989846982",
-    "adjust_factor_manifest": "quant_data_platform/data/qdp_v2/datasets/adjust_factor/adjust_factor__98fbecd479934dda685046f0/dataset.json",
+    "adjust_factor_manifest": "data/qdp/qdp_v2/datasets/adjust_factor/adjust_factor__98fbecd479934dda685046f0/dataset.json",
     "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
-    "prior_margin_probe_record": "daily_research/research_records/seq100/seq100_margin_balance_probe_20260808/research_record.md",
+    "prior_margin_probe_record": "research/records/seq100/seq100_margin_balance_probe_20260808/research_record.md",
     "prior_margin_probe_record_sha256": "957710c70afa81f0348b828ad684d4ef3828abe4fc6ddf53b16e1d5ab49f3ddd",
     "research_start_date": "2012-01-01",
     "maximum_outcome_date": "2025-12-31",
@@ -163,6 +163,6 @@
     "account_optimization_allowed": false,
     "production_claim_allowed": false,
     "forward_confirmation_required": true,
-    "output_root": "daily_research/output/path_policy/studies/seq100_margin_top10_adaptive_entry_v1"
+    "output_root": "runs/studies/seq100_margin_top10_adaptive_entry_v1"
   }
 }

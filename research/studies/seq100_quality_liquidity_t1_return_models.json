@@ -2,9 +2,9 @@
   "study_id": "seq100_quality_liquidity_t1_return_models",
   "purpose": "Train six bounded rolling LightGBM heads for strict T+1 open-to-open and open-to-D2-close returns.",
   "source": {
-    "model_input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "t1_target_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_targets/manifest.json",
-    "frozen_g1_root": "daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns",
+    "model_input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "t1_target_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_t1_targets/manifest.json",
+    "frozen_g1_root": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_model/direct_returns",
     "source_model_study_id": "seq100_quality_liquidity_model",
     "source_target_study_id": "seq100_quality_liquidity_t1_targets",
     "maximum_outcome_date": "2025-12-31",

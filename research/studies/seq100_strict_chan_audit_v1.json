@@ -3,7 +3,7 @@
   "status": "frozen_parser_validation_plan",
   "parent_study_id": "seq100_strict_chan_definition_v1",
   "purpose": "Validate the strict causal Chan parser on diverse real five-minute paths before any future-path, return, execution, or model study.",
-  "quality_pool_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
+  "quality_pool_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_research_scope/quality_liquidity_pit/manifest.json",
   "boundaries": {
     "future_path_test_performed": false,
     "return_test_performed": false,

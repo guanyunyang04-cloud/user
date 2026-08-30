@@ -107,5 +107,5 @@
       "unstable"
     ]
   },
-  "output_dir": "daily_research/output/path_policy/studies/seq100_pit_l35v2_oof_trees_v1"
+  "output_dir": "runs/studies/seq100_pit_l35v2_oof_trees_v1"
 }

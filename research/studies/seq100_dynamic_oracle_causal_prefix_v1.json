@@ -3,13 +3,13 @@
   "status": "frozen_initial_contract",
   "purpose": "Construct an annual as-of experience ledger from prefix-only dynamic oracles, record when an action value first becomes naturally resolved, and measure later revisions without exposing final-oracle row labels to a causal learner.",
   "source": {
-    "oracle_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
+    "oracle_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_v1/analysis_manifest.json",
     "expected_oracle_manifest_sha256": "531a92166f1caedebad6f7a265d02504f0122f8cad794bde2ba39cee5be3af46",
-    "resolution_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/manifest.json",
+    "resolution_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/manifest.json",
     "expected_resolution_manifest_sha256": "6e4bb04e8d192c349ebc41fcd718c34b87440bbfa3e0e887ea732c574b95d23c",
-    "resolution_validation": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/validation.json",
+    "resolution_validation": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_oracle_resolution_v1/validation.json",
     "expected_resolution_validation_sha256": "84ec35d6818159e67fafa903344643d45b72884ff694d99b4ba1c076aab3280e",
-    "oracle_study": "daily_research/studies/seq100_dynamic_oracle_v1.json",
+    "oracle_study": "research/studies/seq100_dynamic_oracle_v1.json",
     "expected_oracle_study_sha256": "7648b60cd4d01424b3d0a4e3fdefb7c3faebc9dbcbc86b1cf087b7bf84d059c6",
     "quality_pool_name": "quality_liquidity_pit",
     "forbidden_year": 2026
@@ -47,5 +47,5 @@
     "production_policy_selection_allowed": false,
     "report_generation_performed": false
   },
-  "output_root": "daily_research/output/path_policy/studies/seq100_dynamic_oracle_causal_prefix_v1"
+  "output_root": "runs/studies/seq100_dynamic_oracle_causal_prefix_v1"
 }

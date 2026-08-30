@@ -3,9 +3,9 @@
   "status": "frozen_structure_increment_and_matched_control_test",
   "purpose": "Test whether causally confirmed strict-Chan structure attributes add complete-path information beyond transparent market coordinates, and whether strict points differ from same-date risk/activity-matched non-pattern states.",
   "source": {
-    "sample_study": "daily_research/studies/seq100_strict_chan_structure_increment_sample_v1.json",
-    "coordinate_manifest": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
-    "coordinate_validation": "daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
+    "sample_study": "research/studies/seq100_strict_chan_structure_increment_sample_v1.json",
+    "coordinate_manifest": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/manifest.json",
+    "coordinate_validation": "legacy://daily_research/output/path_policy/studies/seq100_dynamic_action_distribution_v1/validation.json",
     "profile": "primary",
     "side": "buy",
     "point_types": [1, 2, 3],

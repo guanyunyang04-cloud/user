@@ -11,15 +11,15 @@
     "2026_data_are_forbidden": true
   },
   "source": {
-    "exact_policy_summary": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
+    "exact_policy_summary": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/summary.json",
     "exact_policy_summary_sha256": "349005a7505ead306db2892061765423d390e065ac043e77b68e969d213e325d",
-    "candidate_features": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
+    "candidate_features": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/candidate_features.parquet",
     "candidate_features_sha256": "91956712b39db71eec6175cd25b5cf48c96a576f635789bb906b7c00f15b996b",
-    "selections": "daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
+    "selections": "legacy://daily_research/output/path_policy/studies/seq100_exact_value_growth_policy_v1/selections.parquet",
     "selections_sha256": "57db1504724912c874d19bd0a7cc24a1abf474b58e8bc69926a93c1b5c73b447",
-    "input_manifest": "daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
-    "label_manifest": "daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
-    "pack_manifest": "daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
+    "input_manifest": "legacy://daily_research/output/path_policy/studies/seq100_quality_liquidity_training_ready/model_inputs/manifest.json",
+    "label_manifest": "legacy://daily_research/output/path_policy/studies/seq100_stock_distribution_v1/manifest.json",
+    "pack_manifest": "legacy://daily_research/data/research_store/seq100_pit_l35v2_v1/pack/manifest.json",
     "pack_manifest_sha256": "ca15ca8a0fb4091b812b19e8d02ab93fe74c840343097f67c05ddc6bc9ea9adb",
     "adjust_factor_dataset_id": "adjust_factor__98fbecd479934dda685046f0",
     "adjust_factor_manifest_sha256": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0",
@@ -71,6 +71,6 @@
     "account_optimization_performed": false,
     "live_alpha_claim_allowed": false,
     "production_strategy_claim_allowed": false,
-    "output_root": "daily_research/output/path_policy/studies/seq100_exact_value_growth_account_v1"
+    "output_root": "runs/studies/seq100_exact_value_growth_account_v1"
   }
 }
