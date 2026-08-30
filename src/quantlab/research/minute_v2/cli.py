@@ -12,7 +12,7 @@ from .contracts import MinuteV2Config
 from .pilot import audit_pilot_month
 from .sampling import audit_candidate_recall_files
 from .stage_one import run_stage_one_audit
-from .training import run_two_fold_baselines
+from .training import run_development_validation_baselines
 
 
 def _print(value: Any) -> None:
@@ -109,7 +109,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     verify.add_argument("--manifest", required=True)
     verify_dataset_parser = subparsers.add_parser("verify-dataset")
     verify_dataset_parser.add_argument("--manifest", required=True)
-    train = subparsers.add_parser("train-baselines")
+    train = subparsers.add_parser(
+        "train-baselines",
+        help="fit on 2022-2024 and validate once on held-out 2025",
+    )
     train.add_argument("--dataset-root", required=True)
     train.add_argument("--output-root", required=True)
     recall = subparsers.add_parser(
@@ -169,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         _print(verify_dataset(args.manifest))
     elif args.command == "train-baselines":
         _print(
-            run_two_fold_baselines(
+            run_development_validation_baselines(
                 args.dataset_root,
                 output_root=args.output_root,
             )

@@ -11,6 +11,7 @@ from pandas.testing import assert_frame_equal
 
 from quantlab.research.minute_v2 import builder as minute_v2_builder
 from quantlab.research.minute_v2 import cli as minute_v2_cli
+from quantlab.research.minute_v2 import training as minute_v2_training
 from quantlab.research.minute_v2.builder import (
     BUILD_IMPLEMENTATION_REVISION,
     _artifact,
@@ -101,6 +102,142 @@ def test_checkpoint_reuses_parts_when_only_resource_controls_change() -> None:
     assert _checkpoint_specs_compatible(current, requested)
     requested["config"]["candidate_background_percent"] = 2
     assert not _checkpoint_specs_compatible(current, requested)
+
+
+def test_training_schedule_uses_one_held_out_validation_year() -> None:
+    spec = minute_v2_training.DEVELOPMENT_VALIDATION_SPEC
+    assert minute_v2_training.DEVELOPMENT_YEARS == (2022, 2023, 2024)
+    assert minute_v2_training.FINAL_VALIDATION_YEAR == 2025
+    assert spec.as_dict() == {
+        "development_start_year": 2022,
+        "development_end_year": 2024,
+        "validation_start_year": 2025,
+        "validation_end_year": 2025,
+    }
+    assert spec.development_label_end_exclusive == "2025-01-01"
+
+
+def test_development_validation_run_keeps_2025_out_of_fitting(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    output_root = tmp_path / "models"
+    output_root.mkdir()
+    scan_calls: list[dict[str, object]] = []
+    saved_paths: list[Path] = []
+
+    monkeypatch.setattr(
+        minute_v2_training,
+        "_period_parts",
+        lambda *_args: [
+            PeriodPart(
+                year=2022,
+                month=1,
+                events=tmp_path / "events.parquet",
+                labels=tmp_path / "labels.parquet",
+                base=tmp_path / "base.parquet",
+                feature_storage="core",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        minute_v2_training,
+        "model_feature_columns_for_storage",
+        lambda _storage: ("feature_a",),
+    )
+
+    def fake_iter_period_frames(_dataset_root, **kwargs):
+        scan_calls.append(kwargs)
+        yield pd.DataFrame({"feature_a": [1.0], "label_net_return": [0.01]})
+
+    def fake_collect(factory):
+        sample = next(iter(factory()))
+        return sample, {"source_rows": 1, "source_chunks": 1, "sample_rows": 1}
+
+    class FakeRidge:
+        def save(self, path):
+            saved_paths.append(Path(path))
+
+        def predict(self, frame):
+            return np.zeros(len(frame), dtype=float)
+
+    def fake_fit_ridge(factory, **kwargs):
+        assert kwargs == {
+            "feature_names": ("feature_a",),
+            "alpha": 10.0,
+            "median_sample_size": minute_v2_training.DEFAULT_MEDIAN_SAMPLE_ROWS,
+        }
+        next(iter(factory()))
+        return FakeRidge(), {"row_count": 1}
+
+    class FakeBooster:
+        def save_model(self, path):
+            saved_paths.append(Path(path))
+
+    class FakeLightGBM:
+        booster_ = FakeBooster()
+
+        def predict(self, frame):
+            return np.zeros(len(frame), dtype=float)
+
+    def fake_fit_lightgbm(train, **kwargs):
+        assert len(train) == 1
+        assert kwargs == {
+            "validation": None,
+            "feature_names": ("feature_a",),
+        }
+        return FakeLightGBM(), {"validation_rows": 0}
+
+    def fake_write_scores(factory, scorers, directory):
+        validation = next(iter(factory()))
+        assert set(scorers) == {"rule", "ridge", "lightgbm"}
+        return {
+            name: {
+                "path": str(directory / f"{name}.parquet"),
+                "row_count": len(validation),
+                "chunk_count": 1,
+            }
+            for name in scorers
+        }
+
+    monkeypatch.setattr(minute_v2_training, "iter_period_frames", fake_iter_period_frames)
+    monkeypatch.setattr(minute_v2_training, "_collect_cross_section_sample", fake_collect)
+    monkeypatch.setattr(minute_v2_training, "fit_ridge_chunks", fake_fit_ridge)
+    monkeypatch.setattr(minute_v2_training, "fit_lightgbm_ranker", fake_fit_lightgbm)
+    monkeypatch.setattr(
+        minute_v2_training,
+        "_write_multiple_scored_periods",
+        fake_write_scores,
+    )
+    monkeypatch.setattr(
+        minute_v2_training,
+        "_finish_multiple_scored_evaluations",
+        lambda metadata, **_kwargs: {name: {} for name in metadata},
+    )
+
+    result = minute_v2_training._run_development_validation(
+        tmp_path,
+        output_root,
+        minute_v2_training.DEVELOPMENT_VALIDATION_SPEC,
+    )
+
+    assert [
+        (
+            call["start_year"],
+            call["end_year"],
+            call["include_execution"],
+            call["label_end_exclusive"],
+        )
+        for call in scan_calls
+    ] == [
+        (2022, 2024, False, "2025-01-01"),
+        (2022, 2024, False, "2025-01-01"),
+        (2025, 2025, True, None),
+    ]
+    assert saved_paths == [output_root / "ridge.json", output_root / "lightgbm.txt"]
+    assert result["schema"] == "quantlab.minute_v2_development_validation/1"
+    assert result["year_policy"]["validation_used_for_fitting_or_early_stopping"] is False
+    assert result["period_samples"]["validation"]["held_out_from_fitting"] is True
 
 
 @pytest.mark.parametrize(
@@ -582,6 +719,41 @@ def test_candidate_recall_cli_writes_complete_json_output(tmp_path, monkeypatch,
     )
     assert calls == [("base.parquet", "candidates.parquet", "outcomes.parquet")]
     assert json.loads(output.read_text(encoding="utf-8")) == expected
+    assert json.loads(capsys.readouterr().out) == expected
+
+
+def test_train_baselines_cli_uses_development_validation_runner(
+    monkeypatch,
+    capsys,
+) -> None:
+    expected = {
+        "schema": "quantlab.minute_v2_development_validation/1",
+        "status": "ok",
+    }
+    calls: list[tuple[str, str]] = []
+
+    def fake_train(dataset_root: str, *, output_root: str):
+        calls.append((dataset_root, output_root))
+        return expected
+
+    monkeypatch.setattr(
+        minute_v2_cli,
+        "run_development_validation_baselines",
+        fake_train,
+    )
+    assert (
+        minute_v2_cli.main(
+            [
+                "train-baselines",
+                "--dataset-root",
+                "dataset",
+                "--output-root",
+                "models",
+            ]
+        )
+        == 0
+    )
+    assert calls == [("dataset", "models")]
     assert json.loads(capsys.readouterr().out) == expected
 
 

@@ -161,6 +161,12 @@ range that mixes storage modes. `verify-month` and stage-one checks work with
 `core`; the full causal `audit-pilot` requires `split` or `full` because its
 finite-feature, fixed-boundary and mutation checks cover the complete matrix.
 
+`train-baselines` uses one chronological split: all 2022-2024 data is the
+development/fitting period and 2025 is held out for one final validation.
+The 2025 rows are not used for fitting or early stopping, and late-2024 rows
+whose 10-market-day label window reaches 2025 are excluded from development.
+There is no second fold or separate test set in this four-year workflow.
+
 The minute labels have distinct time semantics. `label_*m` advances N positions
 on the decision grid, so it is N decision steps rather than necessarily N
 elapsed trading minutes and can cross lunch or overnight. Legacy execution

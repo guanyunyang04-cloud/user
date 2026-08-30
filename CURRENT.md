@@ -268,6 +268,11 @@ dedicated producer code has been retired.
   for contract/stage-one checks and core-only training; the complete causal
   pilot audit intentionally requires `split` or `full` so its feature and
   mutation checks cannot silently omit the optional windows.
+- Baseline training now has one chronological boundary rather than two folds:
+  2022-2024 is the complete development/fitting period and 2025 is used once
+  for held-out validation. The 2025 rows do not participate in fitting or
+  early stopping, and late-2024 rows whose 10-market-day label window reaches
+  2025 are excluded. This four-year workflow has no separate test set.
 - In the label contract, `label_*m` advances by N positions on the 234-point
   decision grid. It is therefore N decision steps, not necessarily N elapsed
   trading minutes: a window may cross lunch or overnight. The separate
@@ -509,12 +514,13 @@ dedicated producer code has been retired.
    or free-source update path.
 2. The one-day complete-base recall audit is finished for both the retained
    rev5 benchmark and the current rev1 development artifact. Do not tune the
-   gate to this date or call its concentrated tails alpha. Next, repeat the
-   same audit on a small, regime-spanning set of dates, compare the present
-   37% attention gate with a wider gate and a full-base/weighted-sampling
-   baseline, and only then train a directional ranker. Explicitly force
-   current holdings through the gate during a real inventory replay. No model
-   or broker decision is authorized by this benchmark alone.
+   gate to this date or call its concentrated tails alpha. Complete the
+   2022-2025 panel, then develop candidate strategies only on 2022-2024 and
+   inspect 2025 once for overfitting. Manually specified causal rules and a
+   real inventory backtest are the preferred next research path; ML baselines
+   remain optional comparators. Explicitly force current holdings through the
+   gate during replay. No model or broker decision is authorized by the
+   one-day benchmark alone.
 3. Keep the QDP flattening migration as maintenance rather than a blocker for
    minute research. The active physical/latest-key quick check and the new
    minute-v2 artifact verification are green. Preserve atomic manifests,

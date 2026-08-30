@@ -1,4 +1,4 @@
-"""Two-fold, bounded-memory baseline training for minute-v2 events."""
+"""Single-split, bounded-memory baseline training for minute-v2 events."""
 
 from __future__ import annotations
 
@@ -30,7 +30,6 @@ from .contracts import (
     MinuteV2Error,
     model_feature_columns_for_storage,
 )
-from .mining import DEFAULT_MINING_SEEDS, mine_formula_features, write_mining_result
 from .models import (
     evaluate_scores,
     fit_lightgbm_ranker,
@@ -39,23 +38,32 @@ from .models import (
 )
 from .replay import EventReplayConfig, replay_events
 
+DEVELOPMENT_YEARS = (2022, 2023, 2024)
+FINAL_VALIDATION_YEAR = 2025
+
 
 @dataclass(frozen=True)
-class FoldSpec:
-    fold: int
-    train_start_year: int
-    train_end_year: int
-    validation_year: int
-    test_start_year: int
-    test_end_year: int
+class DevelopmentValidationSpec:
+    development_start_year: int
+    development_end_year: int
+    validation_start_year: int
+    validation_end_year: int
+
+    @property
+    def development_label_end_exclusive(self) -> str:
+        """Keep every outcome touching validation outside development fitting."""
+
+        return f"{self.validation_start_year:04d}-01-01"
 
     def as_dict(self) -> dict[str, int]:
         return asdict(self)
 
 
-TWO_FOLDS = (
-    FoldSpec(1, 2012, 2017, 2018, 2019, 2020),
-    FoldSpec(2, 2012, 2019, 2020, 2021, 2022),
+DEVELOPMENT_VALIDATION_SPEC = DevelopmentValidationSpec(
+    development_start_year=DEVELOPMENT_YEARS[0],
+    development_end_year=DEVELOPMENT_YEARS[-1],
+    validation_start_year=FINAL_VALIDATION_YEAR,
+    validation_end_year=FINAL_VALIDATION_YEAR,
 )
 
 EXECUTION_LABEL_COLUMNS = (
@@ -1099,24 +1107,27 @@ def _evaluate_and_replay(
     return {"score_metrics": metrics, "sampled_event_replay": replay_result}
 
 
-def _run_fold(
+def _run_development_validation(
     dataset_root: Path,
     output_root: Path,
-    spec: FoldSpec,
-    *,
-    mining_result: dict[str, Any] | None,
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    directory = output_root / f"fold_{spec.fold}"
-    directory.mkdir(parents=True, exist_ok=True)
-    fold_parts = _period_parts(dataset_root, spec.train_start_year, spec.test_end_year)
-    if not fold_parts:
-        raise MinuteV2Error(f"minute_v2_training_period_empty:{spec.train_start_year}:{spec.test_end_year}")
-    feature_storage = fold_parts[0].feature_storage
-    feature_names = model_feature_columns_for_storage(feature_storage)
-    mining_seed_features = tuple(
-        name for name in DEFAULT_MINING_SEEDS if name in feature_names
+    spec: DevelopmentValidationSpec,
+) -> dict[str, Any]:
+    period_parts = _period_parts(
+        dataset_root,
+        spec.development_start_year,
+        spec.validation_end_year,
     )
-    with TemporaryDirectory(prefix=f"fold_{spec.fold}_", dir=output_root) as temporary:
+    if not period_parts:
+        raise MinuteV2Error(
+            "minute_v2_training_period_empty:"
+            f"{spec.development_start_year}:{spec.validation_end_year}"
+        )
+    feature_storage = period_parts[0].feature_storage
+    feature_names = model_feature_columns_for_storage(feature_storage)
+    with TemporaryDirectory(
+        prefix="development_validation_",
+        dir=output_root,
+    ) as temporary:
         temp = Path(temporary)
 
         def factory(
@@ -1138,63 +1149,43 @@ def _run_fold(
                 ordered=ordered,
             )
 
-        train_factory = factory(
-            start_year=spec.train_start_year,
-            end_year=spec.train_end_year,
+        development_factory = factory(
+            start_year=spec.development_start_year,
+            end_year=spec.development_end_year,
             include_execution=False,
-            label_end_exclusive=f"{spec.validation_year:04d}-01-01",
+            label_end_exclusive=spec.development_label_end_exclusive,
         )
         validation_factory = factory(
-            start_year=spec.validation_year,
-            end_year=spec.validation_year,
-            include_execution=False,
-            label_end_exclusive=f"{spec.test_start_year:04d}-01-01",
-        )
-        test_factory = factory(
-            start_year=spec.test_start_year,
-            end_year=spec.test_end_year,
+            start_year=spec.validation_start_year,
+            end_year=spec.validation_end_year,
             include_execution=True,
-            ordered=False,
         )
-        train_sample, train_sample_meta = _collect_cross_section_sample(train_factory)
-        validation_sample, validation_sample_meta = _collect_cross_section_sample(
-            validation_factory
+        development_sample, development_sample_meta = _collect_cross_section_sample(
+            development_factory
         )
         ridge, ridge_meta = fit_ridge_chunks(
-            train_factory,
+            development_factory,
             feature_names=feature_names,
             alpha=10.0,
             median_sample_size=DEFAULT_MEDIAN_SAMPLE_ROWS,
         )
-        if spec.fold == 1 and mining_result is None:
-            mining_result = mine_formula_features(
-                train_sample,
-                validation_sample,
-                seed_features=mining_seed_features,
-                maximum_candidates=120,
-                maximum_selected=12,
-                minimum_coverage=0.85,
-            )
-            mining_result["train_rows"] = int(ridge_meta["row_count"])
-            mining_result["validation_rows"] = int(validation_sample_meta["sample_rows"])
-            mining_result["sampling"] = {
-                "train": train_sample_meta,
-                "validation": validation_sample_meta,
-            }
-            write_mining_result(mining_result, output_root / "formula_mining_fold_1.json")
-        ridge.save(directory / "ridge.json")
+        ridge.save(output_root / "ridge.json")
         lightgbm_model, lightgbm_meta = fit_lightgbm_ranker(
-            train_sample,
-            validation=validation_sample,
+            development_sample,
+            validation=None,
             feature_names=feature_names,
         )
         lightgbm_meta["sampling"] = {
-            "train": train_sample_meta,
-            "validation": validation_sample_meta,
+            "development": development_sample_meta,
+            "validation": {
+                "status": "not_used",
+                "reason": "2025 is held out from fitting and early stopping",
+            },
         }
-        lightgbm_model.booster_.save_model(str(directory / "lightgbm.txt"))
+        lightgbm_meta["early_stopping_used"] = False
+        lightgbm_model.booster_.save_model(str(output_root / "lightgbm.txt"))
         score_meta = _write_multiple_scored_periods(
-            test_factory,
+            validation_factory,
             {
                 "rule": rule_score,
                 "ridge": ridge.predict,
@@ -1206,39 +1197,54 @@ def _run_fold(
         )
         evaluations = _finish_multiple_scored_evaluations(
             score_meta,
-            output_directory=directory,
+            output_directory=output_root,
         )
-        test_rows = int(next(iter(score_meta.values()))["row_count"])
+        validation_rows = int(next(iter(score_meta.values()))["row_count"])
         result = {
-            "schema": "quantlab.minute_v2_fold/2",
+            "schema": "quantlab.minute_v2_development_validation/1",
             "status": "ok",
-            "fold": spec.as_dict(),
+            "dataset_root": str(dataset_root.resolve()),
+            "year_policy": {
+                **spec.as_dict(),
+                "development_years": list(DEVELOPMENT_YEARS),
+                "final_validation_year": FINAL_VALIDATION_YEAR,
+                "independent_test_set": False,
+                "validation_used_for_fitting_or_early_stopping": False,
+            },
             "period_samples": {
-                "train": {
-                    **train_sample_meta,
+                "development": {
+                    **development_sample_meta,
                     "effective_label_rows": int(ridge_meta["row_count"]),
                     "streaming_ridge": ridge_meta,
+                    "label_end_exclusive": spec.development_label_end_exclusive,
                 },
-                "validation": validation_sample_meta,
-                "test": {
-                    "row_count": test_rows,
-                    "sampling_policy": "all causal candidate rows; streamed score evaluation",
-                    "feature_source": "base_joined_by_symbol_trade_date_bar_time",
+                "validation": {
+                    "row_count": validation_rows,
+                    "sampling_policy": (
+                        "all causal candidate rows; streamed score evaluation"
+                    ),
+                    "feature_source": (
+                        "base_joined_by_symbol_trade_date_bar_time"
+                    ),
+                    "held_out_from_fitting": True,
+                    "used_for_early_stopping": False,
                 },
             },
             "feature_storage": feature_storage,
             "feature_names": list(feature_names),
             "lightgbm": lightgbm_meta,
             "evaluations": evaluations,
-            "available_memory_gib_after_fold": psutil.virtual_memory().available / 1024**3,
+            "available_memory_gib_after_validation": (
+                psutil.virtual_memory().available / 1024**3
+            ),
         }
-        write_json(directory / "result.json", result)
-    del train_sample, validation_sample, ridge, lightgbm_model
+        write_json(output_root / "result.json", result)
+    del development_sample, ridge, lightgbm_model
     gc.collect()
-    return result, mining_result
+    return result
 
 
-def run_two_fold_baselines(
+def run_development_validation_baselines(
     dataset_root: str | Path,
     *,
     output_root: str | Path,
@@ -1247,34 +1253,18 @@ def run_two_fold_baselines(
     output = Path(output_root).resolve()
     output.mkdir(parents=True, exist_ok=True)
     if psutil.virtual_memory().available < MIN_TRAINING_AVAILABLE_GIB * 1024**3:
-        raise MinuteV2Error(
-            "minute_v2_training_requires_two_gib_available_memory"
-        )
-    results: list[dict[str, Any]] = []
-    mining_result: dict[str, Any] | None = None
-    for spec in TWO_FOLDS:
-        result, mining_result = _run_fold(
-            dataset,
-            output,
-            spec,
-            mining_result=mining_result,
-        )
-        results.append(result)
-    aggregate = {
-        "schema": "quantlab.minute_v2_two_fold/1",
-        "status": "ok",
-        "dataset_root": str(dataset),
-        "fold_count": len(results),
-        "sampling_policy": "all causal candidate rows at all decision minutes",
-        "formula_mining": {
-            "path": str(output / "formula_mining_fold_1.json"),
-            "selected_count": int((mining_result or {}).get("selected_count", 0)),
-            "used_final_fold": False,
-        },
-        "fold_results": [str(output / f"fold_{spec.fold}" / "result.json") for spec in TWO_FOLDS],
-    }
-    write_json(output / "result.json", aggregate)
-    return aggregate
+        raise MinuteV2Error("minute_v2_training_requires_two_gib_available_memory")
+    return _run_development_validation(
+        dataset,
+        output,
+        DEVELOPMENT_VALIDATION_SPEC,
+    )
 
 
-__all__ = ["FoldSpec", "TWO_FOLDS", "run_two_fold_baselines"]
+__all__ = [
+    "DEVELOPMENT_VALIDATION_SPEC",
+    "DEVELOPMENT_YEARS",
+    "FINAL_VALIDATION_YEAR",
+    "DevelopmentValidationSpec",
+    "run_development_validation_baselines",
+]
