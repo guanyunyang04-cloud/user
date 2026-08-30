@@ -16,6 +16,10 @@ def main(argv: list[str] | None = None) -> int:
         from .minute_v2.cli import main as minute_v2_main
 
         return int(minute_v2_main(values[1:]) or 0)
+    if values and values[0] == "minute-strategy-study":
+        from .minute_strategy_runner import main as minute_strategy_main
+
+        return int(minute_strategy_main(values[1:]) or 0)
 
     parser = argparse.ArgumentParser(description="Current daily research pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)

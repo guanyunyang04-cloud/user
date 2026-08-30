@@ -41,6 +41,26 @@ OUTCOME_COLUMNS = (
     "reference_signal_id",
     "reference_symbol",
     "liquidity_match_ratio",
+    "author_id",
+    "hypothesis_id",
+    "market_regime",
+    "sector_strength_rank",
+    "sector_breadth",
+    "leader_relative_return",
+    "auction_gap",
+    "volume_acceleration_5_20",
+    "amount_curve_surprise",
+    "vwap_deviation",
+    "recent_high_breakout",
+    "prior_acceleration",
+    "breakout_recent",
+    "daily_trend_positive",
+    "market_supportive",
+    "sector_strong",
+    "leader_sync",
+    "auction_confirmed",
+    "volume_normal",
+    "not_repeated_cross",
     "signal_adjusted_close",
     "entry_date",
     "entry_time",
@@ -61,6 +81,21 @@ OUTCOME_COLUMNS = (
     "t1_gross_return",
     "t1_net_return",
 )
+
+
+def _session_time_label(ordinal: int) -> str:
+    if ordinal < 120:
+        minute = ordinal
+        hour = 9 + (31 + minute) // 60
+        minute_value = (31 + minute) % 60
+    else:
+        minute = ordinal - 120
+        hour = 13 + (1 + minute) // 60
+        minute_value = (1 + minute) % 60
+    return f"{hour:02d}{minute_value:02d}00000"
+
+
+_SESSION_ORDINAL_BY_TIME = {_session_time_label(index): index for index in range(240)}
 
 
 @dataclass(frozen=True)
@@ -165,7 +200,11 @@ def prepare_outcome_bars(bars: pd.DataFrame) -> pd.DataFrame:
     if frame["symbol"].eq("").any() or frame["symbol"].str.lower().isin({"nan", "none", "<na>"}).any():
         raise EventStudyError("event_study_symbol_invalid")
     frame["trade_date"] = _normalise_date_series(frame["trade_date"])
-    frame["bar_time"] = frame["bar_time"].map(normalize_bar_time).astype("string")
+    raw_times = frame["bar_time"].astype("string").str.strip()
+    if bool(raw_times.str.fullmatch(r"\d{9}", na=False).all()):
+        frame["bar_time"] = raw_times
+    else:
+        frame["bar_time"] = raw_times.map(normalize_bar_time).astype("string")
     for column in ("open", "high", "low", "close", "volume", "amount"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
     if "adjust_factor" not in frame:
@@ -183,7 +222,10 @@ def prepare_outcome_bars(bars: pd.DataFrame) -> pd.DataFrame:
     )
     if not bool(valid.all()):
         raise EventStudyError(f"event_study_invalid_bar_count:{int((~valid).sum())}")
-    frame["session_minute_ordinal"] = frame["bar_time"].map(session_minute_ordinal)
+    frame["session_minute_ordinal"] = frame["bar_time"].map(_SESSION_ORDINAL_BY_TIME)
+    noncanonical = frame["session_minute_ordinal"].isna() & ~frame["bar_time"].isin(_SESSION_ORDINAL_BY_TIME)
+    if noncanonical.any():
+        frame.loc[noncanonical, "session_minute_ordinal"] = frame.loc[noncanonical, "bar_time"].map(session_minute_ordinal)
     if frame["session_minute_ordinal"].isna().any():
         bad = frame.loc[frame["session_minute_ordinal"].isna(), "bar_time"].iloc[0]
         raise EventStudyError(f"event_study_out_of_session_bar:{bad}")
@@ -210,6 +252,9 @@ def _truthy(row: pd.Series, names: Sequence[str]) -> bool:
 
 
 def _bar_is_executable(row: pd.Series, *, side: str) -> tuple[bool, str]:
+    status_fields = [name for name in ("is_suspended", "is_delisted") if name in row.index]
+    if status_fields and any(pd.isna(row[name]) for name in status_fields):
+        return False, "status_unknown"
     if _truthy(row, ("is_suspended", "suspended", "exclude_open", "exclude_close")):
         return False, "suspended_or_quality_excluded"
     if side == "buy" and _truthy(row, ("is_limit_up", "limit_up", "buy_blocked")):
@@ -240,6 +285,87 @@ def _is_adjacent(frame: pd.DataFrame, left: int, right: int, next_dates: dict[st
         and int(first["session_minute_ordinal"]) == 239
         and int(second["session_minute_ordinal"]) == 0
     )
+
+
+def _truthy_array(frame: pd.DataFrame, name: str) -> np.ndarray:
+    """Return the same permissive truth test as :func:`_truthy`, vectorised."""
+
+    if name not in frame.columns:
+        return np.zeros(len(frame), dtype=bool)
+    values = frame[name]
+    # ``fillna(False)`` also keeps nullable Boolean columns out of the object
+    # dtype path.  The remaining map deliberately mirrors ``bool(value)`` for
+    # legacy numeric/string status columns.
+    return values.fillna(False).map(bool).to_numpy(dtype=bool)
+
+
+def _execution_arrays(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Precompute entry/exit executability and reasons for every bar.
+
+    The former event loop called ``DataFrame.iloc`` for every signal.  These
+    arrays preserve the documented reason priority while making the hot path
+    independent of pandas row construction.
+    """
+
+    n_rows = len(frame)
+    unknown = np.zeros(n_rows, dtype=bool)
+    for name in ("is_suspended", "is_delisted"):
+        if name in frame.columns:
+            unknown |= frame[name].isna().to_numpy()
+    suspended = np.zeros(n_rows, dtype=bool)
+    for name in ("is_suspended", "suspended", "exclude_open", "exclude_close"):
+        suspended |= _truthy_array(frame, name)
+    buy_blocked = np.zeros(n_rows, dtype=bool)
+    for name in ("is_limit_up", "limit_up", "buy_blocked"):
+        buy_blocked |= _truthy_array(frame, name)
+    sell_blocked = np.zeros(n_rows, dtype=bool)
+    for name in ("is_limit_down", "limit_down", "sell_blocked"):
+        sell_blocked |= _truthy_array(frame, name)
+
+    entry_ok = ~unknown
+    entry_reason = np.full(n_rows, "ok", dtype=object)
+    entry_reason[unknown] = "status_unknown"
+    mask = entry_ok & suspended
+    entry_ok[mask] = False
+    entry_reason[mask] = "suspended_or_quality_excluded"
+    mask = entry_ok & buy_blocked
+    entry_ok[mask] = False
+    entry_reason[mask] = "buy_limit_blocked"
+    if "entry_executable" in frame.columns:
+        values = frame["entry_executable"]
+        false_mask = values.notna().to_numpy() & ~values.fillna(True).map(bool).to_numpy(dtype=bool)
+        mask = entry_ok & false_mask
+        entry_ok[mask] = False
+        entry_reason[mask] = "entry_executable_false"
+    if "executable" in frame.columns:
+        values = frame["executable"]
+        false_mask = values.notna().to_numpy() & ~values.fillna(True).map(bool).to_numpy(dtype=bool)
+        mask = entry_ok & false_mask
+        entry_ok[mask] = False
+        entry_reason[mask] = "executable_false"
+
+    exit_ok = ~unknown
+    exit_reason = np.full(n_rows, "ok", dtype=object)
+    exit_reason[unknown] = "status_unknown"
+    mask = exit_ok & suspended
+    exit_ok[mask] = False
+    exit_reason[mask] = "suspended_or_quality_excluded"
+    mask = exit_ok & sell_blocked
+    exit_ok[mask] = False
+    exit_reason[mask] = "sell_limit_blocked"
+    if "exit_executable" in frame.columns:
+        values = frame["exit_executable"]
+        false_mask = values.notna().to_numpy() & ~values.fillna(True).map(bool).to_numpy(dtype=bool)
+        mask = exit_ok & false_mask
+        exit_ok[mask] = False
+        exit_reason[mask] = "exit_executable_false"
+    if "executable" in frame.columns:
+        values = frame["executable"]
+        false_mask = values.notna().to_numpy() & ~values.fillna(True).map(bool).to_numpy(dtype=bool)
+        mask = exit_ok & false_mask
+        exit_ok[mask] = False
+        exit_reason[mask] = "executable_false"
+    return entry_ok, entry_reason, exit_ok, exit_reason
 
 
 def _stamp_tax_bps(exit_date: str, config: EventStudyConfig) -> float:
@@ -306,9 +432,17 @@ def compute_event_outcomes(
     frame = prepare_outcome_bars(bars)
     explicit_calendar = None if trading_dates is None else _normalise_trading_dates(trading_dates)
     explicit_next_dates = None if explicit_calendar is None else _next_date_map(explicit_calendar)
+    frame_symbols = frame["symbol"].astype(str).to_numpy()
+    frame_dates = frame["trade_date"].astype(str).to_numpy()
+    frame_times = frame["bar_time"].astype(str).to_numpy()
+    frame_ordinals = frame["session_minute_ordinal"].to_numpy(dtype=np.int16, copy=False)
+    frame_adjusted_open = frame["adjusted_open"].to_numpy(dtype=np.float64, copy=False)
+    frame_adjusted_close = frame["adjusted_close"].to_numpy(dtype=np.float64, copy=False)
+    frame_open = frame["open"].to_numpy(dtype=np.float64, copy=False)
+    entry_ok_array, entry_reason_array, exit_ok_array, exit_reason_array = _execution_arrays(frame)
     by_symbol_date_time = {
-        (str(row.symbol), str(row.trade_date), str(row.bar_time)): int(row.bar_index_internal)
-        for row in frame.itertuples(index=False)
+        (frame_symbols[index], frame_dates[index], frame_times[index]): int(index)
+        for index in range(len(frame))
     }
     symbol_positions: dict[str, list[int]] = {}
     symbol_position_lookup: dict[str, dict[int, int]] = {}
@@ -324,12 +458,24 @@ def compute_event_outcomes(
         symbol_positions[symbol_name] = positions
         symbol_position_lookup[symbol_name] = {value: index for index, value in enumerate(positions)}
         symbol_next_dates[symbol_name] = explicit_next_dates or _next_date_map(group["trade_date"].astype(str).unique().tolist())
-        adjacent_next.update(
-            {
-                left: _is_adjacent(frame, left, right, symbol_next_dates[symbol_name])
-                for left, right in zip(positions, positions[1:], strict=False)
-            }
-        )
+        if len(positions) > 1:
+            left = np.asarray(positions[:-1], dtype=np.int64)
+            right = np.asarray(positions[1:], dtype=np.int64)
+            same_date = frame_dates[left] == frame_dates[right]
+            adjacent_values = np.where(
+                same_date,
+                frame_ordinals[right] == frame_ordinals[left] + 1,
+                np.array(
+                    [
+                        symbol_next_dates[symbol_name].get(frame_dates[item]) == frame_dates[next_item]
+                        and int(frame_ordinals[item]) == 239
+                        and int(frame_ordinals[next_item]) == 0
+                        for item, next_item in zip(left, right, strict=True)
+                    ],
+                    dtype=bool,
+                ),
+            )
+            adjacent_next.update({int(item): bool(value) for item, value in zip(left, adjacent_values, strict=True)})
         for trade_date, day_group in group.groupby("trade_date", sort=False):
             day_indices = day_group["bar_index_internal"].astype(int).tolist()
             day_ordinals = set(day_group["session_minute_ordinal"].astype(int).tolist())
@@ -362,12 +508,25 @@ def compute_event_outcomes(
         (str(row.symbol), str(row.trade_date)): int(index)
         for index, row in enumerate(daily.itertuples(index=False))
     }
+    daily_first_indices = daily["first_bar_index"].to_numpy(dtype=np.int64, copy=False)
+    daily_first_times = daily["first_bar_time"].astype(str).to_numpy()
+    daily_adjusted_open = daily["adjusted_open"].to_numpy(dtype=np.float64, copy=False)
+    daily_adjusted_close = daily["adjusted_close"].to_numpy(dtype=np.float64, copy=False)
     daily_by_symbol: dict[str, list[int]] = {}
     daily_position_lookup: dict[str, dict[int, int]] = {}
     for symbol, group in daily.groupby("symbol", sort=False):
         values = group.index.astype(int).tolist()
         daily_by_symbol[str(symbol)] = values
         daily_position_lookup[str(symbol)] = {value: index for index, value in enumerate(values)}
+
+    # This mapping is constant for the whole event batch.  Building it inside
+    # the per-signal loop made a full-universe day needlessly quadratic in the
+    # number of signals.
+    calendar_position = (
+        {value: index for index, value in enumerate(explicit_calendar)}
+        if explicit_calendar is not None
+        else None
+    )
 
     metric_names = _metric_names(selected)
     output: list[dict[str, Any]] = []
@@ -436,14 +595,14 @@ def compute_event_outcomes(
             base["entry_reason"] = "next_minute_gap"
             output.append(base)
             continue
-        entry_row = frame.iloc[entry_index]
-        entry_ok, entry_reason = _bar_is_executable(entry_row, side="buy")
+        entry_ok = bool(entry_ok_array[entry_index])
+        entry_reason = str(entry_reason_array[entry_index])
         base.update(
             {
-                "entry_date": str(entry_row["trade_date"]),
-                "entry_time": str(entry_row["bar_time"]),
-                "entry_price": float(entry_row["open"]),
-                "entry_adjusted_price": float(entry_row["adjusted_open"]),
+                "entry_date": frame_dates[entry_index],
+                "entry_time": frame_times[entry_index],
+                "entry_price": float(frame_open[entry_index]),
+                "entry_adjusted_price": float(frame_adjusted_open[entry_index]),
                 "entry_observed": True,
                 "entry_executable": bool(entry_ok and base["signal_executable"]),
                 "entry_reason": entry_reason if base["signal_executable"] else "signal_marked_non_executable",
@@ -455,8 +614,8 @@ def compute_event_outcomes(
         if not entry_ok:
             output.append(base)
             continue
-        entry_price = float(entry_row["adjusted_open"])
-        entry_date = str(entry_row["trade_date"])
+        entry_price = float(frame_adjusted_open[entry_index])
+        entry_date = frame_dates[entry_index]
         stats = day_stats.get((symbol, entry_date))
         if stats is not None and stats["adjacent"] and stats["complete"]:
             base["mfe_same_day"] = _gross_return(entry_price, float(suffix_high[entry_index]))
@@ -479,9 +638,8 @@ def compute_event_outcomes(
                 )
                 if not adjacent:
                     continue
-            target_row = frame.iloc[target_index]
-            target_price = float(target_row["adjusted_close"])
-            target_date = str(target_row["trade_date"])
+            target_price = float(frame_adjusted_close[target_index])
+            target_date = frame_dates[target_index]
             base[gross_name] = _gross_return(entry_price, target_price)
             base[net_name] = _net_return(entry_price, target_price, target_date, selected)
 
@@ -502,8 +660,7 @@ def compute_event_outcomes(
                     else None
                 )
             else:
-                calendar_position = {value: index for index, value in enumerate(explicit_calendar)}
-                calendar_local = calendar_position.get(entry_date)
+                calendar_local = calendar_position.get(entry_date) if calendar_position is not None else None
                 target_dates = (
                     [
                         explicit_calendar[calendar_local + int(horizon)]
@@ -525,8 +682,7 @@ def compute_event_outcomes(
                 target_index = daily_lookup.get((symbol, target_date))
                 if target_index is None:
                     continue
-                target_daily = daily.iloc[target_index]
-                target_price = float(target_daily["adjusted_close"])
+                target_price = float(daily_adjusted_close[target_index])
                 base[f"gross_return_{horizon}d"] = _gross_return(entry_price, target_price)
                 base[f"net_return_{horizon}d"] = _net_return(entry_price, target_price, target_date, selected)
             if next_day is not None:
@@ -535,19 +691,17 @@ def compute_event_outcomes(
                 if t1_index is None:
                     base["t1_exit_reason"] = "next_trading_day_bar_missing"
                 else:
-                    t1_daily = daily.iloc[t1_index]
-                    sell_ok, sell_reason = _bar_is_executable(
-                        frame.iloc[int(t1_daily["first_bar_index"])],
-                        side="sell",
-                    )
+                    first_index = int(daily_first_indices[t1_index])
+                    sell_ok = bool(exit_ok_array[first_index])
+                    sell_reason = str(exit_reason_array[first_index])
                     base.update(
                         {
-                            "t1_exit_time": str(t1_daily["first_bar_time"]),
-                            "t1_exit_adjusted_price": float(t1_daily["adjusted_open"]),
+                            "t1_exit_time": str(daily_first_times[t1_index]),
+                            "t1_exit_adjusted_price": float(daily_adjusted_open[t1_index]),
                             "t1_exit_observed": bool(sell_ok),
                             "t1_exit_reason": sell_reason,
-                            "t1_gross_return": _gross_return(entry_price, float(t1_daily["adjusted_open"])) if sell_ok else np.nan,
-                            "t1_net_return": _net_return(entry_price, float(t1_daily["adjusted_open"]), next_day, selected)
+                            "t1_gross_return": _gross_return(entry_price, float(daily_adjusted_open[t1_index])) if sell_ok else np.nan,
+                            "t1_net_return": _net_return(entry_price, float(daily_adjusted_open[t1_index]), next_day, selected)
                             if sell_ok
                             else np.nan,
                         }

@@ -272,26 +272,22 @@ def _hour_history(hourly: pd.DataFrame, config: MinuteMAConfig) -> pd.DataFrame:
     for period in config.periods:
         current = hourly.loc[:, keys].copy()
         current["ma_period"] = int(period)
-        prior_sum = pd.Series(index=current.index, dtype="float64")
-        prior_ma = pd.Series(index=current.index, dtype="float64")
-        prior_ma_slope = pd.Series(index=current.index, dtype="float64")
-        previous_close = pd.Series(index=current.index, dtype="float64")
-        previous_high = pd.Series(index=current.index, dtype="float64")
-        for _, index in current.groupby("symbol", sort=False).groups.items():
-            values = current.loc[index, "adjusted_close"]
-            sums = values.rolling(period - 1, min_periods=period - 1).sum().shift(1)
-            ma = values.rolling(period, min_periods=period).mean().shift(1)
-            previous_ma = ma.shift(1)
-            prior_sum.loc[index] = sums
-            prior_ma.loc[index] = ma
-            prior_ma_slope.loc[index] = np.where(previous_ma.gt(0), (ma / previous_ma - 1.0) * 10_000.0, np.nan)
-            previous_close.loc[index] = values.shift(1)
-            previous_high.loc[index] = current.loc[index, "adjusted_high"].shift(1)
+        grouped_close = current.groupby("symbol", sort=False, observed=True)["adjusted_close"]
+        grouped_high = current.groupby("symbol", sort=False, observed=True)["adjusted_high"]
+        prior_sum = grouped_close.transform(
+            lambda values, window=period - 1: values.rolling(window, min_periods=window).sum().shift(1)
+        )
+        prior_ma = grouped_close.transform(
+            lambda values, window=period: values.rolling(window, min_periods=window).mean().shift(1)
+        )
+        previous_ma = prior_ma.groupby(current["symbol"], sort=False, observed=True).shift(1)
         current["prior_close_sum_adjusted"] = prior_sum
         current["prior_completed_ma_adjusted"] = prior_ma
-        current["prior_ma_slope_bps"] = prior_ma_slope
-        current["previous_hour_close_adjusted"] = previous_close
-        current["previous_hour_high_adjusted"] = previous_high
+        current["prior_ma_slope_bps"] = np.where(
+            previous_ma.gt(0), (prior_ma / previous_ma - 1.0) * 10_000.0, np.nan
+        )
+        current["previous_hour_close_adjusted"] = grouped_close.transform(lambda values: values.shift(1))
+        current["previous_hour_high_adjusted"] = grouped_high.transform(lambda values: values.shift(1))
         current["causal_intersection_adjusted"] = prior_sum / float(period - 1)
         current["causal_intersection"] = current["causal_intersection_adjusted"] / current["adjust_factor"]
         current["final_ma_adjusted"] = (prior_sum + current["adjusted_close"]) / float(period)
@@ -305,6 +301,20 @@ def _hour_history(hourly: pd.DataFrame, config: MinuteMAConfig) -> pd.DataFrame:
         ignore_index=True,
     )
     return history
+
+
+def build_hourly_ma_history(
+    hourly: pd.DataFrame,
+    *,
+    config: MinuteMAConfig | None = None,
+) -> pd.DataFrame:
+    """Build prior-completed-hour MA values from an aggregated hour table."""
+
+    selected = config or MinuteMAConfig()
+    selected.validate()
+    if hourly.empty:
+        return pd.DataFrame()
+    return _hour_history(hourly, selected)
 
 
 def _add_prior_touch_counts(
@@ -360,24 +370,276 @@ def _add_prior_touch_counts(
             .reset_index()
         )
         touches.sort_values(["symbol", "hour_sequence"], inplace=True)
-        prior_window = pd.Series(index=touches.index, dtype="float64")
-        prior_loaded = pd.Series(index=touches.index, dtype="float64")
-        for _, index in touches.groupby("symbol", sort=False).groups.items():
-            values = touches.loc[index, "true_touch"].astype(int)
-            prior_window.loc[index] = (
-                values.rolling(
-                    int(config.prior_touch_window_hours),
-                    min_periods=1,
-                )
-                .sum()
-                .shift(1)
-                .fillna(0)
-            )
-            prior_loaded.loc[index] = values.cumsum().shift(1).fillna(0)
+        grouped_touch = touches.groupby("symbol", sort=False, observed=True)["true_touch"]
+        prior_window = grouped_touch.transform(
+            lambda values: values.astype(int)
+            .rolling(int(config.prior_touch_window_hours), min_periods=1)
+            .sum()
+            .shift(1)
+            .fillna(0)
+        )
+        prior_loaded = grouped_touch.transform(
+            lambda values: values.astype(int).cumsum().shift(1).fillna(0)
+        )
         touches["prior_true_touch_count_window"] = prior_window.astype("int16")
         touches["prior_true_touch_count_loaded"] = prior_loaded.astype("int32")
         parts.append(touches.drop(columns="true_touch"))
     return pd.concat(parts, ignore_index=True)
+
+
+def _add_prior_touch_counts_from_hourly(
+    history: pd.DataFrame,
+    config: MinuteMAConfig,
+) -> pd.DataFrame:
+    """Compute prior-touch counters from already aggregated hourly history.
+
+    The full-universe runner aggregates raw minutes in DuckDB first.  Keeping
+    this path separate from ``_add_prior_touch_counts`` avoids materialising
+    the historical minute table a second time while preserving the same
+    point-in-time definition.
+    """
+
+    required = {
+        "symbol",
+        "trade_date",
+        "sixty_minute_bucket",
+        "ma_period",
+        "hour_sequence",
+        "causal_intersection_adjusted",
+        "adjusted_low",
+        "adjusted_high",
+    }
+    _require_columns(history, required)
+    parts: list[pd.DataFrame] = []
+    for period in config.periods:
+        current = history.loc[history["ma_period"].eq(int(period)), list(required)].copy()
+        if current.empty:
+            continue
+        current["true_touch"] = current["adjusted_low"].le(current["causal_intersection_adjusted"]) & current[
+            "adjusted_high"
+        ].ge(current["causal_intersection_adjusted"])
+        current.sort_values(["symbol", "hour_sequence"], inplace=True, kind="stable")
+        grouped_touch = current.groupby("symbol", sort=False, observed=True)["true_touch"]
+        prior_window = grouped_touch.transform(
+            lambda values: values.astype(int)
+            .rolling(int(config.prior_touch_window_hours), min_periods=1)
+            .sum()
+            .shift(1)
+            .fillna(0)
+        )
+        prior_loaded = grouped_touch.transform(
+            lambda values: values.astype(int).cumsum().shift(1).fillna(0)
+        )
+        current["prior_true_touch_count_window"] = prior_window.astype("int16")
+        current["prior_true_touch_count_loaded"] = prior_loaded.astype("int32")
+        parts.append(current.drop(columns="true_touch"))
+    if not parts:
+        return pd.DataFrame(
+            columns=[
+                "symbol",
+                "trade_date",
+                "sixty_minute_bucket",
+                "ma_period",
+                "hour_sequence",
+                "prior_true_touch_count_window",
+                "prior_true_touch_count_loaded",
+            ]
+        )
+    return pd.concat(parts, ignore_index=True)
+
+
+def build_minute_ma_states_from_history(
+    target_bars: pd.DataFrame,
+    hourly_bars: pd.DataFrame,
+    *,
+    config: MinuteMAConfig | None = None,
+    context: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Build causal states from aggregated history and target-day minutes.
+
+    ``build_minute_ma_states`` is convenient for small samples because it
+    accepts one contiguous minute frame.  A full-universe run cannot retain
+    60+ days of minutes for every symbol, so its loader aggregates historical
+    minutes to four hourly bars first and passes those bars here.  Only
+    ``target_bars`` are expanded to minute x MA rows; all historical values
+    used for the MA seed and touch counter are completed-hour values.
+    """
+
+    selected = config or MinuteMAConfig()
+    selected.validate()
+    if target_bars.empty or hourly_bars.empty:
+        return pd.DataFrame()
+    prepared = prepare_minute_bars(target_bars)
+    hourly_required = {
+        "symbol",
+        "trade_date",
+        "sixty_minute_bucket",
+        "adjust_factor",
+        "adjusted_open",
+        "adjusted_high",
+        "adjusted_low",
+        "adjusted_close",
+        "close",
+    }
+    _require_columns(hourly_bars, hourly_required)
+    hourly = hourly_bars.copy()
+    hourly["symbol"] = hourly["symbol"].astype(str)
+    hourly["trade_date"] = hourly["trade_date"].astype(str)
+    hourly["sixty_minute_bucket"] = pd.to_numeric(hourly["sixty_minute_bucket"], errors="coerce")
+    hourly = hourly.loc[hourly["sixty_minute_bucket"].notna()].copy()
+    hourly["sixty_minute_bucket"] = hourly["sixty_minute_bucket"].astype("int16")
+    hourly.sort_values(["symbol", "trade_date", "sixty_minute_bucket"], inplace=True, kind="stable")
+    hourly = hourly.reset_index(drop=True)
+    hourly["hour_sequence"] = hourly.groupby("symbol", sort=False).cumcount().astype("int32")
+    history = _hour_history(hourly, selected)
+    if history.empty:
+        return pd.DataFrame()
+    touch_counts = _add_prior_touch_counts_from_hourly(history, selected)
+    target_dates = prepared["trade_date"].astype(str).unique().tolist()
+    history_columns = [
+        "symbol",
+        "trade_date",
+        "sixty_minute_bucket",
+        "ma_period",
+        "hour_sequence",
+        "prior_close_sum_adjusted",
+        "prior_completed_ma_adjusted",
+        "prior_ma_slope_bps",
+        "previous_hour_close_adjusted",
+        "previous_hour_high_adjusted",
+        "causal_intersection_adjusted",
+        "causal_intersection",
+        "final_ma_adjusted",
+        "final_ma",
+        "adjusted_open",
+        "adjusted_high",
+        "adjusted_low",
+        "adjusted_close",
+    ]
+    history_target = history.loc[history["trade_date"].isin(target_dates), history_columns].rename(
+        columns={
+            "final_ma_adjusted": "diagnostic_final_ma_adjusted",
+            "final_ma": "diagnostic_final_ma",
+            "adjusted_open": "diagnostic_hour_adjusted_open",
+            "adjusted_high": "diagnostic_hour_adjusted_high",
+            "adjusted_low": "diagnostic_hour_adjusted_low",
+            "adjusted_close": "diagnostic_hour_adjusted_close",
+        }
+    )
+    states = prepared.merge(
+        history_target,
+        on=["symbol", "trade_date", "sixty_minute_bucket"],
+        how="inner",
+        validate="many_to_many",
+    )
+    states = states.merge(
+        touch_counts.loc[
+            :,
+            [
+                "symbol",
+                "trade_date",
+                "sixty_minute_bucket",
+                "ma_period",
+                "hour_sequence",
+                "prior_true_touch_count_window",
+                "prior_true_touch_count_loaded",
+            ],
+        ],
+        on=["symbol", "trade_date", "sixty_minute_bucket", "ma_period", "hour_sequence"],
+        how="left",
+        validate="many_to_one",
+    )
+    states.sort_values(
+        ["symbol", "trade_date", "sixty_minute_bucket", "ma_period", "session_minute_ordinal", "bar_time"],
+        inplace=True,
+        ignore_index=True,
+    )
+    level = states["causal_intersection_adjusted"]
+    states["live_ma_adjusted"] = (states["prior_close_sum_adjusted"] + states["adjusted_close"]) / states["ma_period"]
+    states["live_ma"] = states["live_ma_adjusted"] / states["adjust_factor"]
+    states["close_to_live_ma_bps"] = (states["adjusted_close"] / states["live_ma_adjusted"] - 1.0) * 10_000.0
+    states["close_to_intersection_bps"] = (states["adjusted_close"] / level - 1.0) * 10_000.0
+    states["range_distance_to_intersection_bps"] = np.select(
+        [states["adjusted_low"].gt(level), states["adjusted_high"].lt(level)],
+        [
+            (states["adjusted_low"] / level - 1.0) * 10_000.0,
+            (states["adjusted_high"] / level - 1.0) * 10_000.0,
+        ],
+        default=0.0,
+    )
+    states["touched_now"] = states["adjusted_low"].le(level) & states["adjusted_high"].ge(level)
+    states["close_below_intersection"] = states["adjusted_close"].lt(level)
+    group_key = list(EVENT_KEY_COLUMNS)
+    grouped = states.groupby(group_key, sort=False, observed=True)
+    states["partial_hour_high_adjusted"] = grouped["adjusted_high"].cummax()
+    states["partial_hour_low_adjusted"] = grouped["adjusted_low"].cummin()
+    states["partial_hour_open_adjusted"] = grouped["adjusted_open"].transform("first")
+    states["minutes_below_so_far"] = grouped["close_below_intersection"].cumsum().astype("int16")
+    states["rebound_from_partial_low_bps"] = (
+        states["adjusted_close"] / states["partial_hour_low_adjusted"] - 1.0
+    ) * 10_000.0
+    states["partial_hour_range_bps"] = (
+        states["partial_hour_high_adjusted"] / states["partial_hour_low_adjusted"] - 1.0
+    ) * 10_000.0
+    range_value = states["partial_hour_high_adjusted"] - states["partial_hour_low_adjusted"]
+    states["partial_hour_close_location"] = np.where(
+        range_value.gt(0),
+        (states["adjusted_close"] - states["partial_hour_low_adjusted"]) / range_value,
+        0.5,
+    )
+    body_low = np.minimum(states["partial_hour_open_adjusted"], states["adjusted_close"])
+    states["partial_lower_wick_bps"] = (body_low / states["partial_hour_low_adjusted"] - 1.0) * 10_000.0
+    previous_close = grouped["adjusted_close"].shift(1).fillna(states["previous_hour_close_adjusted"])
+    direction = np.sign(states["adjusted_close"] - previous_close)
+    states["up_amount"] = np.where(direction > 0, states["amount"], 0.0)
+    states["down_amount"] = np.where(direction < 0, states["amount"], 0.0)
+    states["cumulative_up_amount"] = states.groupby(group_key, sort=False)["up_amount"].cumsum()
+    states["cumulative_down_amount"] = states.groupby(group_key, sort=False)["down_amount"].cumsum()
+    states["up_down_amount_ratio"] = np.where(
+        states["cumulative_down_amount"].gt(0),
+        states["cumulative_up_amount"] / states["cumulative_down_amount"],
+        np.nan,
+    )
+    alignment_key = ["symbol", "trade_date", "bar_time"]
+    pivot = states.pivot_table(index=alignment_key, columns="ma_period", values="live_ma_adjusted", aggfunc="first")
+    score = pd.Series(0.0, index=pivot.index)
+    comparisons = pd.Series(0, index=pivot.index, dtype="int16")
+    for short, long in zip(selected.periods[:-1], selected.periods[1:], strict=True):
+        if short not in pivot or long not in pivot:
+            continue
+        available = pivot[short].notna() & pivot[long].notna()
+        score.loc[available] += np.sign(pivot.loc[available, short] - pivot.loc[available, long])
+        comparisons.loc[available] += 1
+    alignment = (score / comparisons.replace(0, np.nan)).rename("ma_alignment_score").reset_index()
+    states = states.merge(alignment, on=alignment_key, how="left", validate="many_to_one")
+    states["bullish_ma_stack"] = states["ma_alignment_score"].eq(1.0)
+    states["bearish_ma_stack"] = states["ma_alignment_score"].eq(-1.0)
+    states.drop(columns=["up_amount", "down_amount"], inplace=True)
+    if context is not None and not context.empty:
+        context_frame = context.copy()
+        context_frame["symbol"] = context_frame["symbol"].astype(str)
+        context_frame["trade_date"] = context_frame["trade_date"].astype(str)
+        merge_keys = ["symbol", "trade_date"]
+        if "bar_time" in context_frame.columns and "bar_time" in states.columns:
+            context_frame["bar_time"] = context_frame["bar_time"].map(normalize_bar_time)
+            merge_keys.append("bar_time")
+        duplicate = context_frame.duplicated(merge_keys)
+        if duplicate.any():
+            raise MinuteMAError("minute_ma_context_duplicate_key")
+        collisions = set(states.columns).intersection(context_frame.columns).difference(set(merge_keys))
+        if collisions:
+            raise MinuteMAError(f"minute_ma_context_column_collision:{','.join(sorted(collisions))}")
+        states = states.merge(context_frame, on=merge_keys, how="left", validate="many_to_one")
+    states.attrs["causal_columns"] = [column for column in states.columns if not column.startswith("diagnostic_")]
+    states.attrs["diagnostic_columns"] = [
+        "diagnostic_final_ma_adjusted",
+        "diagnostic_final_ma",
+        "diagnostic_hour_adjusted_open",
+        "diagnostic_hour_adjusted_high",
+        "diagnostic_hour_adjusted_low",
+        "diagnostic_hour_adjusted_close",
+    ]
+    return states
 
 
 def _target_mask(
@@ -839,8 +1101,10 @@ __all__ = [
     "MinuteMAConfig",
     "MinuteMAError",
     "build_hourly_bars",
+    "build_hourly_ma_history",
     "build_ma_event_table",
     "build_minute_ma_states",
+    "build_minute_ma_states_from_history",
     "load_qdp_minute_bars",
     "normalize_bar_time",
     "prepare_minute_bars",

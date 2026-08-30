@@ -5,7 +5,10 @@ import pandas as pd
 from quantlab.research.minute_ma_strategies import (
     attach_prior_daily_liquidity,
     build_liquidity_matched_control,
+    build_liquidity_matched_controls_many,
     build_strategy_signals,
+    build_strategy_signals_many,
+    build_strategy_signals_vectorized,
     strategy_catalog,
 )
 
@@ -105,6 +108,58 @@ def test_posthoc_rule_is_marked_non_executable() -> None:
     assert spec.control is True
 
 
+def test_batched_signal_builder_matches_individual_rules() -> None:
+    states = _state_rows()
+    ids = ["s0_random_matched", "s1_touch_reclaim", "s2_reclaim_positive_slope"]
+    individual = pd.concat(
+        [build_strategy_signals(states, strategy_ids=[strategy_id]) for strategy_id in ids],
+        ignore_index=True,
+    ).sort_values("signal_id", kind="stable").reset_index(drop=True)
+    batched = build_strategy_signals_many(states, strategy_ids=ids).sort_values(
+        "signal_id", kind="stable"
+    ).reset_index(drop=True)
+    pd.testing.assert_frame_equal(
+        individual,
+        batched,
+        check_dtype=False,
+        check_like=True,
+    )
+
+
+def test_vectorized_signal_builder_matches_individual_rules() -> None:
+    states = _state_rows()
+    ids = ["s0_random_matched", "s1_touch_reclaim", "s1_near_reversal", "s2_reclaim_positive_slope"]
+    individual = pd.concat(
+        [build_strategy_signals(states, strategy_ids=[strategy_id]) for strategy_id in ids],
+        ignore_index=True,
+    ).sort_values("signal_id", kind="stable").reset_index(drop=True)
+    vectorized = build_strategy_signals_vectorized(states, strategy_ids=ids).sort_values(
+        "signal_id", kind="stable"
+    ).reset_index(drop=True)
+    pd.testing.assert_frame_equal(
+        individual,
+        vectorized,
+        check_dtype=False,
+        check_like=True,
+    )
+
+
+def test_vectorized_filters_do_not_mutate_shared_rule_masks() -> None:
+    states = _state_rows().assign(vwap_supportive=True)
+    ids = [
+        "s1_touch_reclaim",
+        "s2_reclaim_positive_slope",
+        "s4_reclaim_vwap_support",
+    ]
+    individual = pd.concat(
+        [build_strategy_signals(states, strategy_ids=[strategy_id]) for strategy_id in ids],
+        ignore_index=True,
+    )
+    vectorized = build_strategy_signals_vectorized(states, strategy_ids=ids)
+    assert set(vectorized["strategy_id"]) == set(ids)
+    assert len(vectorized) == len(individual)
+
+
 def test_strong_control_uses_previous_high_not_previous_close() -> None:
     states = _state_rows()
     states.loc[:, "previous_hour_high_adjusted"] = 10.35
@@ -163,3 +218,21 @@ def test_liquidity_control_matches_same_minute_and_keeps_reference_id() -> None:
     assert controls["reference_signal_id"].iloc[0] == reference["signal_id"].iloc[0]
     assert controls["reference_symbol"].iloc[0] == "A"
     assert controls["liquidity_match_ratio"].iloc[0] == 1.1
+
+
+def test_many_liquidity_controls_clone_one_match_per_reference() -> None:
+    base = _state_rows()
+    other = base.copy()
+    other["symbol"] = "B"
+    base["prior_20d_median_amount"] = 100.0
+    other["prior_20d_median_amount"] = 110.0
+    states = pd.concat([base, other], ignore_index=True)
+    first = build_strategy_signals(states, strategy_ids=["s1_touch_reclaim"])
+    second = first.copy()
+    second["strategy_id"] = "s2_reclaim_positive_slope"
+    second["signal_id"] = second["signal_id"].str.replace("s1_touch_reclaim", "s2_reclaim_positive_slope", regex=False)
+    references = pd.concat([first, second], ignore_index=True)
+    controls = build_liquidity_matched_controls_many(states, references)
+    assert len(controls) == 2
+    assert set(controls["reference_signal_id"]) == set(references["signal_id"])
+    assert controls["symbol"].eq("B").all()
