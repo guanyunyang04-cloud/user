@@ -1,0 +1,74 @@
+{
+  "schema_version": "minute_ma_research_contract_v1",
+  "as_of": "2026-08-30",
+  "objective": "建立可因果复核的60分钟均线事件层，为后续策略事件研究提供事实表",
+  "periods": [10, 20, 40, 60, 120, 240],
+  "development_period": {
+    "start": "2022-01-01",
+    "end": "2024-12-31",
+    "purpose": "事件定义、假设筛选与参数冻结"
+  },
+  "validation_period": {
+    "start": "2025-01-01",
+    "end": "2025-12-31",
+    "purpose": "策略冻结后的历史检验；本阶段尚未使用"
+  },
+  "event_layer_validation": {
+    "status": "representative_checks_passed",
+    "record": "research/records/minute_ma_v1/representative_validation.json",
+    "report": "research/records/minute_ma_v1/representative_validation.md",
+    "scope": "2022-2024的12个代表日期、8只固定股票；仅验证数据切分、因果字段和事件分类，不验证收益"
+  },
+  "minute_source": {
+    "domain": "market_intraday_1m",
+    "dataset_id": "market_intraday_1m",
+    "required_columns": ["symbol", "trade_date", "bar_time", "open", "high", "low", "close", "volume", "amount"],
+    "price_policy": "使用adjust_factor调整价格；一交易日内adjust_factor必须恒定；质量排除日不参与事件计算",
+    "universe_policy": "只对调用者明确提供的股票加载；不得因为事件结果反向选择股票"
+  },
+  "session_contract": {
+    "expected_minute_count": 240,
+    "buckets": [
+      {"bucket": 1, "start": "09:31", "end": "10:30"},
+      {"bucket": 2, "start": "10:31", "end": "11:30"},
+      {"bucket": 3, "start": "13:01", "end": "14:00"},
+      {"bucket": 4, "start": "14:01", "end": "15:00"}
+    ],
+    "lunch_break": "11:31-13:00不进入同一小时的连续分钟序列",
+    "incomplete_hour_policy": "丢弃不满60根或边界不完整的小时段，并记录incomplete_hour_count"
+  },
+  "causal_ma_definition": {
+    "completed_hour_close": "只使用已经结束的60分钟段的最后收盘价",
+    "live_ma": "(前N-1个已完成小时收盘价之和 + 当前分钟最新价) / N",
+    "causal_intersection": "前N-1个已完成小时收盘价之和 / (N-1)；同一当前小时内固定",
+    "first_eligible_hour": "至少有N-1个历史完成小时后才产生事件状态",
+    "future_information_rule": "当前分钟之后的高低收盘、最终小时MA和最终K线形态不得进入当前分钟的因果字段；状态表中的事后值统一使用diagnostic_前缀"
+  },
+  "event_taxonomy": [
+    {"kind": "touch_hold", "definition": "实际穿过固定因果相交价，且小时结束时收盘仍在其上方"},
+    {"kind": "break_reclaim", "definition": "先出现收盘跌破，随后在当前小时内重新站回，最终在上方"},
+    {"kind": "reclaim_from_below", "definition": "小时开始时位于相交价下方，随后重新站回"},
+    {"kind": "failed_break", "definition": "触碰/跌破后没有收回，小时结束仍在下方"},
+    {"kind": "repeated_cross", "definition": "收盘相对因果相交价至少三次换侧"},
+    {"kind": "near_touch", "definition": "未实际穿越，但价格区间距相交价不超过near_touch_bps"},
+    {"kind": "posthoc_catchup", "definition": "当时未穿越，最终小时MA追到小时低点附近；只能作事后诊断"}
+  ],
+  "threshold_policy": {
+    "near_touch_bps": 25.0,
+    "posthoc_catchup_bps": 25.0,
+    "status": "contract_defaults_not_optimized",
+    "change_rule": "后续开发若调整阈值，必须作为新版本记录，不覆盖本合同"
+  },
+  "output_layers": {
+    "minute_states": "每个目标分钟 x MA周期的因果状态；可作为未来信号输入",
+    "event_summary": "每个股票/日期/小时/周期一行；包含结果分类和诊断字段",
+    "diagnostic_fields": "任何使用小时最终值的字段必须明确标记，状态表使用diagnostic_前缀，禁止进入实时买入规则",
+    "prior_touch_count_field": "prior_true_touch_count_window；窗口长度由prior_touch_window_hours显式记录"
+  },
+  "verification_scope": {
+    "small_sample_only": true,
+    "representative_categories": ["broad_up", "broad_down", "high_dispersion", "low_dispersion", "high_liquidity", "low_liquidity", "sector_concentration_proxy", "industry_rotation_proxy"],
+    "checks": ["60分钟边界", "午休与跨日", "动态MA不含未来分钟", "真触碰与均线追认区分", "跌破站回与失败跌破", "输出可由原始分钟人工复核"],
+    "not_in_scope": ["参数寻优", "完整策略收益结论", "自动交易", "QMT接入"]
+  }
+}

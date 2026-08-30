@@ -1,0 +1,677 @@
+{
+  "schema_version": "quantlab.minute_ma_representative_validation/v1",
+  "generated_at": "2026-08-30T08:58:02+00:00",
+  "scope": {
+    "development_period": "2022-01-01/2024-12-31",
+    "validation_period": "2025-01-01/2025-12-31",
+    "validation_period_used": false,
+    "purpose": "验证60分钟切分、因果均线字段和事件分类可由真实分钟数据复核",
+    "not_a_profitability_backtest": true,
+    "symbols": [
+      "000001.SZ",
+      "000858.SZ",
+      "600036.SH",
+      "600519.SH",
+      "600613.SH",
+      "600664.SH",
+      "600127.SH",
+      "002412.SZ"
+    ],
+    "date_categories_are": "统计代理标签，非作者主观标签",
+    "date_selection_basis": "沿用此前日线横截面统计扫描得到的候选日期；未查看本次分钟事件结果后再挑选"
+  },
+  "source_snapshot": {
+    "active_as_of_date": "2026-07-21",
+    "dataset_ids": {
+      "market_intraday_1m": "market_intraday_1m",
+      "adjust_factor": "adjust_factor__98fbecd479934dda685046f0"
+    },
+    "manifest_sha256": {
+      "active": "ca59c93f6b21351fe4a049f73393b8f76683e63e717c58bb6b7f1e43f5124d80",
+      "market_intraday_1m": "438bbb7c712e2780991690be67b33b07d9d397b8fe6e3c18da9526a5b0b2213c",
+      "adjust_factor": "fa0b0620a1ccea252cce39b4780f7911ee4fd824cfeff8b23b83c4630917bdc0"
+    },
+    "manifest_paths": {
+      "active": "H:\\quant_project\\data\\qdp\\qdp_v2\\active\\active.json",
+      "market_intraday_1m": "H:\\quant_project\\data\\qdp\\qdp_v2\\datasets\\market_intraday_1m\\market_intraday_1m\\dataset.json",
+      "adjust_factor": "H:\\quant_project\\data\\qdp\\qdp_v2\\datasets\\adjust_factor\\adjust_factor__98fbecd479934dda685046f0\\dataset.json"
+    }
+  },
+  "implementation_snapshot": {
+    "module": "src/quantlab/research/minute_ma.py",
+    "sha256": "dc78e7da4e6c57e63502373762e6f0df8aa88f175ec957ec37128de80eedecdc",
+    "rechecked_after_contract_hardening": true,
+    "rechecked_at": "2026-08-30T09:21:00Z"
+  },
+  "configuration": {
+    "ma_periods": [
+      10,
+      20,
+      40,
+      60,
+      120,
+      240
+    ],
+    "near_touch_bps": 25.0,
+    "posthoc_catchup_bps": 25.0,
+    "prior_touch_window_hours": 20,
+    "session_buckets": [
+      {
+        "bucket": 1,
+        "start": "09:31",
+        "end": "10:30"
+      },
+      {
+        "bucket": 2,
+        "start": "10:31",
+        "end": "11:30"
+      },
+      {
+        "bucket": 3,
+        "start": "13:01",
+        "end": "14:00"
+      },
+      {
+        "bucket": 4,
+        "start": "14:01",
+        "end": "15:00"
+      }
+    ]
+  },
+  "batches": [
+    {
+      "year": "2022",
+      "warmup_start": "2021-10-01",
+      "source_end": "2022-12-31",
+      "target_dates": [
+        {
+          "trade_date": "2022-04-25",
+          "category": "broad_down"
+        },
+        {
+          "trade_date": "2022-04-27",
+          "category": "high_dispersion"
+        },
+        {
+          "trade_date": "2022-04-29",
+          "category": "broad_up"
+        },
+        {
+          "trade_date": "2022-06-15",
+          "category": "high_liquidity"
+        },
+        {
+          "trade_date": "2022-09-30",
+          "category": "low_liquidity"
+        },
+        {
+          "trade_date": "2022-11-08",
+          "category": "low_dispersion"
+        },
+        {
+          "trade_date": "2022-11-29",
+          "category": "sector_concentration_proxy"
+        }
+      ],
+      "source_rows": 581520,
+      "source_stock_days": 2423,
+      "quality_excluded_stock_days_applied": 1,
+      "quality_excluded_stock_days_applied_scope": "entire_source_range",
+      "quality_excluded_stock_days_available_in_range": 1864,
+      "target_stock_days": 56,
+      "target_complete_240_stock_days": 56,
+      "target_incomplete_stock_days": 0,
+      "missing_expected_stock_days": [],
+      "incomplete_stock_days": [],
+      "bad_bucket_counts": [],
+      "bad_ordinal_sets": [],
+      "state_rows": 80640,
+      "state_groups": 1344,
+      "state_groups_not_60": 0,
+      "state_rows_by_ma_period": {
+        "10": 13440,
+        "20": 13440,
+        "40": 13440,
+        "60": 13440,
+        "120": 13440,
+        "240": 13440
+      },
+      "max_intersection_nunique_per_group": 1,
+      "dynamic_ma_formula_max_abs_error": 0.0,
+      "event_rows": 249,
+      "event_kinds": {
+        "repeated_cross": 114,
+        "posthoc_catchup": 37,
+        "failed_break": 35,
+        "near_touch": 24,
+        "reclaim_from_below": 21,
+        "break_reclaim": 10,
+        "touch_hold": 8
+      },
+      "posthoc_true_touch_conflicts": 0,
+      "confirmation_order_violations": 0,
+      "checks": {
+        "all_expected_stock_days_present": true,
+        "all_target_stock_days_have_240_bars": true,
+        "all_target_buckets_have_60_bars": true,
+        "all_target_ordinals_are_0_to_239": true,
+        "all_state_groups_have_60_rows": true,
+        "causal_intersection_constant_per_group": true,
+        "live_ma_formula_exact": true,
+        "posthoc_never_true_touch": true,
+        "confirmation_not_before_reference": true
+      },
+      "per_date": [
+        {
+          "trade_date": "2022-04-25",
+          "category": "broad_down",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 12,
+          "event_kinds": {
+            "failed_break": 7,
+            "near_touch": 3,
+            "repeated_cross": 1,
+            "posthoc_catchup": 1
+          }
+        },
+        {
+          "trade_date": "2022-04-27",
+          "category": "high_dispersion",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 37,
+          "event_kinds": {
+            "repeated_cross": 15,
+            "posthoc_catchup": 6,
+            "failed_break": 6,
+            "near_touch": 5,
+            "reclaim_from_below": 3,
+            "touch_hold": 2
+          }
+        },
+        {
+          "trade_date": "2022-04-29",
+          "category": "broad_up",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 37,
+          "event_kinds": {
+            "repeated_cross": 18,
+            "failed_break": 11,
+            "near_touch": 4,
+            "posthoc_catchup": 3,
+            "break_reclaim": 1
+          }
+        },
+        {
+          "trade_date": "2022-06-15",
+          "category": "high_liquidity",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 54,
+          "event_kinds": {
+            "repeated_cross": 32,
+            "posthoc_catchup": 8,
+            "touch_hold": 3,
+            "reclaim_from_below": 3,
+            "near_touch": 3,
+            "break_reclaim": 3,
+            "failed_break": 2
+          }
+        },
+        {
+          "trade_date": "2022-09-30",
+          "category": "low_liquidity",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 45,
+          "event_kinds": {
+            "repeated_cross": 19,
+            "posthoc_catchup": 8,
+            "near_touch": 6,
+            "reclaim_from_below": 4,
+            "break_reclaim": 3,
+            "touch_hold": 3,
+            "failed_break": 2
+          }
+        },
+        {
+          "trade_date": "2022-11-08",
+          "category": "low_dispersion",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 41,
+          "event_kinds": {
+            "repeated_cross": 24,
+            "posthoc_catchup": 7,
+            "failed_break": 4,
+            "reclaim_from_below": 3,
+            "break_reclaim": 2,
+            "near_touch": 1
+          }
+        },
+        {
+          "trade_date": "2022-11-29",
+          "category": "sector_concentration_proxy",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 23,
+          "event_kinds": {
+            "reclaim_from_below": 8,
+            "repeated_cross": 5,
+            "posthoc_catchup": 4,
+            "failed_break": 3,
+            "near_touch": 2,
+            "break_reclaim": 1
+          }
+        }
+      ]
+    },
+    {
+      "year": "2023",
+      "warmup_start": "2022-10-01",
+      "source_end": "2023-12-31",
+      "target_dates": [
+        {
+          "trade_date": "2023-08-29",
+          "category": "broad_up"
+        },
+        {
+          "trade_date": "2023-09-28",
+          "category": "industry_rotation_proxy"
+        }
+      ],
+      "source_rows": 579840,
+      "source_stock_days": 2416,
+      "quality_excluded_stock_days_applied": 0,
+      "quality_excluded_stock_days_applied_scope": "entire_source_range",
+      "quality_excluded_stock_days_available_in_range": 952,
+      "target_stock_days": 16,
+      "target_complete_240_stock_days": 16,
+      "target_incomplete_stock_days": 0,
+      "missing_expected_stock_days": [],
+      "incomplete_stock_days": [],
+      "bad_bucket_counts": [],
+      "bad_ordinal_sets": [],
+      "state_rows": 23040,
+      "state_groups": 384,
+      "state_groups_not_60": 0,
+      "state_rows_by_ma_period": {
+        "10": 3840,
+        "20": 3840,
+        "40": 3840,
+        "60": 3840,
+        "120": 3840,
+        "240": 3840
+      },
+      "max_intersection_nunique_per_group": 1,
+      "dynamic_ma_formula_max_abs_error": 0.0,
+      "event_rows": 119,
+      "event_kinds": {
+        "repeated_cross": 54,
+        "posthoc_catchup": 27,
+        "failed_break": 17,
+        "near_touch": 8,
+        "reclaim_from_below": 5,
+        "break_reclaim": 5,
+        "touch_hold": 3
+      },
+      "posthoc_true_touch_conflicts": 0,
+      "confirmation_order_violations": 0,
+      "checks": {
+        "all_expected_stock_days_present": true,
+        "all_target_stock_days_have_240_bars": true,
+        "all_target_buckets_have_60_bars": true,
+        "all_target_ordinals_are_0_to_239": true,
+        "all_state_groups_have_60_rows": true,
+        "causal_intersection_constant_per_group": true,
+        "live_ma_formula_exact": true,
+        "posthoc_never_true_touch": true,
+        "confirmation_not_before_reference": true
+      },
+      "per_date": [
+        {
+          "trade_date": "2023-08-29",
+          "category": "broad_up",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 68,
+          "event_kinds": {
+            "repeated_cross": 35,
+            "failed_break": 9,
+            "posthoc_catchup": 9,
+            "near_touch": 5,
+            "break_reclaim": 4,
+            "reclaim_from_below": 3,
+            "touch_hold": 3
+          }
+        },
+        {
+          "trade_date": "2023-09-28",
+          "category": "industry_rotation_proxy",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 51,
+          "event_kinds": {
+            "repeated_cross": 19,
+            "posthoc_catchup": 18,
+            "failed_break": 8,
+            "near_touch": 3,
+            "reclaim_from_below": 2,
+            "break_reclaim": 1
+          }
+        }
+      ]
+    },
+    {
+      "year": "2024",
+      "warmup_start": "2023-10-01",
+      "source_end": "2024-12-31",
+      "target_dates": [
+        {
+          "trade_date": "2024-02-05",
+          "category": "broad_down"
+        },
+        {
+          "trade_date": "2024-02-07",
+          "category": "high_dispersion"
+        },
+        {
+          "trade_date": "2024-09-30",
+          "category": "broad_up"
+        }
+      ],
+      "source_rows": 579840,
+      "source_stock_days": 2416,
+      "quality_excluded_stock_days_applied": 0,
+      "quality_excluded_stock_days_applied_scope": "entire_source_range",
+      "quality_excluded_stock_days_available_in_range": 747,
+      "target_stock_days": 24,
+      "target_complete_240_stock_days": 24,
+      "target_incomplete_stock_days": 0,
+      "missing_expected_stock_days": [],
+      "incomplete_stock_days": [],
+      "bad_bucket_counts": [],
+      "bad_ordinal_sets": [],
+      "state_rows": 34560,
+      "state_groups": 576,
+      "state_groups_not_60": 0,
+      "state_rows_by_ma_period": {
+        "10": 5760,
+        "20": 5760,
+        "40": 5760,
+        "60": 5760,
+        "120": 5760,
+        "240": 5760
+      },
+      "max_intersection_nunique_per_group": 1,
+      "dynamic_ma_formula_max_abs_error": 0.0,
+      "event_rows": 56,
+      "event_kinds": {
+        "repeated_cross": 16,
+        "failed_break": 10,
+        "reclaim_from_below": 8,
+        "near_touch": 7,
+        "posthoc_catchup": 7,
+        "touch_hold": 5,
+        "break_reclaim": 3
+      },
+      "posthoc_true_touch_conflicts": 0,
+      "confirmation_order_violations": 0,
+      "checks": {
+        "all_expected_stock_days_present": true,
+        "all_target_stock_days_have_240_bars": true,
+        "all_target_buckets_have_60_bars": true,
+        "all_target_ordinals_are_0_to_239": true,
+        "all_state_groups_have_60_rows": true,
+        "causal_intersection_constant_per_group": true,
+        "live_ma_formula_exact": true,
+        "posthoc_never_true_touch": true,
+        "confirmation_not_before_reference": true
+      },
+      "per_date": [
+        {
+          "trade_date": "2024-02-05",
+          "category": "broad_down",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 38,
+          "event_kinds": {
+            "repeated_cross": 10,
+            "reclaim_from_below": 8,
+            "near_touch": 7,
+            "failed_break": 6,
+            "break_reclaim": 3,
+            "posthoc_catchup": 2,
+            "touch_hold": 2
+          }
+        },
+        {
+          "trade_date": "2024-02-07",
+          "category": "high_dispersion",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 18,
+          "event_kinds": {
+            "repeated_cross": 6,
+            "posthoc_catchup": 5,
+            "failed_break": 4,
+            "touch_hold": 3
+          }
+        },
+        {
+          "trade_date": "2024-09-30",
+          "category": "broad_up",
+          "included_stock_days": 8,
+          "complete_240_stock_days": 8,
+          "state_rows": 11520,
+          "event_rows": 0,
+          "event_kinds": {}
+        }
+      ]
+    }
+  ],
+  "overall": {
+    "batch_count": 3,
+    "target_date_count": 12,
+    "target_stock_day_count": 96,
+    "target_complete_240_stock_day_count": 96,
+    "state_rows": 138240,
+    "event_rows": 424,
+    "event_kinds": {
+      "repeated_cross": 184,
+      "posthoc_catchup": 71,
+      "failed_break": 62,
+      "near_touch": 39,
+      "reclaim_from_below": 34,
+      "break_reclaim": 18,
+      "touch_hold": 16
+    },
+    "posthoc_true_touch_conflicts": 0
+  },
+  "representative_event_samples": [
+    {
+      "event_kind": "break_reclaim",
+      "symbol": "000858.SZ",
+      "trade_date": "2022-04-29",
+      "sixty_minute_bucket": 4,
+      "ma_period": 120,
+      "reference_time": "140400000",
+      "causal_confirmation_time": "145500000",
+      "causal_intersection": 161.81563025210082,
+      "reference_adjusted_low": 202.83648065634068,
+      "reference_adjusted_high": 203.1248143433058,
+      "reference_adjusted_close": 202.86155315085935,
+      "recomputed_reference_true_touch": true,
+      "event_true_touch": true,
+      "reference_touch_expectation_ok": true,
+      "confirmation_time_order_ok": true,
+      "final_ma_to_hour_low_bps": 19.705882352940574,
+      "diagnostic_uses_hour_end": true
+    },
+    {
+      "event_kind": "failed_break",
+      "symbol": "000001.SZ",
+      "trade_date": "2022-04-25",
+      "sixty_minute_bucket": 1,
+      "ma_period": 120,
+      "reference_time": "095300000",
+      "causal_confirmation_time": "095300000",
+      "causal_intersection": 15.335882352941178,
+      "reference_adjusted_low": 47.75371915557289,
+      "reference_adjusted_high": 47.878402495404664,
+      "reference_adjusted_close": 47.75371915557289,
+      "recomputed_reference_true_touch": true,
+      "event_true_touch": true,
+      "reference_touch_expectation_ok": true,
+      "confirmation_time_order_ok": true,
+      "final_ma_to_hour_low_bps": 215.63402176326906,
+      "diagnostic_uses_hour_end": true
+    },
+    {
+      "event_kind": "near_touch",
+      "symbol": "000001.SZ",
+      "trade_date": "2022-04-25",
+      "sixty_minute_bucket": 1,
+      "ma_period": 20,
+      "reference_time": "093100000",
+      "causal_confirmation_time": null,
+      "causal_intersection": 15.875789473684211,
+      "reference_adjusted_low": 48.626502534395364,
+      "reference_adjusted_high": 49.40577340834401,
+      "reference_adjusted_close": 49.1252358937225,
+      "recomputed_reference_true_touch": false,
+      "event_true_touch": false,
+      "reference_touch_expectation_ok": true,
+      "confirmation_time_order_ok": true,
+      "final_ma_to_hour_low_bps": 549.966688874084,
+      "diagnostic_uses_hour_end": true
+    },
+    {
+      "event_kind": "posthoc_catchup",
+      "symbol": "600519.SH",
+      "trade_date": "2022-04-25",
+      "sixty_minute_bucket": 3,
+      "ma_period": 120,
+      "reference_time": "135500000",
+      "causal_confirmation_time": null,
+      "causal_intersection": 1738.956638655462,
+      "reference_adjusted_low": 2831.187579313342,
+      "reference_adjusted_high": 2835.3127335940894,
+      "reference_adjusted_close": 2835.3127335940894,
+      "recomputed_reference_true_touch": false,
+      "event_true_touch": false,
+      "reference_touch_expectation_ok": true,
+      "confirmation_time_order_ok": true,
+      "final_ma_to_hour_low_bps": -24.2457617720071,
+      "diagnostic_uses_hour_end": true
+    },
+    {
+      "event_kind": "reclaim_from_below",
+      "symbol": "000001.SZ",
+      "trade_date": "2022-04-27",
+      "sixty_minute_bucket": 1,
+      "ma_period": 10,
+      "reference_time": "093100000",
+      "causal_confirmation_time": "093100000",
+      "causal_intersection": 15.024444444444445,
+      "reference_adjusted_low": 46.75625243691862,
+      "reference_adjusted_high": 47.473181640951374,
+      "reference_adjusted_close": 47.22381496128781,
+      "recomputed_reference_true_touch": true,
+      "event_true_touch": true,
+      "reference_touch_expectation_ok": true,
+      "confirmation_time_order_ok": true,
+      "final_ma_to_hour_low_bps": 34.666666666665066,
+      "diagnostic_uses_hour_end": true
+    },
+    {
+      "event_kind": "repeated_cross",
+      "symbol": "000001.SZ",
+      "trade_date": "2022-04-25",
+      "sixty_minute_bucket": 1,
+      "ma_period": 240,
+      "reference_time": "093100000",
+      "causal_confirmation_time": "093200000",
+      "causal_intersection": 15.765020920502092,
+      "reference_adjusted_low": 48.626502534395364,
+      "reference_adjusted_high": 49.40577340834401,
+      "reference_adjusted_close": 49.1252358937225,
+      "recomputed_reference_true_touch": true,
+      "event_true_touch": true,
+      "reference_touch_expectation_ok": true,
+      "confirmation_time_order_ok": true,
+      "final_ma_to_hour_low_bps": 501.08261159227175,
+      "diagnostic_uses_hour_end": true
+    },
+    {
+      "event_kind": "touch_hold",
+      "symbol": "000001.SZ",
+      "trade_date": "2022-04-27",
+      "sixty_minute_bucket": 3,
+      "ma_period": 20,
+      "reference_time": "130600000",
+      "causal_confirmation_time": "130600000",
+      "causal_intersection": 15.435789473684212,
+      "reference_adjusted_low": 48.06542750515234,
+      "reference_adjusted_high": 48.221281679942074,
+      "reference_adjusted_close": 48.221281679942074,
+      "recomputed_reference_true_touch": true,
+      "event_true_touch": true,
+      "reference_touch_expectation_ok": true,
+      "confirmation_time_order_ok": true,
+      "final_ma_to_hour_low_bps": 14.591439688715901,
+      "diagnostic_uses_hour_end": true
+    }
+  ],
+  "checks": {
+    "2022:all_expected_stock_days_present": true,
+    "2022:all_target_stock_days_have_240_bars": true,
+    "2022:all_target_buckets_have_60_bars": true,
+    "2022:all_target_ordinals_are_0_to_239": true,
+    "2022:all_state_groups_have_60_rows": true,
+    "2022:causal_intersection_constant_per_group": true,
+    "2022:live_ma_formula_exact": true,
+    "2022:posthoc_never_true_touch": true,
+    "2022:confirmation_not_before_reference": true,
+    "2023:all_expected_stock_days_present": true,
+    "2023:all_target_stock_days_have_240_bars": true,
+    "2023:all_target_buckets_have_60_bars": true,
+    "2023:all_target_ordinals_are_0_to_239": true,
+    "2023:all_state_groups_have_60_rows": true,
+    "2023:causal_intersection_constant_per_group": true,
+    "2023:live_ma_formula_exact": true,
+    "2023:posthoc_never_true_touch": true,
+    "2023:confirmation_not_before_reference": true,
+    "2024:all_expected_stock_days_present": true,
+    "2024:all_target_stock_days_have_240_bars": true,
+    "2024:all_target_buckets_have_60_bars": true,
+    "2024:all_target_ordinals_are_0_to_239": true,
+    "2024:all_state_groups_have_60_rows": true,
+    "2024:causal_intersection_constant_per_group": true,
+    "2024:live_ma_formula_exact": true,
+    "2024:posthoc_never_true_touch": true,
+    "2024:confirmation_not_before_reference": true,
+    "representative_event_samples_reference_recomputed": true,
+    "representative_event_confirmation_order_causal": true,
+    "representative_samples_mark_hour_end_diagnostics": true
+  },
+  "all_checks_passed": true,
+  "interpretation": [
+    "所有检查只验证数据切分、字段因果性和事后诊断标记，不证明任何交易规则盈利。",
+    "posthoc_catchup只说明最终图形可能追认早先低点，不能作为实时入场信号。",
+    "本记录没有使用2025数据，没有进行参数搜索、模型训练或自动交易。"
+  ]
+}

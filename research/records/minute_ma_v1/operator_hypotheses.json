@@ -1,0 +1,391 @@
+{
+  "schema_version": "minute_ma_operator_hypotheses_v1",
+  "as_of": "2026-08-30",
+  "scope": {
+    "objective": "把四位操盘手的可重复思想拆成互相竞争、可用历史分钟数据检验的命题",
+    "development_period": "2022-01-01/2024-12-31",
+    "validation_period": "2025-01-01/2025-12-31",
+    "validation_status": "not_started",
+    "event_layer_status": "representative_checks_passed",
+    "event_layer_record": "research/records/minute_ma_v1/representative_validation.json",
+    "source_corpus": "H:/Money/tonghuashun_user_comments",
+    "selection_rule": "只保留带有条件、动作、失效或复盘判断的文本证据；不把晒单收益或单只股票结果当作规律",
+    "text_only_limit": "本目录使用评论文本和已有结构化字段；图片中的未转写信息暂不作为证据"
+  },
+  "authors": [
+    {
+      "id": "fu_ge_long_kong_long",
+      "display_name": "付哥龙空龙",
+      "corpus": {
+        "deduplicated_posts": 376,
+        "date_start": "2024-09-30",
+        "date_end": "2026-08-28",
+        "paths": [
+          "users/fu_ge_long_kong_long/posts.jsonl",
+          "live/users/fu_ge_long_kong_long/posts.jsonl"
+        ]
+      },
+      "hypotheses": [
+        {
+          "id": "FU-R1",
+          "thesis": "情绪退潮或恐慌尚未企稳时，减少新开仓甚至空仓，比继续寻找个股更有利。",
+          "role": "market_regime_gate",
+          "applicable_states": ["retreat", "panic", "unconfirmed_repair"],
+          "observable_features": ["market_up_ratio", "limit_down_count", "breadth_shock", "index_reclaim_status", "sector_dispersion"],
+          "causal_rule_template": "当市场广度恶化且核心标的未重新站稳时，禁止新开仓；仅保留观察状态。",
+          "invalidation": "市场广度恢复、核心标的重新获得持续承接后才解除禁入。",
+          "evidence": [
+            {"content_id": "2304807402", "date": "2026-02-01", "note": "把情绪周期转弱与果断空仓、等待下一条主线联系起来。"},
+            {"content_id": "2298872179", "date": "2026-01-21", "note": "退潮后震荡且亏钱效应高时，选择空仓等待修复。"},
+            {"content_id": "2397057774", "date": "2026-08-28", "note": "整体偏多但获利兑现和监管压力升高时，节奏转为高抛低吸。"}
+          ],
+          "data_status": "partially_ready",
+          "missing_or_proxy": ["情绪周期标签需由可复现市场统计定义，不能直接读取作者判断"]
+        },
+        {
+          "id": "FU-R2",
+          "thesis": "主线明确时，前排龙头和容量核心的相对强度比后排跟风更能承载持续性。",
+          "role": "sector_leadership_selection",
+          "applicable_states": ["main_rise", "repair_with_leader"],
+          "observable_features": ["sector_return_rank", "leader_relative_return", "leader_turnover", "sector_limit_up_echelon", "stock_position_in_sector"],
+          "causal_rule_template": "只在板块强度位于横截面前列且核心相对强度为正时保留候选；后排标的降权或剔除。",
+          "invalidation": "龙头断板、板块广度收缩或核心相对强度转负。",
+          "evidence": [
+            {"content_id": "2397524124", "date": "2026-08-28", "note": "强调主线前排、连板龙和资金回流时前排先涨，退潮时后排先死。"},
+            {"content_id": "2298872179", "date": "2026-01-21", "note": "用梯队和容量核心筛选电力方向，其余板块不看。"},
+            {"content_id": "2390499583", "date": "2026-08-13", "note": "核心断板即撤退，并等待另一个核心接力。"}
+          ],
+          "data_status": "partially_ready",
+          "missing_or_proxy": ["龙头身份、前后排和板块主线需要点时排名规则"]
+        },
+        {
+          "id": "FU-R3",
+          "thesis": "主线核心的分歧回落或均线附近低吸，可能优于盲目追高，但必须有市场与板块承接。",
+          "role": "pullback_entry",
+          "applicable_states": ["trend_continuation", "controlled_divergence"],
+          "observable_features": ["causal_ma_distance", "break_reclaim", "rebound_speed", "sector_relative_strength", "leader_support", "volume_balance"],
+          "causal_rule_template": "触碰动态均线只生成观察事件；只有重新站回且指数/板块未同步转弱时才生成入场候选。",
+          "invalidation": "均线下方停留过久、板块核心同步破位或反弹无量。",
+          "evidence": [
+            {"content_id": "2368883526", "date": "2026-06-30", "note": "提出聚焦核心、寻找机会低吸而不是追高。"},
+            {"content_id": "2397057774", "date": "2026-08-28", "note": "偏多环境仍把节奏描述为高抛低吸。"},
+            {"content_id": "2298872179", "date": "2026-01-21", "note": "在市场条件允许时才考虑低吸电网核心。"}
+          ],
+          "data_status": "ready_for_event_layer",
+          "missing_or_proxy": ["板块承接需接入点时行业聚合；资金流只能用成交额/相对量代理"]
+        },
+        {
+          "id": "FU-R4",
+          "thesis": "预先写出的市场、主线和个股情景，只有在盘中得到强度反馈时才执行；预期落空时减仓或撤退。",
+          "role": "scenario_execution",
+          "applicable_states": ["all"],
+          "observable_features": ["opening_gap", "first_30m_relative_return", "sector_confirmation", "leader_confirmation", "intraday_volume_curve"],
+          "causal_rule_template": "将前一交易日形成的候选分成预案情景；盘中只执行满足对应反馈的分支。",
+          "invalidation": "实际走势与预案关键条件不符，禁止用事后价格替换原条件。",
+          "evidence": [
+            {"content_id": "2397057774", "date": "2026-08-28", "note": "盘前判断环境偏多但强调早盘冲高可能是卖点。"},
+            {"content_id": "2390499583", "date": "2026-08-13", "note": "根据龙头断板与否决定撤退或等待接回。"}
+          ],
+          "data_status": "ready_for_minute_proxy",
+          "missing_or_proxy": ["作者的主观预案文本不是可自动生成标签，本阶段只实现价格量反馈代理"]
+        }
+      ]
+    },
+    {
+      "id": "hai_tang_jun",
+      "display_name": "海棠君_",
+      "corpus": {
+        "deduplicated_posts": 385,
+        "date_start": "2025-02-09",
+        "date_end": "2026-08-28",
+        "paths": [
+          "users/hai_tang_jun/posts.jsonl",
+          "live/users/hai_tang_jun/posts.jsonl"
+        ]
+      },
+      "hypotheses": [
+        {
+          "id": "HT-R1",
+          "thesis": "混沌、退潮或没有确定性时，低频等待和空仓本身是有效决策，而不是漏掉机会。",
+          "role": "market_regime_gate",
+          "applicable_states": ["chop", "retreat", "ice_point"],
+          "observable_features": ["market_return_dispersion", "sector_leader_agreement", "limit_up_echelon_completeness", "limit_down_count", "breadth"],
+          "causal_rule_template": "若板块方向、核心反馈和梯队均未形成，保持观察，不强行触发均线买入。",
+          "invalidation": "出现可确认的核心带动、板块共振和持续承接。",
+          "evidence": [
+            {"content_id": "2373300005", "date": "2026-07-07", "note": "将混沌市场定义为等待企稳和方向的阶段。"},
+            {"content_id": "2392346432", "date": "2026-08-17", "note": "没有排进目标也继续空，强调没有固定买卖点、跟随市场。"},
+            {"content_id": "2392104500", "date": "2026-08-17", "note": "排不到核心就空，等待确定性。"}
+          ],
+          "data_status": "partially_ready",
+          "missing_or_proxy": ["确定性和混沌需由显式横截面指标定义"]
+        },
+        {
+          "id": "HT-R2",
+          "thesis": "完整的板块梯队、容量中军和情绪龙头同时存在时，板块持续性应强于只有单只强股的题材。",
+          "role": "sector_structure_filter",
+          "applicable_states": ["main_rise", "repair"],
+          "observable_features": ["sector_member_count", "sector_limit_up_echelon", "leader_count_by_height", "capacity_stock_relative_strength", "sector_breadth"],
+          "causal_rule_template": "候选板块至少满足梯队完整度、容量核心承接和情绪核心强度中的预设组合；否则只做观察。",
+          "invalidation": "梯队断层、容量核心失守或情绪龙头不能带动板块。",
+          "evidence": [
+            {"content_id": "2392104500", "date": "2026-08-17", "note": "明确区分容量中军、情绪龙头和补涨先锋，并强调梯队完整。"},
+            {"content_id": "2389367449", "date": "2026-08-10", "note": "要求中军有承接、情绪龙头上板来检验强度。"},
+            {"content_id": "2395664631", "date": "2026-08-25", "note": "指出梯度不完整且缺少放量检验时后排风险高。"}
+          ],
+          "data_status": "partially_ready",
+          "missing_or_proxy": ["容量/情绪角色需依据规模、相对强度和连板状态点时推断"]
+        },
+        {
+          "id": "HT-R3",
+          "thesis": "核心股在板块分歧中保持承接、相对强度和可接受成交结构时，回落后的再次确认可能提供更好的风险收益。",
+          "role": "leader_pullback_confirmation",
+          "applicable_states": ["controlled_divergence", "leader_repair"],
+          "observable_features": ["causal_ma_distance", "reclaim_time", "leader_relative_return", "capacity_stock_support", "volume_not_extreme", "sector_breadth"],
+          "causal_rule_template": "均线事件只在核心相对强度为正、板块未全面转弱、下方承接可见时进入候选；不得仅凭最终K线长下影。",
+          "invalidation": "核心和中军同时跌破、反弹不能站回或成交极端异常。",
+          "evidence": [
+            {"content_id": "2389367449", "date": "2026-08-10", "note": "把中军承接、龙头回封和次日分歧强度作为继续观察条件。"},
+            {"content_id": "2392104500", "date": "2026-08-17", "note": "强调中军承接强、核心带动板块时的确定性。"}
+          ],
+          "data_status": "ready_for_event_layer",
+          "missing_or_proxy": ["承接使用低点回收、相对成交额和站回时间代理"]
+        },
+        {
+          "id": "HT-R4",
+          "thesis": "核心地位或板块结构被破坏时，应优先减少暴露，不因为过去的判断正确而继续持有。",
+          "role": "invalidation_and_exit",
+          "applicable_states": ["all"],
+          "observable_features": ["leader_break", "sector_breadth_break", "relative_strength_reversal", "intraday_ma_failure", "limit_board_failure"],
+          "causal_rule_template": "核心失去带动或板块由共振转为单点时，降低仓位/停止新增；退出信号使用当时已发生的破坏。",
+          "invalidation": "新的核心重新确认且板块广度恢复，只能开启新的观察周期。",
+          "evidence": [
+            {"content_id": "2373300005", "date": "2026-07-07", "note": "把龙头拉升但容量和卧龙下跌视为市场不合力。"},
+            {"content_id": "2395664631", "date": "2026-08-25", "note": "对梯队不完整和强度不足的题材采取目送/不追。"}
+          ],
+          "data_status": "ready_for_minute_proxy",
+          "missing_or_proxy": ["监管和题材认知属于外部信息，先不编码为自动信号"]
+        }
+      ]
+    },
+    {
+      "id": "chong_sheng_san_hu_yi_ge",
+      "display_name": "重生之散户一哥",
+      "corpus": {
+        "deduplicated_posts": 323,
+        "date_start": "2025-11-10",
+        "date_end": "2026-08-28",
+        "paths": [
+          "users/chong_sheng_san_hu_yi_ge/posts.jsonl",
+          "live/users/chong_sheng_san_hu_yi_ge/posts.jsonl"
+        ]
+      },
+      "hypotheses": [
+        {
+          "id": "CS-R1",
+          "thesis": "盘前预期必须被盘中实际反馈更新；低于预期且核心/板块不能修复时，停止持有或开仓。",
+          "role": "expectation_gap_execution",
+          "applicable_states": ["all"],
+          "observable_features": ["auction_gap", "first_5m_return", "first_30m_return", "sector_relative_return", "leader_follow_through"],
+          "causal_rule_template": "把预期分支映射为可观察阈值；若实际低于分支阈值且无快速修复，发出退出/不买信号。",
+          "invalidation": "核心带动、板块同步修复或后续强度重新超过分支阈值。",
+          "evidence": [
+            {"content_id": "2395861729", "date": "2026-08-25", "note": "用次日是否继续带领板块定义超预期，否则随板块去留。"},
+            {"content_id": "2391103177", "date": "2026-08-13", "note": "板块内其他股票低于预期时判断次日困难，并关注破板承接。"},
+            {"content_id": "2382494979", "date": "2026-07-24", "note": "明确低于预期后切换方向。"}
+          ],
+          "data_status": "ready_for_minute_proxy",
+          "missing_or_proxy": ["盘前主观预期本身需要独立记录，不能从收盘结果倒推"]
+        },
+        {
+          "id": "CS-R2",
+          "thesis": "尊重盘面意味着在没有破局或明确强度时保持手部约束，而不是强行寻找固定买点。",
+          "role": "no_trade_discipline",
+          "applicable_states": ["chop", "uncertain_repair"],
+          "observable_features": ["breakout_count", "sector_breadth", "leader_confirmation", "market_dispersion", "signal_conflict_count"],
+          "causal_rule_template": "若候选条件互相冲突且没有确认事件，保持空仓/观察；不以错过机会为理由放宽阈值。",
+          "invalidation": "出现明确破局、核心确认和可执行的成交窗口。",
+          "evidence": [
+            {"content_id": "2393029771", "date": "2026-08-19", "note": "直接使用尊重盘面、给机会并管住手的表述。"},
+            {"content_id": "2395369672", "date": "2026-08-24", "note": "混沌期以空仓保护利润，等待超预期品种。"}
+          ],
+          "data_status": "partially_ready",
+          "missing_or_proxy": ["破局和冲突需由横截面事件定义"]
+        },
+        {
+          "id": "CS-R3",
+          "thesis": "只在核心或板块得到实际强度确认后才考虑跟随，后排单独走强不足以替代主线确认。",
+          "role": "leader_confirmation",
+          "applicable_states": ["main_rise", "repair"],
+          "observable_features": ["leader_relative_return", "sector_breadth", "sector_turnover_share", "follower_dispersion", "break_reclaim"],
+          "causal_rule_template": "核心先确认、板块广度随后扩散时才允许后续候选；核心失效则撤销后排候选。",
+          "invalidation": "核心和板块同时转弱，或候选仅凭单点脉冲。",
+          "evidence": [
+            {"content_id": "2391103177", "date": "2026-08-13", "note": "用板块核心、破板回封和其他成员反馈决定是否继续。"},
+            {"content_id": "2389656211", "date": "2026-08-11", "note": "即使竞价不及预期，也观察龙头和板块能否继续给强反馈。"}
+          ],
+          "data_status": "partially_ready",
+          "missing_or_proxy": ["核心角色需要点时排名，暂不把作者点名股票硬编码"]
+        },
+        {
+          "id": "CS-R4",
+          "thesis": "同一策略的执行应依盘面动态调整仓位和持有/退出，而不能把一次成功预判固化成无条件规则。",
+          "role": "adaptive_positioning",
+          "applicable_states": ["all"],
+          "observable_features": ["intraday_realized_range", "relative_strength_change", "break_failure", "market_regime_score", "holding_time"],
+          "causal_rule_template": "根据已发生的强弱变化分级减仓或继续观察；策略日志必须保留原预案与实际分支。",
+          "invalidation": "没有可观测的分支变化时不重复加码。",
+          "evidence": [
+            {"content_id": "2396959044", "date": "2026-08-27", "note": "复盘中按预期一致、核心和次核心的反馈调整持仓。"},
+            {"content_id": "2396375294", "date": "2026-08-26", "note": "按核心观察标的的反馈决定去留，失败时以空仓为主。"}
+          ],
+          "data_status": "ready_for_minute_proxy",
+          "missing_or_proxy": ["仓位大小需要单独的组合回放，不在事件表内决定"]
+        }
+      ]
+    },
+    {
+      "id": "niu_ge_xun_shi",
+      "display_name": "牛哥寻势",
+      "corpus": {
+        "deduplicated_posts": 78,
+        "date_start": "2026-08-19",
+        "date_end": "2026-08-28",
+        "paths": ["live/users/牛哥寻势_893192357/posts.jsonl"],
+        "sample_warning": "样本只有78条、时间窗口很短，以下是候选命题，不是稳定风格结论"
+      },
+      "hypotheses": [
+        {
+          "id": "NG-R1",
+          "thesis": "竞价/开盘相对预期的强弱差，决定是等待回落、在确认后追强，还是降低风险。",
+          "role": "auction_expectation_gap",
+          "applicable_states": ["all"],
+          "observable_features": ["auction_gap", "first_5m_return", "first_5m_high_low", "opening_volume", "sector_opening_breadth"],
+          "causal_rule_template": "低开有承接观察回收；超预期高开需等待短时确认；高开后不能维持则不追。",
+          "invalidation": "开盘信号与板块/核心反馈相反。",
+          "evidence": [
+            {"content_id": "2397064658", "date": "2026-08-28", "note": "区分低开有承接与超预期高开后五分钟向上买。"},
+            {"content_id": "2397037443", "date": "2026-08-27", "note": "低开做T、超预期高开加仓，并要求板块分歧中的相对优势。"},
+            {"content_id": "2396460235", "date": "2026-08-26", "note": "把高开程度与异动约束结合，分别处理减仓和确认。"}
+          ],
+          "data_status": "ready_if_auction_domain_present",
+          "missing_or_proxy": ["竞价数据可由QDP opening_auction读取；盘口队列不可得"]
+        },
+        {
+          "id": "NG-R2",
+          "thesis": "回踩均线后重新企稳/站回是低吸确认；反复回钩却不能接近均线或继续跌破则退出。",
+          "role": "ma_reclaim_entry",
+          "applicable_states": ["trend_continuation", "controlled_pullback"],
+          "observable_features": ["causal_intersection", "live_ma", "break_reclaim", "minutes_below", "rebound_speed", "prior_touch_count"],
+          "causal_rule_template": "先记录真实穿越或近触碰；站回动态均线后才生成候选，连续不能站回则标记失败。",
+          "invalidation": "均线下方停留超时、反复穿越或板块同步转弱。",
+          "evidence": [
+            {"content_id": "2393640104", "date": "2026-08-20", "note": "列出五日/十日线附近低吸以及打板确认两类路径。"},
+            {"content_id": "2393625583", "date": "2026-08-19", "note": "明确回钩一直沾不上均线就清仓。"},
+            {"content_id": "2397037387", "date": "2026-08-27", "note": "低开回踩五日线且量能正常时低吸。"}
+          ],
+          "data_status": "implemented_in_event_layer",
+          "missing_or_proxy": ["评论提到5日/10日线；本项目事件层按用户指定的60分钟MA10/20/40/60/120/240验证，不假定周期等价"]
+        },
+        {
+          "id": "NG-R3",
+          "thesis": "健康换手/正常量能比极端缩量或异常放量更能支持回踩后的继续博弈。",
+          "role": "volume_quality_filter",
+          "applicable_states": ["pullback", "breakout", "board_repair"],
+          "observable_features": ["relative_amount_20h", "down_leg_amount", "rebound_leg_amount", "volume_concentration", "board_failure_count"],
+          "causal_rule_template": "回踩候选要求成交额不过度萎缩且不出现异常爆量；量能极端时降权或拒绝。",
+          "invalidation": "量能条件与价格/板块状态组合出现相反证据。",
+          "evidence": [
+            {"content_id": "2397037387", "date": "2026-08-27", "note": "要求量能不明显缩小或异常放大。"},
+            {"content_id": "2393640104", "date": "2026-08-20", "note": "把放量换手和低吸/打板确认放在同一决策框架。"},
+            {"content_id": "2393625583", "date": "2026-08-19", "note": "板上过硬不放量被视为隐患，后续失守均线则清。"}
+          ],
+          "data_status": "implemented_in_event_layer",
+          "missing_or_proxy": ["真实主动买卖方向不可得，先用分钟涨跌段成交额近似"]
+        },
+        {
+          "id": "NG-R4",
+          "thesis": "涨停失败后的回封、反包或板块共振，是比单次冲板更强的确认事件；监管/异动约束会改变可交易性。",
+          "role": "board_confirmation_and_constraint",
+          "applicable_states": ["breakout", "controlled_divergence"],
+          "observable_features": ["limit_touch_count", "reseal_time", "close_location", "sector_confirmation", "recent_return_distance", "regulatory_flag_proxy"],
+          "causal_rule_template": "将炸板、回封、反包作为独立事件；监管约束目前只作为研究分层字段，不直接预测结果。",
+          "invalidation": "回封失败、板块不共振或约束导致不可成交。",
+          "evidence": [
+            {"content_id": "2397037387", "date": "2026-08-27", "note": "双炸板反包涨停被描述为启动信号，并结合量能。"},
+            {"content_id": "2395416535", "date": "2026-08-24", "note": "把进入异动/监管与后续强弱分成不同情景。"},
+            {"content_id": "2397064658", "date": "2026-08-28", "note": "一字板需要观察炸板回封机会。"}
+          ],
+          "data_status": "partially_ready",
+          "missing_or_proxy": ["监管公告与盘口封单需要独立数据域；本阶段只保留价格量事件"]
+        }
+      ]
+    }
+  ],
+  "cross_author_conflicts": [
+    {
+      "id": "CONFLICT-01",
+      "topic": "回踩低吸_vs_突破追强",
+      "competing_hypotheses": ["FU-R3", "HT-R3", "NG-R2", "NG-R4"],
+      "test_design": "同一股票/板块按事件类型分层比较，不在一个总分中混合；报告触碰、站回、回封和直接突破的样本量、收益分布与失败率。"
+    },
+    {
+      "id": "CONFLICT-02",
+      "topic": "低频空仓_vs_积极参与",
+      "competing_hypotheses": ["FU-R1", "HT-R1", "CS-R2", "NG-R1"],
+      "test_design": "先固定市场状态门槛，再比较门槛内外的事件结果；空仓是可测的零交易分支，不从样本中删除。"
+    },
+    {
+      "id": "CONFLICT-03",
+      "topic": "核心集中_vs_板块扩散",
+      "competing_hypotheses": ["FU-R2", "HT-R2", "CS-R3"],
+      "test_design": "按核心相对强度、梯队完整度和后排扩散程度分层，检查是否存在状态依赖，而不是预设谁正确。"
+    },
+    {
+      "id": "CONFLICT-04",
+      "topic": "正常量能_vs_缩量/放量",
+      "competing_hypotheses": ["FU-R3", "HT-R3", "NG-R3"],
+      "test_design": "量能只作分层变量；报告成交额分位与事件后收益的非线性关系，避免把‘放量’或‘缩量’单独当作方向信号。"
+    }
+  ],
+  "shared_observable_contract": {
+    "causal_minute_fields": [
+      "bar_time",
+      "sixty_minute_bucket",
+      "causal_intersection",
+      "live_ma",
+      "close_to_intersection_bps",
+      "close_to_live_ma_bps",
+      "touched_now",
+      "minutes_below_so_far",
+      "partial_hour_high_adjusted",
+      "partial_hour_low_adjusted",
+      "rebound_from_partial_low_bps",
+      "cumulative_up_amount",
+      "cumulative_down_amount",
+      "ma_alignment_score",
+      "prior_true_touch_count_window",
+      "prior_touch_window_hours"
+    ],
+    "diagnostic_only_fields": [
+      "final_ma",
+      "diagnostic_final_ma_adjusted",
+      "diagnostic_final_ma",
+      "diagnostic_hour_adjusted_open",
+      "diagnostic_hour_adjusted_high",
+      "diagnostic_hour_adjusted_low",
+      "diagnostic_hour_adjusted_close",
+      "final_ma_to_hour_low_bps",
+      "hour_low",
+      "hour_close",
+      "posthoc_catchup",
+      "event_kind"
+    ],
+    "not_available_or_not_yet_causal": [
+      "true_order_book_imbalance",
+      "封单数量和撤单队列",
+      "作者主观预案原文的机器标签",
+      "监管公告在盘中生效的精确时间"
+    ]
+  }
+}

@@ -3,6 +3,11 @@
 This package is the small active path for daily technical research. It does not
 contain live order generation.
 
+The separate `minute_ma` module provides causal 60-minute MA10/20/40/60/120/240
+states and diagnostic event summaries for the minute-strategy work. Its contract
+and representative real-data checks are recorded in
+`research/records/minute_ma_v1/`; those checks do not establish profitability.
+
 ## Data contract
 
 The current repaired matrix contains 4,191,476 rows from 2012-01-04 through

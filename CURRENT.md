@@ -26,6 +26,8 @@ evidence.
   `data/research/minute_v2_bench_narrow_rev5/`.
 - Retired minute-v2 evidence:
   `data/research/archive/minute_v2_legacy_20260830/`.
+- Minute-MA research contract and representative validation:
+  `research/records/minute_ma_v1/`.
 - Durable study inputs and evidence: `research/studies/` and
   `research/records/`.
 - Local model outputs: `runs/`.
@@ -133,6 +135,22 @@ harness and marks open positions at entry cost. A real held-position path,
 independent market marks, and order-state reconciliation are required before
 any paper-trading interpretation.
 
+## Minute-MA event layer
+
+The causal 60-minute event module is `quantlab.research.minute_ma`. It is kept
+separate from the existing minute-v2 MA5/MA30 contract and uses MA10/20/40/60/
+120/240. It builds the four session buckets 09:31-10:30, 10:31-11:30,
+13:01-14:00, and 14:01-15:00. A live MA uses the current minute close; the
+fixed causal intersection is the price at which that live MA would meet the
+current price. End-of-hour values are retained only as explicitly marked
+diagnostics, including `posthoc_catchup`.
+
+The representative check covered 12 dates in 2022-2024 and eight fixed stocks:
+96/96 target stock-days had 240 minutes, all 138,240 state rows had complete
+60-minute groups, and 424 diagnostic events were generated. All 30 recorded
+checks passed. This validates data definitions and reproducibility only; it is
+not a strategy or profitability result, and 2025 was not read.
+
 ## Artifact policy
 
 Retain the rev5 compatibility benchmark as historical evidence and keep it
@@ -155,13 +173,15 @@ recoverable archives or provenance needed for audit.
 
 1. Keep QDP status/quick checks and the minute-v2 month verifier as regression
    checks after any data or code change.
-2. Build a deliberately small multi-date panel from 2022-2024 covering varied
-   market states. Do not build the full multi-year minute lake before a strategy
-   direction is justified.
-3. Compare hand-designed causal rules first, then optional tree/sequence
-   baselines. Fit and select on 2022-2024, inspect 2025 once, and report costs,
-   missingness, recall, turnover, and drawdown by year and regime.
-4. Replace the comparison replay with an inventory/order-state backtest before
+2. Turn the independent operator hypotheses and minute-MA event types into
+   competing hand-designed rules. Keep every attempted version and use only
+   causal minute fields for entries and exits.
+3. Replay the candidate rules on 2022-2024, then inspect 2025 once after the
+   strategy is frozen. Report costs, missingness, recall, turnover, and drawdown
+   by year and market regime.
+4. Add optional tree/sequence baselines only as comparators after the hand-
+   designed rules have a stable event contract.
+5. Replace the comparison replay with an inventory/order-state backtest before
    considering a broker adapter. QMT integration remains deferred.
 
 ## Useful commands
