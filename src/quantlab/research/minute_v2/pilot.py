@@ -22,6 +22,7 @@ from .contracts import (
     OPTIONAL_STORAGE_COLUMNS,
     SIXTY_MINUTE_WINDOWS,
     MinuteV2Error,
+    model_feature_columns_for_storage,
 )
 from .features import STOCK_DAY_COLUMNS, build_feature_frame
 from .labels import DAILY_LABEL_HORIZONS, MINUTE_LABEL_HORIZONS
@@ -195,6 +196,15 @@ def audit_pilot_month(
     manifest_file = Path(manifest_path).resolve()
     manifest = read_json(manifest_file)
     verify = verify_month(manifest_file)
+    build_spec = manifest.get("build_spec")
+    if not isinstance(build_spec, dict):
+        raise MinuteV2Error("minute_v2_pilot_build_spec_missing")
+    feature_storage = str(build_spec.get("feature_storage", "full"))
+    model_feature_columns_for_storage(feature_storage)
+    if feature_storage == "core":
+        raise MinuteV2Error(
+            "minute_v2_pilot_audit_requires_split_or_full_storage"
+        )
     artifacts = dict(manifest.get("artifacts", {}))
     if "base" not in artifacts:
         raise MinuteV2Error("minute_v2_pilot_audit_requires_retained_base")
@@ -389,6 +399,7 @@ def audit_pilot_month(
         "schema": "quantlab.minute_v2_pilot_audit/2",
         "status": "ok",
         "manifest": str(manifest_file),
+        "feature_storage": feature_storage,
         "scope": "data correctness only; no strategy score or return was inspected",
         "artifact_verification": verify,
         "base": {

@@ -28,8 +28,9 @@ from .contracts import (
     MODEL_FEATURE_COLUMNS,
     OPTIONAL_STORAGE_COLUMNS,
     MinuteV2Error,
+    model_feature_columns_for_storage,
 )
-from .mining import mine_formula_features, write_mining_result
+from .mining import DEFAULT_MINING_SEEDS, mine_formula_features, write_mining_result
 from .models import (
     evaluate_scores,
     fit_lightgbm_ranker,
@@ -353,6 +354,11 @@ def _period_parts(dataset_root: Path, start_year: int, end_year: int) -> list[Pe
                     feature_storage=feature_storage,
                 )
             )
+    storage_modes = sorted({part.feature_storage for part in parts})
+    if len(storage_modes) > 1:
+        raise MinuteV2Error(
+            "minute_v2_training_mixed_feature_storage:" + ",".join(storage_modes)
+        )
     return parts
 
 
@@ -377,15 +383,20 @@ def _period_query(
     event_scan = _scan([part.events])
     label_scan = _scan([part.labels])
     base_scan = _scan([part.base])
-    optional_scan = _scan([part.optional]) if part.optional is not None else None
+    optional_scan = None
+    if part.feature_storage == "split":
+        if part.optional is None:
+            raise MinuteV2Error("minute_v2_training_optional_features_missing")
+        optional_scan = _scan([part.optional])
     optional_names = set(OPTIONAL_STORAGE_COLUMNS)
+    feature_names = model_feature_columns_for_storage(part.feature_storage)
     feature_projection = ",".join(
         (
             f"o.{name}"
             if optional_scan is not None and name in optional_names
             else f"b.{name}"
         )
-        for name in MODEL_FEATURE_COLUMNS
+        for name in feature_names
     )
     execution_projection = (
         "," + ",".join(f"l.{name}" for name in EXECUTION_LABEL_COLUMNS)
@@ -422,12 +433,16 @@ def _period_query(
     """
 
 
-def _normalise_training_frame(frame: pd.DataFrame) -> pd.DataFrame:
+def _normalise_training_frame(
+    frame: pd.DataFrame,
+    *,
+    feature_names: tuple[str, ...] = MODEL_FEATURE_COLUMNS,
+) -> pd.DataFrame:
     if frame.empty:
         return frame
     for name in KEY_COLUMNS:
         frame[name] = frame[name].astype(str)
-    for name in MODEL_FEATURE_COLUMNS:
+    for name in feature_names:
         frame[name] = pd.to_numeric(frame[name], errors="coerce").astype("float32")
     frame["label_net_return"] = pd.to_numeric(
         frame["label_net_return"], errors="coerce"
@@ -455,6 +470,7 @@ def iter_period_frames(
     temporary = Path(temp_directory).resolve()
     temporary.mkdir(parents=True, exist_ok=True)
     for part in _period_parts(dataset, start_year, end_year):
+        feature_names = model_feature_columns_for_storage(part.feature_storage)
         month_temp = temporary / f"year={part.year:04d}" / f"month={part.month:02d}"
         month_temp.mkdir(parents=True, exist_ok=True)
         connection = duckdb.connect(":memory:")
@@ -471,7 +487,10 @@ def iter_period_frames(
             )
             reader = connection.execute(query).fetch_record_batch(rows_per_batch)
             for batch in reader:
-                frame = _normalise_training_frame(batch.to_pandas())
+                frame = _normalise_training_frame(
+                    batch.to_pandas(),
+                    feature_names=feature_names,
+                )
                 if not frame.empty:
                     yield frame
         finally:
@@ -1089,6 +1108,14 @@ def _run_fold(
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     directory = output_root / f"fold_{spec.fold}"
     directory.mkdir(parents=True, exist_ok=True)
+    fold_parts = _period_parts(dataset_root, spec.train_start_year, spec.test_end_year)
+    if not fold_parts:
+        raise MinuteV2Error(f"minute_v2_training_period_empty:{spec.train_start_year}:{spec.test_end_year}")
+    feature_storage = fold_parts[0].feature_storage
+    feature_names = model_feature_columns_for_storage(feature_storage)
+    mining_seed_features = tuple(
+        name for name in DEFAULT_MINING_SEEDS if name in feature_names
+    )
     with TemporaryDirectory(prefix=f"fold_{spec.fold}_", dir=output_root) as temporary:
         temp = Path(temporary)
 
@@ -1135,6 +1162,7 @@ def _run_fold(
         )
         ridge, ridge_meta = fit_ridge_chunks(
             train_factory,
+            feature_names=feature_names,
             alpha=10.0,
             median_sample_size=DEFAULT_MEDIAN_SAMPLE_ROWS,
         )
@@ -1142,6 +1170,7 @@ def _run_fold(
             mining_result = mine_formula_features(
                 train_sample,
                 validation_sample,
+                seed_features=mining_seed_features,
                 maximum_candidates=120,
                 maximum_selected=12,
                 minimum_coverage=0.85,
@@ -1157,6 +1186,7 @@ def _run_fold(
         lightgbm_model, lightgbm_meta = fit_lightgbm_ranker(
             train_sample,
             validation=validation_sample,
+            feature_names=feature_names,
         )
         lightgbm_meta["sampling"] = {
             "train": train_sample_meta,
@@ -1169,7 +1199,7 @@ def _run_fold(
                 "rule": rule_score,
                 "ridge": ridge.predict,
                 "lightgbm": lambda frame, model=lightgbm_model: model.predict(
-                    frame.loc[:, list(MODEL_FEATURE_COLUMNS)]
+                    frame.loc[:, list(feature_names)]
                 ),
             },
             temp / "scores",
@@ -1196,7 +1226,8 @@ def _run_fold(
                     "feature_source": "base_joined_by_symbol_trade_date_bar_time",
                 },
             },
-            "feature_names": list(MODEL_FEATURE_COLUMNS),
+            "feature_storage": feature_storage,
+            "feature_names": list(feature_names),
             "lightgbm": lightgbm_meta,
             "evaluations": evaluations,
             "available_memory_gib_after_fold": psutil.virtual_memory().available / 1024**3,

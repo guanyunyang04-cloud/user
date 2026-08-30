@@ -68,7 +68,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--feature-storage",
         choices=("split", "core", "full"),
         default="split",
-        help="persist core features only, core+optional sidecar, or legacy full base",
+        help=(
+            "split=core base plus optional sidecar; core=core-only training profile; "
+            "full=complete feature matrix in base"
+        ),
     )
     range_parser = subparsers.add_parser("build-range")
     range_parser.add_argument("--start-year", type=int, required=True)
@@ -94,7 +97,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--feature-storage",
         choices=("split", "core", "full"),
         default="split",
-        help="persist core features only, core+optional sidecar, or legacy full base",
+        help=(
+            "split=core base plus optional sidecar; core=core-only training profile; "
+            "full=complete feature matrix in base"
+        ),
     )
     audit = subparsers.add_parser("audit-pilot")
     audit.add_argument("--manifest", required=True)

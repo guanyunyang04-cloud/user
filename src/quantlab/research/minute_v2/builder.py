@@ -66,6 +66,7 @@ RUNTIME_ONLY_CONFIG_FIELDS = frozenset(
         "query_profile_path",
     }
 )
+_DIRECTORY_REMOVE_RETRY_DELAYS = (0.05, 0.10, 0.20, 0.40, 0.80)
 
 # Cache successful fingerprint checks for the lifetime of this process.  A
 # month can be inspected repeatedly by training factories; using the file
@@ -190,6 +191,41 @@ def _remove_exact_file(path: Path) -> bool:
     return True
 
 
+def _remove_generated_tree(path: Path) -> None:
+    """Remove one authorized generated tree with bounded transient retries.
+
+    Windows and exFAT can briefly report an emptied directory as non-empty
+    while a closed Parquet handle or filesystem metadata update is settling.
+    The caller remains responsible for checking the exact owned path before
+    invoking this helper.
+    """
+
+    target = Path(path)
+    last_error: OSError | None = None
+    attempts = len(_DIRECTORY_REMOVE_RETRY_DELAYS) + 1
+    for attempt in range(attempts):
+        if not target.exists():
+            return
+        try:
+            shutil.rmtree(target)
+        except OSError as exc:
+            if not target.exists():
+                return
+            transient = getattr(exc, "winerror", None) in {32, 33, 145} or getattr(
+                exc, "errno", None
+            ) in {16, 39}
+            if not transient:
+                raise
+            last_error = exc
+        if not target.exists():
+            return
+        if attempt < len(_DIRECTORY_REMOVE_RETRY_DELAYS):
+            time.sleep(_DIRECTORY_REMOVE_RETRY_DELAYS[attempt])
+    if last_error is not None:
+        raise last_error
+    raise MinuteV2Error(f"minute_v2_generated_cleanup_incomplete:{target}")
+
+
 def _remove_stale_optional_artifact(month_directory: Path) -> bool:
     """Remove the exact split-feature sidecar when the requested build omits it."""
 
@@ -221,7 +257,7 @@ def _runtime_directory(
     if runtime.exists():
         if not marker.is_file():
             raise MinuteV2Error(f"minute_v2_external_runtime_not_owned:{runtime}")
-        shutil.rmtree(runtime)
+        _remove_generated_tree(runtime)
     runtime.mkdir(parents=True, exist_ok=True)
     marker.write_text("quantlab.minute_v2.runtime/1\n", encoding="utf-8")
     return runtime, True
@@ -231,7 +267,7 @@ def _clean_runtime_directory(runtime: Path, *, external: bool, month_directory: 
     if external:
         marker = runtime / ".quantlab_runtime_marker"
         if marker.is_file():
-            shutil.rmtree(runtime)
+            _remove_generated_tree(runtime)
     else:
         _safe_clean_generated(runtime, month_directory, expected_name="_runtime")
 
@@ -494,7 +530,7 @@ def _safe_clean_generated(directory: Path, month_directory: Path, *, expected_na
     parent = month_directory.resolve()
     if resolved.parent != parent or resolved.name != expected_name:
         raise MinuteV2Error(f"minute_v2_generated_cleanup_refused:{resolved}")
-    shutil.rmtree(resolved)
+    _remove_generated_tree(resolved)
 
 
 def _checkpoint_spec(
@@ -845,7 +881,7 @@ def _materialize_period_raw_bars(
             resolved = staging.resolve()
             if resolved.parent != directory.resolve() or resolved.name != staging.name:
                 raise MinuteV2Error(f"minute_v2_period_raw_cleanup_refused:{resolved}")
-            shutil.rmtree(resolved)
+            _remove_generated_tree(resolved)
         staging.mkdir(parents=True, exist_ok=True)
         completed = False
         try:
@@ -880,7 +916,7 @@ def _materialize_period_raw_bars(
             completed = True
         finally:
             if staging.exists():
-                shutil.rmtree(staging)
+                _remove_generated_tree(staging)
         if not completed:
             for path in paths:
                 _remove_exact_file(path)

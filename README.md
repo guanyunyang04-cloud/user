@@ -136,9 +136,30 @@ available trading days), while the selected output date is `2022-06-16` with
 minutes), and the candidate and label artifacts each have 254,417 rows.
 Candidate coverage is 37.2092% in this run; that is a compute-budget
 observation, not an industry standard or a strategy-validity result. The
-current benchmark was rebuilt with implementation revision `2026-08-28-5`.
-The previous `data/research/minute_v2_bench_narrow/` directory is retained as
-an explicitly historical revision-3 artifact and is not mixed with this one.
+retained compatibility benchmark was rebuilt with implementation revision
+`2026-08-28-5`; it is intentionally kept separate from the current code
+revision. The previous `data/research/minute_v2_bench_narrow/` directory is
+retained as an explicitly historical revision-3 artifact and is not mixed
+with this one.
+
+The current builder revision is `2026-08-29-1`. A separate development artifact
+at `data/research/minute_v2_dev_rev6_partition/` has completed an end-to-end
+single-day `split` build and passes `verify-month`: its base and optional
+sidecar each contain 683,748 rows, while events and labels each contain
+254,417 rows across all 234 decision groups. The recorded
+`months/year=2022/month=06/query_profile.json` has 160 successful queries; in
+that run the 16 label-bucket queries, rather than feature construction, were
+the dominant cost. This confirms the shared support-cache path, but does not
+mean that stage-one or label work is free of source scans.
+
+Feature storage has explicit training semantics: `split` joins the 82-column
+core feature subset in the base with its 97-column optional feature sidecar,
+`full` keeps all 179 model columns in the base file, and `core` is a valid
+core-only model profile. The
+training loader selects the columns declared by the profile and rejects a
+range that mixes storage modes. `verify-month` and stage-one checks work with
+`core`; the full causal `audit-pilot` requires `split` or `full` because its
+finite-feature, fixed-boundary and mutation checks cover the complete matrix.
 
 The minute labels have distinct time semantics. `label_*m` advances N positions
 on the decision grid, so it is N decision steps rather than necessarily N
@@ -162,22 +183,22 @@ and entry-cost marking, not a fill-accurate inventory backtest.
 ```powershell
 $env:PYTHONPATH='H:\quant_project\src'
 
-# Recheck the current one-day correctness benchmark.
+# Recheck the current-code one-day development artifact.
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
   --workspace-root H:/quant_project verify-month `
-  --manifest H:/quant_project/data/research/minute_v2_bench_narrow_rev5/months/year=2022/month=06/manifest.json
+  --manifest H:/quant_project/data/research/minute_v2_dev_rev6_partition/months/year=2022/month=06/manifest.json
 
 # Reuse or rebuild the separate full-base outcomes, then refresh all recall reports.
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab.research.minute_v2 `
   --workspace-root H:/quant_project stage-one-audit `
-  --manifest H:/quant_project/data/research/minute_v2_bench_narrow_rev5/months/year=2022/month=06/manifest.json
+  --manifest H:/quant_project/data/research/minute_v2_dev_rev6_partition/months/year=2022/month=06/manifest.json
 ```
 
-The historical revision-3 manifest remains available at
-`data/research/minute_v2_bench_narrow/months/year=2022/month=06/manifest.json`.
-Running the verifier against that path intentionally reports
-`minute_v2_manifest_build_revision_mismatch:2026-08-28-3:2026-08-28-5`; do not
-edit it to suppress the guard.
+The retained revision-5 and historical revision-3 manifests remain available
+under `data/research/minute_v2_bench_narrow_rev5/` and
+`data/research/minute_v2_bench_narrow/`. Running the current verifier against
+them intentionally reports revision mismatches ending in `2026-08-29-1`; do
+not edit either manifest to suppress the guard.
 
 The older `data/research/minute_v2/` and any derived `/1` products are retained
 only as historical material and must not be mixed with the `/2` benchmark.

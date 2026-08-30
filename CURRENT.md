@@ -238,7 +238,7 @@ dedicated producer code has been retired.
   The retained candidate and label artifacts each contain 254,417 rows, or
   37.2092% of the base rows. The percentage is an observed compute-budget
   characteristic, not an industry standard, a target, or evidence of alpha.
-- The current benchmark manifest is
+- The retained compatibility benchmark manifest is
   `data/research/minute_v2_bench_narrow_rev5/months/year=2022/month=06/manifest.json`.
   It is `quantlab.minute_v2_month/2` and was rebuilt with implementation revision
   `2026-08-28-5` after defensive finite-value, structural-price, and field-mask
@@ -251,6 +251,23 @@ dedicated producer code has been retired.
   future-mutation maximum of about `4.44e-16` on its sampled probe. These are
   data-contract and causal-invariance checks only; no model return has been
   evaluated.
+- The current builder/training code is revision `2026-08-29-1`. Its separate
+  development artifact is
+  `data/research/minute_v2_dev_rev6_partition/months/year=2022/month=06/manifest.json`.
+  That `split` manifest passes `verify-month` with 683,748 base rows,
+  683,748 optional-feature rows, 254,417 event rows, 254,417 label rows and
+  all 234 decision groups present. Its query profile records 160 successful
+  queries; the 16 label-bucket queries dominate the roughly 824-second build
+  in this run. Support-cache reuse is therefore real but does not eliminate
+  all label/source scans, and stage-one remains a separate optimization target.
+- Feature storage is now explicit at the training boundary: `split` exposes
+  the complete 179-column model matrix through a core base plus optional
+  sidecar, `full` stores the same matrix in one base file, and `core` exposes
+  only the 82 core model columns. Training automatically uses the declared
+  profile and rejects mixed storage modes in one year range. `core` is valid
+  for contract/stage-one checks and core-only training; the complete causal
+  pilot audit intentionally requires `split` or `full` so its feature and
+  mutation checks cannot silently omit the optional windows.
 - In the label contract, `label_*m` advances by N positions on the 234-point
   decision grid. It is therefore N decision steps, not necessarily N elapsed
   trading minutes: a window may cross lunch or overnight. The separate
@@ -490,13 +507,14 @@ dedicated producer code has been retired.
    every mask unless the current field-level gates pass. Daily/factor/basic and
    PIT auxiliary tails remain separate and continue through the existing local
    or free-source update path.
-2. The one-day complete-base recall audit is finished. Do not tune the gate to
-   this date or call its concentrated tails alpha. Next, repeat the same audit
-   on a small, regime-spanning set of dates, compare the present 37% attention
-   gate with a wider gate and a full-base/weighted-sampling baseline, and only
-   then train a directional ranker. Explicitly force current holdings through
-   the gate during a real inventory replay. No model or broker decision is
-   authorized by this benchmark alone.
+2. The one-day complete-base recall audit is finished for both the retained
+   rev5 benchmark and the current rev1 development artifact. Do not tune the
+   gate to this date or call its concentrated tails alpha. Next, repeat the
+   same audit on a small, regime-spanning set of dates, compare the present
+   37% attention gate with a wider gate and a full-base/weighted-sampling
+   baseline, and only then train a directional ranker. Explicitly force
+   current holdings through the gate during a real inventory replay. No model
+   or broker decision is authorized by this benchmark alone.
 3. Keep the QDP flattening migration as maintenance rather than a blocker for
    minute research. The active physical/latest-key quick check and the new
    minute-v2 artifact verification are green. Preserve atomic manifests,

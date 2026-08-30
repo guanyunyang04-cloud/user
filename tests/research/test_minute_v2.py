@@ -19,15 +19,19 @@ from quantlab.research.minute_v2.builder import (
     _materialize_cached_view,
     _protect_existing_manifest,
     _remove_stale_base_artifact,
+    _safe_clean_generated,
     verify_month,
 )
 from quantlab.research.minute_v2.contracts import (
+    CORE_MODEL_FEATURE_COLUMNS,
     DAILY_WINDOWS,
     EXPECTED_DECISION_BARS,
     MODEL_FEATURE_COLUMNS,
+    OPTIONAL_MODEL_FEATURE_COLUMNS,
     MinuteV2Config,
     MinuteV2Error,
     is_decision_bar,
+    model_feature_columns_for_storage,
 )
 from quantlab.research.minute_v2.features import build_feature_frame
 from quantlab.research.minute_v2.labels import (
@@ -51,10 +55,13 @@ from quantlab.research.minute_v2.sampling import (
 )
 from quantlab.research.minute_v2.source import stock_day_query
 from quantlab.research.minute_v2.training import (
+    PeriodPart,
     _collect_cross_section_sample,
     _evaluate_score_file,
     _load_top_scored,
+    _normalise_training_frame,
     _period_parts,
+    _period_query,
     _write_multiple_scored_periods,
     _write_scored_period,
 )
@@ -143,6 +150,94 @@ def test_drop_base_removes_only_the_exact_month_artifact(tmp_path) -> None:
     assert _remove_stale_base_artifact(tmp_path)
     assert not base.exists()
     assert not _remove_stale_base_artifact(tmp_path)
+
+
+def test_generated_directory_cleanup_retries_windows_directory_not_empty(
+    tmp_path, monkeypatch
+) -> None:
+    generated = tmp_path / "_parts"
+    generated.mkdir()
+    (generated / "part.parquet").write_bytes(b"test")
+    original = minute_v2_builder.shutil.rmtree
+    attempts = 0
+
+    def flaky_rmtree(path: Path) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            error = OSError(145, "directory not empty")
+            error.winerror = 145
+            raise error
+        original(path)
+
+    monkeypatch.setattr(minute_v2_builder.shutil, "rmtree", flaky_rmtree)
+    monkeypatch.setattr(minute_v2_builder.time, "sleep", lambda _seconds: None)
+
+    _safe_clean_generated(generated, tmp_path, expected_name="_parts")
+
+    assert attempts == 2
+    assert not generated.exists()
+
+
+def test_core_storage_query_and_normalisation_omit_optional_features(tmp_path) -> None:
+    keys = {
+        "symbol": ["A"],
+        "trade_date": ["2022-06-01"],
+        "bar_time": ["093100000"],
+    }
+    base = {**keys, **{name: [1.0] for name in CORE_MODEL_FEATURE_COLUMNS}}
+    events = dict(keys)
+    labels = {**keys, "label_net_return": [0.01], "label_observed": [True]}
+    base_path = tmp_path / "base.parquet"
+    event_path = tmp_path / "events.parquet"
+    label_path = tmp_path / "labels.parquet"
+    pd.DataFrame(base).to_parquet(base_path, index=False)
+    pd.DataFrame(events).to_parquet(event_path, index=False)
+    pd.DataFrame(labels).to_parquet(label_path, index=False)
+    part = PeriodPart(
+        year=2022,
+        month=6,
+        events=event_path,
+        labels=label_path,
+        base=base_path,
+        feature_storage="core",
+    )
+
+    query = _period_query(
+        part,
+        include_execution=False,
+        label_end_exclusive=None,
+        ordered=True,
+    )
+    with duckdb.connect(":memory:") as connection:
+        frame = connection.execute(query).fetchdf()
+    normalised = _normalise_training_frame(
+        frame,
+        feature_names=CORE_MODEL_FEATURE_COLUMNS,
+    )
+
+    assert model_feature_columns_for_storage("core") == CORE_MODEL_FEATURE_COLUMNS
+    assert set(CORE_MODEL_FEATURE_COLUMNS).issubset(normalised.columns)
+    assert set(OPTIONAL_MODEL_FEATURE_COLUMNS).isdisjoint(normalised.columns)
+    assert len(normalised) == 1
+
+
+def test_split_storage_query_requires_its_optional_sidecar(tmp_path) -> None:
+    part = PeriodPart(
+        year=2022,
+        month=6,
+        events=tmp_path / "events.parquet",
+        labels=tmp_path / "labels.parquet",
+        base=tmp_path / "base.parquet",
+        feature_storage="split",
+    )
+    with pytest.raises(MinuteV2Error, match="optional_features_missing"):
+        _period_query(
+            part,
+            include_execution=False,
+            label_end_exclusive=None,
+            ordered=False,
+        )
 
 
 def test_verify_month_rejects_unexpected_base_for_drop_base_manifest(tmp_path) -> None:

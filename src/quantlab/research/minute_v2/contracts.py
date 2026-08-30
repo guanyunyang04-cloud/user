@@ -212,6 +212,24 @@ class MinuteV2Error(RuntimeError):
     """Raised when a minute-v2 contract or causal invariant is violated."""
 
 
+def model_feature_columns_for_storage(feature_storage: str) -> tuple[str, ...]:
+    """Return the model columns available in a persisted feature profile.
+
+    ``split`` keeps the complete model matrix across the base file and its
+    optional sidecar, while ``full`` keeps that matrix in one base file.
+    ``core`` deliberately omits the optional rolling-window columns and is
+    therefore a valid, smaller feature contract rather than a partially
+    readable full contract.
+    """
+
+    mode = str(feature_storage)
+    if mode == "core":
+        return CORE_MODEL_FEATURE_COLUMNS
+    if mode in {"split", "full"}:
+        return MODEL_FEATURE_COLUMNS
+    raise MinuteV2Error(f"minute_v2_feature_storage_invalid:{feature_storage}")
+
+
 @dataclass(frozen=True)
 class MinuteV2Config:
     """Causal A-share minute-research assumptions."""
@@ -427,6 +445,7 @@ __all__ = [
     "EXPECTED_SESSION_BARS",
     "KEY_COLUMNS",
     "MODEL_FEATURE_COLUMNS",
+    "model_feature_columns_for_storage",
     "OPTIONAL_MODEL_FEATURE_COLUMNS",
     "OPTIONAL_STORAGE_COLUMNS",
     "FEATURE_STORAGE_MODES",
