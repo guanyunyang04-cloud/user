@@ -44,6 +44,11 @@ a trading service. No live orders are sent by this project.
 The current minute-MA event contract and its real-data representative check are
 kept under `research/records/minute_ma_v1/`. The check covers 2022-2024 only;
 it validates causal definitions and data completeness, not profitability.
+The finite rule/event-study pilot is under
+`research/records/minute_ma_v2_pilot/`; its cross-sectional control uses
+prior-session turnover matching and its minute outcomes begin at the next-open
+fill bar. That pilot is still an eight-symbol implementation check, not a
+full-universe result.
 
 The former `daily_research/` and `quant_data_platform/` trees are retired.
 Historical reports may still mention those names as provenance; such strings

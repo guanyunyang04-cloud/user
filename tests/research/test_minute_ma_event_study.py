@@ -8,6 +8,7 @@ from quantlab.research.minute_ma_event_study import (
     EventStudyError,
     build_representative_regime_frame,
     compare_to_control,
+    compare_to_reference_control,
     compute_event_outcomes,
     summarize_control_comparison,
     summarize_event_study,
@@ -169,6 +170,49 @@ def test_summary_and_paired_control_are_finite_and_explicit() -> None:
 def test_invalid_horizon_is_rejected() -> None:
     with pytest.raises(EventStudyError, match="minute_horizons"):
         EventStudyConfig(minute_horizons=(0,)).validate()
+
+
+def test_minute_horizon_is_measured_from_the_next_open_fill_bar() -> None:
+    bars = _bars().loc[lambda frame: frame["trade_date"].eq("2022-01-03")].copy()
+    bars.loc[bars["bar_time"].eq("093100000"), ["open", "high", "low", "close"]] = [10.0, 10.0, 10.0, 10.0]
+    bars.loc[bars["bar_time"].eq("093200000"), ["open", "high", "low", "close"]] = [11.0, 12.0, 10.5, 12.0]
+    outcome = compute_event_outcomes(
+        bars,
+        _signals().iloc[[0]],
+        config=EventStudyConfig(minute_horizons=(1,), day_horizons=(1,)),
+    ).iloc[0]
+    assert outcome["entry_time"] == "093200000"
+    assert outcome["gross_return_1m"] == pytest.approx(12.0 / 11.0 - 1.0)
+
+
+def test_reference_control_pairs_different_symbols_by_reference_signal_id() -> None:
+    outcomes = pd.DataFrame(
+        [
+            {
+                "signal_id": "ref-1",
+                "strategy_id": "strategy",
+                "symbol": "A",
+                "signal_date": "2022-01-03",
+                "signal_time": "093100000",
+                "net_return_60m": 0.02,
+                "reference_signal_id": None,
+            },
+            {
+                "signal_id": "control-1",
+                "strategy_id": "s0_liquidity_matched",
+                "symbol": "B",
+                "signal_date": "2022-01-03",
+                "signal_time": "093100000",
+                "net_return_60m": 0.01,
+                "reference_signal_id": "ref-1",
+            },
+        ]
+    )
+    paired = compare_to_reference_control(outcomes, strategy_id="strategy")
+    assert len(paired) == 1
+    assert paired["strategy_symbol"].iloc[0] == "A"
+    assert paired["control_symbol"].iloc[0] == "B"
+    assert paired["paired_difference"].iloc[0] == pytest.approx(0.01)
 
 
 def test_representative_regime_frame_is_fixed_and_unique() -> None:

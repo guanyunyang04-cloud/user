@@ -3,6 +3,8 @@ from __future__ import annotations
 import pandas as pd
 
 from quantlab.research.minute_ma_strategies import (
+    attach_prior_daily_liquidity,
+    build_liquidity_matched_control,
     build_strategy_signals,
     strategy_catalog,
 )
@@ -33,6 +35,7 @@ def _state_rows() -> pd.DataFrame:
                 "touched_now": low <= 10.0 <= high,
                 "close_below_intersection": close < 10.0,
                 "previous_hour_close_adjusted": 10.0,
+                "previous_hour_high_adjusted": 10.25,
                 "prior_ma_slope_bps": 10.0,
                 "ma_alignment_score": 1.0,
                 "prior_true_touch_count_window": 0,
@@ -100,3 +103,63 @@ def test_posthoc_rule_is_marked_non_executable() -> None:
     assert spec.causal is False
     assert spec.executable is False
     assert spec.control is True
+
+
+def test_strong_control_uses_previous_high_not_previous_close() -> None:
+    states = _state_rows()
+    states.loc[:, "previous_hour_high_adjusted"] = 10.35
+    result = build_strategy_signals(states, strategy_ids=["s0_strong_no_ma"])
+    assert result.empty
+    states.loc[states.index[-1], "adjusted_close"] = 10.4
+    result = build_strategy_signals(states, strategy_ids=["s0_strong_no_ma"])
+    assert result["signal_time"].tolist() == ["093500000"]
+
+
+def _complete_daily_bars() -> pd.DataFrame:
+    rows = []
+    for symbol, amounts in (("A", [10.0, 20.0, 1000.0]), ("B", [30.0, 40.0, 2000.0])):
+        for day_index, amount in enumerate(amounts):
+            trade_date = f"2022-01-0{day_index + 1}"
+            for ordinal in range(240):
+                if ordinal < 120:
+                    minute = ordinal
+                    hour = 9 + (31 + minute) // 60
+                    minute_value = (31 + minute) % 60
+                else:
+                    minute = ordinal - 120
+                    hour = 13 + (1 + minute) // 60
+                    minute_value = (1 + minute) % 60
+                rows.append(
+                    {
+                        "symbol": symbol,
+                        "trade_date": trade_date,
+                        "bar_time": f"{hour:02d}{minute_value:02d}00000",
+                        "amount": amount / 240.0,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_prior_liquidity_is_shifted_and_ignores_signal_day() -> None:
+    states = _state_rows().assign(trade_date="2022-01-03")
+    states = states.loc[states["bar_time"].eq("093100000")].copy()
+    bars = _complete_daily_bars()
+    enriched = attach_prior_daily_liquidity(states, bars, lookback_days=2)
+    assert enriched["prior_20d_median_amount"].iloc[0] == 15.0
+
+
+def test_liquidity_control_matches_same_minute_and_keeps_reference_id() -> None:
+    base = _state_rows()
+    other = base.copy()
+    other["symbol"] = "B"
+    other["prior_20d_median_amount"] = 110.0
+    base["prior_20d_median_amount"] = 100.0
+    states = pd.concat([base, other], ignore_index=True)
+    reference = build_strategy_signals(states, strategy_ids=["s1_touch_reclaim"])
+    reference = reference.loc[reference["symbol"].eq("A")].reset_index(drop=True)
+    controls = build_liquidity_matched_control(states, reference)
+    assert len(controls) == 1
+    assert controls["symbol"].iloc[0] == "B"
+    assert controls["reference_signal_id"].iloc[0] == reference["signal_id"].iloc[0]
+    assert controls["reference_symbol"].iloc[0] == "A"
+    assert controls["liquidity_match_ratio"].iloc[0] == 1.1

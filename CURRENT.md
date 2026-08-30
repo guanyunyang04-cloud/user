@@ -156,15 +156,24 @@ not a strategy or profitability result, and 2025 was not read.
 The finite rule registry is `src/quantlab/research/minute_ma_strategies.py`.
 It keeps S0 controls, causal S1 touch/reclaim variants, S2 slope/stack/first-
 touch filters, and an S4 volume-ratio proxy as separate versioned rules. The
+`s0_random_matched` label explicitly means a same-stock random-time control;
+`s0_liquidity_matched` is a separate same-minute cross-sectional control built
+from prior 20-session turnover and paired with `reference_signal_id`. The
+strong-no-MA proxy is a breakout of the previous completed-hour high. The
 posthoc catch-up rule is diagnostic-only; S3 market and sector gates are listed
 but unavailable until point-in-time breadth fields are joined. Forward outcomes
 and compact statistics live in
 `src/quantlab/research/minute_ma_event_study.py`; they use next-minute-open
-entry, explicit percentage costs, missingness flags, and no inventory replay.
+entry, count minute horizons from the fill bar, explicit percentage costs,
+missingness flags, and no inventory replay.
 
 The representative strategy pilot is recorded in
-`research/records/minute_ma_v2_pilot/`. Its eight-symbol/12-date scope is a
-development-chain check, not evidence of full-universe profitability.
+`research/records/minute_ma_v2_pilot/`. The corrected v6 record has 9,927
+signal/outcome rows (including 4,482 matched cross-sectional controls) over the
+same eight-symbol/12-date scope. It remains a development-chain check, not
+evidence of full-universe profitability; 892 of 5,374 control references were
+unmatched in this deliberately thin pool and are reported rather than scored
+as zero.
 
 ## Artifact policy
 
@@ -188,16 +197,18 @@ recoverable archives or provenance needed for audit.
 
 1. Keep QDP status/quick checks and the minute-v2 month verifier as regression
    checks after any data or code change.
-2. Turn the independent operator hypotheses and minute-MA event types into
-   competing hand-designed rules. Keep every attempted version and use only
-   causal minute fields for entries and exits.
-3. Replay the candidate rules on 2022-2024, then inspect 2025 once after the
-   strategy is frozen. Report costs, missingness, recall, turnover, and drawdown
-   by year and market regime.
-4. Add optional tree/sequence baselines only as comparators after the hand-
-   designed rules have a stable event contract.
-5. Replace the comparison replay with an inventory/order-state backtest before
-   considering a broker adapter. QMT integration remains deferred.
+2. Expand the declared point-in-time development universe beyond the
+   eight-symbol implementation pool and join the market/sector fields needed
+   for the S3 gates. Keep every attempted rule version and use only causal
+   minute fields for entries and exits.
+3. Replay the finite rules on the full 2022-2024 development universe with an
+   inventory/order-state engine; report costs, missingness, turnover, capacity,
+   and drawdown by year and market regime.
+4. Freeze the selected rule family, then inspect 2025 once as the held-out
+   validation year. Do not tune on that pass.
+5. Add optional tree/sequence baselines only as comparators after the
+   hand-designed rules have a stable event contract. QMT integration remains
+   deferred until the inventory replay is credible.
 
 ## Useful commands
 

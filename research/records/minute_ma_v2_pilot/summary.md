@@ -1,52 +1,50 @@
 # Minute-MA rule study pilot results
 
-Scope: eight fixed symbols and twelve representative dates across 2022-2024; 2025 was not read. Returns are percentage-cost event outcomes from the next-minute open. Blank cells mean no observed events. The table below uses the pooled rows in `event_study_pilot.json`, combining all observed MA periods for each strategy; its medians are therefore true pooled medians. The JSON also retains one row per MA period under `summary_overall`.
+Scope: eight fixed symbols and twelve representative dates across 2022-2024; 2025 was not read. This is an implementation and hypothesis-screening pilot, not a full-universe performance claim.
+Entries use the next available minute open. Minute horizons count from the fill bar (therefore 1m is the fill bar close); percentage costs are applied in the JSON record.
 
-| Strategy | Signals | Executable | 60m net mean | 60m net median | 60m mean, top 1% winners removed | T+1 net mean |
+| Strategy | Signals | Entry executable | 60m net mean | 60m net median | 60m mean, top 1% winners removed | T+1 net mean |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| s0_random_matched | 2304 | 2304 | 0.032% | -0.146% | -0.009% | 0.547% |
-| s0_strong_no_ma | 2076 | 2076 | 0.196% | -0.049% | 0.146% | 0.831% |
-| s0_distance_only | 375 | 375 | -0.164% | -0.125% | -0.193% | -0.404% |
-| s1_touch_immediate | 314 | 314 | -0.119% | -0.208% | -0.154% | -0.391% |
-| s1_touch_reclaim | 285 | 285 | -0.073% | -0.125% | -0.108% | -0.317% |
-| s1_near_reversal | 331 | 331 | -0.138% | -0.168% | -0.175% | -0.326% |
-| s1_break_reclaim_stable3 | 241 | 241 | 0.019% | -0.124% | -0.020% | -0.251% |
-| s2_reclaim_positive_slope | 112 | 112 | -0.012% | -0.014% | -0.053% | -0.221% |
-| s2_reclaim_bull_stack | 1 | 1 | 0.604% | 0.604% |  | 1.481% |
-| s2_first_touch_reclaim | 9 | 9 | 0.036% | -0.503% | -0.255% | -0.118% |
-| s4_reclaim_volume_proxy | 133 | 133 | -0.116% | -0.125% | -0.148% | -0.422% |
+| s0_distance_only | 375 | 375 | -0.194% | -0.163% | -0.220% | -0.404% |
+| s0_liquidity_matched | 4482 | 4482 | 0.220% | -0.064% | 0.174% | 0.495% |
+| s0_random_matched | 2304 | 2304 | 0.030% | -0.134% | -0.010% | 0.547% |
+| s0_strong_no_ma | 1164 | 1164 | 0.526% | 0.073% | 0.471% | 1.272% |
+| s1_break_reclaim_stable3 | 241 | 241 | 0.013% | -0.089% | -0.028% | -0.251% |
+| s1_near_reversal | 331 | 331 | -0.125% | -0.163% | -0.163% | -0.326% |
+| s1_touch_immediate | 314 | 314 | -0.113% | -0.191% | -0.147% | -0.391% |
+| s1_touch_reclaim | 285 | 285 | -0.050% | -0.100% | -0.088% | -0.317% |
+| s2_first_touch_reclaim | 9 | 9 | 0.053% | -0.503% | -0.235% | -0.118% |
+| s2_reclaim_bull_stack | 1 | 1 | 0.627% | 0.627% | — | 1.481% |
+| s2_reclaim_positive_slope | 112 | 112 | 0.023% | -0.098% | -0.026% | -0.221% |
+| s4_reclaim_volume_proxy | 238 | 238 | -0.002% | -0.089% | -0.038% | -0.320% |
 
-## 60-minute net mean by development year
+## Control coverage
 
-These are pooled by strategy within each year. They are useful for seeing the strong 2024 contribution in this small sample; they are not an out-of-sample claim.
+Cross-sectional liquidity control references: 5374; matched: 4482; unmatched: 892. Matching is same date/minute/hour/MA period, different symbol, prior-20-session turnover within a 2x band, nearest five candidates, deterministic seed 7.
 
-| Strategy | 2022 (n) | 2023 (n) | 2024 (n) |
-| --- | ---: | ---: | ---: |
-| s0_random_matched | -0.084% (1344) | -0.395% (384) | 0.587% (576) |
-| s0_strong_no_ma | 0.016% (1200) | -0.344% (366) | 1.009% (510) |
-| s0_distance_only | -0.136% (215) | -0.402% (109) | 0.232% (51) |
-| s1_touch_immediate | -0.073% (188) | -0.385% (84) | 0.204% (42) |
-| s1_touch_reclaim | -0.009% (171) | -0.393% (75) | 0.263% (39) |
-| s1_near_reversal | -0.107% (195) | -0.369% (91) | 0.199% (45) |
-| s1_break_reclaim_stable3 | 0.109% (146) | -0.362% (62) | 0.340% (33) |
-| s2_reclaim_positive_slope | -0.001% (65) | -0.352% (31) | 0.608% (16) |
-| s2_reclaim_bull_stack | 0.604% (1) | — | — |
-| s2_first_touch_reclaim | 0.257% (8) | — | -1.735% (1) |
-| s4_reclaim_volume_proxy | -0.139% (82) | -0.256% (29) | 0.151% (22) |
+| Strategy | Control | Matched | Mean strategy minus control | Positive difference fraction |
+| --- | --- | ---: | ---: | ---: |
+| s0_distance_only | s0_random_matched (same_stock_random_time) | 375 | -0.125% | 44.533% |
+| s0_distance_only | s0_liquidity_matched (cross_sectional_prior_turnover) | 295 | -0.087% | 51.525% |
+| s0_strong_no_ma | s0_random_matched (same_stock_random_time) | 1164 | 0.155% | 45.275% |
+| s0_strong_no_ma | s0_liquidity_matched (cross_sectional_prior_turnover) | 996 | -0.178% | 44.177% |
+| s1_break_reclaim_stable3 | s0_random_matched (same_stock_random_time) | 241 | -0.046% | 39.419% |
+| s1_break_reclaim_stable3 | s0_liquidity_matched (cross_sectional_prior_turnover) | 192 | -0.121% | 54.167% |
+| s1_near_reversal | s0_random_matched (same_stock_random_time) | 331 | -0.107% | 40.181% |
+| s1_near_reversal | s0_liquidity_matched (cross_sectional_prior_turnover) | 261 | -0.106% | 50.575% |
+| s1_touch_immediate | s0_random_matched (same_stock_random_time) | 314 | -0.047% | 45.541% |
+| s1_touch_immediate | s0_liquidity_matched (cross_sectional_prior_turnover) | 251 | -0.110% | 49.402% |
+| s1_touch_reclaim | s0_random_matched (same_stock_random_time) | 285 | -0.053% | 41.404% |
+| s1_touch_reclaim | s0_liquidity_matched (cross_sectional_prior_turnover) | 228 | -0.121% | 50.000% |
+| s2_first_touch_reclaim | s0_random_matched (same_stock_random_time) | 9 | -0.043% | 33.333% |
+| s2_first_touch_reclaim | s0_liquidity_matched (cross_sectional_prior_turnover) | 9 | 0.043% | 33.333% |
+| s2_reclaim_bull_stack | s0_random_matched (same_stock_random_time) | 1 | -0.033% | 0.000% |
+| s2_reclaim_bull_stack | s0_liquidity_matched (cross_sectional_prior_turnover) | 1 | -1.075% | 0.000% |
+| s2_reclaim_positive_slope | s0_random_matched (same_stock_random_time) | 112 | -0.064% | 43.750% |
+| s2_reclaim_positive_slope | s0_liquidity_matched (cross_sectional_prior_turnover) | 89 | -0.037% | 50.562% |
+| s4_reclaim_volume_proxy | s0_random_matched (same_stock_random_time) | 238 | -0.078% | 39.076% |
+| s4_reclaim_volume_proxy | s0_liquidity_matched (cross_sectional_prior_turnover) | 192 | -0.062% | 53.646% |
 
-## Paired 60-minute comparison against the random control
+## Interpretation
 
-| Strategy | Matched | Mean strategy minus control | Positive difference fraction |
-| --- | ---: | ---: | ---: |
-| s0_strong_no_ma | 2076 | 0.052% | 49.181% |
-| s0_distance_only | 375 | -0.105% | 45.867% |
-| s1_touch_immediate | 314 | -0.068% | 46.178% |
-| s1_touch_reclaim | 285 | -0.091% | 42.456% |
-| s1_near_reversal | 331 | -0.130% | 40.483% |
-| s1_break_reclaim_stable3 | 241 | -0.048% | 40.664% |
-| s2_reclaim_positive_slope | 112 | -0.114% | 41.964% |
-| s2_reclaim_bull_stack | 1 | -0.085% | 0.000% |
-| s2_first_touch_reclaim | 9 | -0.059% | 33.333% |
-| s4_reclaim_volume_proxy | 133 | -0.287% | 35.338% |
-
-Interpretation: this pilot is a code and hypothesis-screening result, not a full-universe profitability claim. It does not select a winner: 2023 is uniformly weak and the small sample's 2024 contribution is visibly large. Same-day MFE/MAE starts at the entry minute and is only marked observed for a complete contiguous day. The posthoc catch-up rows are retained separately and excluded from the executable summary. A broader development run with a declared point-in-time universe, turnover, overlap, capacity and drawdown is still required before any strategy freeze.
+The corrected record keeps all attempted rule versions, separates timing and cross-sectional controls, and leaves missing or blocked outcomes missing. The small fixed pool is sufficient for implementation checks only; strategy selection requires the declared point-in-time development universe and an inventory/order-state replay before the single frozen 2025 validation.

@@ -8,6 +8,7 @@ executable signals.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -15,11 +16,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from quantlab.research.minute_ma import EVENT_KEY_COLUMNS, MA_PERIODS, summarize_ma_events
+from quantlab.research.minute_ma import (
+    EVENT_KEY_COLUMNS,
+    MA_PERIODS,
+    normalize_bar_time,
+    session_minute_ordinal,
+    summarize_ma_events,
+)
 
 
 class StrategyError(ValueError):
     """Raised when a strategy definition or signal input is invalid."""
+
+
+DEFAULT_LIQUIDITY_COLUMN = "prior_20d_median_amount"
 
 
 SIGNAL_COLUMNS = (
@@ -37,6 +47,9 @@ SIGNAL_COLUMNS = (
     "causal_only",
     "diagnostic_only",
     "signal_executable",
+    "reference_signal_id",
+    "reference_symbol",
+    "liquidity_match_ratio",
     "close_to_intersection_bps",
     "prior_ma_slope_bps",
     "ma_alignment_score",
@@ -44,6 +57,7 @@ SIGNAL_COLUMNS = (
     "up_down_amount_ratio",
     "bullish_ma_stack",
     "previous_hour_close_adjusted",
+    "previous_hour_high_adjusted",
     "signal_adjusted_close",
     "signal_amount",
 )
@@ -66,6 +80,7 @@ class StrategySpec:
     implemented: bool = True
     required_columns: tuple[str, ...] = ()
     filters: tuple[str, ...] = ()
+    reference_control: bool = False
 
     def validate(self) -> None:
         if not self.strategy_id or self.strategy_id.strip() != self.strategy_id:
@@ -91,6 +106,10 @@ class StrategySpec:
             raise StrategyError("strategy_stable_minutes_required")
         if not self.causal and self.executable:
             raise StrategyError("noncausal_strategy_cannot_be_executable")
+        if self.reference_control and not self.control:
+            raise StrategyError("reference_control_must_be_control")
+        if self.reference_control and self.signal_rule != "liquidity_matched_stock":
+            raise StrategyError("reference_control_rule_invalid")
 
     def as_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -139,18 +158,29 @@ def strategy_catalog(*, include_unavailable: bool = True) -> tuple[StrategySpec,
         StrategySpec(
             "s0_random_matched",
             "S0",
-            "Deterministic random minute within each eligible stock-hour; control only.",
+            "Within-stock random-time control; it matches the same stock/hour, not cross-sectional liquidity.",
             "random_minute",
             ma_periods=ma,
             control=True,
         ),
         StrategySpec(
+            "s0_liquidity_matched",
+            "S0",
+            "Cross-sectional control: deterministic random choice among same-minute stocks within a causal turnover band.",
+            "liquidity_matched_stock",
+            ma_periods=ma,
+            control=True,
+            reference_control=True,
+            required_columns=("prior_20d_median_amount",),
+        ),
+        StrategySpec(
             "s0_strong_no_ma",
             "S0",
-            "First minute closing at or above the previous completed hour close; no MA condition.",
+            "First minute closing at or above the previous completed hour high; a price-strength proxy without MA inputs.",
             "strong_without_ma",
             ma_periods=ma,
             control=True,
+            required_columns=("previous_hour_high_adjusted",),
         ),
         StrategySpec(
             "s0_distance_only",
@@ -348,7 +378,7 @@ def _causal_signal_candidates(rows: pd.DataFrame, spec: StrategySpec, *, random_
 
     if rule == "strong_without_ma":
         close = pd.to_numeric(rows["adjusted_close"], errors="coerce").to_numpy(dtype=float)
-        previous = pd.to_numeric(rows["previous_hour_close_adjusted"], errors="coerce").to_numpy(dtype=float)
+        previous = pd.to_numeric(rows["previous_hour_high_adjusted"], errors="coerce").to_numpy(dtype=float)
         for position in np.flatnonzero(np.isfinite(close) & np.isfinite(previous) & (close >= previous)):
             yield int(position), "strong_without_ma"
         return
@@ -370,18 +400,14 @@ def _causal_signal_candidates(rows: pd.DataFrame, spec: StrategySpec, *, random_
 
     if rule == "touch_reclaim":
         trigger_seen = False
-        below_seen = False
         for position, (touched, below) in enumerate(zip(touched_values, below_values, strict=True)):
-            if below:
-                trigger_seen = True
-                below_seen = True
-                continue
-            if touched or (trigger_seen and (below_seen or not below)):
+            # Keep the episode open after the first causal reclaim.  This lets
+            # a later minute satisfy a directional/volume filter without
+            # requiring a second artificial touch.  The caller still emits at
+            # most one signal per stock/hour/MA group.
+            trigger_seen = trigger_seen or touched or below
+            if trigger_seen and not below:
                 yield position, "touch_reclaim"
-                # The first reclaim consumes this episode.  A later touch or
-                # break must start a new episode before another signal.
-                trigger_seen = False
-                below_seen = False
         return
 
     if rule == "near_reversal":
@@ -447,6 +473,9 @@ def _signal_row(rows: pd.DataFrame, position: int, spec: StrategySpec, trigger: 
         "causal_only": bool(spec.causal),
         "diagnostic_only": not bool(spec.executable),
         "signal_executable": bool(spec.executable),
+        "reference_signal_id": None,
+        "reference_symbol": None,
+        "liquidity_match_ratio": np.nan,
         "close_to_intersection_bps": float(row["close_to_intersection_bps"]),
         "prior_ma_slope_bps": float(row["prior_ma_slope_bps"]),
         "ma_alignment_score": float(row["ma_alignment_score"]),
@@ -454,6 +483,11 @@ def _signal_row(rows: pd.DataFrame, position: int, spec: StrategySpec, trigger: 
         "up_down_amount_ratio": float(row["up_down_amount_ratio"]),
         "bullish_ma_stack": bool(row["bullish_ma_stack"]),
         "previous_hour_close_adjusted": float(row["previous_hour_close_adjusted"]),
+        "previous_hour_high_adjusted": (
+            float(row["previous_hour_high_adjusted"])
+            if "previous_hour_high_adjusted" in row.index and _finite(row["previous_hour_high_adjusted"])
+            else np.nan
+        ),
         "signal_adjusted_close": float(row["adjusted_close"]),
         "signal_amount": float(row["amount"]),
     }
@@ -511,7 +545,7 @@ def build_strategy_signals(
     selected_ids = tuple(strategy_ids) if strategy_ids is not None else tuple(
         spec.strategy_id
         for spec in strategy_catalog(include_unavailable=False)
-        if include_diagnostic or spec.executable
+        if (include_diagnostic or spec.executable) and not spec.reference_control
     )
     unknown = sorted(set(selected_ids).difference(catalog))
     if unknown:
@@ -521,6 +555,8 @@ def build_strategy_signals(
     for spec in selected_specs:
         required.update(spec.required_columns)
         spec.validate()
+        if spec.reference_control:
+            raise StrategyError(f"strategy_requires_reference_signals:{spec.strategy_id}")
         if not spec.implemented:
             raise StrategyError(f"strategy_not_implemented:{spec.strategy_id}")
     _require_state_columns(states, required)
@@ -585,12 +621,12 @@ def build_matched_random_control(
     strategy_id: str = "s0_random_matched",
     random_seed: int = 7,
 ) -> pd.DataFrame:
-    """Choose one random minute in each reference signal's stock-hour group.
+    """Choose one random minute in each reference signal's same-stock hour.
 
-    Matching the symbol/date/hour/MA keys keeps the control comparison local;
-    the chosen minute is independent of the reference signal time. The
-    control is a return comparison, not a claim that the random minute was
-    selected by a separate screening process.
+    This is a timing control for asking whether a signal's exact minute adds
+    value within the same stock/hour. It is deliberately distinct from the
+    cross-sectional liquidity control built by
+    :func:`build_liquidity_matched_control`.
     """
 
     spec = strategy_spec(strategy_id)
@@ -628,10 +664,271 @@ def build_matched_random_control(
     return result
 
 
+def _normalise_strategy_dates(values: pd.Series) -> pd.Series:
+    raw = values.astype("string").str.strip()
+    compact = raw.str.fullmatch(r"\d{8}", na=False)
+    parsed = pd.Series(pd.NaT, index=values.index, dtype="datetime64[ns]")
+    if compact.any():
+        parsed.loc[compact] = pd.to_datetime(raw.loc[compact], format="%Y%m%d", errors="coerce")
+    if (~compact).any():
+        parsed.loc[~compact] = pd.to_datetime(raw.loc[~compact], errors="coerce")
+    if parsed.isna().any():
+        bad = raw.loc[parsed.isna()].iloc[0]
+        raise StrategyError(f"strategy_trade_date_invalid:{bad!r}")
+    return parsed.dt.strftime("%Y-%m-%d")
+
+
+def attach_prior_daily_liquidity(
+    states: pd.DataFrame,
+    bars: pd.DataFrame,
+    *,
+    lookback_days: int = 20,
+    column: str = DEFAULT_LIQUIDITY_COLUMN,
+) -> pd.DataFrame:
+    """Attach a point-in-time turnover proxy to minute states.
+
+    The value is the median daily traded amount over the preceding
+    ``lookback_days`` complete sessions, shifted by one session.  It therefore
+    cannot use the signal day's amount.  Incomplete sessions are excluded from
+    the history rather than silently treated as low liquidity.
+    """
+
+    if (
+        isinstance(lookback_days, bool)
+        or not isinstance(lookback_days, (int, np.integer))
+        or int(lookback_days) < 1
+    ):
+        raise StrategyError("liquidity_lookback_days_invalid")
+    if not column or str(column).strip() != str(column):
+        raise StrategyError("liquidity_column_invalid")
+    _require_state_columns(states, ("symbol", "trade_date"))
+    required = {"symbol", "trade_date", "bar_time", "amount"}
+    missing = sorted(required.difference(bars.columns))
+    if missing:
+        raise StrategyError(f"liquidity_bar_columns_missing:{','.join(missing)}")
+    if column in states.columns:
+        raise StrategyError(f"liquidity_column_already_present:{column}")
+
+    frame = bars.loc[:, ["symbol", "trade_date", "bar_time", "amount"]].copy()
+    frame["symbol"] = frame["symbol"].astype(str).str.strip()
+    if frame["symbol"].eq("").any() or frame["symbol"].str.lower().isin({"nan", "none", "<na>"}).any():
+        raise StrategyError("liquidity_symbol_invalid")
+    frame["trade_date"] = _normalise_strategy_dates(frame["trade_date"])
+    frame["bar_time"] = frame["bar_time"].map(normalize_bar_time)
+    frame["session_minute_ordinal"] = frame["bar_time"].map(session_minute_ordinal)
+    frame = frame.loc[frame["session_minute_ordinal"].notna()].copy()
+    frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce")
+    valid = np.isfinite(frame["amount"]) & frame["amount"].ge(0)
+    if not bool(valid.all()):
+        raise StrategyError("liquidity_amount_invalid")
+    if frame.duplicated(["symbol", "trade_date", "bar_time"]).any():
+        raise StrategyError("liquidity_duplicate_minute_key")
+
+    daily = (
+        frame.groupby(["symbol", "trade_date"], sort=True, observed=True)
+        .agg(
+            daily_amount=("amount", "sum"),
+            bar_count=("session_minute_ordinal", "size"),
+            distinct_minute_count=("session_minute_ordinal", "nunique"),
+        )
+        .reset_index()
+    )
+    daily = daily.loc[
+        daily["bar_count"].eq(240) & daily["distinct_minute_count"].eq(240)
+    ].copy()
+    if daily.empty:
+        raise StrategyError("liquidity_complete_daily_history_empty")
+    daily.sort_values(["symbol", "trade_date"], inplace=True, kind="stable", ignore_index=True)
+    prior = pd.Series(np.nan, index=daily.index, dtype="float64")
+    for _, indices in daily.groupby("symbol", sort=False).groups.items():
+        values = daily.loc[indices, "daily_amount"]
+        prior.loc[indices] = values.rolling(
+            int(lookback_days), min_periods=int(lookback_days)
+        ).median().shift(1)
+    daily[column] = prior
+    liquidity = daily.loc[:, ["symbol", "trade_date", column]]
+    result = states.copy()
+    result["trade_date"] = _normalise_strategy_dates(result["trade_date"])
+    result = result.merge(
+        liquidity,
+        on=["symbol", "trade_date"],
+        how="left",
+        validate="many_to_one",
+    )
+    result.attrs.update(
+        {
+            "liquidity_column": str(column),
+            "liquidity_lookback_days": int(lookback_days),
+            "liquidity_complete_stock_days": int(len(daily)),
+        }
+    )
+    return result
+
+
+def _stable_choice_position(key: str, *, seed: int, size: int) -> int:
+    if size <= 0:
+        raise StrategyError("liquidity_candidate_pool_empty")
+    sequence = np.random.SeedSequence(
+        [int(seed) & 0xFFFFFFFF, _stable_key_number(key)]
+    )
+    return int(np.random.default_rng(sequence).integers(0, int(size)))
+
+
+def build_liquidity_matched_control(
+    states: pd.DataFrame,
+    reference_signals: pd.DataFrame,
+    *,
+    strategy_id: str = "s0_liquidity_matched",
+    liquidity_column: str = DEFAULT_LIQUIDITY_COLUMN,
+    liquidity_band_ratio: float = 2.0,
+    nearest_candidates: int = 5,
+    random_seed: int = 7,
+) -> pd.DataFrame:
+    """Choose a same-minute stock with comparable *prior* liquidity.
+
+    A reference signal is matched on date, minute, 60-minute bucket and MA
+    period.  Candidates must be a different symbol and have a prior-turnover
+    ratio within ``liquidity_band_ratio``.  The nearest
+    ``nearest_candidates`` are ordered by absolute log-ratio and one is chosen
+    deterministically at random.  The reference id is carried on the control
+    row so outcomes can be paired even though the symbols differ.
+
+    The function only sees the supplied state universe.  Callers must declare
+    that universe separately; this is not a survivorship-free universe builder.
+    """
+
+    spec = strategy_spec(strategy_id)
+    if not spec.reference_control or spec.signal_rule != "liquidity_matched_stock":
+        raise StrategyError("liquidity_control_strategy_invalid")
+    if (
+        not np.isfinite(float(liquidity_band_ratio))
+        or float(liquidity_band_ratio) < 1.0
+    ):
+        raise StrategyError("liquidity_band_ratio_invalid")
+    if (
+        isinstance(nearest_candidates, bool)
+        or not isinstance(nearest_candidates, (int, np.integer))
+        or int(nearest_candidates) < 1
+    ):
+        raise StrategyError("liquidity_nearest_candidates_invalid")
+    _require_state_columns(
+        states,
+        set(_BASE_COLUMNS) | {str(liquidity_column)},
+    )
+    required_ref = {
+        "signal_id",
+        "symbol",
+        "signal_date",
+        "signal_time",
+        "sixty_minute_bucket",
+        "ma_period",
+    }
+    missing = sorted(required_ref.difference(reference_signals.columns))
+    if missing:
+        raise StrategyError(f"strategy_reference_columns_missing:{','.join(missing)}")
+    if reference_signals.empty:
+        empty = _empty_signal_frame()
+        empty.attrs.update({"reference_count": 0, "matched_count": 0, "unmatched_count": 0, "unmatched_reasons": {}})
+        return empty
+    if reference_signals["signal_id"].duplicated().any():
+        raise StrategyError("strategy_reference_signal_id_duplicate")
+
+    working = states.copy()
+    working["symbol"] = working["symbol"].astype(str).str.strip()
+    working["trade_date"] = _normalise_strategy_dates(working["trade_date"])
+    working["bar_time"] = working["bar_time"].map(normalize_bar_time)
+    working["ma_period"] = pd.to_numeric(working["ma_period"], errors="coerce")
+    working["sixty_minute_bucket"] = pd.to_numeric(working["sixty_minute_bucket"], errors="coerce")
+    working["liquidity_value"] = pd.to_numeric(working[liquidity_column], errors="coerce")
+    group_columns = ["trade_date", "bar_time", "sixty_minute_bucket", "ma_period"]
+    grouped = {
+        tuple(key) if isinstance(key, tuple) else (key,): group
+        for key, group in working.groupby(group_columns, sort=False, observed=True)
+    }
+
+    rows: list[dict[str, Any]] = []
+    unmatched = Counter()
+    for reference in reference_signals.itertuples(index=False):
+        ref = reference._asdict()
+        ref_id = str(ref["signal_id"])
+        key = (
+            str(_normalise_strategy_dates(pd.Series([ref["signal_date"]])).iloc[0]),
+            normalize_bar_time(ref["signal_time"]),
+            int(ref["sixty_minute_bucket"]),
+            int(ref["ma_period"]),
+        )
+        group = grouped.get(key)
+        if group is None or group.empty:
+            unmatched["same_minute_state_missing"] += 1
+            continue
+        ref_symbol = str(ref["symbol"]).strip()
+        reference_rows = group.loc[group["symbol"].eq(ref_symbol)]
+        if reference_rows.empty:
+            unmatched["reference_state_missing"] += 1
+            continue
+        ref_liquidity = float(reference_rows.iloc[0]["liquidity_value"])
+        if not np.isfinite(ref_liquidity) or ref_liquidity <= 0:
+            unmatched["reference_liquidity_missing"] += 1
+            continue
+        candidates = group.loc[group["symbol"].ne(ref_symbol)].copy()
+        candidates = candidates.loc[np.isfinite(candidates["liquidity_value"]) & candidates["liquidity_value"].gt(0)].copy()
+        if candidates.empty:
+            unmatched["candidate_liquidity_missing"] += 1
+            continue
+        candidates["liquidity_match_ratio"] = candidates["liquidity_value"] / ref_liquidity
+        band = float(liquidity_band_ratio)
+        candidates = candidates.loc[
+            candidates["liquidity_match_ratio"].between(1.0 / band, band, inclusive="both")
+        ].copy()
+        if candidates.empty:
+            unmatched["no_candidate_in_liquidity_band"] += 1
+            continue
+        candidates["match_distance"] = candidates["liquidity_match_ratio"].map(lambda value: abs(float(np.log(value))))
+        candidates.sort_values(["match_distance", "symbol"], inplace=True, kind="stable")
+        candidates = candidates.head(int(nearest_candidates)).reset_index(drop=True)
+        choice = _stable_choice_position(ref_id, seed=int(random_seed), size=len(candidates))
+        chosen = candidates.iloc[[choice]].copy().reset_index(drop=True)
+        signal = _signal_row(chosen, 0, spec, "liquidity_matched_stock")
+        chosen_symbol = str(chosen.iloc[0]["symbol"])
+        signal["signal_id"] = f"{strategy_id}|ref:{ref_id}|{chosen_symbol}"
+        signal["reference_signal_id"] = ref_id
+        signal["reference_symbol"] = ref_symbol
+        signal["liquidity_match_ratio"] = float(chosen.iloc[0]["liquidity_match_ratio"])
+        rows.append(signal)
+
+    if not rows:
+        result = _empty_signal_frame()
+    else:
+        result = pd.DataFrame(rows).loc[:, list(SIGNAL_COLUMNS)]
+        result.sort_values(
+            ["signal_date", "signal_time", "strategy_id", "symbol", "ma_period", "reference_signal_id"],
+            inplace=True,
+            kind="stable",
+            ignore_index=True,
+        )
+        if result["signal_id"].duplicated().any():
+            raise StrategyError("liquidity_control_signal_id_duplicate")
+    result.attrs.update(
+        {
+            "reference_count": int(len(reference_signals)),
+            "matched_count": int(len(rows)),
+            "unmatched_count": int(len(reference_signals) - len(rows)),
+            "unmatched_reasons": dict(unmatched),
+            "liquidity_column": str(liquidity_column),
+            "liquidity_band_ratio": float(liquidity_band_ratio),
+            "nearest_candidates": int(nearest_candidates),
+        }
+    )
+    return result
+
+
 __all__ = [
+    "DEFAULT_LIQUIDITY_COLUMN",
     "SIGNAL_COLUMNS",
     "StrategyError",
     "StrategySpec",
+    "attach_prior_daily_liquidity",
+    "build_liquidity_matched_control",
     "build_matched_random_control",
     "build_strategy_signals",
     "strategy_catalog",

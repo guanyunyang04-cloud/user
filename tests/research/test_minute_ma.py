@@ -177,6 +177,7 @@ def test_future_minute_mutation_does_not_change_prior_causal_state() -> None:
         "live_ma",
         "close_to_intersection_bps",
         "close_to_live_ma_bps",
+        "previous_hour_high_adjusted",
         "touched_now",
         "minutes_below_so_far",
         "partial_hour_high_adjusted",

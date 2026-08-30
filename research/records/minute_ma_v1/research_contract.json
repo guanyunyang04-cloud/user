@@ -1,5 +1,5 @@
 {
-  "schema_version": "minute_ma_research_contract_v1",
+  "schema_version": "minute_ma_research_contract_v2",
   "as_of": "2026-08-30",
   "objective": "建立可因果复核的60分钟均线事件层，为后续策略事件研究提供事实表",
   "periods": [10, 20, 40, 60, 120, 240],
@@ -24,7 +24,15 @@
     "dataset_id": "market_intraday_1m",
     "required_columns": ["symbol", "trade_date", "bar_time", "open", "high", "low", "close", "volume", "amount"],
     "price_policy": "使用adjust_factor调整价格；一交易日内adjust_factor必须恒定；质量排除日不参与事件计算",
-    "universe_policy": "只对调用者明确提供的股票加载；不得因为事件结果反向选择股票"
+    "universe_policy": "只对调用者明确提供的股票加载；不得因为事件结果反向选择股票",
+    "development_universe_policy": "全市场运行时必须使用点时在市股票池；代表性试跑只声明并使用固定8只股票，不能外推为全市场",
+    "liquidity_control_policy": {
+      "feature": "前20个完整交易日的日成交额中位数，并向后移一日",
+      "matching_keys": ["trade_date", "bar_time", "sixty_minute_bucket", "ma_period"],
+      "candidate_rule": "排除参考股票，在2倍成交额比率带内取最接近的最多5只，再用固定种子可复现随机选择",
+      "unmatched_policy": "参考流动性缺失、候选池为空或没有落入比率带时保留未匹配计数，不以零收益替代",
+      "interpretation": "这是横截面流动性控制；同股票随机分钟控制另行标记为时间控制"
+    }
   },
   "session_contract": {
     "expected_minute_count": 240,
@@ -63,6 +71,8 @@
     "minute_states": "每个目标分钟 x MA周期的因果状态；可作为未来信号输入",
     "event_summary": "每个股票/日期/小时/周期一行；包含结果分类和诊断字段",
     "diagnostic_fields": "任何使用小时最终值的字段必须明确标记，状态表使用diagnostic_前缀，禁止进入实时买入规则",
+    "signal_controls": "s0_random_matched仅表示同股票同小时随机时间控制；s0_liquidity_matched表示同一时刻跨股票流动性匹配控制，必须通过reference_signal_id配对",
+    "minute_outcome_timing": "信号后下一根分钟K线开盘成交；N分钟结果从成交K线开始计数，1分钟结果为成交K线收盘价；缺失或不可成交保持缺失",
     "prior_touch_count_field": "prior_true_touch_count_window；窗口长度由prior_touch_window_hours显式记录"
   },
   "verification_scope": {

@@ -13,20 +13,26 @@ and representative real-data checks are recorded in
 `minute_ma_strategies` contains the finite S0-S4 rule registry. S0 controls,
 causal S1 entry variants, and the currently available S2/S4 filters can be
 generated from the causal state table with `build_strategy_signals`. The
+`s0_random_matched` entry is a same-stock timing control; the separate
+`s0_liquidity_matched` builder selects a different stock at the same minute
+using a prior-turnover band and pairs it through `reference_signal_id`. The
 `s1_posthoc_catchup_diagnostic` entry is deliberately non-executable. S3 market
 and sector gates remain listed in the registry but are unavailable until their
 point-in-time source fields are joined.
 
 `minute_ma_event_study` resolves every signal at the next minute open and
 computes 5/15/30/60-minute, 1/2/3/5-trading-day, same-day MFE/MAE, and T+1
-outcomes. It reports observed counts, win rates, profit factors, and means
-after removing the largest positive 1% winners. Missing or blocked bars remain
-missing; they are never scored as zero returns. This is an event study with
-percentage costs, not an inventory or capacity backtest.
+outcomes. Minute horizons start at the fill bar, so the 1-minute result is
+that bar's close. It reports observed counts, win rates, profit factors, and
+means after removing the largest positive 1% winners. Missing or blocked bars
+remain missing; they are never scored as zero returns. This is an event study
+with percentage costs, not an inventory or capacity backtest.
 
 The first representative-date run is recorded under
 `research/records/minute_ma_v2_pilot/`. It is an implementation and hypothesis
-screening check over eight fixed symbols, not a full-universe performance claim.
+screening check over eight fixed symbols, not a full-universe performance claim;
+the eight-symbol pool is also too small to stand in for a production liquidity
+match universe.
 
 ## Data contract
 

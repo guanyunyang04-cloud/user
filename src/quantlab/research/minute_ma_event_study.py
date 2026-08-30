@@ -1,8 +1,9 @@
 """Causal forward outcomes and compact statistics for minute-MA signals.
 
 This module is intentionally an event study, not an inventory backtest. Entry
-is the next available minute open after a signal, forward minute horizons use
-future closes, and T+1 uses the first minute open of the next trading day.
+is the next available minute open after a signal, forward minute horizons are
+measured from that fill bar (a 1-minute outcome is its close), and T+1 uses the
+first minute open of the next trading day.
 Every result carries observed/usable flags so missing bars are not silently
 treated as zero returns.
 """
@@ -37,6 +38,9 @@ OUTCOME_COLUMNS = (
     "causal_only",
     "diagnostic_only",
     "signal_executable",
+    "reference_signal_id",
+    "reference_symbol",
+    "liquidity_match_ratio",
     "signal_adjusted_close",
     "entry_date",
     "entry_time",
@@ -391,6 +395,9 @@ def compute_event_outcomes(
                 "causal_only": bool(signal_dict.get("causal_only", True)),
                 "diagnostic_only": bool(signal_dict.get("diagnostic_only", False)),
                 "signal_executable": bool(signal_dict.get("signal_executable", True)),
+                "reference_signal_id": signal_dict.get("reference_signal_id"),
+                "reference_symbol": signal_dict.get("reference_symbol"),
+                "liquidity_match_ratio": signal_dict.get("liquidity_match_ratio", np.nan),
                 "signal_adjusted_close": signal_dict.get("signal_adjusted_close"),
                 "entry_date": None,
                 "entry_time": None,
@@ -457,7 +464,9 @@ def compute_event_outcomes(
             base["same_day_observed"] = True
 
         for horizon in selected.minute_horizons:
-            target_local = local_position + 1 + int(horizon)
+            # The signal bar is not the fill bar: entry is the next bar's
+            # open, so a one-minute outcome ends at that entry bar's close.
+            target_local = local_position + int(horizon)
             gross_name = f"gross_return_{horizon}m"
             net_name = f"net_return_{horizon}m"
             if target_local >= len(positions):
@@ -692,6 +701,96 @@ def compare_to_control(
     ]
 
 
+def compare_to_reference_control(
+    outcomes: pd.DataFrame,
+    *,
+    strategy_id: str,
+    control_id: str = "s0_liquidity_matched",
+    metric: str = "net_return_60m",
+) -> pd.DataFrame:
+    """Pair a strategy with a cross-sectional control by reference signal id.
+
+    ``compare_to_control`` is appropriate when strategy and control share the
+    same symbol/hour key.  A liquidity-matched stock intentionally has a
+    different symbol, so its signal carries ``reference_signal_id`` instead.
+    Missing or non-finite outcomes remain visible as unmatched observations;
+    they are not converted to zero.
+    """
+
+    required = {"signal_id", "strategy_id", metric, "reference_signal_id"}
+    _require_columns(outcomes, required, prefix="event_study_outcome")
+    left = outcomes.loc[
+        outcomes["strategy_id"].eq(strategy_id),
+        ["signal_id", "symbol", "signal_date", "signal_time", metric],
+    ].copy()
+    right = outcomes.loc[
+        outcomes["strategy_id"].eq(control_id),
+        ["reference_signal_id", "symbol", "signal_date", "signal_time", metric],
+    ].copy()
+    if left.empty or right.empty:
+        return pd.DataFrame(
+            columns=[
+                "reference_signal_id",
+                "strategy_id",
+                "control_id",
+                "metric",
+                "strategy_symbol",
+                "control_symbol",
+                "strategy_signal_date",
+                "control_signal_date",
+                "strategy_signal_time",
+                "control_signal_time",
+                "strategy_value",
+                "control_value",
+                "paired_difference",
+            ]
+        )
+    if right["reference_signal_id"].isna().any():
+        right = right.loc[right["reference_signal_id"].notna()].copy()
+    if right["reference_signal_id"].duplicated().any():
+        raise EventStudyError("event_study_reference_control_duplicate")
+    left = left.rename(
+        columns={
+            "signal_id": "reference_signal_id",
+            "symbol": "strategy_symbol",
+            "signal_date": "strategy_signal_date",
+            "signal_time": "strategy_signal_time",
+            metric: "strategy_value",
+        }
+    )
+    right = right.rename(
+        columns={
+            "symbol": "control_symbol",
+            "signal_date": "control_signal_date",
+            "signal_time": "control_signal_time",
+            metric: "control_value",
+        }
+    )
+    merged = left.merge(right, on="reference_signal_id", how="inner", validate="one_to_one")
+    merged["paired_difference"] = merged["strategy_value"] - merged["control_value"]
+    merged["strategy_id"] = str(strategy_id)
+    merged["control_id"] = str(control_id)
+    merged["metric"] = str(metric)
+    return merged.loc[
+        :,
+        [
+            "reference_signal_id",
+            "strategy_id",
+            "control_id",
+            "metric",
+            "strategy_symbol",
+            "control_symbol",
+            "strategy_signal_date",
+            "control_signal_date",
+            "strategy_signal_time",
+            "control_signal_time",
+            "strategy_value",
+            "control_value",
+            "paired_difference",
+        ],
+    ]
+
+
 def summarize_control_comparison(paired: pd.DataFrame) -> dict[str, Any]:
     """Summarise a paired comparison without treating missing outcomes as zero."""
 
@@ -733,6 +832,7 @@ __all__ = [
     "EventStudyError",
     "OUTCOME_COLUMNS",
     "compare_to_control",
+    "compare_to_reference_control",
     "build_representative_regime_frame",
     "compute_event_outcomes",
     "prepare_outcome_bars",

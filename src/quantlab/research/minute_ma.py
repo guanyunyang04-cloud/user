@@ -73,6 +73,16 @@ class MinuteMAConfig:
         ):
             raise MinuteMAError("minute_ma_prior_touch_window_invalid")
 
+    def as_dict(self) -> dict[str, Any]:
+        """Return the immutable event configuration in JSON-safe form."""
+
+        return {
+            "periods": [int(value) for value in self.periods],
+            "near_touch_bps": float(self.near_touch_bps),
+            "posthoc_catchup_bps": float(self.posthoc_catchup_bps),
+            "prior_touch_window_hours": int(self.prior_touch_window_hours),
+        }
+
 
 def normalize_bar_time(value: Any) -> str:
     """Normalize common QDP/provider time encodings to ``HHMMSSmmm``."""
@@ -266,6 +276,7 @@ def _hour_history(hourly: pd.DataFrame, config: MinuteMAConfig) -> pd.DataFrame:
         prior_ma = pd.Series(index=current.index, dtype="float64")
         prior_ma_slope = pd.Series(index=current.index, dtype="float64")
         previous_close = pd.Series(index=current.index, dtype="float64")
+        previous_high = pd.Series(index=current.index, dtype="float64")
         for _, index in current.groupby("symbol", sort=False).groups.items():
             values = current.loc[index, "adjusted_close"]
             sums = values.rolling(period - 1, min_periods=period - 1).sum().shift(1)
@@ -275,10 +286,12 @@ def _hour_history(hourly: pd.DataFrame, config: MinuteMAConfig) -> pd.DataFrame:
             prior_ma.loc[index] = ma
             prior_ma_slope.loc[index] = np.where(previous_ma.gt(0), (ma / previous_ma - 1.0) * 10_000.0, np.nan)
             previous_close.loc[index] = values.shift(1)
+            previous_high.loc[index] = current.loc[index, "adjusted_high"].shift(1)
         current["prior_close_sum_adjusted"] = prior_sum
         current["prior_completed_ma_adjusted"] = prior_ma
         current["prior_ma_slope_bps"] = prior_ma_slope
         current["previous_hour_close_adjusted"] = previous_close
+        current["previous_hour_high_adjusted"] = previous_high
         current["causal_intersection_adjusted"] = prior_sum / float(period - 1)
         current["causal_intersection"] = current["causal_intersection_adjusted"] / current["adjust_factor"]
         current["final_ma_adjusted"] = (prior_sum + current["adjusted_close"]) / float(period)
@@ -410,6 +423,7 @@ def build_minute_ma_states(
         "prior_completed_ma_adjusted",
         "prior_ma_slope_bps",
         "previous_hour_close_adjusted",
+        "previous_hour_high_adjusted",
         "causal_intersection_adjusted",
         "causal_intersection",
         "final_ma_adjusted",
