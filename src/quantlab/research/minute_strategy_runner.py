@@ -6,7 +6,7 @@ import argparse
 import gc
 import json
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -20,7 +20,12 @@ from quantlab.data.qdp_v2.duckdb_resources import (
     DEFAULT_MEMORY_FLOOR_BYTES,
     open_guarded_duckdb,
 )
-from quantlab.research.minute_ma import MA_PERIODS, MinuteMAConfig
+from quantlab.research.minute_ma import (
+    MA_PERIODS,
+    MinuteMAConfig,
+    build_target_hourly_ma_inputs,
+    session_minute_ordinal,
+)
 from quantlab.research.minute_ma_event_study import (
     OUTCOME_COLUMNS,
     EventStudyConfig,
@@ -51,16 +56,140 @@ class MinuteStrategyRunError(RuntimeError):
 
 GIB = 1024**3
 
+# The state builder naturally carries many diagnostic columns from the raw
+# minute frame.  Signals and cross-sectional controls need only this compact
+# causal subset.  Keeping the broad frame out of the per-symbol work table is
+# the main protection against pandas' temporary merge allocations.
+_COMPACT_STATE_COLUMNS = (
+    "symbol",
+    "trade_date",
+    "bar_time",
+    "sixty_minute_bucket",
+    "ma_period",
+    "hour_sequence",
+    "session_minute_ordinal",
+    "adjusted_close",
+    "adjusted_high",
+    "adjusted_low",
+    "amount",
+    "prior_20d_median_amount",
+    "causal_intersection_adjusted",
+    "close_to_intersection_bps",
+    "range_distance_to_intersection_bps",
+    "touched_now",
+    "close_below_intersection",
+    "previous_hour_close_adjusted",
+    "previous_hour_high_adjusted",
+    "prior_ma_slope_bps",
+    "ma_alignment_score",
+    "prior_true_touch_count_window",
+    "up_down_amount_ratio",
+    "bullish_ma_stack",
+    "recent_high_breakout",
+    "prior_acceleration",
+    "breakout_recent",
+    "daily_trend_positive",
+    "market_supportive",
+    "market_regime",
+    "sector_strength_rank",
+    "sector_breadth",
+    "leader_relative_return",
+    "sector_strong",
+    "leader_sync",
+    "auction_confirmed",
+    "volume_normal",
+    "not_repeated_cross",
+    "vwap_supportive",
+    "amount_acceleration_positive",
+    "auction_gap",
+    "volume_acceleration_5_20",
+    "amount_curve_surprise",
+    "vwap_deviation",
+)
 
-def _require_memory_floor(config: DevelopmentStudyConfig, stage: str) -> int:
-    """Stop before another allocation when the requested RAM reserve is gone."""
+_COMPACT_CONTEXT_COLUMNS = (
+    "symbol",
+    "trade_date",
+    "bar_time",
+    "recent_high_breakout",
+    "prior_acceleration",
+    "breakout_recent",
+    "daily_trend_positive",
+    "market_regime",
+    "market_supportive",
+    "sector_strength_rank",
+    "sector_breadth",
+    "leader_relative_return",
+    "sector_strong",
+    "leader_sync",
+    "auction_confirmed",
+    "volume_normal",
+    "vwap_supportive",
+    "amount_acceleration_positive",
+    "volume_acceleration_5_20",
+    "amount_curve_surprise",
+    "vwap_deviation",
+)
+
+
+def _compact_state_frame(states: pd.DataFrame) -> pd.DataFrame:
+    """Retain only columns consumed by rules and matched controls."""
+
+    columns = [name for name in _COMPACT_STATE_COLUMNS if name in states.columns]
+    return states.loc[:, columns].copy()
+
+
+def _compact_context_frame(context: pd.DataFrame) -> pd.DataFrame:
+    columns = [name for name in _COMPACT_CONTEXT_COLUMNS if name in context.columns]
+    return context.loc[:, columns].copy()
+
+
+def _chunk_size_for_memory(config: DevelopmentStudyConfig, *, requested: int | None = None) -> int:
+    """Choose a conservative symbol chunk before a large pandas allocation.
+
+    The cap is intentionally based on *available* RAM, not process RSS.  RSS
+    misses DuckDB buffers and other processes, while the user's safety margin
+    is a machine-wide requirement.  A smaller chunk is preferable to letting a
+    transient merge consume the last few hundred MiB.
+    """
+
+    available = _require_memory_floor(config, "chunk_size_probe", soft=True)
+    available_gib = available / GIB
+    if available_gib < 2.0:
+        cap = 24
+    elif available_gib < 3.0:
+        cap = 64
+    elif available_gib < 4.0:
+        cap = 128
+    elif available_gib < 5.0:
+        cap = 256
+    elif available_gib < 6.0:
+        cap = 384
+    else:
+        cap = 512
+    return max(1, min(int(requested or config.signal_symbol_chunk_size), cap))
+
+
+def _require_memory_floor(
+    config: DevelopmentStudyConfig,
+    stage: str,
+    *,
+    soft: bool = False,
+) -> int:
+    """Stop before another allocation when the requested RAM reserve is gone.
+
+    ``memory_floor_gib`` is the non-negotiable reserve.  The optional soft
+    floor is checked immediately before chunked pandas work so a transient
+    allocation has room to complete without crossing the hard floor.
+    """
 
     available = int(psutil.virtual_memory().available)
-    floor = int(float(config.memory_floor_gib) * GIB)
+    floor_gib = config.soft_memory_floor_gib if soft else config.memory_floor_gib
+    floor = int(float(floor_gib) * GIB)
     if available < floor:
         raise MinuteStrategyRunError(
             f"strategy_run_memory_floor_breached:{stage}:"
-            f"available={available}:floor={floor}"
+            f"available={available}:floor={floor}:soft={bool(soft)}"
         )
     return available
 
@@ -78,10 +207,11 @@ class DevelopmentStudyConfig:
     history_open_days: int = 66
     outcome_open_days: int = 5
     strategy_periods: tuple[int, ...] = MA_PERIODS
-    signal_symbol_chunk_size: int = 300
+    signal_symbol_chunk_size: int = 512
     duckdb_threads: int | str = 2
     temp_directory: str | None = None
     memory_floor_gib: float = 0.5
+    soft_memory_floor_gib: float = 1.0
     duckdb_memory_floor_gib: float = 2.0
 
     def validate(self) -> None:
@@ -105,6 +235,11 @@ class DevelopmentStudyConfig:
             raise MinuteStrategyRunError("strategy_run_duckdb_threads_invalid")
         if not np.isfinite(float(self.memory_floor_gib)) or float(self.memory_floor_gib) < 0.5:
             raise MinuteStrategyRunError("strategy_run_memory_floor_invalid")
+        if (
+            not np.isfinite(float(self.soft_memory_floor_gib))
+            or float(self.soft_memory_floor_gib) < float(self.memory_floor_gib)
+        ):
+            raise MinuteStrategyRunError("strategy_run_soft_memory_floor_invalid")
         if (
             not np.isfinite(float(self.duckdb_memory_floor_gib))
             or float(self.duckdb_memory_floor_gib) < float(self.memory_floor_gib)
@@ -131,6 +266,7 @@ class DevelopmentStudyConfig:
             "duckdb_threads": self.duckdb_threads,
             "temp_directory": self.temp_directory,
             "memory_floor_gib": float(self.memory_floor_gib),
+            "soft_memory_floor_gib": float(self.soft_memory_floor_gib),
             "duckdb_memory_floor_gib": float(self.duckdb_memory_floor_gib),
         }
 
@@ -222,15 +358,41 @@ def _build_day_signals(
     include_diagnostic: bool,
     liquidity_band: float,
     signal_symbol_chunk_size: int,
+    memory_config: DevelopmentStudyConfig | None = None,
+    ma_inputs: Mapping[int, tuple[pd.DataFrame, pd.DataFrame]] | None = None,
     random_seed: int = 7,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     if day_bars.empty:
         return pd.DataFrame(), {"state_rows": 0, "signal_rows": 0, "control_reference_count": 0, "control_matched_count": 0}
-    market_context = build_minute_market_context(day_bars, daily_context=daily_context)
+    # Build cross-sectional context once (it must see the full universe), then
+    # immediately discard the diagnostic/raw columns.  Per-symbol chunks below
+    # retain the market/sector fields while keeping transient MA tables small.
+    market_context = _compact_context_frame(
+        build_minute_market_context(day_bars, daily_context=daily_context)
+    )
     # Alignment is the only cross-period state.  Compute it once, then process
     # each MA period independently so the six expanded state tables are never
     # resident at the same time.
-    alignment = build_live_ma_alignment(day_bars, hourly_history, config=ma_config)
+    alignment_history = None
+    if ma_inputs:
+        day_dates = set(day_bars["trade_date"].astype(str).unique())
+        alignment_parts = [
+            history.loc[history["trade_date"].astype(str).isin(day_dates)].copy()
+            for history, _touches in ma_inputs.values()
+            if not history.empty
+        ]
+        if alignment_parts:
+            alignment_history = pd.concat(alignment_parts, ignore_index=True)
+    alignment = build_live_ma_alignment(
+        day_bars,
+        hourly_history,
+        config=ma_config,
+        hourly_ma_history=alignment_history,
+    )
+    chunk_config = memory_config or DevelopmentStudyConfig(
+        signal_symbol_chunk_size=int(signal_symbol_chunk_size)
+    )
+    chunk_size = _chunk_size_for_memory(chunk_config, requested=signal_symbol_chunk_size)
     parts: list[pd.DataFrame] = []
     control_parts: list[pd.DataFrame] = []
     state_rows = 0
@@ -245,6 +407,17 @@ def _build_day_signals(
         and (include_diagnostic or spec.executable)
         and spec.signal_rule != "posthoc_catchup"
     ]
+    day_symbol_values = day_bars["symbol"].astype(str)
+    context_symbol_values = market_context["symbol"].astype(str)
+    hourly_symbol_values = (
+        hourly_history["symbol"].astype(str)
+        if hourly_history is not None and not hourly_history.empty
+        else None
+    )
+    all_symbols = day_symbol_values.drop_duplicates().tolist()
+    alignment_symbol_values = (
+        alignment["symbol"].astype(str) if not alignment.empty else pd.Series(dtype="string")
+    )
     for period in strategy_periods:
         period = int(period)
         if period not in ma_config.periods:
@@ -255,55 +428,119 @@ def _build_day_signals(
             posthoc_catchup_bps=ma_config.posthoc_catchup_bps,
             prior_touch_window_hours=ma_config.prior_touch_window_hours,
         )
-        states = build_enriched_minute_ma_states(
-            day_bars,
-            hourly_history,
-            daily_context=daily_context,
-            context=market_context,
-            config=period_config,
-        )
-        if states.empty:
-            continue
-        if not alignment.empty:
-            states = _attach_alignment(states, alignment)
-        state_rows += int(len(states))
-        state_symbols = states["symbol"].astype(str).drop_duplicates().tolist()
-        signal_parts: list[pd.DataFrame] = []
-        for start in range(0, len(state_symbols), int(signal_symbol_chunk_size)):
-            chunk_symbols = set(state_symbols[start : start + int(signal_symbol_chunk_size)])
-            chunk_states = states.loc[states["symbol"].astype(str).isin(chunk_symbols)]
+        # Keep one compact state chunk per symbol group for the control match.
+        # No broad all-universe state frame is needed by the signal builder.
+        period_state_parts: list[pd.DataFrame] = []
+        period_signal_parts: list[pd.DataFrame] = []
+        period_reference_parts: list[pd.DataFrame] = []
+        for start in range(0, len(all_symbols), chunk_size):
+            _require_memory_floor(
+                memory_config or DevelopmentStudyConfig(signal_symbol_chunk_size=chunk_size),
+                f"signal_chunk_start:{period}:{start}",
+                soft=True,
+            )
+            chunk_symbols = set(all_symbols[start : start + chunk_size])
+            bars_mask = day_symbol_values.isin(chunk_symbols).to_numpy(dtype=bool)
+            context_mask = context_symbol_values.isin(chunk_symbols).to_numpy(dtype=bool)
+            hourly_mask = (
+                hourly_symbol_values.isin(chunk_symbols).to_numpy(dtype=bool)
+                if hourly_symbol_values is not None
+                else None
+            )
+            chunk_bars = day_bars.loc[bars_mask].copy()
+            chunk_context = market_context.loc[context_mask].copy()
+            chunk_hourly = (
+                hourly_history.loc[hourly_mask].copy()
+                if hourly_history is not None and hourly_mask is not None
+                else None
+            )
+            if ma_inputs and period in ma_inputs:
+                cached_history, cached_touches = ma_inputs[period]
+                target_dates = set(chunk_bars["trade_date"].astype(str).unique())
+                cached_history_chunk = cached_history.loc[
+                    cached_history["symbol"].astype(str).isin(chunk_symbols)
+                    & cached_history["trade_date"].astype(str).isin(target_dates)
+                ].copy()
+                cached_touches_chunk = cached_touches.loc[
+                    cached_touches["symbol"].astype(str).isin(chunk_symbols)
+                    & cached_touches["trade_date"].astype(str).isin(target_dates)
+                ].copy()
+                states = build_enriched_minute_ma_states(
+                    chunk_bars,
+                    None,
+                    # Context already contains the daily and cross-sectional
+                    # fields; avoiding a second daily merge saves a large copy.
+                    daily_context=None,
+                    context=chunk_context,
+                    config=period_config,
+                    hourly_ma_history=cached_history_chunk,
+                    prior_touch_counts=cached_touches_chunk,
+                )
+                del cached_history_chunk, cached_touches_chunk
+            else:
+                states = build_enriched_minute_ma_states(
+                    chunk_bars,
+                    chunk_hourly,
+                    # Context already contains the daily and cross-sectional
+                    # fields; avoiding a second daily merge saves a large copy.
+                    daily_context=None,
+                    context=chunk_context,
+                    config=period_config,
+                )
+            if states.empty:
+                del chunk_bars, chunk_context, chunk_hourly, states
+                gc.collect()
+                continue
+            if not alignment.empty:
+                chunk_alignment = alignment.loc[alignment_symbol_values.isin(chunk_symbols)].copy()
+                states = _attach_alignment(states, chunk_alignment)
+                del chunk_alignment
+            state_rows += int(len(states))
+            compact_states = _compact_state_frame(states)
+            period_state_parts.append(compact_states)
             chunk_signals = build_strategy_signals_vectorized(
-                chunk_states,
+                compact_states,
                 strategy_ids=[spec.strategy_id for spec in specs],
                 include_diagnostic=include_diagnostic,
                 random_seed=random_seed,
             )
             if not chunk_signals.empty:
-                signal_parts.append(chunk_signals)
-        signal = pd.concat(signal_parts, ignore_index=True) if signal_parts else pd.DataFrame()
-        filtered = _decision_signal_filter(signal) if not signal.empty else signal
-        if not filtered.empty:
-            parts.append(filtered)
-            reference_frame = filtered.loc[
-                ~filtered["strategy_id"].isin(["s0_random_matched", "s0_liquidity_matched"])
-                & filtered["signal_executable"].fillna(False)
-            ].copy()
-            if not reference_frame.empty:
-                controls = build_liquidity_matched_controls_many(
-                    states,
-                    reference_frame,
-                    liquidity_band_ratio=liquidity_band,
-                    random_seed=random_seed,
-                )
-                control_reference_count += int(controls.attrs.get("reference_count", len(reference_frame)))
-                control_matched_count += int(controls.attrs.get("matched_count", len(controls)))
-                for name, value in controls.attrs.get("unmatched_reasons", {}).items():
-                    control_unmatched_reasons[str(name)] = control_unmatched_reasons.get(str(name), 0) + int(value)
-                if not controls.empty:
-                    filtered_controls = _decision_signal_filter(controls)
-                    if not filtered_controls.empty:
-                        control_parts.append(filtered_controls)
-        del states, signal, signal_parts
+                filtered = _decision_signal_filter(chunk_signals)
+                if not filtered.empty:
+                    period_signal_parts.append(filtered)
+                    reference_frame = filtered.loc[
+                        ~filtered["strategy_id"].isin(["s0_random_matched", "s0_liquidity_matched"])
+                        & filtered["signal_executable"].fillna(False)
+                    ].copy()
+                    if not reference_frame.empty:
+                        period_reference_parts.append(reference_frame)
+            del chunk_bars, chunk_context, chunk_hourly, states, compact_states, chunk_signals
+            gc.collect()
+            _require_memory_floor(
+                memory_config or DevelopmentStudyConfig(signal_symbol_chunk_size=chunk_size),
+                f"signal_chunk_complete:{period}:{start}",
+            )
+        if period_signal_parts:
+            parts.append(pd.concat(period_signal_parts, ignore_index=True))
+        if period_reference_parts and period_state_parts:
+            reference_frame = pd.concat(period_reference_parts, ignore_index=True)
+            control_states = pd.concat(period_state_parts, ignore_index=True)
+            controls = build_liquidity_matched_controls_many(
+                control_states,
+                reference_frame,
+                liquidity_band_ratio=liquidity_band,
+                random_seed=random_seed,
+            )
+            control_reference_count += int(controls.attrs.get("reference_count", len(reference_frame)))
+            control_matched_count += int(controls.attrs.get("matched_count", len(controls)))
+            for name, value in controls.attrs.get("unmatched_reasons", {}).items():
+                control_unmatched_reasons[str(name)] = control_unmatched_reasons.get(str(name), 0) + int(value)
+            if not controls.empty:
+                filtered_controls = _decision_signal_filter(controls)
+                if not filtered_controls.empty:
+                    control_parts.append(filtered_controls)
+            del reference_frame, control_states, controls
+        del period_state_parts, period_signal_parts, period_reference_parts
         gc.collect()
     if not parts:
         return pd.DataFrame(), {"state_rows": state_rows, "signal_rows": 0, "control_reference_count": control_reference_count, "control_matched_count": control_matched_count, "control_unmatched_reasons": control_unmatched_reasons}
@@ -323,6 +560,168 @@ def _lean_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
     keep.extend(name for name in ("mfe_same_day", "mae_same_day", "t1_gross_return", "t1_net_return") if name in outcomes.columns)
     keep.extend(name for name in metric_names if name not in keep)
     return outcomes.loc[:, list(dict.fromkeys(keep))].copy()
+
+
+def _empty_outcome_frame(config: EventStudyConfig) -> pd.DataFrame:
+    metric_names = (
+        [f"gross_return_{horizon}m" for horizon in config.minute_horizons]
+        + [f"net_return_{horizon}m" for horizon in config.minute_horizons]
+        + [f"gross_return_{horizon}d" for horizon in config.day_horizons]
+        + [f"net_return_{horizon}d" for horizon in config.day_horizons]
+        + ["mfe_same_day", "mae_same_day", "t1_gross_return", "t1_net_return"]
+    )
+    return pd.DataFrame(
+        {
+            name: pd.Series(dtype="object")
+            for name in (*OUTCOME_COLUMNS, *metric_names)
+        }
+    )
+
+
+_OUTCOME_RUNTIME_COLUMNS = {
+    "entry_date",
+    "entry_time",
+    "entry_price",
+    "entry_adjusted_price",
+    "entry_observed",
+    "entry_executable",
+    "entry_reason",
+    "entry_bar_index",
+    "mfe_same_day",
+    "mae_same_day",
+    "same_day_observed",
+    "t1_exit_date",
+    "t1_exit_time",
+    "t1_exit_adjusted_price",
+    "t1_exit_observed",
+    "t1_exit_reason",
+    "t1_gross_return",
+    "t1_net_return",
+}
+
+
+def _broadcast_unique_event_outcomes(
+    signals: pd.DataFrame,
+    unique_outcomes: pd.DataFrame,
+) -> pd.DataFrame:
+    """Map one computed price path back to every strategy using that event."""
+
+    key_columns = ["symbol", "signal_date", "signal_time", "signal_executable"]
+    runtime_columns = [
+        name
+        for name in unique_outcomes.columns
+        if name in _OUTCOME_RUNTIME_COLUMNS
+        or name.startswith(("gross_return_", "net_return_"))
+    ]
+    lookup = unique_outcomes.loc[:, [*key_columns, *runtime_columns]].drop_duplicates(
+        key_columns
+    )
+    base_columns = [
+        name
+        for name in OUTCOME_COLUMNS
+        if name in signals.columns and name not in _OUTCOME_RUNTIME_COLUMNS
+    ]
+    base = signals.loc[:, base_columns].copy()
+    base["_row_order"] = np.arange(len(base), dtype=np.int64)
+    result = base.merge(
+        lookup,
+        on=key_columns,
+        how="left",
+        validate="many_to_one",
+        sort=False,
+    )
+    result.sort_values("_row_order", inplace=True, kind="stable")
+    result.drop(columns="_row_order", inplace=True)
+    for name in OUTCOME_COLUMNS:
+        if name not in result.columns:
+            result[name] = None
+    return _lean_outcomes(result)
+
+
+def _compute_outcomes_chunked(
+    workspace_root: Path,
+    signals: pd.DataFrame,
+    *,
+    future_dates: Sequence[str],
+    trading_dates: Sequence[str],
+    data_config: StrategyDataConfig,
+    event_config: EventStudyConfig,
+    requested_chunk_size: int,
+    memory_config: DevelopmentStudyConfig,
+) -> pd.DataFrame:
+    """Score one date in symbol chunks instead of loading all forward minutes.
+
+    A five-session outcome window is several times larger than the target-day
+    signal frame.  Keeping only one symbol slice of those minutes at a time
+    prevents the forward lookup table from becoming the run's memory peak.
+    """
+
+    if signals.empty:
+        return pd.DataFrame()
+    chunk_size = _chunk_size_for_memory(memory_config, requested=requested_chunk_size)
+    symbol_values = signals["symbol"].astype(str)
+    symbols = symbol_values.drop_duplicates().tolist()
+    parts: list[pd.DataFrame] = []
+    for start in range(0, len(symbols), chunk_size):
+        _require_memory_floor(
+            memory_config,
+            f"outcome_chunk_start:{start}",
+            soft=True,
+        )
+        chunk_symbols = set(symbols[start : start + chunk_size])
+        signal_mask = symbol_values.isin(chunk_symbols).to_numpy(dtype=bool)
+        chunk_signals = signals.loc[signal_mask].copy()
+        # Outcomes only need OHLC, execution status and session ordinals.  The
+        # daily/context columns are deliberately not merged into this frame.
+        chunk_bars = load_target_bars(
+            workspace_root,
+            symbols=sorted(chunk_symbols),
+            trade_dates=future_dates,
+            daily_context=None,
+            require_complete_session=False,
+            config=data_config,
+        )
+        event_keys = ["symbol", "signal_date", "signal_time", "signal_executable"]
+        unique_signals = chunk_signals.drop_duplicates(event_keys, keep="first").copy()
+        unique_outcomes = compute_event_outcomes(
+            chunk_bars,
+            unique_signals,
+            config=event_config,
+            trading_dates=trading_dates,
+        )
+        parts.append(_broadcast_unique_event_outcomes(chunk_signals, unique_outcomes))
+        del chunk_signals, chunk_bars, unique_signals, unique_outcomes
+        gc.collect()
+        _require_memory_floor(memory_config, f"outcome_chunk_complete:{start}")
+    if not parts:
+        return pd.DataFrame()
+    result = pd.concat(parts, ignore_index=True)
+    # ``compute_event_outcomes`` normally exposes a batch-local row number.
+    # Once the bars are partitioned by symbol that number would depend on the
+    # chunk boundary.  Replace it with a deterministic key within this
+    # outcome window so reruns and resumed chunks remain comparable.
+    if "entry_bar_index" in result.columns and {"entry_date", "entry_time"}.issubset(result.columns):
+        symbol_codes = {value: index for index, value in enumerate(sorted(symbols))}
+        date_codes = {str(value): index for index, value in enumerate(future_dates)}
+        entry_symbols = result["symbol"].astype(str).map(symbol_codes)
+        entry_dates = result["entry_date"].astype("string").map(date_codes)
+        entry_ordinals = result["entry_time"].map(session_minute_ordinal)
+        valid = entry_symbols.notna() & entry_dates.notna() & entry_ordinals.notna()
+        if valid.any():
+            date_stride = max(1, len(date_codes)) * 240
+            stable = (
+                entry_symbols.loc[valid].astype("int64") * date_stride
+                + entry_dates.loc[valid].astype("int64") * 240
+                + entry_ordinals.loc[valid].astype("int64")
+            )
+            result.loc[valid, "entry_bar_index"] = stable.to_numpy(dtype=np.int64)
+    result.sort_values(
+        ["signal_date", "signal_time", "strategy_id", "symbol", "ma_period"],
+        kind="stable",
+        inplace=True,
+        ignore_index=True,
+    )
+    return result
 
 
 def _quote_identifier(value: str) -> str:
@@ -661,6 +1060,7 @@ def run_development_study(
         date.fromisoformat(str(selected.end_date))
         + timedelta(days=max(14, int(selected.outcome_open_days) * 3))
     ).isoformat()
+    _require_memory_floor(selected, "calendar_load_start", soft=True)
     calendar = load_trading_calendar(
         root,
         start_date="2010-01-01",
@@ -685,6 +1085,11 @@ def run_development_study(
         month_dir.mkdir(parents=True, exist_ok=True)
         checkpoint = month_dir / "checkpoint.json"
         completed = set() if selected.force else _completed_dates(checkpoint)
+        completed = {
+            value
+            for value in completed
+            if (output_root / "outcomes" / f"date={value}" / "outcomes.parquet").is_file()
+        }
         # Date-level outputs are the resumable unit and are never overwritten
         # unless --force is explicitly supplied.
         target_dates = [value for value in target_dates if value not in completed]
@@ -694,6 +1099,20 @@ def run_development_study(
             if month_start <= value <= month_end and selected.start_date <= value <= selected.end_date
         ]
         if not target_month_dates:
+            continue
+        if not target_dates:
+            # Everything in this month already has a durable date output.
+            # Avoid reloading the large support window merely to update a
+            # checkpoint during a resume, while preserving an ``ok`` run
+            # status when every month is already complete.
+            aggregate["months"].append(
+                {
+                    "month": month_start[:7],
+                    "target_date_count": len(target_month_dates),
+                    "completed_date_count": len(completed),
+                    "status": "already_complete",
+                }
+            )
             continue
         target_universe = load_point_in_time_universe(root, trade_dates=target_month_dates, config=selected_data)
         all_open = calendar["trade_date"].astype(str).tolist()
@@ -744,6 +1163,7 @@ def run_development_study(
             target_universe = target_universe.loc[target_universe["symbol"].isin(symbols)].copy()
         started_month = time.perf_counter()
         _require_memory_floor(selected, f"month_start:{month_start[:7]}")
+        _require_memory_floor(selected, f"daily_context_load_start:{month_start[:7]}", soft=True)
         daily_context = load_daily_context(
             root,
             symbols=symbols,
@@ -752,6 +1172,7 @@ def run_development_study(
             config=selected_data,
         )
         _require_memory_floor(selected, f"daily_context_loaded:{month_start[:7]}")
+        _require_memory_floor(selected, f"hourly_history_load_start:{month_start[:7]}", soft=True)
         # ``month_end`` is a lexical partition label (e.g. YYYY-MM-31), not
         # necessarily a real date.  The last actual target date is the
         # correct inclusive bound for the historical hourly aggregation.
@@ -763,6 +1184,35 @@ def run_development_study(
             config=selected_data,
         )
         _require_memory_floor(selected, f"hourly_history_loaded:{month_start[:7]}")
+        # Rolling MA history is computed once per month, retained only for the
+        # target dates, and split by period.  This removes the old repeated
+        # 66-session rolling calculation from every target day.
+        cache_chunk_size = _chunk_size_for_memory(
+            selected, requested=selected.signal_symbol_chunk_size
+        )
+        _require_memory_floor(
+            selected, f"ma_cache_start:{month_start[:7]}", soft=True
+        )
+        cached_history, cached_touches = build_target_hourly_ma_inputs(
+            hourly_history,
+            target_dates,
+            config=selected_ma,
+            symbol_chunk_size=cache_chunk_size,
+        )
+        ma_inputs = {
+            int(period): (
+                cached_history.loc[cached_history["ma_period"].eq(int(period))].copy(),
+                cached_touches.loc[cached_touches["ma_period"].eq(int(period))].copy(),
+            )
+            for period in selected.strategy_periods
+        }
+        del cached_history, cached_touches
+        # The cache contains everything the signal path needs; raw hourly bars
+        # are no longer kept beside the target-day minute frame.
+        del hourly_history
+        hourly_history = None
+        gc.collect()
+        _require_memory_floor(selected, f"ma_cache_ready:{month_start[:7]}")
         month_outcome_paths: list[str] = []
         month_stats = {
             "month": month_start[:7],
@@ -778,6 +1228,65 @@ def run_development_study(
             "completed_dates_before_run": len(completed),
             "dates": [],
         }
+
+        def finish_date(
+            trade_date: str,
+            *,
+            symbol_count: int,
+            bar_rows: int,
+            signal_rows: int,
+            outcomes: pd.DataFrame,
+            signal_stats: dict[str, Any],
+            started: float,
+            _month_outcome_paths: list[str] = month_outcome_paths,
+            _completed: set[str] = completed,
+            _month_stats: dict[str, Any] = month_stats,
+            _checkpoint: Path = checkpoint,
+            _month_label: str = month_start[:7],
+        ) -> None:
+            """Persist one date, including an explicit empty-date result."""
+
+            date_dir = output_root / "outcomes" / f"date={trade_date}"
+            outcome_path = date_dir / "outcomes.parquet"
+            date_dir.mkdir(parents=True, exist_ok=True)
+            outcomes.to_parquet(outcome_path, index=False)
+            _month_outcome_paths.append(str(outcome_path))
+            _completed.add(trade_date)
+            observed = int(
+                outcomes["entry_observed"].fillna(False).sum()
+                if "entry_observed" in outcomes
+                else 0
+            )
+            executable = int(
+                outcomes["entry_executable"].fillna(False).sum()
+                if "entry_executable" in outcomes
+                else 0
+            )
+            _month_stats["dates"].append(
+                {
+                    "trade_date": trade_date,
+                    "symbol_count": int(symbol_count),
+                    "bar_rows": int(bar_rows),
+                    "signal_rows": int(signal_rows),
+                    "outcome_rows": int(len(outcomes)),
+                    "entry_observed": observed,
+                    "entry_executable": executable,
+                    "signal_stats": signal_stats,
+                    "elapsed_seconds": round(time.perf_counter() - started, 3),
+                    "outcome_path": str(outcome_path),
+                }
+            )
+            _write_json(
+                _checkpoint,
+                {
+                    "schema": "quantlab.minute_ma_development_checkpoint/1",
+                    "month": _month_label,
+                    "completed_dates": sorted(_completed),
+                    "outcome_paths": sorted(_month_outcome_paths),
+                    "month_stats": _month_stats,
+                },
+            )
+
         for trade_date in target_month_dates:
             date_dir = output_root / "outcomes" / f"date={trade_date}"
             outcome_path = date_dir / "outcomes.parquet"
@@ -786,9 +1295,24 @@ def run_development_study(
                 continue
             date_started = time.perf_counter()
             _require_memory_floor(selected, f"date_start:{trade_date}")
+            _require_memory_floor(selected, f"target_bars_load_start:{trade_date}", soft=True)
             day_universe = target_universe.loc[target_universe["trade_date"].astype(str).eq(trade_date)].copy()
             day_symbols = day_universe["symbol"].astype(str).tolist()
             if not day_symbols:
+                finish_date(
+                    trade_date,
+                    symbol_count=0,
+                    bar_rows=0,
+                    signal_rows=0,
+                    outcomes=_empty_outcome_frame(selected_event),
+                    signal_stats={
+                        "state_rows": 0,
+                        "signal_rows": 0,
+                        "control_reference_count": 0,
+                        "control_matched_count": 0,
+                    },
+                    started=date_started,
+                )
                 continue
             day_bars = load_target_bars(
                 root,
@@ -807,57 +1331,45 @@ def run_development_study(
                 include_diagnostic=False,
                 liquidity_band=selected_data.liquidity_match_band,
                 signal_symbol_chunk_size=selected.signal_symbol_chunk_size,
+                memory_config=selected,
+                ma_inputs=ma_inputs,
             )
             _require_memory_floor(selected, f"signals_built:{trade_date}")
             if signals.empty:
+                finish_date(
+                    trade_date,
+                    symbol_count=len(day_symbols),
+                    bar_rows=len(day_bars),
+                    signal_rows=0,
+                    outcomes=_empty_outcome_frame(selected_event),
+                    signal_stats=signal_stats,
+                    started=date_started,
+                )
+                del day_bars, signals
+                gc.collect()
                 continue
             target_index = all_open.index(trade_date)
             future_dates = all_open[target_index : min(len(all_open), target_index + int(selected_data.outcome_open_days) + 1)]
-            outcome_symbols = sorted(signals["symbol"].astype(str).unique().tolist())
-            outcome_bars = load_target_bars(
+            outcomes = _compute_outcomes_chunked(
                 root,
-                symbols=outcome_symbols,
-                trade_dates=future_dates,
-                daily_context=daily_context,
-                require_complete_session=False,
-                config=selected_data,
-            )
-            _require_memory_floor(selected, f"outcome_bars_loaded:{trade_date}")
-            outcomes = compute_event_outcomes(
-                outcome_bars,
                 signals,
-                config=selected_event,
+                future_dates=future_dates,
                 trading_dates=all_open,
+                data_config=selected_data,
+                event_config=selected_event,
+                requested_chunk_size=selected.signal_symbol_chunk_size,
+                memory_config=selected,
             )
-            outcomes = _lean_outcomes(outcomes)
-            date_dir.mkdir(parents=True, exist_ok=True)
-            outcomes.to_parquet(outcome_path, index=False)
-            month_outcome_paths.append(str(outcome_path))
-            completed.add(trade_date)
-            day_record = {
-                "trade_date": trade_date,
-                "symbol_count": len(day_symbols),
-                "bar_rows": int(len(day_bars)),
-                "signal_rows": int(len(signals)),
-                "outcome_rows": int(len(outcomes)),
-                "entry_observed": int(outcomes["entry_observed"].fillna(False).sum()),
-                "entry_executable": int(outcomes["entry_executable"].fillna(False).sum()),
-                "signal_stats": signal_stats,
-                "elapsed_seconds": round(time.perf_counter() - date_started, 3),
-                "outcome_path": str(outcome_path),
-            }
-            month_stats["dates"].append(day_record)
-            _write_json(
-                checkpoint,
-                {
-                    "schema": "quantlab.minute_ma_development_checkpoint/1",
-                    "month": month_start[:7],
-                    "completed_dates": sorted(completed),
-                    "outcome_paths": sorted(month_outcome_paths),
-                    "month_stats": month_stats,
-                },
+            finish_date(
+                trade_date,
+                symbol_count=len(day_symbols),
+                bar_rows=len(day_bars),
+                signal_rows=len(signals),
+                outcomes=outcomes,
+                signal_stats=signal_stats,
+                started=date_started,
             )
-            del day_bars, signals, outcome_bars, outcomes
+            del day_bars, signals, outcomes
             gc.collect()
             _require_memory_floor(selected, f"date_complete:{trade_date}")
         month_stats["completed_date_count"] = len(completed)
@@ -874,7 +1386,7 @@ def run_development_study(
                 "month_stats": month_stats,
             },
         )
-        del daily_context, hourly_history
+        del daily_context, hourly_history, ma_inputs
         gc.collect()
         _require_memory_floor(selected, f"month_complete:{month_start[:7]}")
     aggregate["status"] = "ok" if len(aggregate["months"]) == len(month_ranges) else "partial"
@@ -901,8 +1413,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--history-open-days", type=int, default=66)
     parser.add_argument("--outcome-open-days", type=int, default=5)
     parser.add_argument("--duckdb-threads", default="2")
-    parser.add_argument("--signal-symbol-chunk-size", type=int, default=300)
+    parser.add_argument("--signal-symbol-chunk-size", type=int, default=512)
     parser.add_argument("--memory-floor-gib", type=float, default=0.5)
+    parser.add_argument("--soft-memory-floor-gib", type=float, default=1.0)
     parser.add_argument("--duckdb-memory-floor-gib", type=float, default=2.0)
     parser.add_argument("--temp-directory", default="")
     parser.add_argument("--period", type=int, action="append", dest="periods")
@@ -930,6 +1443,7 @@ def main(argv: list[str] | None = None) -> int:
         duckdb_threads=duckdb_threads,
         temp_directory=args.temp_directory or None,
         memory_floor_gib=args.memory_floor_gib,
+        soft_memory_floor_gib=args.soft_memory_floor_gib,
         duckdb_memory_floor_gib=args.duckdb_memory_floor_gib,
     )
     result = run_development_study(args.workspace_root, config=config)

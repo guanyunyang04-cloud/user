@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-30
+Updated: 2026-08-31
 
 ## Decision
 
@@ -175,6 +175,28 @@ evidence of full-universe profitability; 892 of 5,374 control references were
 unmatched in this deliberately thin pool and are reported rather than scored
 as zero.
 
+The development runner was then made memory-bounded before any multi-year
+replay.  It keeps cross-sectional context compact, processes MA states and
+controls in adaptive symbol chunks, scores forward bars in chunks, and
+deduplicates identical symbol/minute event paths across strategies.  The hard
+machine-wide reserve is 0.5 GiB; a 1 GiB soft reserve prevents starting another
+large pandas allocation.  DuckDB uses a 2 GiB internal reserve by default.
+An all-main-board single-day probe on 2022-06-16 (3,009 symbols, six MA
+periods, 24 rule/control variants) produced 445,017 outcome rows with a
+measured minimum of about 2.28 GiB available RAM on the month-cache path.
+The cache path completed the month/date work in about 402 seconds on this
+machine; the older unbounded path was not used for the final probe.  This is an implementation
+and capacity result only, not evidence of profitability; the probe output is
+kept under the ignored `runs/` workspace rather than durable research records.
+
+The active 5-minute archive was also tested as a coarse MA-event screen on the
+same date.  A 25 bps threshold retained 25.14% of possible stock/hour/MA keys
+but missed 17 exact 1-minute signal keys; a 200 bps threshold retained 56.81%
+and recalled every exact key on that date.  Because this is only one market
+state, the coarse screen remains audit-only and is not enabled in the runner.
+The reproducible counts and source dataset identities are recorded under
+`research/records/minute_ma_coarse_screen_probe/`.
+
 ## Artifact policy
 
 Retain the rev5 compatibility benchmark as historical evidence and keep it
@@ -201,12 +223,14 @@ recoverable archives or provenance needed for audit.
    eight-symbol implementation pool and join the market/sector fields needed
    for the S3 gates. Keep every attempted rule version and use only causal
    minute fields for entries and exits.
-3. Replay the finite rules on the full 2022-2024 development universe with an
+3. Build and audit an optional 5-minute coarse candidate pass against the exact
+   1-minute path; enable it only after its recall and coverage are measured.
+4. Replay the finite rules on the full 2022-2024 development universe with an
    inventory/order-state engine; report costs, missingness, turnover, capacity,
    and drawdown by year and market regime.
-4. Freeze the selected rule family, then inspect 2025 once as the held-out
+5. Freeze the selected rule family, then inspect 2025 once as the held-out
    validation year. Do not tune on that pass.
-5. Add optional tree/sequence baselines only as comparators after the
+6. Add optional tree/sequence baselines only as comparators after the
    hand-designed rules have a stable event contract. QMT integration remains
    deferred until the inventory replay is credible.
 

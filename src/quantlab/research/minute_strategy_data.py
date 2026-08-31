@@ -26,7 +26,6 @@ from quantlab.data.qdp_v2.duckdb_resources import (
 from quantlab.research.minute_ma import (
     EVENT_KEY_COLUMNS,
     MinuteMAConfig,
-    build_hourly_ma_history,
     build_minute_ma_states_from_history,
     normalize_bar_time,
     prepare_minute_bars,
@@ -745,12 +744,12 @@ def build_minute_market_context(
     frame["cumulative_volume"] = grouped["volume"].cumsum()
     frame["cumulative_vwap"] = frame["cumulative_amount"] / frame["cumulative_volume"].where(frame["cumulative_volume"].gt(0))
     frame["vwap_deviation"] = frame["adjusted_close"] / frame["cumulative_vwap"] - 1.0
-    frame["recent_volume_5"] = pd.Series(np.nan, index=frame.index, dtype="float64")
-    frame["previous_volume_20"] = pd.Series(np.nan, index=frame.index, dtype="float64")
-    for _, indices in frame.groupby(["symbol", "trade_date"], sort=False).groups.items():
-        values = pd.to_numeric(frame.loc[indices, "volume"], errors="coerce")
-        frame.loc[indices, "recent_volume_5"] = values.rolling(5, min_periods=5).mean()
-        frame.loc[indices, "previous_volume_20"] = values.shift(5).rolling(20, min_periods=20).mean()
+    frame["recent_volume_5"] = grouped["volume"].transform(
+        lambda values: values.rolling(5, min_periods=5).mean()
+    )
+    frame["previous_volume_20"] = grouped["volume"].transform(
+        lambda values: values.shift(5).rolling(20, min_periods=20).mean()
+    )
     frame["volume_acceleration_5_20"] = frame["recent_volume_5"] / frame["previous_volume_20"] - 1.0
     frame["amount_curve_surprise"] = np.where(
         pd.to_numeric(frame.get("prior_20d_median_amount"), errors="coerce").gt(0),
@@ -758,9 +757,9 @@ def build_minute_market_context(
         np.nan,
     )
     frame["price_impact_1m"] = np.abs(frame["return_1m"]) / (frame["amount"] / 1_000_000.0 + 1.0)
-    frame["previous_high_20m"] = pd.Series(np.nan, index=frame.index, dtype="float64")
-    for _, indices in frame.groupby(["symbol", "trade_date"], sort=False).groups.items():
-        frame.loc[indices, "previous_high_20m"] = frame.loc[indices, "adjusted_high"].shift(1).rolling(20, min_periods=20).max()
+    frame["previous_high_20m"] = grouped["adjusted_high"].transform(
+        lambda values: values.shift(1).rolling(20, min_periods=20).max()
+    )
     frame["recent_high_breakout"] = frame["adjusted_close"] > frame["previous_high_20m"]
     frame["prior_acceleration"] = (
         frame["return_5m"].fillna(0.0) - frame["return_20m"].fillna(0.0) > 0.0
@@ -776,11 +775,12 @@ def build_minute_market_context(
     else:
         frame["touched_limit_up"] = False
         frame["touched_limit_down"] = False
+    frame["_return_positive"] = frame["return_from_previous_close"].gt(0.0)
     market = (
         frame.groupby(["trade_date", "bar_time"], sort=False, observed=True)
         .agg(
             market_return_mean=("return_from_previous_close", "mean"),
-            market_breadth_positive=("return_from_previous_close", lambda values: float((values > 0).mean())),
+            market_breadth_positive=("_return_positive", "mean"),
             market_return_dispersion=("return_from_previous_close", "std"),
             market_total_amount=("amount", "sum"),
             market_member_count=("symbol", "nunique"),
@@ -805,7 +805,7 @@ def build_minute_market_context(
         frame.groupby(["trade_date", "bar_time", "industry_name"], sort=False, observed=True)
         .agg(
             sector_return_mean=("return_from_previous_close", "mean"),
-            sector_breadth=("return_from_previous_close", lambda values: float((values > 0).mean())),
+            sector_breadth=("_return_positive", "mean"),
             sector_amount=("amount", "sum"),
             sector_member_count=("symbol", "nunique"),
         )
@@ -819,15 +819,25 @@ def build_minute_market_context(
     frame["leader_relative_return"] = frame["return_from_previous_close"] - frame["sector_return_mean"]
     frame["leader_sync"] = frame["industry_stock_return_rank"].ge(0.70) & frame["sector_breadth"].ge(0.50)
     frame["sector_amount_share"] = frame["sector_amount"] / frame["market_total_amount"].where(frame["market_total_amount"].gt(0))
-    frame["first_5m_close"] = np.nan
-    frame["first_5m_return"] = np.nan
-    for _, indices in frame.groupby(["symbol", "trade_date"], sort=False).groups.items():
-        current = frame.loc[indices].sort_values("session_minute_ordinal")
-        if len(current) >= 5:
-            first = float(current["adjusted_close"].iloc[0])
-            fifth = float(current["adjusted_close"].iloc[4])
-            frame.loc[indices, "first_5m_close"] = fifth
-            frame.loc[indices, "first_5m_return"] = fifth / first - 1.0 if first > 0 else np.nan
+    first_five = (
+        frame.groupby(["symbol", "trade_date"], sort=False, observed=True)["adjusted_close"]
+        .agg(
+            first_5m_open="first",
+            first_5m_close=lambda values: values.iloc[4] if len(values) >= 5 else np.nan,
+        )
+        .reset_index()
+    )
+    first_five["first_5m_return"] = np.where(
+        first_five["first_5m_open"].gt(0),
+        first_five["first_5m_close"] / first_five["first_5m_open"] - 1.0,
+        np.nan,
+    )
+    frame = frame.merge(
+        first_five.drop(columns="first_5m_open"),
+        on=["symbol", "trade_date"],
+        how="left",
+        validate="many_to_one",
+    )
     frame["auction_confirmed"] = (
         frame["session_minute_ordinal"].ge(4)
         & (
@@ -841,16 +851,19 @@ def build_minute_market_context(
     frame["market_supportive"] = frame["market_supportive"].fillna(False).astype(bool)
     frame["sector_strong"] = frame["sector_strong"].fillna(False).astype(bool)
     frame["leader_sync"] = frame["leader_sync"].fillna(False).astype(bool)
+    frame.drop(columns="_return_positive", inplace=True)
     return frame
 
 
 def build_enriched_minute_ma_states(
     target_bars: pd.DataFrame,
-    hourly_history: pd.DataFrame,
+    hourly_history: pd.DataFrame | None,
     *,
     daily_context: pd.DataFrame | None = None,
     context: pd.DataFrame | None = None,
     config: MinuteMAConfig | None = None,
+    hourly_ma_history: pd.DataFrame | None = None,
+    prior_touch_counts: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Build MA states and attach the rule-level causal flags."""
 
@@ -877,6 +890,8 @@ def build_enriched_minute_ma_states(
         hourly_history,
         config=config,
         context=context,
+        hourly_ma_history=hourly_ma_history,
+        prior_touch_counts=prior_touch_counts,
     )
     if states.empty:
         return states
@@ -913,15 +928,16 @@ def build_enriched_minute_ma_states(
 
 def build_live_ma_alignment(
     target_bars: pd.DataFrame,
-    hourly_history: pd.DataFrame,
+    hourly_history: pd.DataFrame | None,
     *,
     config: MinuteMAConfig | None = None,
+    hourly_ma_history: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Return compact all-period live-MA alignment flags for target minutes."""
 
     selected = config or MinuteMAConfig()
     selected.validate()
-    if target_bars.empty or hourly_history.empty:
+    if target_bars.empty or (hourly_history is None and hourly_ma_history is None):
         return pd.DataFrame(columns=["symbol", "trade_date", "bar_time", "ma_alignment_score", "bullish_ma_stack", "bearish_ma_stack"])
     target_source = target_bars.copy()
     if "adjusted_close" not in target_source.columns:
@@ -930,30 +946,59 @@ def build_live_ma_alignment(
     target["symbol"] = target["symbol"].astype(str)
     target["trade_date"] = _normalise_date_series(target["trade_date"])
     target["bar_time"] = target["bar_time"].map(normalize_bar_time)
-    hourly = hourly_history.copy()
-    hourly["symbol"] = hourly["symbol"].astype(str)
-    hourly["trade_date"] = _normalise_date_series(hourly["trade_date"])
-    hourly["sixty_minute_bucket"] = pd.to_numeric(hourly["sixty_minute_bucket"], errors="coerce")
-    hourly = hourly.loc[hourly["sixty_minute_bucket"].notna()].copy()
-    hourly["sixty_minute_bucket"] = hourly["sixty_minute_bucket"].astype("int16")
-    hourly.sort_values(["symbol", "trade_date", "sixty_minute_bucket"], inplace=True, kind="stable")
-    hourly.reset_index(drop=True, inplace=True)
-    hourly["hour_sequence"] = hourly.groupby("symbol", sort=False).cumcount().astype("int32")
-    history = build_hourly_ma_history(hourly, config=selected)
     keys = ["symbol", "trade_date", "sixty_minute_bucket"]
     target["session_minute_ordinal"] = target["bar_time"].map(session_minute_ordinal)
     target["sixty_minute_bucket"] = target["session_minute_ordinal"].floordiv(60).add(1).astype("int16")
     live_columns: list[str] = []
-    for period in selected.periods:
-        current = history.loc[
-            history["ma_period"].eq(int(period)),
-            [*keys, "prior_close_sum_adjusted"],
-        ].rename(columns={"prior_close_sum_adjusted": f"prior_sum_{int(period)}"})
-        target = target.merge(current, on=keys, how="left", validate="many_to_one")
-        name = f"live_ma_{int(period)}"
-        target[name] = (target[f"prior_sum_{int(period)}"] + target["adjusted_close"]) / float(period)
-        live_columns.append(name)
-        target.drop(columns=f"prior_sum_{int(period)}", inplace=True)
+    target_dates = set(target["trade_date"].astype(str).unique())
+    if hourly_ma_history is not None:
+        history = hourly_ma_history.loc[
+            :, ["symbol", "trade_date", "sixty_minute_bucket", "ma_period", "prior_close_sum_adjusted"]
+        ].copy()
+        history["symbol"] = history["symbol"].astype(str)
+        history["trade_date"] = _normalise_date_series(history["trade_date"])
+        history["sixty_minute_bucket"] = pd.to_numeric(
+            history["sixty_minute_bucket"], errors="coerce"
+        ).astype("int16")
+        history["ma_period"] = pd.to_numeric(history["ma_period"], errors="coerce").astype("int16")
+        history = history.loc[history["trade_date"].isin(target_dates)].copy()
+        for period in selected.periods:
+            current = history.loc[
+                history["ma_period"].eq(int(period)),
+                [*keys, "prior_close_sum_adjusted"],
+            ].rename(columns={"prior_close_sum_adjusted": f"prior_sum_{int(period)}"})
+            target = target.merge(current, on=keys, how="left", validate="many_to_one")
+            name = f"live_ma_{int(period)}"
+            target[name] = (target[f"prior_sum_{int(period)}"] + target["adjusted_close"]) / float(period)
+            live_columns.append(name)
+            target.drop(columns=f"prior_sum_{int(period)}", inplace=True)
+    else:
+        hourly = hourly_history.loc[
+            :, ["symbol", "trade_date", "sixty_minute_bucket", "adjusted_close"]
+        ].copy()
+        hourly["symbol"] = hourly["symbol"].astype(str)
+        hourly["trade_date"] = _normalise_date_series(hourly["trade_date"])
+        hourly["sixty_minute_bucket"] = pd.to_numeric(hourly["sixty_minute_bucket"], errors="coerce")
+        hourly = hourly.loc[hourly["sixty_minute_bucket"].notna()].copy()
+        hourly["sixty_minute_bucket"] = hourly["sixty_minute_bucket"].astype("int16")
+        hourly["adjusted_close"] = pd.to_numeric(hourly["adjusted_close"], errors="coerce")
+        hourly = hourly.loc[np.isfinite(hourly["adjusted_close"])].copy()
+        hourly.sort_values(["symbol", "trade_date", "sixty_minute_bucket"], inplace=True, kind="stable")
+        hourly.reset_index(drop=True, inplace=True)
+        grouped_close = hourly.groupby("symbol", sort=False, observed=True)["adjusted_close"]
+        for period in selected.periods:
+            window = int(period) - 1
+            prior_sum = grouped_close.transform(
+                lambda values, size=window: values.rolling(size, min_periods=size).sum().shift(1)
+            )
+            available = prior_sum.notna() & hourly["trade_date"].astype(str).isin(target_dates)
+            current = hourly.loc[available, keys].copy()
+            current[f"prior_sum_{int(period)}"] = prior_sum.loc[available].to_numpy()
+            target = target.merge(current, on=keys, how="left", validate="many_to_one")
+            name = f"live_ma_{int(period)}"
+            target[name] = (target[f"prior_sum_{int(period)}"] + target["adjusted_close"]) / float(period)
+            live_columns.append(name)
+            target.drop(columns=f"prior_sum_{int(period)}", inplace=True)
     pivot = target.set_index(["symbol", "trade_date", "bar_time"])[live_columns]
     score = pd.Series(0.0, index=pivot.index)
     comparisons = pd.Series(0, index=pivot.index, dtype="int16")

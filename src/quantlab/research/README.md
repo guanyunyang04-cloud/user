@@ -34,6 +34,23 @@ screening check over eight fixed symbols, not a full-universe performance claim;
 the eight-symbol pool is also too small to stand in for a production liquidity
 match universe.
 
+For a larger development run, `quantlab minute-strategy-study` now evaluates
+one date at a time and one symbol chunk at a time.  Month-level causal MA
+inputs are cached once for the target dates, the forward outcome loader uses
+the same bounded path, and repeated strategy signals at one symbol/minute
+share a single price-path calculation.  The runner reserves a hard 0.5 GiB
+machine-wide RAM floor and stops new heavy chunks below its 1 GiB soft floor;
+DuckDB keeps a separate 2 GiB internal reserve by default.  These settings are
+execution controls, not statistical assumptions, and are written into the run
+manifest for reproducibility.
+
+The first active-5-minute coarse-screen audit is recorded under
+`research/records/minute_ma_coarse_screen_probe/`.  It shows meaningful key
+reduction, but only the 200 bps threshold retained every exact 1-minute MA
+signal key on the single audited date.  The screen is therefore not enabled in
+the development runner until recall is checked across additional market
+states.
+
 ## Data contract
 
 The current repaired matrix contains 4,191,476 rows from 2012-01-04 through

@@ -1,0 +1,83 @@
+{
+  "schema": "quantlab.minute_ma_5m_coarse_screen_probe/1",
+  "trade_date": "2022-06-16",
+  "validation_2025_used": false,
+  "universe": {
+    "policy": "point_in_time_main_board",
+    "symbol_count": 3009
+  },
+  "sources": {
+    "market_intraday_1m": "market_intraday_1m",
+    "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
+    "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
+    "universe_snapshot": "universe_snapshot__f79157008ed647500a73e8b4"
+  },
+  "candidate_contract": {
+    "key": [
+      "symbol",
+      "sixty_minute_bucket",
+      "ma_period"
+    ],
+    "ma_periods": [10, 20, 40, 60, 120, 240],
+    "five_minute_rows": 144432,
+    "possible_keys": 70224,
+    "exact_ma_signal_keys": 17160,
+    "excluded_reference_rows": [
+      "s0_random_matched",
+      "s0_liquidity_matched",
+      "s0_strong_no_ma"
+    ]
+  },
+  "threshold_results": [
+    {
+      "threshold_bps": 0,
+      "candidate_keys": 13095,
+      "candidate_fraction": 0.1864747095010253,
+      "recalled_keys": 13061,
+      "recall": 0.7611305361305362,
+      "missed_keys": 4099
+    },
+    {
+      "threshold_bps": 10,
+      "candidate_keys": 14971,
+      "candidate_fraction": 0.21318922305764412,
+      "recalled_keys": 14853,
+      "recall": 0.8655594405594406,
+      "missed_keys": 2307
+    },
+    {
+      "threshold_bps": 25,
+      "candidate_keys": 17653,
+      "candidate_fraction": 0.25138129414445204,
+      "recalled_keys": 17143,
+      "recall": 0.999009324009324,
+      "missed_keys": 17
+    },
+    {
+      "threshold_bps": 50,
+      "candidate_keys": 22010,
+      "candidate_fraction": 0.31342560947824105,
+      "recalled_keys": 17152,
+      "recall": 0.9995337995337995,
+      "missed_keys": 8
+    },
+    {
+      "threshold_bps": 100,
+      "candidate_keys": 29481,
+      "candidate_fraction": 0.41981373889268625,
+      "recalled_keys": 17159,
+      "recall": 0.999941724941725,
+      "missed_keys": 1
+    },
+    {
+      "threshold_bps": 200,
+      "candidate_keys": 39895,
+      "candidate_fraction": 0.5681106174527227,
+      "recalled_keys": 17160,
+      "recall": 1.0,
+      "missed_keys": 0
+    }
+  ],
+  "decision": "audit_only_not_enabled",
+  "reason": "A single date cannot establish that the 200 bps threshold preserves exact one-minute recall across market regimes."
+}

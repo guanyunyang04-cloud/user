@@ -317,6 +317,167 @@ def build_hourly_ma_history(
     return _hour_history(hourly, selected)
 
 
+def build_target_hourly_ma_inputs(
+    hourly: pd.DataFrame,
+    target_dates: Sequence[str],
+    *,
+    config: MinuteMAConfig | None = None,
+    symbol_chunk_size: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build only target-date MA rows and prior-touch counters.
+
+    A month runner needs the rolling history to seed every target day, but it
+    does not need to retain the expanded history for all earlier hours.  This
+    helper computes one period and symbol chunk at a time, retaining only the
+    target-hour rows and their causal touch counters.  The returned pair is
+    suitable for ``build_minute_ma_states_from_history`` via its precomputed
+    input arguments.
+    """
+
+    selected = config or MinuteMAConfig()
+    selected.validate()
+    if hourly.empty:
+        return pd.DataFrame(), pd.DataFrame()
+    _require_columns(
+        hourly,
+        {
+            "symbol",
+            "trade_date",
+            "sixty_minute_bucket",
+            "hour_sequence",
+            "adjust_factor",
+            "adjusted_open",
+            "adjusted_high",
+            "adjusted_low",
+            "adjusted_close",
+            "close",
+        },
+    )
+    dates = {
+        date.fromisoformat(str(value)).isoformat()
+        for value in target_dates
+    }
+    if not dates:
+        return pd.DataFrame(), pd.DataFrame()
+    frame = hourly.loc[
+        :,
+        [
+            "symbol",
+            "trade_date",
+            "sixty_minute_bucket",
+            "hour_sequence",
+            "adjust_factor",
+            "adjusted_open",
+            "adjusted_high",
+            "adjusted_low",
+            "adjusted_close",
+            "close",
+        ],
+    ].copy()
+    frame["symbol"] = frame["symbol"].astype(str)
+    frame["trade_date"] = frame["trade_date"].astype(str)
+    frame["sixty_minute_bucket"] = pd.to_numeric(
+        frame["sixty_minute_bucket"], errors="coerce"
+    )
+    frame = frame.loc[frame["sixty_minute_bucket"].notna()].copy()
+    frame["sixty_minute_bucket"] = frame["sixty_minute_bucket"].astype("int16")
+    frame.sort_values(
+        ["symbol", "trade_date", "sixty_minute_bucket"],
+        inplace=True,
+        kind="stable",
+    )
+    frame.reset_index(drop=True, inplace=True)
+    frame["hour_sequence"] = frame.groupby("symbol", sort=False).cumcount().astype("int32")
+    symbols = frame["symbol"].drop_duplicates().tolist()
+    chunk = int(symbol_chunk_size) if int(symbol_chunk_size) > 0 else len(symbols)
+    history_parts: list[pd.DataFrame] = []
+    touch_parts: list[pd.DataFrame] = []
+    history_columns = [
+        "symbol",
+        "trade_date",
+        "sixty_minute_bucket",
+        "ma_period",
+        "hour_sequence",
+        "prior_close_sum_adjusted",
+        "prior_completed_ma_adjusted",
+        "prior_ma_slope_bps",
+        "previous_hour_close_adjusted",
+        "previous_hour_high_adjusted",
+        "causal_intersection_adjusted",
+        "causal_intersection",
+        "final_ma_adjusted",
+        "final_ma",
+        "adjust_factor",
+        "adjusted_open",
+        "adjusted_high",
+        "adjusted_low",
+        "adjusted_close",
+        "close",
+    ]
+    touch_columns = [
+        "symbol",
+        "trade_date",
+        "sixty_minute_bucket",
+        "ma_period",
+        "hour_sequence",
+        "prior_true_touch_count_window",
+        "prior_true_touch_count_loaded",
+    ]
+    for start in range(0, len(symbols), chunk):
+        wanted = set(symbols[start : start + chunk])
+        subset = frame.loc[frame["symbol"].isin(wanted)].copy()
+        if subset.empty:
+            continue
+        for period in selected.periods:
+            period_config = MinuteMAConfig(
+                periods=(int(period),),
+                near_touch_bps=selected.near_touch_bps,
+                posthoc_catchup_bps=selected.posthoc_catchup_bps,
+                prior_touch_window_hours=selected.prior_touch_window_hours,
+            )
+            history = _hour_history(subset, period_config)
+            if history.empty:
+                continue
+            target_history = history.loc[
+                history["trade_date"].astype(str).isin(dates), history_columns
+            ].copy()
+            if not target_history.empty:
+                history_parts.append(target_history)
+            touches = _add_prior_touch_counts_from_hourly(history, period_config)
+            target_touches = touches.loc[
+                touches["trade_date"].astype(str).isin(dates), touch_columns
+            ].copy()
+            if not target_touches.empty:
+                touch_parts.append(target_touches)
+            del history, target_history, touches, target_touches
+        del subset
+    history_result = (
+        pd.concat(history_parts, ignore_index=True)
+        if history_parts
+        else pd.DataFrame(columns=history_columns)
+    )
+    touch_result = (
+        pd.concat(touch_parts, ignore_index=True)
+        if touch_parts
+        else pd.DataFrame(columns=touch_columns)
+    )
+    if not history_result.empty:
+        history_result.sort_values(
+            ["symbol", "trade_date", "sixty_minute_bucket", "ma_period"],
+            inplace=True,
+            kind="stable",
+            ignore_index=True,
+        )
+    if not touch_result.empty:
+        touch_result.sort_values(
+            ["symbol", "trade_date", "sixty_minute_bucket", "ma_period"],
+            inplace=True,
+            kind="stable",
+            ignore_index=True,
+        )
+    return history_result, touch_result
+
+
 def _add_prior_touch_counts(
     prepared: pd.DataFrame,
     history: pd.DataFrame,
@@ -450,10 +611,12 @@ def _add_prior_touch_counts_from_hourly(
 
 def build_minute_ma_states_from_history(
     target_bars: pd.DataFrame,
-    hourly_bars: pd.DataFrame,
+    hourly_bars: pd.DataFrame | None = None,
     *,
     config: MinuteMAConfig | None = None,
     context: pd.DataFrame | None = None,
+    hourly_ma_history: pd.DataFrame | None = None,
+    prior_touch_counts: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Build causal states from aggregated history and target-day minutes.
 
@@ -467,7 +630,7 @@ def build_minute_ma_states_from_history(
 
     selected = config or MinuteMAConfig()
     selected.validate()
-    if target_bars.empty or hourly_bars.empty:
+    if target_bars.empty:
         return pd.DataFrame()
     prepared = prepare_minute_bars(target_bars)
     hourly_required = {
@@ -481,20 +644,79 @@ def build_minute_ma_states_from_history(
         "adjusted_close",
         "close",
     }
-    _require_columns(hourly_bars, hourly_required)
-    hourly = hourly_bars.copy()
-    hourly["symbol"] = hourly["symbol"].astype(str)
-    hourly["trade_date"] = hourly["trade_date"].astype(str)
-    hourly["sixty_minute_bucket"] = pd.to_numeric(hourly["sixty_minute_bucket"], errors="coerce")
-    hourly = hourly.loc[hourly["sixty_minute_bucket"].notna()].copy()
-    hourly["sixty_minute_bucket"] = hourly["sixty_minute_bucket"].astype("int16")
-    hourly.sort_values(["symbol", "trade_date", "sixty_minute_bucket"], inplace=True, kind="stable")
-    hourly = hourly.reset_index(drop=True)
-    hourly["hour_sequence"] = hourly.groupby("symbol", sort=False).cumcount().astype("int32")
-    history = _hour_history(hourly, selected)
-    if history.empty:
-        return pd.DataFrame()
-    touch_counts = _add_prior_touch_counts_from_hourly(history, selected)
+    if hourly_ma_history is None:
+        if hourly_bars is None or hourly_bars.empty:
+            return pd.DataFrame()
+        _require_columns(hourly_bars, hourly_required)
+        hourly = hourly_bars.copy()
+        hourly["symbol"] = hourly["symbol"].astype(str)
+        hourly["trade_date"] = hourly["trade_date"].astype(str)
+        hourly["sixty_minute_bucket"] = pd.to_numeric(hourly["sixty_minute_bucket"], errors="coerce")
+        hourly = hourly.loc[hourly["sixty_minute_bucket"].notna()].copy()
+        hourly["sixty_minute_bucket"] = hourly["sixty_minute_bucket"].astype("int16")
+        hourly.sort_values(["symbol", "trade_date", "sixty_minute_bucket"], inplace=True, kind="stable")
+        hourly = hourly.reset_index(drop=True)
+        hourly["hour_sequence"] = hourly.groupby("symbol", sort=False).cumcount().astype("int32")
+        history = _hour_history(hourly, selected)
+        if history.empty:
+            return pd.DataFrame()
+        touch_counts = _add_prior_touch_counts_from_hourly(history, selected)
+    else:
+        history_required = {
+            "symbol",
+            "trade_date",
+            "sixty_minute_bucket",
+            "ma_period",
+            "hour_sequence",
+            "prior_close_sum_adjusted",
+            "prior_completed_ma_adjusted",
+            "prior_ma_slope_bps",
+            "previous_hour_close_adjusted",
+            "previous_hour_high_adjusted",
+            "causal_intersection_adjusted",
+            "causal_intersection",
+            "final_ma_adjusted",
+            "final_ma",
+            "adjust_factor",
+            "adjusted_open",
+            "adjusted_high",
+            "adjusted_low",
+            "adjusted_close",
+            "close",
+        }
+        _require_columns(hourly_ma_history, history_required)
+        if prior_touch_counts is None:
+            raise MinuteMAError("minute_ma_precomputed_touch_counts_missing")
+        _require_columns(
+            prior_touch_counts,
+            {
+                "symbol",
+                "trade_date",
+                "sixty_minute_bucket",
+                "ma_period",
+                "hour_sequence",
+                "prior_true_touch_count_window",
+                "prior_true_touch_count_loaded",
+            },
+        )
+        history = hourly_ma_history.copy()
+        history["symbol"] = history["symbol"].astype(str)
+        history["trade_date"] = history["trade_date"].astype(str)
+        history["sixty_minute_bucket"] = pd.to_numeric(
+            history["sixty_minute_bucket"], errors="coerce"
+        ).astype("int16")
+        history["ma_period"] = pd.to_numeric(history["ma_period"], errors="coerce").astype("int16")
+        touch_counts = prior_touch_counts.copy()
+        touch_counts["symbol"] = touch_counts["symbol"].astype(str)
+        touch_counts["trade_date"] = touch_counts["trade_date"].astype(str)
+        touch_counts["sixty_minute_bucket"] = pd.to_numeric(
+            touch_counts["sixty_minute_bucket"], errors="coerce"
+        ).astype("int16")
+        touch_counts["ma_period"] = pd.to_numeric(touch_counts["ma_period"], errors="coerce").astype("int16")
+        history = history.loc[history["ma_period"].isin([int(value) for value in selected.periods])].copy()
+        touch_counts = touch_counts.loc[
+            touch_counts["ma_period"].isin([int(value) for value in selected.periods])
+        ].copy()
     target_dates = prepared["trade_date"].astype(str).unique().tolist()
     history_columns = [
         "symbol",
@@ -601,17 +823,23 @@ def build_minute_ma_states_from_history(
         np.nan,
     )
     alignment_key = ["symbol", "trade_date", "bar_time"]
-    pivot = states.pivot_table(index=alignment_key, columns="ma_period", values="live_ma_adjusted", aggfunc="first")
-    score = pd.Series(0.0, index=pivot.index)
-    comparisons = pd.Series(0, index=pivot.index, dtype="int16")
-    for short, long in zip(selected.periods[:-1], selected.periods[1:], strict=True):
-        if short not in pivot or long not in pivot:
-            continue
-        available = pivot[short].notna() & pivot[long].notna()
-        score.loc[available] += np.sign(pivot.loc[available, short] - pivot.loc[available, long])
-        comparisons.loc[available] += 1
-    alignment = (score / comparisons.replace(0, np.nan)).rename("ma_alignment_score").reset_index()
-    states = states.merge(alignment, on=alignment_key, how="left", validate="many_to_one")
+    if len(selected.periods) > 1:
+        pivot = states.pivot_table(index=alignment_key, columns="ma_period", values="live_ma_adjusted", aggfunc="first")
+        score = pd.Series(0.0, index=pivot.index)
+        comparisons = pd.Series(0, index=pivot.index, dtype="int16")
+        for short, long in zip(selected.periods[:-1], selected.periods[1:], strict=True):
+            if short not in pivot or long not in pivot:
+                continue
+            available = pivot[short].notna() & pivot[long].notna()
+            score.loc[available] += np.sign(pivot.loc[available, short] - pivot.loc[available, long])
+            comparisons.loc[available] += 1
+        alignment = (score / comparisons.replace(0, np.nan)).rename("ma_alignment_score").reset_index()
+        states = states.merge(alignment, on=alignment_key, how="left", validate="many_to_one")
+    else:
+        # A one-period state cannot establish an ordering; the runner attaches
+        # the all-period alignment separately.  Avoiding a one-column pivot is
+        # a measurable memory/time win for every per-period chunk.
+        states["ma_alignment_score"] = np.nan
     states["bullish_ma_stack"] = states["ma_alignment_score"].eq(1.0)
     states["bearish_ma_stack"] = states["ma_alignment_score"].eq(-1.0)
     states.drop(columns=["up_amount", "down_amount"], inplace=True)
@@ -1102,6 +1330,7 @@ __all__ = [
     "MinuteMAError",
     "build_hourly_bars",
     "build_hourly_ma_history",
+    "build_target_hourly_ma_inputs",
     "build_ma_event_table",
     "build_minute_ma_states",
     "build_minute_ma_states_from_history",

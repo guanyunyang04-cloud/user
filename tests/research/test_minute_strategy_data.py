@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -8,6 +9,7 @@ from quantlab.research.minute_ma import (
     build_hourly_bars,
     build_minute_ma_states,
     build_minute_ma_states_from_history,
+    build_target_hourly_ma_inputs,
     session_minute_ordinal,
 )
 from quantlab.research.minute_strategy_data import (
@@ -75,6 +77,44 @@ def test_aggregated_history_path_matches_contiguous_path() -> None:
     )
 
 
+def test_target_hourly_cache_matches_raw_history_path() -> None:
+    bars = _bars(dates=("2022-01-03", "2022-01-04", "2022-01-05"))
+    hourly = build_hourly_bars(bars)
+    config = MinuteMAConfig(periods=(3,))
+    cached_history, cached_touches = build_target_hourly_ma_inputs(
+        hourly,
+        ["2022-01-04", "2022-01-05"],
+        config=config,
+    )
+    for trade_date in ("2022-01-04", "2022-01-05"):
+        target = bars.loc[bars["trade_date"].eq(trade_date)]
+        direct = build_minute_ma_states_from_history(target, hourly, config=config)
+        cached = build_minute_ma_states_from_history(
+            target,
+            None,
+            config=config,
+            hourly_ma_history=cached_history.loc[
+                cached_history["trade_date"].eq(trade_date)
+            ],
+            prior_touch_counts=cached_touches.loc[
+                cached_touches["trade_date"].eq(trade_date)
+            ],
+        )
+        for column in (
+            "causal_intersection_adjusted",
+            "live_ma_adjusted",
+            "close_to_intersection_bps",
+        ):
+            np.testing.assert_allclose(
+                direct[column].to_numpy(dtype=float),
+                cached[column].to_numpy(dtype=float),
+                equal_nan=True,
+            )
+        pd.testing.assert_series_equal(
+            direct["prior_true_touch_count_window"].reset_index(drop=True),
+            cached["prior_true_touch_count_window"].reset_index(drop=True),
+            check_dtype=False,
+        )
 def test_market_context_exposes_causal_rule_flags() -> None:
     bars = _bars(dates=("2022-01-03",))
     bars["session_minute_ordinal"] = bars["bar_time"].map(session_minute_ordinal)
