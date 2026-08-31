@@ -54,7 +54,7 @@ def _bars(symbol: str = "A", dates: tuple[str, ...] = ("2022-01-03",)) -> pd.Dat
 
 def test_aggregated_history_path_matches_contiguous_path() -> None:
     bars = _bars(dates=("2022-01-03", "2022-01-04"))
-    config = MinuteMAConfig(periods=(3,))
+    config = MinuteMAConfig(periods=(3, 5))
     direct = build_minute_ma_states(bars, config=config, target_dates=["2022-01-04"])
     hourly = build_hourly_bars(bars)
     reduced = build_minute_ma_states_from_history(
@@ -80,7 +80,7 @@ def test_aggregated_history_path_matches_contiguous_path() -> None:
 def test_target_hourly_cache_matches_raw_history_path() -> None:
     bars = _bars(dates=("2022-01-03", "2022-01-04", "2022-01-05"))
     hourly = build_hourly_bars(bars)
-    config = MinuteMAConfig(periods=(3,))
+    config = MinuteMAConfig(periods=(3, 5))
     cached_history, cached_touches = build_target_hourly_ma_inputs(
         hourly,
         ["2022-01-04", "2022-01-05"],

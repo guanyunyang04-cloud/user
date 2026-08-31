@@ -428,22 +428,18 @@ def build_target_hourly_ma_inputs(
         subset = frame.loc[frame["symbol"].isin(wanted)].copy()
         if subset.empty:
             continue
-        for period in selected.periods:
-            period_config = MinuteMAConfig(
-                periods=(int(period),),
-                near_touch_bps=selected.near_touch_bps,
-                posthoc_catchup_bps=selected.posthoc_catchup_bps,
-                prior_touch_window_hours=selected.prior_touch_window_hours,
-            )
-            history = _hour_history(subset, period_config)
-            if history.empty:
-                continue
+        # Compute all configured periods in one pass per symbol chunk.  The
+        # previous implementation repeated the same grouped rolling work once
+        # per MA period, which was pure overhead because the source hourly
+        # rows and target-date filter were identical.
+        history = _hour_history(subset, selected)
+        if not history.empty:
             target_history = history.loc[
                 history["trade_date"].astype(str).isin(dates), history_columns
             ].copy()
             if not target_history.empty:
                 history_parts.append(target_history)
-            touches = _add_prior_touch_counts_from_hourly(history, period_config)
+            touches = _add_prior_touch_counts_from_hourly(history, selected)
             target_touches = touches.loc[
                 touches["trade_date"].astype(str).isin(dates), touch_columns
             ].copy()

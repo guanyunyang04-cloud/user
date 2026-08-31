@@ -38,7 +38,8 @@ For a larger development run, `quantlab minute-strategy-study` now evaluates
 one date at a time and one symbol chunk at a time.  Month-level causal MA
 inputs are cached once for the target dates, the forward outcome loader uses
 the same bounded path, and repeated strategy signals at one symbol/minute
-share a single price-path calculation.  The runner reserves a hard 0.5 GiB
+share a single price-path calculation.  All configured MA periods are built in
+one rolling pass per symbol chunk.  The runner reserves a hard 0.5 GiB
 machine-wide RAM floor and stops new heavy chunks below its 1 GiB soft floor;
 DuckDB keeps a separate 2 GiB internal reserve by default.  These settings are
 execution controls, not statistical assumptions, and are written into the run
