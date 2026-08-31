@@ -12,10 +12,11 @@ intersection or comes within the configured distance.  Random-time,
 strong-without-MA, and cross-sectional control rows are excluded from recall
 because they are not MA-event candidates.
 
-At 25 bps the screen retained 25.14% of possible keys but missed 17 exact MA
-signal keys.  At 200 bps it retained 56.81% and recalled all exact MA signal
-keys on this date.  One date is not enough to make 200 bps a production
-contract, so the development runner does not enable the coarse screen yet.
-Additional representative dates must show stable recall before it can replace
-any exact 1-minute work.
-
+On the full April 2022 month (19 trading dates), 25 bps retained an average of
+15.82% of possible keys but missed 368 exact keys across all dates.  At 200 bps
+the average candidate fraction rose to 36.21%, yet 10 dates still had misses
+(31 keys in total).  The single-date probe happened to reach 100% recall at
+200 bps, but the month audit shows that was not stable.  The development runner
+therefore does not enable the coarse screen.  The month-level counts are in
+`april_2022_summary.json`; further market states must be audited before any
+exact 1-minute work is filtered.

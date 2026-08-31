@@ -3,7 +3,11 @@ from __future__ import annotations
 import pandas as pd
 
 import quantlab.research.minute_strategy_runner as runner
-from quantlab.research.minute_ma_event_study import EventStudyConfig, compute_event_outcomes
+from quantlab.research.minute_ma_event_study import (
+    OUTCOME_COLUMNS,
+    EventStudyConfig,
+    compute_event_outcomes,
+)
 
 
 def _bar_time(ordinal: int) -> str:
@@ -122,3 +126,50 @@ def test_chunked_outcomes_match_single_batch_metrics(monkeypatch) -> None:
     )
     assert left["entry_bar_index"].is_unique
     assert left["entry_bar_index"].min() >= 0
+
+
+def test_stream_summary_matches_event_summary_for_small_file(tmp_path) -> None:
+    rows = []
+    for index, value in enumerate((0.02, -0.01, 0.005)):
+        row = {name: None for name in OUTCOME_COLUMNS}
+        row.update(
+            {
+                "signal_id": f"sig-{index}",
+                "strategy_id": "s1_touch_reclaim",
+                "strategy_family": "S1",
+                "symbol": "A",
+                "signal_date": "2022-01-03",
+                "signal_time": f"093{index + 1}00000",
+                "sixty_minute_bucket": 1,
+                "ma_period": 10,
+                "diagnostic_only": False,
+                "signal_executable": True,
+                "entry_observed": True,
+                "entry_executable": True,
+                "market_regime": "supportive",
+                "entry_date": "2022-01-03",
+                "entry_time": "093200000",
+                "entry_bar_index": index,
+                "gross_return_5m": value,
+                "net_return_5m": value - 0.001,
+                "gross_return_60m": value,
+                "net_return_60m": value - 0.001,
+                "gross_return_1d": value * 2,
+                "net_return_1d": value * 2 - 0.001,
+                "mfe_same_day": max(value, 0.0),
+                "mae_same_day": min(value, 0.0),
+                "t1_gross_return": value,
+                "t1_net_return": value - 0.001,
+            }
+        )
+        rows.append(row)
+    output = tmp_path / "outcomes" / "date=2022-01-03" / "outcomes.parquet"
+    output.parent.mkdir(parents=True)
+    pd.DataFrame(rows).to_parquet(output, index=False)
+    summary = runner.summarize_development_outputs(tmp_path)
+    pooled = summary["summary_overall_pooled"]
+    assert len(pooled) == 1
+    row = pooled[0]
+    assert row["signal_count"] == 3
+    assert row["net_return_5m_observed_count"] == 3
+    assert row["net_return_5m_win_rate"] == 2 / 3

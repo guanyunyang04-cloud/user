@@ -189,12 +189,12 @@ machine; the older unbounded path was not used for the final probe.  This is an 
 and capacity result only, not evidence of profitability; the probe output is
 kept under the ignored `runs/` workspace rather than durable research records.
 
-The active 5-minute archive was also tested as a coarse MA-event screen on the
-same date.  A 25 bps threshold retained 25.14% of possible stock/hour/MA keys
-but missed 17 exact 1-minute signal keys; a 200 bps threshold retained 56.81%
-and recalled every exact key on that date.  Because this is only one market
-state, the coarse screen remains audit-only and is not enabled in the runner.
-The reproducible counts and source dataset identities are recorded under
+The active 5-minute archive was also tested as a coarse MA-event screen.  The
+single-date probe reached 100% recall at 200 bps, but the full April 2022 audit
+did not: 200 bps retained an average 36.21% of possible keys and still missed
+31 exact keys on 10 of 19 dates.  The coarse screen remains audit-only and is
+not enabled in the runner.  The reproducible counts and source dataset
+identities are recorded under
 `research/records/minute_ma_coarse_screen_probe/`.
 
 ## Artifact policy

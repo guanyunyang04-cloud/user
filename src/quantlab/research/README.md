@@ -44,13 +44,15 @@ machine-wide RAM floor and stops new heavy chunks below its 1 GiB soft floor;
 DuckDB keeps a separate 2 GiB internal reserve by default.  These settings are
 execution controls, not statistical assumptions, and are written into the run
 manifest for reproducibility.
+For very large pooled output sets, the winner-trimmed mean may use a positive
+99th-percentile approximation; manageable monthly/grouped summaries retain
+the exact top-1% removal definition.
 
-The first active-5-minute coarse-screen audit is recorded under
-`research/records/minute_ma_coarse_screen_probe/`.  It shows meaningful key
-reduction, but only the 200 bps threshold retained every exact 1-minute MA
-signal key on the single audited date.  The screen is therefore not enabled in
-the development runner until recall is checked across additional market
-states.
+The active-5-minute coarse-screen audits are recorded under
+`research/records/minute_ma_coarse_screen_probe/`.  The full April 2022 audit
+still missed exact 1-minute MA signal keys at 200 bps, so the screen is not
+enabled in the development runner until recall is stable across additional
+market states.
 
 ## Data contract
 

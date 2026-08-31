@@ -1,0 +1,50 @@
+{
+  "schema": "quantlab.minute_ma_5m_coarse_screen_probe_month_summary/1",
+  "date_range": [
+    "2022-04-01",
+    "2022-04-30"
+  ],
+  "trade_date_count": 19,
+  "symbol_count": 3031,
+  "sources": {
+    "market_intraday_5m": "market_intraday_5m__2c071f88738b5cdea4695f16",
+    "adjust_factor": "adjust_factor__98fbecd479934dda685046f0",
+    "exact_reference": "runs/minute_ma_month_2022_04"
+  },
+  "threshold_summary": [
+    {
+      "threshold_bps": 25,
+      "mean_candidate_fraction": 0.15822415536498863,
+      "mean_recall": 0.9978002440449462,
+      "min_recall": 0.9933333333333333,
+      "total_missed_keys": 368,
+      "dates_with_any_miss": 19
+    },
+    {
+      "threshold_bps": 50,
+      "mean_candidate_fraction": 0.191798599544654,
+      "mean_recall": 0.9985408184177961,
+      "min_recall": 0.9952380952380953,
+      "total_missed_keys": 235,
+      "dates_with_any_miss": 19
+    },
+    {
+      "threshold_bps": 100,
+      "mean_candidate_fraction": 0.2543869942220861,
+      "mean_recall": 0.999294947484515,
+      "min_recall": 0.9967811158798283,
+      "total_missed_keys": 99,
+      "dates_with_any_miss": 17
+    },
+    {
+      "threshold_bps": 200,
+      "mean_candidate_fraction": 0.3620748491376798,
+      "mean_recall": 0.9997432274408765,
+      "min_recall": 0.9985693848354793,
+      "total_missed_keys": 31,
+      "dates_with_any_miss": 10
+    }
+  ],
+  "decision": "audit_only_not_enabled",
+  "reason": "Even 200 bps missed exact one-minute MA signal keys on 10 of 19 dates; the coarse pass cannot replace the exact path yet."
+}

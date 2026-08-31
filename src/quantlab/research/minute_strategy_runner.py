@@ -18,6 +18,7 @@ import psutil
 
 from quantlab.data.qdp_v2.duckdb_resources import (
     DEFAULT_MEMORY_FLOOR_BYTES,
+    DuckDbMemoryFloorError,
     open_guarded_duckdb,
 )
 from quantlab.research.minute_ma import (
@@ -739,7 +740,7 @@ def _outcome_metric_columns(connection: Any, paths: Sequence[Path]) -> list[str]
     ]
 
 
-def _stream_event_summary(
+def _stream_event_summary_legacy(
     connection: Any,
     paths: Sequence[Path],
     *,
@@ -870,6 +871,257 @@ def _stream_event_summary(
     return list(grouped.values())
 
 
+def _source_select_fields(keys: Sequence[str], metrics: Sequence[str]) -> tuple[list[str], str]:
+    """Build a narrow, typed source projection for summary queries."""
+
+    del keys  # Group keys are selected explicitly below; this keeps the helper stable.
+    fields = [
+        f"CAST({_quote_identifier('strategy_id')} AS VARCHAR) AS {_quote_identifier('strategy_id')}",
+        f"TRY_CAST({_quote_identifier('ma_period')} AS INTEGER) AS {_quote_identifier('ma_period')}",
+        f"CAST({_quote_identifier('signal_date')} AS VARCHAR) AS {_quote_identifier('signal_date')}",
+        f"COALESCE(TRY_CAST({_quote_identifier('diagnostic_only')} AS BOOLEAN), FALSE) AS {_quote_identifier('__diagnostic_only')}",
+        f"COALESCE(TRY_CAST({_quote_identifier('entry_observed')} AS BOOLEAN), FALSE) AS {_quote_identifier('__entry_observed')}",
+        f"COALESCE(TRY_CAST({_quote_identifier('entry_executable')} AS BOOLEAN), FALSE) AS {_quote_identifier('__entry_executable')}",
+        f"CAST({_quote_identifier('market_regime')} AS VARCHAR) AS {_quote_identifier('market_regime')}",
+        f"TRY_CAST(substr(CAST({_quote_identifier('signal_date')} AS VARCHAR), 1, 4) AS INTEGER) AS {_quote_identifier('year')}",
+    ]
+    aliases: list[str] = []
+    for name in metrics:
+        alias = f"__metric_{name}"
+        aliases.append(alias)
+        fields.append(
+            f"TRY_CAST({_quote_identifier(name)} AS DOUBLE) AS {_quote_identifier(alias)}"
+        )
+    return fields, ", ".join(aliases)
+
+
+def _summary_stats_query(
+    paths: Sequence[Path],
+    *,
+    keys: Sequence[str],
+    metrics: Sequence[str],
+) -> str:
+    fields, _ = _source_select_fields(keys, metrics)
+    group_sql = ", ".join(_quote_identifier(name) for name in keys)
+    expressions = [
+        "COUNT(*) AS __signal_count",
+        'COUNT(*) FILTER (WHERE "__entry_observed") AS __entry_observed_count',
+        'COUNT(*) FILTER (WHERE "__entry_executable") AS __entry_executable_count',
+    ]
+    for name in metrics:
+        alias = f"__metric_{name}"
+        expressions.extend(
+            [
+                f'COUNT(*) FILTER (WHERE isfinite("{alias}")) AS "{alias}__observed"',
+                f'AVG("{alias}") FILTER (WHERE isfinite("{alias}")) AS "{alias}__mean"',
+                f'MEDIAN("{alias}") FILTER (WHERE isfinite("{alias}")) AS "{alias}__median"',
+                f'SUM("{alias}") FILTER (WHERE isfinite("{alias}")) AS "{alias}__sum"',
+                f'SUM(-"{alias}") FILTER (WHERE isfinite("{alias}") AND "{alias}" < 0) AS "{alias}__negative_abs"',
+                f'COUNT(*) FILTER (WHERE isfinite("{alias}") AND "{alias}" > 0) AS "{alias}__positive"',
+                f'SUM("{alias}") FILTER (WHERE isfinite("{alias}") AND "{alias}" > 0) AS "{alias}__positive_sum"',
+            ]
+        )
+    return f"""
+        WITH source AS (
+            SELECT {", ".join(fields)}
+            FROM {_scan(paths)}
+            WHERE NOT "__diagnostic_only"
+        )
+        SELECT {group_sql}, {", ".join(expressions)}
+        FROM source
+        GROUP BY {group_sql}
+        ORDER BY {group_sql}
+    """
+
+
+def _summary_trim_query(
+    paths: Sequence[Path],
+    *,
+    keys: Sequence[str],
+    metrics: Sequence[str],
+) -> str:
+    fields, _ = _source_select_fields(keys, metrics)
+    group_sql = ", ".join(_quote_identifier(name) for name in keys)
+    aggregate: list[str] = []
+    output: list[str] = []
+    for name in metrics:
+        alias = f"__metric_{name}"
+        aggregate.extend(
+            [
+                f'COUNT(*) FILTER (WHERE isfinite("{alias}")) AS "{alias}__observed"',
+                f'SUM("{alias}") FILTER (WHERE isfinite("{alias}")) AS "{alias}__sum"',
+                f'COUNT(*) FILTER (WHERE isfinite("{alias}") AND "{alias}" > 0) AS "{alias}__positive"',
+                f'list_sort(list("{alias}") FILTER (WHERE isfinite("{alias}") AND "{alias}" > 0), \'DESC\') AS "{alias}__list"',
+            ]
+        )
+        output.append(
+            f'''CASE
+                WHEN "{alias}__observed" = 0 THEN NULL
+                WHEN "{alias}__positive" = 0 THEN "{alias}__sum" / NULLIF("{alias}__observed", 0)
+                ELSE ("{alias}__sum" - COALESCE(
+                    list_sum(list_slice("{alias}__list", 1, CAST(CEIL("{alias}__positive" * 0.01) AS BIGINT))), 0
+                )) / NULLIF(
+                    "{alias}__observed" - CAST(CEIL("{alias}__positive" * 0.01) AS BIGINT), 0
+                )
+            END AS "{alias}__trimmed"'''
+        )
+    return f"""
+        WITH source AS (
+            SELECT {", ".join(fields)}
+            FROM {_scan(paths)}
+            WHERE NOT "__diagnostic_only"
+        ), aggregate AS (
+            SELECT {group_sql}, {", ".join(aggregate)}
+            FROM source
+            GROUP BY {group_sql}
+        )
+        SELECT {group_sql}, {", ".join(output)}
+        FROM aggregate
+        ORDER BY {group_sql}
+    """
+
+
+def _summary_trim_approx_query(
+    paths: Sequence[Path],
+    *,
+    keys: Sequence[str],
+    metrics: Sequence[str],
+) -> str:
+    fields, _ = _source_select_fields(keys, metrics)
+    group_sql = ", ".join(_quote_identifier(name) for name in keys)
+    quantiles: list[str] = []
+    outputs: list[str] = []
+    for name in metrics:
+        alias = f"__metric_{name}"
+        quantiles.append(
+            f'approx_quantile("{alias}", 0.99) FILTER (WHERE isfinite("{alias}") AND "{alias}" > 0) AS "{alias}__q99"'
+        )
+        outputs.append(
+            f'AVG(CASE WHEN isfinite("{alias}") AND ("{alias}" <= 0 OR "{alias}" <= "{alias}__q99") THEN "{alias}" END) AS "{alias}__trimmed"'
+        )
+    return f"""
+        WITH source AS (
+            SELECT {", ".join(fields)}
+            FROM {_scan(paths)}
+            WHERE NOT "__diagnostic_only"
+        ), quantiles AS (
+            SELECT {group_sql}, {", ".join(quantiles)}
+            FROM source
+            GROUP BY {group_sql}
+        ), joined AS (
+            SELECT source.*, quantiles.* EXCLUDE ({group_sql})
+            FROM source
+            JOIN quantiles USING ({group_sql})
+        )
+        SELECT {group_sql}, {", ".join(outputs)}
+        FROM joined
+        GROUP BY {group_sql}
+        ORDER BY {group_sql}
+    """
+
+
+def _stream_event_summary(
+    connection: Any,
+    paths: Sequence[Path],
+    *,
+    group_by: Sequence[str],
+    metrics: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Aggregate wide outcome metrics without a row-multiplying UNPIVOT."""
+
+    if not paths:
+        return []
+    keys = tuple(str(value) for value in group_by)
+    if not keys:
+        raise MinuteStrategyRunError("strategy_summary_group_empty")
+    allowed = {"strategy_id", "ma_period", "signal_date", "market_regime", "year"}
+    unknown = sorted(set(keys).difference(allowed))
+    if unknown:
+        raise MinuteStrategyRunError(f"strategy_summary_group_columns_invalid:{','.join(unknown)}")
+    metric_names = tuple(dict.fromkeys(str(value) for value in metrics))
+    if not metric_names:
+        return []
+    stats = connection.execute(
+        _summary_stats_query(paths, keys=keys, metrics=metric_names)
+    ).fetchdf()
+    if stats.empty:
+        return []
+    rows_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    stats_records = stats.to_dict("records")
+    stats_by_key: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for record in stats_records:
+        key = tuple(record.get(name) for name in keys)
+        stats_by_key[key] = record
+        rows_by_key[key] = {
+            **{name: record.get(name) for name in keys},
+            "signal_count": int(record.get("__signal_count") or 0),
+            "entry_observed_count": int(record.get("__entry_observed_count") or 0),
+            "entry_executable_count": int(record.get("__entry_executable_count") or 0),
+            "diagnostic_excluded": True,
+        }
+    max_group = int(pd.to_numeric(stats["__signal_count"], errors="coerce").max())
+    total_rows = int(pd.to_numeric(stats["__signal_count"], errors="coerce").sum())
+    # Lists give the historical top-1% definition exactly, but only while a
+    # group is small enough to keep its positive values bounded.  Large pooled
+    # runs use a 99th-positive-quantile approximation instead of risking the
+    # machine-wide memory reserve.
+    exact_trim = max_group <= 3_000_000 and total_rows <= 30_000_000
+    if exact_trim:
+        batch_size = 8 if max_group <= 1_000_000 else (4 if max_group <= 2_000_000 else 2)
+        trim_frames: list[pd.DataFrame] = []
+        for start in range(0, len(metric_names), batch_size):
+            trim_frames.append(
+                connection.execute(
+                    _summary_trim_query(
+                        paths,
+                        keys=keys,
+                        metrics=metric_names[start : start + batch_size],
+                    )
+                ).fetchdf()
+            )
+        trim = trim_frames[0]
+        for frame in trim_frames[1:]:
+            trim = trim.merge(frame, on=list(keys), how="outer", validate="one_to_one")
+    else:
+        trim = connection.execute(
+            _summary_trim_approx_query(paths, keys=keys, metrics=metric_names)
+        ).fetchdf()
+    for record in trim.to_dict("records"):
+        key = tuple(record.get(name) for name in keys)
+        row = rows_by_key.get(key)
+        stat_record = stats_by_key.get(key)
+        if row is None or stat_record is None:
+            continue
+        for metric in metric_names:
+            alias = f"__metric_{metric}"
+            observed = int(stat_record.get(f"{alias}__observed") or 0)
+            positive_count = int(stat_record.get(f"{alias}__positive") or 0)
+            positive_sum = stat_record.get(f"{alias}__positive_sum")
+            negative_abs = stat_record.get(f"{alias}__negative_abs")
+            row[f"{metric}_observed_count"] = observed
+            row[f"{metric}_mean"] = stat_record.get(f"{alias}__mean")
+            row[f"{metric}_median"] = stat_record.get(f"{alias}__median")
+            row[f"{metric}_win_rate"] = positive_count / observed if observed else None
+            row[f"{metric}_profit_factor"] = (
+                float(positive_sum) / float(negative_abs)
+                if positive_sum is not None and negative_abs is not None and float(negative_abs) > 0
+                else None
+            )
+            row[f"{metric}_trimmed_mean_top1pct_removed"] = record.get(f"{alias}__trimmed")
+    # A group with no finite value for a metric is still represented in the
+    # summary, matching the previous event-study behaviour.
+    for row in rows_by_key.values():
+        for metric in metric_names:
+            alias = f"__metric_{metric}"
+            row.setdefault(f"{metric}_observed_count", 0)
+            row.setdefault(f"{metric}_mean", None)
+            row.setdefault(f"{metric}_median", None)
+            row.setdefault(f"{metric}_win_rate", None)
+            row.setdefault(f"{metric}_profit_factor", None)
+            row.setdefault(f"{metric}_trimmed_mean_top1pct_removed", None)
+    return list(rows_by_key.values())
+
+
 def _stream_control_summaries(
     connection: Any,
     paths: Sequence[Path],
@@ -976,9 +1228,13 @@ def summarize_development_outputs(output_root: str | Path) -> dict[str, Any]:
     connection = open_guarded_duckdb(
         ":memory:",
         temp_directory=root / ".tmp" / "minute_strategy_summary_duckdb",
-        threads="auto",
+        # Summary queries are window-heavy (median and winner trimming).  A
+        # single DuckDB worker is deliberately used here: parallel hash/window
+        # buffers can consume the entire machine-wide reserve even though the
+        # underlying outcome files are already compact.
+        threads=1,
         floor_bytes=DEFAULT_MEMORY_FLOOR_BYTES,
-        minimum_limit_bytes=128 * 1024**2,
+        minimum_limit_bytes=64 * 1024**2,
     )
     try:
         metrics = _outcome_metric_columns(connection, paths)
@@ -1396,8 +1652,11 @@ def run_development_study(
             summary = summarize_development_outputs(output_root)
             aggregate["summary"] = summary
             _write_json(output_root / "run_manifest.json", aggregate)
-        except MinuteStrategyRunError:
+        except (MinuteStrategyRunError, DuckDbMemoryFloorError) as exc:
             aggregate["status"] = "partial"
+            aggregate["summary_status"] = "deferred_memory_floor"
+            aggregate["summary_error"] = f"{type(exc).__name__}:{str(exc)[:300]}"
+            _write_json(output_root / "run_manifest.json", aggregate)
     return _jsonable(aggregate)
 
 
