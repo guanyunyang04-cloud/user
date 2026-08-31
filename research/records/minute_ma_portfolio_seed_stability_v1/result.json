@@ -1,0 +1,52 @@
+{
+  "schema": "quantlab.minute_ma_portfolio_seed_stability_record/1",
+  "status": "random_tiebreak_rejected",
+  "validation_2025_used": false,
+  "signal_roots": [
+    "runs/minute_ma_month_2022_04",
+    "runs/minute_ma_month_2023_09"
+  ],
+  "selection_seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+  "signal_date_count": 39,
+  "strategy_count": 22,
+  "exit_policy_count": 7,
+  "account_variant_count": 154,
+  "account_result_count": 1540,
+  "run_elapsed_seconds": 2396.797,
+  "stability_counts": {
+    "positive_mean_variants": 0,
+    "positive_median_variants": 0,
+    "variants_positive_at_least_half_seeds": 0,
+    "maximum_positive_seed_count": 3,
+    "fully_resolved_all_seed_variants": 45,
+    "maximum_fully_resolved_both_period_positive_seed_count": 2
+  },
+  "best_median_variant": {
+    "strategy_id": "ng_r1_auction_reclaim",
+    "policy_id": "next_open_1d",
+    "resolved_seed_count": 10,
+    "positive_seed_count": 3,
+    "mean_return": -0.0294299015425064,
+    "median_return": -0.03544126673947362,
+    "minimum_return": -0.08637244519051912,
+    "maximum_return": 0.03010720541598344,
+    "april_2022_positive_seed_count": 0,
+    "september_2023_positive_seed_count": 8
+  },
+  "prior_seed_7_leader": {
+    "strategy_id": "s1_touch_reclaim",
+    "policy_id": "next_open_3d",
+    "positive_seed_count": 1,
+    "mean_return": -0.12636283270142679,
+    "median_return": -0.1244072795998245,
+    "minimum_return": -0.24270844370729927,
+    "maximum_return": 0.08573397963751117
+  },
+  "per_seed_positive_variant_count_range": [4, 15],
+  "per_seed_cross_variant_median_return_range": [
+    -0.1669641815,
+    -0.12513334365
+  ],
+  "decision": "reject_unranked_same_minute_selection",
+  "next_step": "design_and_test_causal_cross_sectional_ranking_on_2022_2024"
+}

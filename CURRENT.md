@@ -197,6 +197,33 @@ not enabled in the runner.  The reproducible counts and source dataset
 identities are recorded under
 `research/records/minute_ma_coarse_screen_probe/`.
 
+## Minute-MA portfolio replay
+
+The first finite-cash account layer is implemented in
+`src/quantlab/research/minute_strategy_portfolio.py` and exposed as
+`quantlab research minute-strategy-portfolio`. Its current contract is CNY
+100,000 starting cash, at most five simultaneous symbols, dynamic equal cash
+allocation across same-time fills, 100-share lots, base slippage and fees,
+T+1, next-minute execution after causal exit triggers, and explicit delayed or
+unresolved exits. Same-session prices are observed for trailing peaks and
+end-of-day marks even though a new position cannot be sold that day. Earlier
+signals have priority; same-minute candidates use a fixed-seed deterministic
+hash so input and stock-code order cannot choose the five positions.
+
+The initial account comparison used the full point-in-time main-board outputs
+for April 2022 and September 2023: 39 trading dates, 22 executable strategy
+variants and seven finite exit policies, for 154 accounts. Nine accounts were
+positive on a marked basis and six of those were fully closed, but no fully
+closed account was positive in both month/year segments. The only two-segment
+positive account ended with an unresolved position. Results also changed
+materially when the invalid stock-code tie-break was replaced. The completed
+seeds 0-9 study now rejects the random tie-break: all 154 variants have
+negative mean and median returns across seeds, and no variant wins in at least
+half the seeds. The best median is -3.54%. Records are under
+`research/records/minute_ma_portfolio_development_v1/` and
+`research/records/minute_ma_portfolio_seed_stability_v1/`; detailed local
+trades and equity paths remain under ignored `runs/` storage.
+
 ## Artifact policy
 
 Retain the rev5 compatibility benchmark as historical evidence and keep it
@@ -219,15 +246,13 @@ recoverable archives or provenance needed for audit.
 
 1. Keep QDP status/quick checks and the minute-v2 month verifier as regression
    checks after any data or code change.
-2. Expand the declared point-in-time development universe beyond the
-   eight-symbol implementation pool and join the market/sector fields needed
-   for the S3 gates. Keep every attempted rule version and use only causal
-   minute fields for entries and exits.
+2. Define a causal cross-sectional rank for same-minute candidates; the
+   unranked fixed-seed path has now been rejected.
 3. Build and audit an optional 5-minute coarse candidate pass against the exact
    1-minute path; enable it only after its recall and coverage are measured.
-4. Replay the finite rules on the full 2022-2024 development universe with an
-   inventory/order-state engine; report costs, missingness, turnover, capacity,
-   and drawdown by year and market regime.
+4. Continue the finite account replay across 2022-2024 with the selected
+   ranking contract; report costs, missingness, turnover, delayed exits and
+   drawdown by year and market regime.
 5. Freeze the selected rule family, then inspect 2025 once as the held-out
    validation year. Do not tune on that pass.
 6. Add optional tree/sequence baselines only as comparators after the

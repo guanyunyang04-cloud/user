@@ -54,6 +54,32 @@ still missed exact 1-minute MA signal keys at 200 bps, so the screen is not
 enabled in the development runner until recall is stable across additional
 market states.
 
+## Minute-MA portfolio replay
+
+`minute_strategy_portfolio` replays executable event rows with finite cash,
+100-share lots, fees, slippage, no duplicate open symbol, at most five open
+symbols, and A-share T+1.  Stops and targets are observed on causal minute bars
+and execute at the next legal minute open; locked, suspended, delisted, unknown
+and missing sessions remain delayed or unresolved rather than being credited
+as fills.  Positions opened during a session are marked from that session's
+observed close.  Signals within one symbol/hour are deduplicated across MA
+periods, then same-time orders share the available account cash equally.
+Earlier signal minutes have priority; same-minute candidates use a declared
+fixed-seed hash so Parquet row order and stock-code order cannot choose fills.
+
+The first full-universe comparison is recorded under
+`research/records/minute_ma_portfolio_development_v1/`.  It covers April 2022
+and September 2023 only and is a development diagnostic, not evidence of a
+profitable or frozen strategy.  Use `quantlab research
+minute-strategy-portfolio` to reproduce the account layer from existing event
+outputs.
+
+The follow-up under `research/records/minute_ma_portfolio_seed_stability_v1/`
+replays seeds 0-9 in one shared scan. Every strategy/exit variant has a
+negative cross-seed mean and median, so the arbitrary same-minute tie-break is
+rejected. A causal cross-sectional rank is required before expanding this
+portfolio path.
+
 ## Data contract
 
 The current repaired matrix contains 4,191,476 rows from 2012-01-04 through
@@ -88,6 +114,7 @@ separate 158 data copy and no v2/v3 data namespace.
 ## Commands
 
 ```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research minute-strategy-portfolio --signal-root runs/minute_ma_month_2022_04 --signal-root runs/minute_ma_month_2023_09 --output-root runs/minute_strategy_portfolio_apr_sep --selection-seed 7
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research verify
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research train-tree --features 158
 C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research evaluate-tree --features 158

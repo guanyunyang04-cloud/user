@@ -79,6 +79,38 @@ def test_nested_minute_v2_options_are_forwarded_without_outer_parsing(monkeypatc
     assert inner == [["--workspace-root", "H:/quant_project", "verify-month"]]
 
 
+def test_minute_strategy_portfolio_options_are_dispatched_lazily(monkeypatch) -> None:
+    forwarded: list[list[str]] = []
+    from quantlab.research import minute_strategy_portfolio
+
+    monkeypatch.setattr(
+        minute_strategy_portfolio,
+        "main",
+        lambda argv: forwarded.append(list(argv)) or 0,
+    )
+    assert research_cli.main(
+        [
+            "minute-strategy-portfolio",
+            "--signal-root",
+            "runs/minute_ma_month_2022_04",
+            "--output-root",
+            "runs/test-portfolio",
+            "--max-positions",
+            "5",
+        ]
+    ) == 0
+    assert forwarded == [
+        [
+            "--signal-root",
+            "runs/minute_ma_month_2022_04",
+            "--output-root",
+            "runs/test-portfolio",
+            "--max-positions",
+            "5",
+        ]
+    ]
+
+
 def test_data_cli_does_not_import_machine_learning_runtimes() -> None:
     script = """
 import contextlib

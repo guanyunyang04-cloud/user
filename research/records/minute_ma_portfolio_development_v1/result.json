@@ -1,0 +1,87 @@
+{
+  "schema": "quantlab.minute_ma_portfolio_development_record/1",
+  "status": "development_not_selected",
+  "validation_2025_used": false,
+  "signal_roots": [
+    "runs/minute_ma_month_2022_04",
+    "runs/minute_ma_month_2023_09"
+  ],
+  "signal_date_count": 39,
+  "signal_outcome_rows": 14977595,
+  "strategy_count": 22,
+  "exit_policy_count": 7,
+  "account_count": 154,
+  "run_elapsed_seconds": 948.752,
+  "portfolio_contract": {
+    "starting_cash_cny": 100000.0,
+    "maximum_simultaneous_symbols": 5,
+    "single_symbol_position_cap": null,
+    "daily_entry_cap": null,
+    "same_time_allocation": "equal_cash_reserved_per_remaining_slot_subject_to_100_share_lots",
+    "same_minute_tiebreak": "deterministic_hash",
+    "selection_seed": 7,
+    "duplicate_open_symbol_allowed": false,
+    "t_plus_one": true,
+    "exit_execution": "minute_trigger_then_next_legal_minute_open",
+    "memory_floor_gib": 0.5,
+    "soft_memory_floor_gib": 1.0
+  },
+  "result_counts": {
+    "positive_marked_accounts": 9,
+    "positive_fully_closed_accounts": 6,
+    "positive_in_both_segments_marked": 1,
+    "positive_in_both_segments_fully_closed": 0,
+    "filled_entries_across_accounts": 15699,
+    "closed_trades_across_accounts": 15667,
+    "terminal_open_positions_across_accounts": 32,
+    "delayed_exit_attempts_across_accounts": 8196
+  },
+  "nominal_best_account": {
+    "strategy_id": "s4_reclaim_vwap_support",
+    "policy_id": "fast_failure_2pct_target4pct_2d",
+    "combined_return": 0.16816029229107654,
+    "segment_2022_return": 0.6465072156023206,
+    "segment_2023_return": -0.2905222150127399,
+    "maximum_drawdown": -0.35320631127893054,
+    "closed_trade_count": 139,
+    "unresolved_position_count": 1,
+    "ending_cash_cny": 70070.0292291077,
+    "unresolved_position_mark_cny": 46746.0,
+    "eligible_as_winner": false
+  },
+  "best_fully_closed_accounts": [
+    {
+      "strategy_id": "s1_touch_reclaim",
+      "policy_id": "next_open_3d",
+      "combined_return": 0.08573397963751117,
+      "segment_2022_return": 0.13962046456066024,
+      "segment_2023_return": -0.04728458868446439,
+      "maximum_drawdown": -0.09359216894635647
+    },
+    {
+      "strategy_id": "s0_distance_only",
+      "policy_id": "next_open_3d",
+      "combined_return": 0.04999618120974114,
+      "segment_2022_return": 0.12978751893050067,
+      "segment_2023_return": -0.07062508337522877,
+      "maximum_drawdown": -0.13383008230147564
+    },
+    {
+      "strategy_id": "s1_near_reversal",
+      "policy_id": "next_open_2d",
+      "combined_return": 0.042115755675975475,
+      "segment_2022_return": 0.09572434885837477,
+      "segment_2023_return": -0.0489252550043755,
+      "maximum_drawdown": -0.08037047217961202
+    }
+  ],
+  "selection_stability": {
+    "single_seed_only": true,
+    "code_order_replay_rejected": true,
+    "reason": "same-minute candidate choice materially changed account results",
+    "follow_up_record": "research/records/minute_ma_portfolio_seed_stability_v1/result.json",
+    "follow_up_decision": "reject_unranked_same_minute_selection"
+  },
+  "decision": "no_strategy_or_exit_policy_selected",
+  "next_step": "test_multiple_selection_seeds_or_define_causal_rank_then_expand_2022_2024_months"
+}
