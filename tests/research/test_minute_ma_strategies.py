@@ -231,7 +231,10 @@ def test_many_liquidity_controls_clone_one_match_per_reference() -> None:
     second = first.copy()
     second["strategy_id"] = "s2_reclaim_positive_slope"
     second["signal_id"] = second["signal_id"].str.replace("s1_touch_reclaim", "s2_reclaim_positive_slope", regex=False)
-    references = pd.concat([first, second], ignore_index=True)
+    references = pd.concat(
+        [first.loc[first["symbol"].eq("A")], second.loc[second["symbol"].eq("A")]],
+        ignore_index=True,
+    )
     controls = build_liquidity_matched_controls_many(states, references)
     assert len(controls) == 2
     assert set(controls["reference_signal_id"]) == set(references["signal_id"])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import time
 from collections.abc import Sequence
@@ -11,19 +12,19 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import numpy as np
 import pandas as pd
+import psutil
 
+from quantlab.data.qdp_v2.duckdb_resources import (
+    DEFAULT_MEMORY_FLOOR_BYTES,
+    open_guarded_duckdb,
+)
 from quantlab.research.minute_ma import MA_PERIODS, MinuteMAConfig
 from quantlab.research.minute_ma_event_study import (
     OUTCOME_COLUMNS,
     EventStudyConfig,
-    compare_to_control,
-    compare_to_reference_control,
     compute_event_outcomes,
-    summarize_control_comparison,
-    summarize_event_study,
 )
 from quantlab.research.minute_ma_strategies import (
     build_liquidity_matched_controls_many,
@@ -34,6 +35,7 @@ from quantlab.research.minute_ma_strategies import (
 from .minute_strategy_data import (
     StrategyDataConfig,
     build_enriched_minute_ma_states,
+    build_live_ma_alignment,
     build_minute_market_context,
     load_daily_context,
     load_hourly_history,
@@ -45,6 +47,22 @@ from .minute_strategy_data import (
 
 class MinuteStrategyRunError(RuntimeError):
     """Raised when a chunked strategy run cannot satisfy its output contract."""
+
+
+GIB = 1024**3
+
+
+def _require_memory_floor(config: DevelopmentStudyConfig, stage: str) -> int:
+    """Stop before another allocation when the requested RAM reserve is gone."""
+
+    available = int(psutil.virtual_memory().available)
+    floor = int(float(config.memory_floor_gib) * GIB)
+    if available < floor:
+        raise MinuteStrategyRunError(
+            f"strategy_run_memory_floor_breached:{stage}:"
+            f"available={available}:floor={floor}"
+        )
+    return available
 
 
 @dataclass(frozen=True)
@@ -61,8 +79,10 @@ class DevelopmentStudyConfig:
     outcome_open_days: int = 5
     strategy_periods: tuple[int, ...] = MA_PERIODS
     signal_symbol_chunk_size: int = 300
-    duckdb_threads: int = 8
+    duckdb_threads: int | str = 2
     temp_directory: str | None = None
+    memory_floor_gib: float = 0.5
+    duckdb_memory_floor_gib: float = 2.0
 
     def validate(self) -> None:
         start = date.fromisoformat(str(self.start_date))
@@ -75,10 +95,21 @@ class DevelopmentStudyConfig:
             ("history_open_days", self.history_open_days, 1),
             ("outcome_open_days", self.outcome_open_days, 1),
             ("signal_symbol_chunk_size", self.signal_symbol_chunk_size, 1),
-            ("duckdb_threads", self.duckdb_threads, 1),
         ):
             if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or int(value) < minimum:
                 raise MinuteStrategyRunError(f"strategy_run_{name}_invalid")
+        if isinstance(self.duckdb_threads, str):
+            if self.duckdb_threads.strip().lower() != "auto":
+                raise MinuteStrategyRunError("strategy_run_duckdb_threads_invalid")
+        elif isinstance(self.duckdb_threads, bool) or not isinstance(self.duckdb_threads, (int, np.integer)) or int(self.duckdb_threads) < 1:
+            raise MinuteStrategyRunError("strategy_run_duckdb_threads_invalid")
+        if not np.isfinite(float(self.memory_floor_gib)) or float(self.memory_floor_gib) < 0.5:
+            raise MinuteStrategyRunError("strategy_run_memory_floor_invalid")
+        if (
+            not np.isfinite(float(self.duckdb_memory_floor_gib))
+            or float(self.duckdb_memory_floor_gib) < float(self.memory_floor_gib)
+        ):
+            raise MinuteStrategyRunError("strategy_run_duckdb_memory_floor_invalid")
         if not self.strategy_periods or tuple(sorted(set(self.strategy_periods))) != tuple(self.strategy_periods):
             raise MinuteStrategyRunError("strategy_run_periods_invalid")
         if any(int(value) not in MA_PERIODS for value in self.strategy_periods):
@@ -97,8 +128,10 @@ class DevelopmentStudyConfig:
             "outcome_open_days": int(self.outcome_open_days),
             "strategy_periods": [int(value) for value in self.strategy_periods],
             "signal_symbol_chunk_size": int(self.signal_symbol_chunk_size),
-            "duckdb_threads": int(self.duckdb_threads),
+            "duckdb_threads": self.duckdb_threads,
             "temp_directory": self.temp_directory,
+            "memory_floor_gib": float(self.memory_floor_gib),
+            "duckdb_memory_floor_gib": float(self.duckdb_memory_floor_gib),
         }
 
 
@@ -194,8 +227,13 @@ def _build_day_signals(
     if day_bars.empty:
         return pd.DataFrame(), {"state_rows": 0, "signal_rows": 0, "control_reference_count": 0, "control_matched_count": 0}
     market_context = build_minute_market_context(day_bars, daily_context=daily_context)
+    # Alignment is the only cross-period state.  Compute it once, then process
+    # each MA period independently so the six expanded state tables are never
+    # resident at the same time.
+    alignment = build_live_ma_alignment(day_bars, hourly_history, config=ma_config)
     parts: list[pd.DataFrame] = []
     control_parts: list[pd.DataFrame] = []
+    state_rows = 0
     control_reference_count = 0
     control_matched_count = 0
     control_unmatched_reasons: dict[str, int] = {}
@@ -207,59 +245,71 @@ def _build_day_signals(
         and (include_diagnostic or spec.executable)
         and spec.signal_rule != "posthoc_catchup"
     ]
-    states = build_enriched_minute_ma_states(
-        day_bars,
-        hourly_history,
-        daily_context=daily_context,
-        context=market_context,
-        config=ma_config,
-    )
-    if states.empty:
-        return pd.DataFrame(), {"state_rows": 0, "signal_rows": 0, "control_reference_count": 0, "control_matched_count": 0}
-    state_symbols = states["symbol"].astype(str).drop_duplicates().tolist()
-    signal_parts: list[pd.DataFrame] = []
-    for start in range(0, len(state_symbols), int(signal_symbol_chunk_size)):
-        chunk_symbols = set(state_symbols[start : start + int(signal_symbol_chunk_size)])
-        chunk_states = states.loc[states["symbol"].astype(str).isin(chunk_symbols)]
-        chunk_signals = build_strategy_signals_vectorized(
-            chunk_states,
-            strategy_ids=[spec.strategy_id for spec in specs],
-            include_diagnostic=include_diagnostic,
-            random_seed=random_seed,
+    for period in strategy_periods:
+        period = int(period)
+        if period not in ma_config.periods:
+            continue
+        period_config = MinuteMAConfig(
+            periods=(period,),
+            near_touch_bps=ma_config.near_touch_bps,
+            posthoc_catchup_bps=ma_config.posthoc_catchup_bps,
+            prior_touch_window_hours=ma_config.prior_touch_window_hours,
         )
-        if not chunk_signals.empty:
-            signal_parts.append(chunk_signals)
-    signal = pd.concat(signal_parts, ignore_index=True) if signal_parts else pd.DataFrame()
-    if not signal.empty:
-        filtered = _decision_signal_filter(signal)
+        states = build_enriched_minute_ma_states(
+            day_bars,
+            hourly_history,
+            daily_context=daily_context,
+            context=market_context,
+            config=period_config,
+        )
+        if states.empty:
+            continue
+        if not alignment.empty:
+            states = _attach_alignment(states, alignment)
+        state_rows += int(len(states))
+        state_symbols = states["symbol"].astype(str).drop_duplicates().tolist()
+        signal_parts: list[pd.DataFrame] = []
+        for start in range(0, len(state_symbols), int(signal_symbol_chunk_size)):
+            chunk_symbols = set(state_symbols[start : start + int(signal_symbol_chunk_size)])
+            chunk_states = states.loc[states["symbol"].astype(str).isin(chunk_symbols)]
+            chunk_signals = build_strategy_signals_vectorized(
+                chunk_states,
+                strategy_ids=[spec.strategy_id for spec in specs],
+                include_diagnostic=include_diagnostic,
+                random_seed=random_seed,
+            )
+            if not chunk_signals.empty:
+                signal_parts.append(chunk_signals)
+        signal = pd.concat(signal_parts, ignore_index=True) if signal_parts else pd.DataFrame()
+        filtered = _decision_signal_filter(signal) if not signal.empty else signal
         if not filtered.empty:
             parts.append(filtered)
-    references = [part for part in parts if not part.empty]
-    reference_frame = pd.concat(references, ignore_index=True) if references else pd.DataFrame()
-    if not reference_frame.empty:
-        reference_frame = reference_frame.loc[
-            ~reference_frame["strategy_id"].isin(["s0_random_matched", "s0_liquidity_matched"])
-            & reference_frame["signal_executable"].fillna(False)
-        ].copy()
-    if not reference_frame.empty:
-        controls = build_liquidity_matched_controls_many(
-            states,
-            reference_frame,
-            liquidity_band_ratio=liquidity_band,
-            random_seed=random_seed,
-        )
-        control_reference_count = int(controls.attrs.get("reference_count", len(reference_frame)))
-        control_matched_count = int(controls.attrs.get("matched_count", len(controls)))
-        control_unmatched_reasons = dict(controls.attrs.get("unmatched_reasons", {}))
-        if not controls.empty:
-            filtered_controls = _decision_signal_filter(controls)
-            if not filtered_controls.empty:
-                control_parts.append(filtered_controls)
+            reference_frame = filtered.loc[
+                ~filtered["strategy_id"].isin(["s0_random_matched", "s0_liquidity_matched"])
+                & filtered["signal_executable"].fillna(False)
+            ].copy()
+            if not reference_frame.empty:
+                controls = build_liquidity_matched_controls_many(
+                    states,
+                    reference_frame,
+                    liquidity_band_ratio=liquidity_band,
+                    random_seed=random_seed,
+                )
+                control_reference_count += int(controls.attrs.get("reference_count", len(reference_frame)))
+                control_matched_count += int(controls.attrs.get("matched_count", len(controls)))
+                for name, value in controls.attrs.get("unmatched_reasons", {}).items():
+                    control_unmatched_reasons[str(name)] = control_unmatched_reasons.get(str(name), 0) + int(value)
+                if not controls.empty:
+                    filtered_controls = _decision_signal_filter(controls)
+                    if not filtered_controls.empty:
+                        control_parts.append(filtered_controls)
+        del states, signal, signal_parts
+        gc.collect()
     if not parts:
-        return pd.DataFrame(), {"state_rows": 0, "signal_rows": 0, "control_reference_count": 0, "control_matched_count": 0}
+        return pd.DataFrame(), {"state_rows": state_rows, "signal_rows": 0, "control_reference_count": control_reference_count, "control_matched_count": control_matched_count, "control_unmatched_reasons": control_unmatched_reasons}
     signals = pd.concat([*parts, *control_parts], ignore_index=True)
     return signals, {
-        "state_rows": int(len(states)),
+        "state_rows": int(state_rows),
         "signal_rows": int(len(signals)),
         "control_reference_count": int(control_reference_count),
         "control_matched_count": int(control_matched_count),
@@ -275,15 +325,246 @@ def _lean_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
     return outcomes.loc[:, list(dict.fromkeys(keep))].copy()
 
 
-def _load_outcome_files(paths: Sequence[Path], columns: Sequence[str] | None = None) -> pd.DataFrame:
+def _quote_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _outcome_metric_columns(connection: Any, paths: Sequence[Path]) -> list[str]:
+    schema = connection.execute(f"DESCRIBE SELECT * FROM {_scan(paths[:1])}").df()
+    names = schema["column_name"].astype(str).tolist()
+    return [
+        name
+        for name in names
+        if name.startswith(("gross_return_", "net_return_"))
+        or name in {"mfe_same_day", "mae_same_day", "t1_gross_return", "t1_net_return"}
+    ]
+
+
+def _stream_event_summary(
+    connection: Any,
+    paths: Sequence[Path],
+    *,
+    group_by: Sequence[str],
+    metrics: Sequence[str],
+) -> list[dict[str, Any]]:
+    """Aggregate outcome files in DuckDB without loading the whole panel."""
+
     if not paths:
-        return pd.DataFrame()
-    con = duckdb.connect()
-    try:
-        projection = "*" if columns is None else ",".join('"' + str(name).replace('"', '""') + '"' for name in columns)
-        return con.execute(f"SELECT {projection} FROM {_scan(paths)}").df()
-    finally:
-        con.close()
+        return []
+    keys = tuple(str(value) for value in group_by)
+    if not keys:
+        raise MinuteStrategyRunError("strategy_summary_group_empty")
+    source_keys = set(keys)
+    expressions = [
+        _quote_identifier("strategy_id"),
+        _quote_identifier("ma_period"),
+        _quote_identifier("signal_date"),
+        _quote_identifier("diagnostic_only"),
+        _quote_identifier("entry_observed"),
+        _quote_identifier("entry_executable"),
+    ]
+    if "market_regime" in source_keys:
+        expressions.append(_quote_identifier("market_regime"))
+    if "year" in source_keys:
+        expressions.append(
+            "TRY_CAST(substr(CAST(\"signal_date\" AS VARCHAR), 1, 4) AS INTEGER) AS \"year\""
+        )
+    for name in metrics:
+        expressions.append(_quote_identifier(name))
+    group_sql = ", ".join(_quote_identifier(name) for name in keys)
+    metric_sql = ", ".join(_quote_identifier(name) for name in metrics)
+    observed_expr = "COALESCE(\"entry_observed\", FALSE)"
+    executable_expr = "COALESCE(\"entry_executable\", FALSE)"
+    query = f"""
+        WITH source AS (
+            SELECT {", ".join(expressions)}
+            FROM {_scan(paths)}
+            WHERE NOT COALESCE(\"diagnostic_only\", FALSE)
+        ),
+        counts AS (
+            SELECT {group_sql},
+                   COUNT(*) AS signal_count,
+                   COUNT(*) FILTER (WHERE {observed_expr}) AS entry_observed_count,
+                   COUNT(*) FILTER (WHERE {executable_expr}) AS entry_executable_count
+            FROM source
+            GROUP BY {group_sql}
+        ),
+        long_values AS (
+            SELECT {group_sql}, metric, CAST(value AS DOUBLE) AS value
+            FROM source
+            UNPIVOT (value FOR metric IN ({metric_sql}))
+        ),
+        valid AS (
+            SELECT * FROM long_values WHERE isfinite(value)
+        ),
+        stats AS (
+            SELECT {group_sql}, metric,
+                   COUNT(*) AS observed_count,
+                   AVG(value) AS mean,
+                   MEDIAN(value) AS median,
+                   SUM(value) FILTER (WHERE value > 0) AS positive_sum,
+                   SUM(-value) FILTER (WHERE value < 0) AS negative_abs,
+                   COUNT(*) FILTER (WHERE value > 0) AS positive_count
+            FROM valid
+            GROUP BY {group_sql}, metric
+        ),
+        ranked AS (
+            SELECT {group_sql}, metric, value,
+                   CASE WHEN value > 0 THEN ROW_NUMBER() OVER (
+                       PARTITION BY {group_sql}, metric ORDER BY value DESC
+                   ) END AS positive_rank,
+                   COUNT(*) FILTER (WHERE value > 0) OVER (
+                       PARTITION BY {group_sql}, metric
+                   ) AS positive_total
+            FROM valid
+        ),
+        trimmed AS (
+            SELECT {group_sql}, metric,
+                   AVG(value) FILTER (
+                       WHERE value <= 0 OR positive_rank > CEIL(positive_total * 0.01)
+                   ) AS trimmed_mean
+            FROM ranked
+            GROUP BY {group_sql}, metric
+        )
+        SELECT counts.*, stats.metric, stats.observed_count, stats.mean,
+               stats.median, stats.positive_sum, stats.negative_abs,
+               stats.positive_count, trimmed.trimmed_mean
+        FROM counts
+        LEFT JOIN stats USING ({group_sql})
+        LEFT JOIN trimmed USING ({group_sql}, metric)
+        ORDER BY {group_sql}, stats.metric
+    """
+    result = connection.execute(query).fetchdf()
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for record in result.to_dict("records"):
+        key = tuple(record.get(name) for name in keys)
+        row = grouped.setdefault(
+            key,
+            {
+                name: record.get(name)
+                for name in keys
+            }
+            | {
+                "signal_count": int(record.get("signal_count") or 0),
+                "entry_observed_count": int(record.get("entry_observed_count") or 0),
+                "entry_executable_count": int(record.get("entry_executable_count") or 0),
+                "diagnostic_excluded": True,
+            },
+        )
+        metric = record.get("metric")
+        if metric is None:
+            continue
+        observed = int(record.get("observed_count") or 0)
+        positive_count = int(record.get("positive_count") or 0)
+        negative_abs = record.get("negative_abs")
+        positive_sum = record.get("positive_sum")
+        row[f"{metric}_observed_count"] = observed
+        row[f"{metric}_mean"] = record.get("mean")
+        row[f"{metric}_median"] = record.get("median")
+        row[f"{metric}_win_rate"] = positive_count / observed if observed else None
+        row[f"{metric}_profit_factor"] = (
+            float(positive_sum) / float(negative_abs)
+            if positive_sum is not None and negative_abs is not None and float(negative_abs) > 0
+            else None
+        )
+        row[f"{metric}_trimmed_mean_top1pct_removed"] = record.get("trimmed_mean")
+    return list(grouped.values())
+
+
+def _stream_control_summaries(
+    connection: Any,
+    paths: Sequence[Path],
+    strategy_ids: Sequence[str],
+    *,
+    metric: str = "net_return_60m",
+) -> list[dict[str, Any]]:
+    """Compute both control comparisons in one bounded DuckDB query."""
+
+    if not paths or not strategy_ids:
+        return []
+    query = f"""
+        WITH source AS (
+            SELECT strategy_id, signal_id, symbol, signal_date,
+                   signal_time, sixty_minute_bucket, ma_period,
+                   reference_signal_id, TRY_CAST({_quote_identifier(metric)} AS DOUBLE) AS metric
+            FROM {_scan(paths)}
+        ),
+        regular AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY strategy_id, symbol, signal_date, sixty_minute_bucket, ma_period
+                ORDER BY signal_id
+            ) AS rn
+            FROM source
+            WHERE strategy_id NOT IN ('s0_random_matched', 's0_liquidity_matched')
+        ),
+        random_control AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY symbol, signal_date, sixty_minute_bucket, ma_period
+                ORDER BY signal_id
+            ) AS rn
+            FROM source WHERE strategy_id = 's0_random_matched'
+        ),
+        liquidity_control AS (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY reference_signal_id ORDER BY signal_id
+            ) AS rn
+            FROM source
+            WHERE strategy_id = 's0_liquidity_matched'
+              AND reference_signal_id IS NOT NULL
+        ),
+        same_pairs AS (
+            SELECT r.strategy_id, 's0_random_matched' AS control_id,
+                   r.metric - c.metric AS difference
+            FROM regular r
+            JOIN random_control c USING(symbol, signal_date, sixty_minute_bucket, ma_period)
+            WHERE r.rn = 1 AND c.rn = 1
+        ),
+        liquidity_pairs AS (
+            SELECT r.strategy_id, 's0_liquidity_matched' AS control_id,
+                   r.metric - c.metric AS difference
+            FROM regular r
+            JOIN liquidity_control c ON c.reference_signal_id = r.signal_id
+            WHERE r.rn = 1 AND c.rn = 1
+        ),
+        pairs AS (
+            SELECT * FROM same_pairs
+            UNION ALL
+            SELECT * FROM liquidity_pairs
+        )
+        SELECT strategy_id, control_id,
+               COUNT(*) AS matched_count,
+               COUNT(*) FILTER (WHERE isfinite(difference)) AS observed_count,
+               AVG(difference) AS mean_difference,
+               MEDIAN(difference) AS median_difference,
+               AVG(CASE WHEN isfinite(difference) THEN
+                   CASE WHEN difference > 0 THEN 1.0 ELSE 0.0 END END) AS positive_fraction
+        FROM pairs
+        GROUP BY strategy_id, control_id
+        ORDER BY strategy_id, control_id
+    """
+    result = connection.execute(query).fetchdf()
+    by_key = {
+        (str(row["strategy_id"]), str(row["control_id"])): row
+        for row in result.to_dict("records")
+    }
+    rows: list[dict[str, Any]] = []
+    for strategy_id in strategy_ids:
+        for control_id in ("s0_random_matched", "s0_liquidity_matched"):
+            row = by_key.get((str(strategy_id), control_id))
+            rows.append(
+                {
+                    "strategy_id": str(strategy_id),
+                    "control_id": control_id,
+                    "summary": {
+                        "matched_count": int(row["matched_count"]) if row is not None else 0,
+                        "observed_count": int(row["observed_count"]) if row is not None else 0,
+                        "mean_difference": row.get("mean_difference") if row is not None else None,
+                        "median_difference": row.get("median_difference") if row is not None else None,
+                        "positive_fraction": row.get("positive_fraction") if row is not None else None,
+                    },
+                }
+            )
+    return rows
 
 
 def summarize_development_outputs(output_root: str | Path) -> dict[str, Any]:
@@ -293,31 +574,47 @@ def summarize_development_outputs(output_root: str | Path) -> dict[str, Any]:
     paths = sorted((root / "outcomes").glob("date=*/outcomes.parquet"))
     if not paths:
         raise MinuteStrategyRunError("strategy_run_outcomes_missing")
-    frame = _load_outcome_files(paths)
-    if frame.empty:
-        raise MinuteStrategyRunError("strategy_run_outcomes_empty")
-    summary = {
-        "output_root": str(root),
-        "outcome_file_count": len(paths),
-        "outcome_rows": int(len(frame)),
-        "summary_overall": summarize_event_study(frame, group_by=("strategy_id", "ma_period")),
-        "summary_overall_pooled": summarize_event_study(frame, group_by=("strategy_id",)),
-        "summary_by_year": summarize_event_study(frame, group_by=("year", "strategy_id")) if "year" in frame else summarize_event_study(frame.assign(year=frame["signal_date"].astype(str).str[:4]), group_by=("year", "strategy_id")),
-    }
-    if "market_regime" in frame.columns:
-        summary["summary_by_market_regime"] = summarize_event_study(frame, group_by=("market_regime", "strategy_id"))
-    control_rows: list[dict[str, Any]] = []
-    for strategy_id in sorted(set(frame["strategy_id"].astype(str)) - {"s0_random_matched", "s0_liquidity_matched"}):
-        paired = compare_to_control(frame, strategy_id=strategy_id, control_id="s0_random_matched", metric="net_return_60m")
-        control_rows.append({"strategy_id": strategy_id, "control_id": "s0_random_matched", "summary": summarize_control_comparison(paired)})
-        paired_cross = compare_to_reference_control(
-            frame,
-            strategy_id=strategy_id,
-            control_id="s0_liquidity_matched",
-            metric="net_return_60m",
+    connection = open_guarded_duckdb(
+        ":memory:",
+        temp_directory=root / ".tmp" / "minute_strategy_summary_duckdb",
+        threads="auto",
+        floor_bytes=DEFAULT_MEMORY_FLOOR_BYTES,
+        minimum_limit_bytes=128 * 1024**2,
+    )
+    try:
+        metrics = _outcome_metric_columns(connection, paths)
+        outcome_rows = int(
+            connection.execute(f"SELECT COUNT(*) FROM {_scan(paths)}").fetchone()[0]
         )
-        control_rows.append({"strategy_id": strategy_id, "control_id": "s0_liquidity_matched", "summary": summarize_control_comparison(paired_cross)})
-    summary["control_comparisons"] = control_rows
+        if not outcome_rows:
+            raise MinuteStrategyRunError("strategy_run_outcomes_empty")
+        summary: dict[str, Any] = {
+            "output_root": str(root),
+            "outcome_file_count": len(paths),
+            "outcome_rows": outcome_rows,
+            "summary_overall": _stream_event_summary(
+                connection, paths, group_by=("strategy_id", "ma_period"), metrics=metrics
+            ),
+            "summary_overall_pooled": _stream_event_summary(
+                connection, paths, group_by=("strategy_id",), metrics=metrics
+            ),
+            "summary_by_year": _stream_event_summary(
+                connection, paths, group_by=("year", "strategy_id"), metrics=metrics
+            ),
+            "summary_by_market_regime": _stream_event_summary(
+                connection, paths, group_by=("market_regime", "strategy_id"), metrics=metrics
+            ),
+        }
+        strategy_ids = [
+            str(row["strategy_id"])
+            for row in summary["summary_overall_pooled"]
+            if str(row["strategy_id"]) not in {"s0_random_matched", "s0_liquidity_matched"}
+        ]
+        summary["control_comparisons"] = _stream_control_summaries(
+            connection, paths, sorted(set(strategy_ids)), metric="net_return_60m"
+        )
+    finally:
+        connection.close()
     _write_json(root / "development_summary.json", summary)
     return _jsonable(summary)
 
@@ -342,6 +639,10 @@ def run_development_study(
     selected_data = data_config or StrategyDataConfig(
         history_open_days=selected.history_open_days,
         outcome_open_days=selected.outcome_open_days,
+        duckdb_threads=selected.duckdb_threads,
+        temp_directory=selected.temp_directory,
+        memory_floor_gib=selected.memory_floor_gib,
+        duckdb_memory_floor_gib=selected.duckdb_memory_floor_gib,
     )
     selected_data.validate()
     selected_ma = ma_config or MinuteMAConfig(periods=tuple(selected.strategy_periods))
@@ -351,6 +652,7 @@ def run_development_study(
     root = Path(workspace_root).resolve()
     output_root = (root / selected.output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    _require_memory_floor(selected, "run_start")
     # Keep the development date range separate from the outcome look-ahead:
     # the latter needs a few open dates after the final target date (and may
     # cross a calendar year).  The extra calendar rows are never used to
@@ -359,7 +661,13 @@ def run_development_study(
         date.fromisoformat(str(selected.end_date))
         + timedelta(days=max(14, int(selected.outcome_open_days) * 3))
     ).isoformat()
-    calendar = load_trading_calendar(root, start_date="2010-01-01", end_date=calendar_end)
+    calendar = load_trading_calendar(
+        root,
+        start_date="2010-01-01",
+        end_date=calendar_end,
+        config=selected_data,
+    )
+    _require_memory_floor(selected, "calendar_loaded")
     month_ranges = _month_ranges(calendar["trade_date"].astype(str).tolist(), selected.start_date, selected.end_date)
     if selected.max_months:
         month_ranges = month_ranges[: int(selected.max_months)]
@@ -435,7 +743,15 @@ def run_development_study(
                 symbols = symbols[: int(selected.max_symbols)]
             target_universe = target_universe.loc[target_universe["symbol"].isin(symbols)].copy()
         started_month = time.perf_counter()
-        daily_context = load_daily_context(root, symbols=symbols, start_date=support_start, end_date=context_end, config=selected_data)
+        _require_memory_floor(selected, f"month_start:{month_start[:7]}")
+        daily_context = load_daily_context(
+            root,
+            symbols=symbols,
+            start_date=support_start,
+            end_date=context_end,
+            config=selected_data,
+        )
+        _require_memory_floor(selected, f"daily_context_loaded:{month_start[:7]}")
         # ``month_end`` is a lexical partition label (e.g. YYYY-MM-31), not
         # necessarily a real date.  The last actual target date is the
         # correct inclusive bound for the historical hourly aggregation.
@@ -444,7 +760,9 @@ def run_development_study(
             symbols=symbols,
             start_date=support_start,
             end_date=target_month_dates[-1],
+            config=selected_data,
         )
+        _require_memory_floor(selected, f"hourly_history_loaded:{month_start[:7]}")
         month_outcome_paths: list[str] = []
         month_stats = {
             "month": month_start[:7],
@@ -467,6 +785,7 @@ def run_development_study(
                 month_outcome_paths.append(str(outcome_path))
                 continue
             date_started = time.perf_counter()
+            _require_memory_floor(selected, f"date_start:{trade_date}")
             day_universe = target_universe.loc[target_universe["trade_date"].astype(str).eq(trade_date)].copy()
             day_symbols = day_universe["symbol"].astype(str).tolist()
             if not day_symbols:
@@ -477,6 +796,7 @@ def run_development_study(
                 trade_dates=[trade_date],
                 daily_context=daily_context,
                 require_complete_session=True,
+                config=selected_data,
             )
             signals, signal_stats = _build_day_signals(
                 day_bars,
@@ -488,6 +808,7 @@ def run_development_study(
                 liquidity_band=selected_data.liquidity_match_band,
                 signal_symbol_chunk_size=selected.signal_symbol_chunk_size,
             )
+            _require_memory_floor(selected, f"signals_built:{trade_date}")
             if signals.empty:
                 continue
             target_index = all_open.index(trade_date)
@@ -499,7 +820,9 @@ def run_development_study(
                 trade_dates=future_dates,
                 daily_context=daily_context,
                 require_complete_session=False,
+                config=selected_data,
             )
+            _require_memory_floor(selected, f"outcome_bars_loaded:{trade_date}")
             outcomes = compute_event_outcomes(
                 outcome_bars,
                 signals,
@@ -534,6 +857,9 @@ def run_development_study(
                     "month_stats": month_stats,
                 },
             )
+            del day_bars, signals, outcome_bars, outcomes
+            gc.collect()
+            _require_memory_floor(selected, f"date_complete:{trade_date}")
         month_stats["completed_date_count"] = len(completed)
         month_stats["outcome_paths"] = sorted(set(month_outcome_paths))
         month_stats["elapsed_seconds"] = round(time.perf_counter() - started_month, 3)
@@ -548,6 +874,9 @@ def run_development_study(
                 "month_stats": month_stats,
             },
         )
+        del daily_context, hourly_history
+        gc.collect()
+        _require_memory_floor(selected, f"month_complete:{month_start[:7]}")
     aggregate["status"] = "ok" if len(aggregate["months"]) == len(month_ranges) else "partial"
     _write_json(output_root / "run_manifest.json", aggregate)
     if aggregate["status"] == "ok":
@@ -571,8 +900,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--history-open-days", type=int, default=66)
     parser.add_argument("--outcome-open-days", type=int, default=5)
-    parser.add_argument("--duckdb-threads", type=int, default=8)
+    parser.add_argument("--duckdb-threads", default="2")
     parser.add_argument("--signal-symbol-chunk-size", type=int, default=300)
+    parser.add_argument("--memory-floor-gib", type=float, default=0.5)
+    parser.add_argument("--duckdb-memory-floor-gib", type=float, default=2.0)
     parser.add_argument("--temp-directory", default="")
     parser.add_argument("--period", type=int, action="append", dest="periods")
     return parser
@@ -580,6 +911,11 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    duckdb_threads: int | str = (
+        args.duckdb_threads
+        if str(args.duckdb_threads).strip().lower() == "auto"
+        else int(args.duckdb_threads)
+    )
     config = DevelopmentStudyConfig(
         start_date=args.start_date,
         end_date=args.end_date,
@@ -591,8 +927,10 @@ def main(argv: list[str] | None = None) -> int:
         outcome_open_days=args.outcome_open_days,
         strategy_periods=tuple(args.periods or MA_PERIODS),
         signal_symbol_chunk_size=args.signal_symbol_chunk_size,
-        duckdb_threads=args.duckdb_threads,
+        duckdb_threads=duckdb_threads,
         temp_directory=args.temp_directory or None,
+        memory_floor_gib=args.memory_floor_gib,
+        duckdb_memory_floor_gib=args.duckdb_memory_floor_gib,
     )
     result = run_development_study(args.workspace_root, config=config)
     print(json.dumps(result, ensure_ascii=False, indent=2))

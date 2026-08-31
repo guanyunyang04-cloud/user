@@ -1253,6 +1253,8 @@ def build_matched_random_control(
 
 def _normalise_strategy_dates(values: pd.Series) -> pd.Series:
     raw = values.astype("string").str.strip()
+    if bool(raw.str.fullmatch(r"\d{4}-\d{2}-\d{2}", na=False).all()):
+        return raw
     compact = raw.str.fullmatch(r"\d{8}", na=False)
     parsed = pd.Series(pd.NaT, index=values.index, dtype="datetime64[ns]")
     if compact.any():
@@ -1263,6 +1265,13 @@ def _normalise_strategy_dates(values: pd.Series) -> pd.Series:
         bad = raw.loc[parsed.isna()].iloc[0]
         raise StrategyError(f"strategy_trade_date_invalid:{bad!r}")
     return parsed.dt.strftime("%Y-%m-%d")
+
+
+def _normalise_strategy_times(values: pd.Series) -> pd.Series:
+    raw = values.astype("string").str.strip()
+    if bool(raw.str.fullmatch(r"\d{9}", na=False).all()):
+        return raw
+    return raw.map(normalize_bar_time).astype("string")
 
 
 def attach_prior_daily_liquidity(
@@ -1568,72 +1577,131 @@ def build_liquidity_matched_controls_many(
         empty = _empty_signal_frame()
         empty.attrs.update({"reference_count": 0, "matched_count": 0, "unmatched_count": 0, "unmatched_reasons": {}})
         return empty
+    spec = strategy_spec(strategy_id)
+    if not spec.reference_control or spec.signal_rule != "liquidity_matched_stock":
+        raise StrategyError("liquidity_control_strategy_invalid")
+    if not np.isfinite(float(liquidity_band_ratio)) or float(liquidity_band_ratio) < 1.0:
+        raise StrategyError("liquidity_band_ratio_invalid")
+    if isinstance(nearest_candidates, bool) or not isinstance(nearest_candidates, (int, np.integer)) or int(nearest_candidates) < 1:
+        raise StrategyError("liquidity_nearest_candidates_invalid")
+    _require_state_columns(states, set(_BASE_COLUMNS) | {str(liquidity_column)})
     required = {"signal_id", "symbol", "signal_date", "signal_time", "sixty_minute_bucket", "ma_period"}
     missing = sorted(required.difference(reference_signals.columns))
     if missing:
         raise StrategyError(f"strategy_reference_columns_missing:{','.join(missing)}")
     if reference_signals["signal_id"].duplicated().any():
         raise StrategyError("strategy_reference_signal_id_duplicate")
-    key_columns = ["symbol", "signal_date", "signal_time", "sixty_minute_bucket", "ma_period"]
-    canonical = reference_signals.loc[:, list(required)].copy()
-    canonical["signal_date"] = _normalise_strategy_dates(canonical["signal_date"])
-    canonical["signal_time"] = canonical["signal_time"].map(normalize_bar_time)
-    canonical = canonical.drop_duplicates(key_columns, keep="first").reset_index(drop=True)
-    base_controls = build_liquidity_matched_control(
-        states,
-        canonical,
-        strategy_id=strategy_id,
-        liquidity_column=liquidity_column,
-        liquidity_band_ratio=liquidity_band_ratio,
-        nearest_candidates=nearest_candidates,
-        random_seed=random_seed,
-    )
-    if base_controls.empty:
-        result = _empty_signal_frame()
-        result.attrs.update(
-            {
-                "reference_count": int(len(reference_signals)),
-                "matched_count": 0,
-                "unmatched_count": int(len(reference_signals)),
-                "unmatched_reasons": {
-                    str(name): int(value)
-                    for name, value in base_controls.attrs.get("unmatched_reasons", {}).items()
-                },
-            }
+
+    references = reference_signals.copy()
+    references["symbol"] = references["symbol"].astype(str).str.strip()
+    references["signal_date"] = _normalise_strategy_dates(references["signal_date"])
+    references["signal_time"] = _normalise_strategy_times(references["signal_time"])
+    references["sixty_minute_bucket"] = pd.to_numeric(references["sixty_minute_bucket"], errors="coerce").astype("int16")
+    references["ma_period"] = pd.to_numeric(references["ma_period"], errors="coerce").astype("int16")
+    references["_control_key"] = list(
+        zip(
+            references["symbol"].astype(str),
+            references["signal_date"].astype(str),
+            references["signal_time"].astype(str),
+            references["sixty_minute_bucket"].astype(int),
+            references["ma_period"].astype(int),
+            strict=False,
         )
-        return result
-    lookup = {
-        tuple(row[name] for name in key_columns): row
-        for row in base_controls.to_dict("records")
+    )
+    canonical = references.drop_duplicates("_control_key", keep="first")
+
+    working = states.copy().reset_index(drop=True)
+    working["symbol"] = working["symbol"].astype(str).str.strip()
+    working["trade_date"] = _normalise_strategy_dates(working["trade_date"])
+    working["bar_time"] = _normalise_strategy_times(working["bar_time"])
+    working["sixty_minute_bucket"] = pd.to_numeric(working["sixty_minute_bucket"], errors="coerce").astype("int16")
+    working["ma_period"] = pd.to_numeric(working["ma_period"], errors="coerce").astype("int16")
+    working["liquidity_value"] = pd.to_numeric(working[liquidity_column], errors="coerce")
+    working["_match_key"] = list(
+        zip(
+            working["trade_date"].astype(str),
+            working["bar_time"].astype(str),
+            working["sixty_minute_bucket"].astype(int),
+            working["ma_period"].astype(int),
+            strict=False,
+        )
+    )
+    wanted_keys = {
+        (key[1], key[2], key[3], key[4])
+        for key in canonical["_control_key"]
     }
-    reference_key_counts = (
-        reference_signals.assign(
-            signal_date=_normalise_strategy_dates(reference_signals["signal_date"]),
-            signal_time=reference_signals["signal_time"].map(normalize_bar_time),
-        )
-        .groupby(key_columns, sort=False, observed=True)
-        .size()
-        .to_dict()
-    )
+    working = working.loc[
+        working["_match_key"].map(lambda key: key in wanted_keys)
+    ].copy()
+    grouped = {
+        key if isinstance(key, tuple) else (key,): group
+        for key, group in working.groupby("_match_key", sort=False, observed=True)
+    }
+
+    matched_by_key: dict[tuple[Any, ...], dict[str, Any] | None] = {}
+    reason_by_key: dict[tuple[Any, ...], str] = {}
+    band = float(liquidity_band_ratio)
+    for canonical_row in canonical.to_dict("records"):
+        ref_key = canonical_row["_control_key"]
+        state_key = ref_key[1:]
+        group = grouped.get(state_key)
+        if group is None or group.empty:
+            reason_by_key[ref_key] = "same_minute_state_missing"
+            matched_by_key[ref_key] = None
+            continue
+        ref_symbol = str(ref_key[0])
+        ref_rows = group.loc[group["symbol"].eq(ref_symbol)]
+        if ref_rows.empty:
+            reason_by_key[ref_key] = "reference_state_missing"
+            matched_by_key[ref_key] = None
+            continue
+        ref_liquidity = float(ref_rows.iloc[0]["liquidity_value"])
+        if not np.isfinite(ref_liquidity) or ref_liquidity <= 0:
+            reason_by_key[ref_key] = "reference_liquidity_missing"
+            matched_by_key[ref_key] = None
+            continue
+        symbols = group["symbol"].astype(str).to_numpy()
+        liquidity = group["liquidity_value"].to_numpy(dtype=float)
+        candidate_mask = (symbols != ref_symbol) & np.isfinite(liquidity) & (liquidity > 0)
+        candidate_indices = np.flatnonzero(candidate_mask)
+        if not len(candidate_indices):
+            reason_by_key[ref_key] = "candidate_liquidity_missing"
+            matched_by_key[ref_key] = None
+            continue
+        ratios = liquidity[candidate_indices] / ref_liquidity
+        in_band = (ratios >= 1.0 / band) & (ratios <= band)
+        candidate_indices = candidate_indices[in_band]
+        ratios = ratios[in_band]
+        if not len(candidate_indices):
+            reason_by_key[ref_key] = "no_candidate_in_liquidity_band"
+            matched_by_key[ref_key] = None
+            continue
+        distances = np.abs(np.log(ratios))
+        order = np.lexsort((symbols[candidate_indices], distances))[: int(nearest_candidates)]
+        candidate_indices = candidate_indices[order]
+        ratios = ratios[order]
+        choice = _stable_choice_position(str(canonical_row["signal_id"]), seed=int(random_seed), size=len(candidate_indices))
+        chosen_position = int(candidate_indices[choice])
+        state_position = int(group.index[chosen_position])
+        state_row = working.loc[state_position]
+        signal = _signal_from_series(state_row, spec, "liquidity_matched_stock")
+        signal["liquidity_match_ratio"] = float(liquidity[chosen_position] / ref_liquidity)
+        matched_by_key[ref_key] = signal
+
     rows: list[dict[str, Any]] = []
-    for reference in reference_signals.itertuples(index=False):
-        ref = reference._asdict()
-        key = (
-            str(ref["symbol"]),
-            _normalise_strategy_dates(pd.Series([ref["signal_date"]])).iloc[0],
-            normalize_bar_time(ref["signal_time"]),
-            int(ref["sixty_minute_bucket"]),
-            int(ref["ma_period"]),
-        )
-        matched = lookup.get(key)
+    unmatched_reasons = Counter()
+    for reference in references.to_dict("records"):
+        ref_key = reference["_control_key"]
+        matched = matched_by_key.get(ref_key)
         if matched is None:
+            unmatched_reasons[reason_by_key.get(ref_key, "no_candidate_in_liquidity_band")] += 1
             continue
         signal = dict(matched)
-        ref_id = str(ref["signal_id"])
+        ref_id = str(reference["signal_id"])
         chosen_symbol = str(signal["symbol"])
         signal["signal_id"] = f"{strategy_id}|ref:{ref_id}|{chosen_symbol}"
         signal["reference_signal_id"] = ref_id
-        signal["reference_symbol"] = str(ref["symbol"])
+        signal["reference_symbol"] = str(reference["symbol"])
         rows.append(signal)
     if rows:
         result = pd.DataFrame(rows)
@@ -1651,23 +1719,11 @@ def build_liquidity_matched_controls_many(
             raise StrategyError("liquidity_control_signal_id_duplicate")
     else:
         result = _empty_signal_frame()
-    canonical_unmatched = int(len(canonical) - len(base_controls))
-    unmatched_reasons = Counter()
-    base_reasons = base_controls.attrs.get("unmatched_reasons", {})
-    for key, count in reference_key_counts.items():
-        if key in lookup:
-            continue
-        # The underlying matcher reports one reason per canonical key.  The
-        # same reason is inherited by every strategy reference sharing it.
-        reason = "no_candidate_in_liquidity_band"
-        if canonical_unmatched and base_reasons:
-            reason = next(iter(base_reasons))
-        unmatched_reasons[reason] += int(count)
     result.attrs.update(
         {
-            "reference_count": int(len(reference_signals)),
+            "reference_count": int(len(references)),
             "matched_count": int(len(rows)),
-            "unmatched_count": int(len(reference_signals) - len(rows)),
+            "unmatched_count": int(len(references) - len(rows)),
             "unmatched_reasons": dict(unmatched_reasons),
             "liquidity_column": str(liquidity_column),
             "liquidity_band_ratio": float(liquidity_band_ratio),

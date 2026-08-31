@@ -15,11 +15,14 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import numpy as np
 import pandas as pd
 
 from quantlab.data.qdp_v2.active import resolve_active_domain
+from quantlab.data.qdp_v2.duckdb_resources import (
+    DEFAULT_MEMORY_FLOOR_BYTES,
+    open_guarded_duckdb,
+)
 from quantlab.research.minute_ma import (
     EVENT_KEY_COLUMNS,
     MinuteMAConfig,
@@ -45,6 +48,10 @@ class StrategyDataConfig:
     outcome_open_days: int = 5
     liquidity_lookback_days: int = 20
     liquidity_match_band: float = 2.0
+    duckdb_threads: int | str = 2
+    temp_directory: str | None = None
+    memory_floor_gib: float = 0.5
+    duckdb_memory_floor_gib: float = 2.0
 
     def validate(self) -> None:
         if self.board != "main":
@@ -58,6 +65,18 @@ class StrategyDataConfig:
                 raise MinuteStrategyDataError(f"strategy_data_{name}_invalid")
         if not np.isfinite(float(self.liquidity_match_band)) or float(self.liquidity_match_band) < 1.0:
             raise MinuteStrategyDataError("strategy_data_liquidity_match_band_invalid")
+        if isinstance(self.duckdb_threads, str):
+            if self.duckdb_threads.strip().lower() != "auto":
+                raise MinuteStrategyDataError("strategy_data_duckdb_threads_invalid")
+        elif isinstance(self.duckdb_threads, bool) or not isinstance(self.duckdb_threads, (int, np.integer)) or int(self.duckdb_threads) < 1:
+            raise MinuteStrategyDataError("strategy_data_duckdb_threads_invalid")
+        if not np.isfinite(float(self.memory_floor_gib)) or float(self.memory_floor_gib) < 0.5:
+            raise MinuteStrategyDataError("strategy_data_memory_floor_invalid")
+        if (
+            not np.isfinite(float(self.duckdb_memory_floor_gib))
+            or float(self.duckdb_memory_floor_gib) < float(self.memory_floor_gib)
+        ):
+            raise MinuteStrategyDataError("strategy_data_duckdb_memory_floor_invalid")
 
     def as_dict(self) -> dict[str, Any]:
         self.validate()
@@ -68,7 +87,37 @@ class StrategyDataConfig:
             "outcome_open_days": int(self.outcome_open_days),
             "liquidity_lookback_days": int(self.liquidity_lookback_days),
             "liquidity_match_band": float(self.liquidity_match_band),
+            "duckdb_threads": self.duckdb_threads,
+            "temp_directory": self.temp_directory,
+            "memory_floor_gib": float(self.memory_floor_gib),
+            "duckdb_memory_floor_gib": float(self.duckdb_memory_floor_gib),
         }
+
+
+def _open_strategy_duckdb(
+    workspace_root: str | Path,
+    config: StrategyDataConfig | None = None,
+):
+    """Open a guarded connection while reserving the configured RAM floor."""
+
+    selected = config or StrategyDataConfig()
+    selected.validate()
+    root = Path(workspace_root).resolve()
+    spill = (
+        Path(selected.temp_directory).resolve()
+        if selected.temp_directory
+        else root / ".tmp" / "minute_strategy_duckdb"
+    )
+    return open_guarded_duckdb(
+        ":memory:",
+        temp_directory=spill,
+        threads=selected.duckdb_threads,
+        floor_bytes=max(
+            DEFAULT_MEMORY_FLOOR_BYTES,
+            int(float(selected.duckdb_memory_floor_gib) * (1024**3)),
+        ),
+        minimum_limit_bytes=128 * 1024**2,
+    )
 
 
 def _scan(paths: Sequence[Path]) -> str:
@@ -111,13 +160,14 @@ def load_trading_calendar(
     *,
     start_date: str,
     end_date: str,
+    config: StrategyDataConfig | None = None,
 ) -> pd.DataFrame:
     """Load the explicit exchange calendar, including only open dates."""
 
     start = date.fromisoformat(str(start_date)).isoformat()
     end = date.fromisoformat(str(end_date)).isoformat()
     context = _context(workspace_root, "trading_calendar")
-    con = duckdb.connect()
+    con = _open_strategy_duckdb(workspace_root, config)
     try:
         frame = con.execute(
             f"""
@@ -186,7 +236,7 @@ def load_point_in_time_universe(
     status = _context(root, "security_status")
     industry = _context(root, "industry_concept")
     date_frame = pd.DataFrame({"trade_date": dates})
-    con = duckdb.connect()
+    con = _open_strategy_duckdb(root, selected)
     con.register("wanted_strategy_dates", date_frame)
     try:
         frame = con.execute(
@@ -293,7 +343,7 @@ def load_daily_context(
     status = _context(root, "security_status")
     industry = _context(root, "industry_concept")
     auction = _context(root, "market_opening_auction")
-    con = duckdb.connect()
+    con = _open_strategy_duckdb(root, selected)
     con.register("wanted_strategy_symbols", symbol_frame)
     try:
         frame = con.execute(
@@ -427,6 +477,7 @@ def load_hourly_history(
     symbols: Sequence[str],
     start_date: str,
     end_date: str,
+    config: StrategyDataConfig | None = None,
 ) -> pd.DataFrame:
     """Aggregate historical minutes to complete 60-minute bars in DuckDB."""
 
@@ -434,7 +485,7 @@ def load_hourly_history(
     symbol_frame = _symbols_frame(symbols)
     factors = _context(root, "adjust_factor")
     paths = _minute_paths(root, start_date, end_date)
-    con = duckdb.connect()
+    con = _open_strategy_duckdb(root, config)
     con.register("wanted_strategy_symbols", symbol_frame)
     try:
         frame = con.execute(
@@ -514,6 +565,7 @@ def load_target_bars(
     trade_dates: Sequence[str],
     daily_context: pd.DataFrame | None = None,
     require_complete_session: bool = False,
+    config: StrategyDataConfig | None = None,
 ) -> pd.DataFrame:
     """Load target or forward bars with optional execution-state fields."""
 
@@ -526,7 +578,7 @@ def load_target_bars(
     factors = _context(root, "adjust_factor")
     status = _context(root, "security_status")
     paths = _minute_paths(root, min(dates), max(dates))
-    con = duckdb.connect()
+    con = _open_strategy_duckdb(root, config)
     con.register("wanted_strategy_symbols", symbol_frame)
     con.register("wanted_strategy_dates", date_frame)
     try:
@@ -578,6 +630,7 @@ def load_target_bars(
         raise MinuteStrategyDataError("strategy_data_target_bars_empty")
     frame["symbol"] = frame["symbol"].astype(str)
     frame["trade_date"] = _normalise_date_series(frame["trade_date"])
+    frame["status_known"] = frame[["is_st", "is_suspended", "is_delisted"]].notna().all(axis=1)
     frame["bar_time"] = frame["bar_time"].map(normalize_bar_time).astype("string")
     for column in ("open", "high", "low", "close", "volume", "amount", "adjust_factor"):
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
@@ -595,6 +648,10 @@ def load_target_bars(
         keys = pd.MultiIndex.from_frame(frame[["symbol", "trade_date"]])
         frame = frame.loc[~keys.isin(pd.MultiIndex.from_tuples(sorted(excluded)))].copy()
     if require_complete_session:
+        # A target-day signal must have an explicit point-in-time status.  For
+        # forward outcome bars we retain unknown statuses so the event study
+        # can report ``status_unknown`` instead of silently dropping them.
+        frame = frame.loc[frame["status_known"]].copy()
         counts = frame.groupby(["symbol", "trade_date"], sort=False)["session_minute_ordinal"].agg(
             count="size", distinct="nunique", minimum="min", maximum="max"
         )
