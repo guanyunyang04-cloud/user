@@ -156,6 +156,14 @@ def test_market_context_exposes_causal_rule_flags() -> None:
     assert len(context) == 240
 
 
+def test_vwap_deviation_uses_one_price_adjustment_basis() -> None:
+    bars = _bars(dates=("2022-01-03",))
+    bars["adjust_factor"] = 3.0
+    context = build_minute_market_context(bars)
+    expected = bars["close"].iloc[0] / (bars["amount"].iloc[0] / bars["volume"].iloc[0]) - 1.0
+    assert context["vwap_deviation"].iloc[0] == pytest.approx(expected)
+
+
 def test_enriched_states_keep_author_filter_inputs_and_alignment() -> None:
     bars = _bars(dates=("2022-01-03", "2022-01-04"))
     hourly = build_hourly_bars(bars)

@@ -440,8 +440,9 @@ def load_daily_context(
             int(selected.liquidity_lookback_days), min_periods=int(selected.liquidity_lookback_days)
         ).median()
         current["previous_daily_high_20"] = current["adjusted_high"].shift(1).rolling(20, min_periods=20).max()
-        current["daily_breakout_prior"] = current["adjusted_close"].shift(1) > current["previous_daily_high_20"]
-        current["breakout_recent"] = current["daily_breakout_prior"].shift(1).rolling(5, min_periods=1).max().fillna(0).astype(bool)
+        breakout_reference = current["adjusted_high"].shift(2).rolling(20, min_periods=20).max()
+        current["daily_breakout_prior"] = current["adjusted_close"].shift(1) > breakout_reference
+        current["breakout_recent"] = current["daily_breakout_prior"].rolling(5, min_periods=1).max().fillna(0).astype(bool)
         current["prior_acceleration"] = current["previous_return_5d"] - current["previous_return_20d"] > 0.0
         current["daily_trend_positive"] = (
             (current["previous_return_20d"] > 0.0) & (current["previous_close_to_sma_20d"] > 0.0)
@@ -743,7 +744,7 @@ def build_minute_market_context(
     frame["cumulative_amount"] = grouped["amount"].cumsum()
     frame["cumulative_volume"] = grouped["volume"].cumsum()
     frame["cumulative_vwap"] = frame["cumulative_amount"] / frame["cumulative_volume"].where(frame["cumulative_volume"].gt(0))
-    frame["vwap_deviation"] = frame["adjusted_close"] / frame["cumulative_vwap"] - 1.0
+    frame["vwap_deviation"] = frame["close"] / frame["cumulative_vwap"] - 1.0
     frame["recent_volume_5"] = grouped["volume"].transform(
         lambda values: values.rolling(5, min_periods=5).mean()
     )
@@ -751,9 +752,13 @@ def build_minute_market_context(
         lambda values: values.shift(5).rolling(20, min_periods=20).mean()
     )
     frame["volume_acceleration_5_20"] = frame["recent_volume_5"] / frame["previous_volume_20"] - 1.0
+    prior_median_amount = pd.to_numeric(
+        frame.get("prior_20d_median_amount", pd.Series(np.nan, index=frame.index)),
+        errors="coerce",
+    )
     frame["amount_curve_surprise"] = np.where(
-        pd.to_numeric(frame.get("prior_20d_median_amount"), errors="coerce").gt(0),
-        frame["cumulative_amount"] / (pd.to_numeric(frame["prior_20d_median_amount"], errors="coerce") * (frame["session_minute_ordinal"] + 1.0) / 240.0) - 1.0,
+        prior_median_amount.gt(0),
+        frame["cumulative_amount"] / (prior_median_amount * (frame["session_minute_ordinal"] + 1.0) / 240.0) - 1.0,
         np.nan,
     )
     frame["price_impact_1m"] = np.abs(frame["return_1m"]) / (frame["amount"] / 1_000_000.0 + 1.0)

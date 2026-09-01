@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
 ## Decision
 
@@ -28,6 +28,8 @@ evidence.
   `data/research/archive/minute_v2_legacy_20260830/`.
 - Minute-MA research contract and representative validation:
   `research/records/minute_ma_v1/`.
+- Minute-MA causal-ranker replay record:
+  `research/records/minute_strategy_portfolio_causal_rankers_v1/`.
 - Durable study inputs and evidence: `research/studies/` and
   `research/records/`.
 - Local model outputs: `runs/`.
@@ -207,8 +209,9 @@ allocation across same-time fills, 100-share lots, base slippage and fees,
 T+1, next-minute execution after causal exit triggers, and explicit delayed or
 unresolved exits. Same-session prices are observed for trailing peaks and
 end-of-day marks even though a new position cannot be sold that day. Earlier
-signals have priority; same-minute candidates use a fixed-seed deterministic
-hash so input and stock-code order cannot choose the five positions.
+signals have priority; same-minute candidates use the declared causal ranker,
+then a fixed-seed deterministic hash for equal scores, so input and stock-code
+order cannot choose the five positions.
 
 The initial account comparison used the full point-in-time main-board outputs
 for April 2022 and September 2023: 39 trading dates, 22 executable strategy
@@ -217,12 +220,22 @@ positive on a marked basis and six of those were fully closed, but no fully
 closed account was positive in both month/year segments. The only two-segment
 positive account ended with an unresolved position. Results also changed
 materially when the invalid stock-code tie-break was replaced. The completed
-seeds 0-9 study now rejects the random tie-break: all 154 variants have
+seeds 0-9 study rejects the unranked random tie-break: all 154 variants have
 negative mean and median returns across seeds, and no variant wins in at least
-half the seeds. The best median is -3.54%. Records are under
-`research/records/minute_ma_portfolio_development_v1/` and
-`research/records/minute_ma_portfolio_seed_stability_v1/`; detailed local
-trades and equity paths remain under ignored `runs/` storage.
+half the seeds. The best median is -3.54%.
+
+The causal-ranker follow-up replayed the same dates with 21 executable
+strategies, seven exits, three rankers and seeds 0-4 (2,205 account results).
+None of the rankers shows a general profitable increment versus the matched
+random baseline. `flow_quality` is closest overall; `sector_leader` produces
+one two-segment candidate, `s4_auction_confirmed_reclaim` with
+`next_open_2d`, at +7.80% combined (+6.33% in 2022 and +1.38% in 2023),
+-9.25% maximum drawdown and no unresolved position. It was found after 441
+account-group comparisons and is not frozen. Keep detailed local trades and
+equity paths under ignored `runs/` storage; the durable conclusions are in
+`research/records/minute_ma_portfolio_development_v1/`,
+`research/records/minute_ma_portfolio_seed_stability_v1/`, and
+`research/records/minute_strategy_portfolio_causal_rankers_v1/`.
 
 ## Artifact policy
 
@@ -246,13 +259,13 @@ recoverable archives or provenance needed for audit.
 
 1. Keep QDP status/quick checks and the minute-v2 month verifier as regression
    checks after any data or code change.
-2. Define a causal cross-sectional rank for same-minute candidates; the
-   unranked fixed-seed path has now been rejected.
+2. Expand the causal-ranker replay across more 2022-2024 months and market
+   regimes, retaining the random baseline and all three rankers until a rule
+   family is stable.
 3. Build and audit an optional 5-minute coarse candidate pass against the exact
    1-minute path; enable it only after its recall and coverage are measured.
-4. Continue the finite account replay across 2022-2024 with the selected
-   ranking contract; report costs, missingness, turnover, delayed exits and
-   drawdown by year and market regime.
+4. Report costs, missingness, turnover, delayed exits and drawdown by year and
+   market regime for the expanded development replay.
 5. Freeze the selected rule family, then inspect 2025 once as the held-out
    validation year. Do not tune on that pass.
 6. Add optional tree/sequence baselines only as comparators after the

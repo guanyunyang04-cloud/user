@@ -309,9 +309,80 @@ def test_multiple_selection_seeds_share_one_replay_and_remain_identifiable() -> 
     assert set(trades["selection_seed"]) == set(seeds)
     assert trades["symbol"].nunique() > 1
     summary = summarize_selection_seed_results(results)
+    assert summary["selection_rankers"] == ["random_hash"]
     assert summary["selection_seeds"] == list(seeds)
     assert summary["account_variant_count"] == 1
     assert summary["accounts"][0]["seed_count"] == len(seeds)
+
+
+def test_sector_leader_ranker_selects_the_stronger_causal_context() -> None:
+    bars = _bars({"A": [10.0, 10.0, 10.0], "B": [10.0, 10.0, 10.0]})
+    weak = _signal("A", "sig-A")
+    weak.update(
+        sector_strength_rank=0.2,
+        sector_breadth=0.3,
+        leader_relative_return=-0.01,
+    )
+    strong = _signal("B", "sig-B")
+    strong.update(
+        sector_strength_rank=0.9,
+        sector_breadth=0.8,
+        leader_relative_return=0.02,
+    )
+
+    def loader(symbols, date):
+        return bars.loc[
+            bars["symbol"].isin(symbols) & bars["trade_date"].eq(date)
+        ].copy()
+
+    _results, _equity, trades = simulate_portfolio_accounts(
+        {"2022-01-03": pd.DataFrame([weak, strong])},
+        bars_loader=loader,
+        calendar=["2022-01-03", "2022-01-04"],
+        strategy_ids=("s1_touch_reclaim",),
+        policies=(ExitPolicy("one_day", 1),),
+        config=PortfolioConfig(starting_cash=100_000, max_positions=1),
+        selection_seeds=(0, 1),
+        selection_rankers=("sector_leader",),
+    )
+    assert set(trades["symbol"]) == {"B"}
+    assert set(trades["selection_ranker"]) == {"sector_leader"}
+    assert trades["selection_score"].gt(0.8).all()
+
+
+def test_trend_and_flow_rankers_use_only_declared_signal_fields() -> None:
+    bars = _bars({"A": [10.0, 10.0, 10.0], "B": [10.0, 10.0, 10.0]})
+    weak = _signal("A", "sig-A")
+    strong = _signal("B", "sig-B")
+    for row, flag in ((weak, False), (strong, True)):
+        row.update(
+            recent_high_breakout=flag,
+            prior_acceleration=flag,
+            daily_trend_positive=flag,
+            volume_acceleration_5_20=1.0 if flag else -1.0,
+            amount_curve_surprise=1.0 if flag else -1.0,
+            auction_confirmed=flag,
+            volume_normal=flag,
+            not_repeated_cross=flag,
+        )
+
+    def loader(symbols, date):
+        return bars.loc[
+            bars["symbol"].isin(symbols) & bars["trade_date"].eq(date)
+        ].copy()
+
+    _results, _equity, trades = simulate_portfolio_accounts(
+        {"2022-01-03": pd.DataFrame([weak, strong])},
+        bars_loader=loader,
+        calendar=["2022-01-03", "2022-01-04"],
+        strategy_ids=("s1_touch_reclaim",),
+        policies=(ExitPolicy("one_day", 1),),
+        config=PortfolioConfig(starting_cash=100_000, max_positions=1),
+        selection_rankers=("trend_structure", "flow_quality"),
+    )
+    assert set(trades["selection_ranker"]) == {"trend_structure", "flow_quality"}
+    assert set(trades["symbol"]) == {"B"}
+    assert trades["selection_score"].eq(1.0).all()
 
 
 def test_explicitly_noncausal_signal_is_not_executable() -> None:

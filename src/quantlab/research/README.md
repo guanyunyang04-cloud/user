@@ -64,8 +64,9 @@ and missing sessions remain delayed or unresolved rather than being credited
 as fills.  Positions opened during a session are marked from that session's
 observed close.  Signals within one symbol/hour are deduplicated across MA
 periods, then same-time orders share the available account cash equally.
-Earlier signal minutes have priority; same-minute candidates use a declared
-fixed-seed hash so Parquet row order and stock-code order cannot choose fills.
+Earlier signal minutes have priority; same-minute candidates use the declared
+causal ranker, with a fixed-seed hash only for equal scores, so Parquet row
+order and stock-code order cannot choose fills.
 
 The first full-universe comparison is recorded under
 `research/records/minute_ma_portfolio_development_v1/`.  It covers April 2022
@@ -77,8 +78,19 @@ outputs.
 The follow-up under `research/records/minute_ma_portfolio_seed_stability_v1/`
 replays seeds 0-9 in one shared scan. Every strategy/exit variant has a
 negative cross-seed mean and median, so the arbitrary same-minute tie-break is
-rejected. A causal cross-sectional rank is required before expanding this
-portfolio path.
+rejected. This motivated the causal cross-sectional rank follow-up below.
+
+The causal-ranker follow-up is recorded under
+`research/records/minute_strategy_portfolio_causal_rankers_v1/`. It compares
+`sector_leader`, `trend_structure`, and `flow_quality` with seeds 0-4 over the
+same April 2022 and September 2023 dates, using 21 executable strategies and
+seven exit policies. Rank scores use only signal-time fields; equal scores use
+the declared deterministic hash. The study found no general profitable
+increment over the matched random baseline. Its best two-month candidate is
+`sector_leader + s4_auction_confirmed_reclaim + next_open_2d` at +7.80%, but it
+was selected after 441 account-group comparisons and remains a development
+hypothesis. Expand the 2022-2024 sample before freezing anything or reading
+2025.
 
 ## Data contract
 

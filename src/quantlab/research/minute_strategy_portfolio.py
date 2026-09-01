@@ -39,6 +39,12 @@ from quantlab.research.portfolio import Position, buy_position, position_value, 
 
 GIB = 1024**3
 CONTROL_STRATEGIES = frozenset({"s0_random_matched", "s0_liquidity_matched"})
+SELECTION_RANKERS = (
+    "random_hash",
+    "sector_leader",
+    "trend_structure",
+    "flow_quality",
+)
 SIGNAL_COLUMNS = (
     "signal_id",
     "strategy_id",
@@ -60,7 +66,37 @@ SIGNAL_COLUMNS = (
     "event_trigger",
     "signal_adjusted_close",
     "market_regime",
+    "sector_strength_rank",
+    "sector_breadth",
+    "leader_relative_return",
+    "recent_high_breakout",
+    "prior_acceleration",
+    "daily_trend_positive",
+    "volume_acceleration_5_20",
+    "amount_curve_surprise",
+    "auction_confirmed",
+    "volume_normal",
+    "not_repeated_cross",
 )
+
+_RANKER_REQUIRED_COLUMNS = {
+    "random_hash": frozenset(),
+    "sector_leader": frozenset(
+        {"sector_strength_rank", "sector_breadth", "leader_relative_return"}
+    ),
+    "trend_structure": frozenset(
+        {"recent_high_breakout", "prior_acceleration", "daily_trend_positive"}
+    ),
+    "flow_quality": frozenset(
+        {
+            "volume_acceleration_5_20",
+            "amount_curve_surprise",
+            "auction_confirmed",
+            "volume_normal",
+            "not_repeated_cross",
+        }
+    ),
+}
 
 
 class MinutePortfolioError(RuntimeError):
@@ -176,6 +212,7 @@ class PortfolioConfig:
     max_positions: int = 5
     slippage_multiplier: float = 1.0
     signal_deduplication: str = "first_per_symbol_hour"
+    selection_ranker: str = "random_hash"
     same_minute_tiebreak: str = "deterministic_hash"
     selection_seed: int = 7
     memory_floor_gib: float = 0.5
@@ -190,6 +227,8 @@ class PortfolioConfig:
             raise MinutePortfolioError("minute_portfolio_slippage_multiplier_invalid")
         if self.signal_deduplication != "first_per_symbol_hour":
             raise MinutePortfolioError("minute_portfolio_signal_deduplication_invalid")
+        if self.selection_ranker not in SELECTION_RANKERS:
+            raise MinutePortfolioError("minute_portfolio_selection_ranker_invalid")
         if self.same_minute_tiebreak != "deterministic_hash":
             raise MinutePortfolioError("minute_portfolio_same_minute_tiebreak_invalid")
         if isinstance(self.selection_seed, bool) or not isinstance(
@@ -211,6 +250,7 @@ class PortfolioConfig:
             "max_positions": int(self.max_positions),
             "slippage_multiplier": float(self.slippage_multiplier),
             "signal_deduplication": self.signal_deduplication,
+            "selection_ranker": self.selection_ranker,
             "same_minute_tiebreak": self.same_minute_tiebreak,
             "selection_seed": int(self.selection_seed),
             "memory_floor_gib": float(self.memory_floor_gib),
@@ -222,6 +262,7 @@ class PortfolioConfig:
 class _PendingEntry:
     record: dict[str, Any]
     signal_date_idx: int
+    selection_score: float
 
 
 @dataclass
@@ -236,6 +277,7 @@ class _Holding:
     entry_date: str
     entry_time: str
     entry_ordinal: int
+    selection_score: float
     position: Position
     entry_adjusted_price: float
     peak_adjusted_price: float
@@ -249,6 +291,7 @@ class _Holding:
 
 @dataclass
 class _Account:
+    selection_ranker: str
     selection_seed: int
     strategy_id: str
     policy: ExitPolicy
@@ -410,6 +453,121 @@ def _selection_tiebreak(row: Mapping[str, Any], seed: int) -> int:
         )
     )
     return int(zlib.crc32(payload.encode("utf-8")) & 0xFFFFFFFF)
+
+
+def _finite_number(row: Mapping[str, Any], name: str, *, default: float = 0.0) -> float:
+    try:
+        value = float(row.get(name, math.nan))
+    except (TypeError, ValueError):
+        return float(default)
+    return value if np.isfinite(value) else float(default)
+
+
+def _causal_flag(row: Mapping[str, Any], name: str) -> float:
+    value = row.get(name)
+    return float(pd.notna(value) and bool(value))
+
+
+def _finite_percentiles(records: Sequence[Mapping[str, Any]], name: str) -> np.ndarray:
+    values = np.asarray(
+        [_finite_number(row, name, default=math.nan) for row in records],
+        dtype=np.float64,
+    )
+    result = np.zeros(len(values), dtype=np.float64)
+    finite = np.isfinite(values)
+    if finite.any():
+        result[finite] = (
+            pd.Series(values[finite]).rank(method="average", pct=True).to_numpy(dtype=float)
+        )
+    return result
+
+
+def _rank_same_minute_records(
+    records: Sequence[dict[str, Any]],
+    *,
+    ranker: str,
+    seed: int,
+) -> list[tuple[dict[str, Any], float]]:
+    if ranker not in SELECTION_RANKERS:
+        raise MinutePortfolioError(f"minute_portfolio_unknown_selection_ranker:{ranker}")
+    if not records:
+        return []
+    missing = sorted(
+        name
+        for name in _RANKER_REQUIRED_COLUMNS[ranker]
+        if any(name not in row for row in records)
+    )
+    if missing:
+        raise MinutePortfolioError(
+            f"minute_portfolio_ranker_columns_missing:{ranker}:{','.join(missing)}"
+        )
+
+    scores = np.zeros(len(records), dtype=np.float64)
+    if ranker == "sector_leader":
+        sector = np.clip(
+            np.asarray(
+                [_finite_number(row, "sector_strength_rank") for row in records],
+                dtype=np.float64,
+            ),
+            0.0,
+            1.0,
+        )
+        breadth = np.clip(
+            np.asarray(
+                [_finite_number(row, "sector_breadth") for row in records],
+                dtype=np.float64,
+            ),
+            0.0,
+            1.0,
+        )
+        leader = _finite_percentiles(records, "leader_relative_return")
+        scores = (sector + breadth + leader) / 3.0
+    elif ranker == "trend_structure":
+        scores = np.asarray(
+            [
+                (
+                    _causal_flag(row, "recent_high_breakout")
+                    + _causal_flag(row, "prior_acceleration")
+                    + _causal_flag(row, "daily_trend_positive")
+                )
+                / 3.0
+                for row in records
+            ],
+            dtype=np.float64,
+        )
+    elif ranker == "flow_quality":
+        scores = np.asarray(
+            [
+                (
+                    _causal_flag(row, "volume_normal")
+                    + _causal_flag(row, "not_repeated_cross")
+                    + _causal_flag(row, "auction_confirmed")
+                    + float(
+                        _finite_number(
+                            row, "amount_curve_surprise", default=-math.inf
+                        )
+                        > 0.0
+                        or _finite_number(
+                            row, "volume_acceleration_5_20", default=-math.inf
+                        )
+                        > 0.0
+                    )
+                )
+                / 4.0
+                for row in records
+            ],
+            dtype=np.float64,
+        )
+
+    order = sorted(
+        range(len(records)),
+        key=lambda index: (
+            -float(scores[index]),
+            _selection_tiebreak(records[index], seed),
+            str(records[index].get("signal_id")),
+        ),
+    )
+    return [(records[index], float(scores[index])) for index in order]
 
 
 def _bar_maps(bars: pd.DataFrame) -> dict[str, dict[int, dict[str, Any]]]:
@@ -575,6 +733,7 @@ def _close_holding(
     account.trade_rows.append(
         {
             "trade_id": holding.trade_id,
+            "selection_ranker": account.selection_ranker,
             "selection_seed": int(account.selection_seed),
             "strategy_id": account.strategy_id,
             "policy_id": account.policy.policy_id,
@@ -584,6 +743,7 @@ def _close_holding(
             "signal_time": holding.signal_time,
             "entry_date": holding.entry_date,
             "entry_time": holding.entry_time,
+            "selection_score": float(holding.selection_score),
             "exit_date": date_text,
             "exit_time": str(row.get("bar_time", "")),
             "exit_reason": reason,
@@ -725,6 +885,7 @@ def _execute_pending_entries(
             entry_date=date_text,
             entry_time=entry_time,
             entry_ordinal=int(row["entry_ordinal"]),
+            selection_score=float(item.selection_score),
             position=position,
             entry_adjusted_price=adjusted_open,
             peak_adjusted_price=adjusted_open,
@@ -831,6 +992,7 @@ def _mark_account(
         equity += position_value(holding.position, float(mark))
     account.equity_rows.append(
         {
+            "selection_ranker": account.selection_ranker,
             "selection_seed": int(account.selection_seed),
             "strategy_id": account.strategy_id,
             "policy_id": account.policy.policy_id,
@@ -861,6 +1023,7 @@ def _account_result(account: _Account) -> dict[str, Any]:
         ending = float(equity["equity"].iloc[-1])
         drawdown = float(equity["drawdown"].min())
     return {
+        "selection_ranker": account.selection_ranker,
         "selection_seed": int(account.selection_seed),
         "strategy_id": account.strategy_id,
         "policy_id": account.policy.policy_id,
@@ -919,6 +1082,7 @@ def simulate_portfolio_accounts(
     policies: Sequence[ExitPolicy],
     config: PortfolioConfig | None = None,
     selection_seeds: Sequence[int] | None = None,
+    selection_rankers: Sequence[str] | None = None,
 ) -> tuple[list[dict[str, Any]], pd.DataFrame, pd.DataFrame]:
     """Replay all requested strategy/policy accounts over a shared bar stream."""
 
@@ -945,9 +1109,22 @@ def simulate_portfolio_accounts(
     ):
         raise MinutePortfolioError("minute_portfolio_selection_seeds_invalid")
     seeds = tuple(dict.fromkeys(int(value) for value in raw_seeds))
+    rankers = tuple(
+        dict.fromkeys(
+            str(value)
+            for value in (
+                selection_rankers
+                if selection_rankers is not None
+                else (selected.selection_ranker,)
+            )
+        )
+    )
+    if not rankers or any(value not in SELECTION_RANKERS for value in rankers):
+        raise MinutePortfolioError("minute_portfolio_selection_rankers_invalid")
     date_index = {value: index for index, value in enumerate(dates)}
     accounts = {
-        (seed, str(strategy_id), policy.policy_id): _Account(
+        (ranker, seed, str(strategy_id), policy.policy_id): _Account(
+            selection_ranker=ranker,
             selection_seed=int(seed),
             strategy_id=str(strategy_id),
             policy=policy,
@@ -956,6 +1133,7 @@ def simulate_portfolio_accounts(
             cash=float(selected.starting_cash),
             previous_equity=float(selected.starting_cash),
         )
+        for ranker in rankers
         for seed in seeds
         for strategy_id in strategy_ids
         for policy in policies
@@ -1040,43 +1218,54 @@ def simulate_portfolio_accounts(
                 records = grouped_signals.get(str(strategy_id), {}).get(ordinal, [])
                 if not records:
                     continue
-                for seed in seeds:
-                    ranked = sorted(
-                        records,
-                        key=lambda row: (
-                            int(row.get("sixty_minute_bucket") or -1),
-                            _selection_tiebreak(row, seed),
-                            str(row.get("signal_id")),
-                        ),
-                    )
-                    for policy in policies:
-                        account = accounts[(seed, str(strategy_id), policy.policy_id)]
-                        for row in ranked:
-                            account.selection_count += 1
-                            symbol = str(row["symbol"])
-                            if symbol in account.holdings_by_symbol:
-                                account.skipped_duplicate_count += 1
-                                continue
-                            if symbol in account.pending_symbols:
-                                account.skipped_duplicate_count += 1
-                                continue
-                            entry_date = str(row.get("entry_date") or date_text)
-                            entry_idx = date_index.get(entry_date)
-                            entry_ordinal = row.get("entry_ordinal")
-                            if entry_idx is None or entry_ordinal is None:
-                                continue
-                            if int(entry_idx) < date_idx or (
-                                int(entry_idx) == date_idx and int(entry_ordinal) <= ordinal
-                            ):
-                                continue
-                            if len(account.holdings) + len(account.pending_symbols) >= account.max_positions:
-                                account.skipped_slot_count += 1
-                                continue
-                            account.accepted_signal_count += 1
-                            account.pending_entries[(int(entry_idx), int(entry_ordinal))].append(
-                                _PendingEntry(record=row, signal_date_idx=date_idx)
-                            )
-                            account.pending_symbols.add(symbol)
+                for ranker in rankers:
+                    for seed in seeds:
+                        ranked = _rank_same_minute_records(
+                            records,
+                            ranker=ranker,
+                            seed=seed,
+                        )
+                        for policy in policies:
+                            account = accounts[
+                                (ranker, seed, str(strategy_id), policy.policy_id)
+                            ]
+                            for row, selection_score in ranked:
+                                account.selection_count += 1
+                                symbol = str(row["symbol"])
+                                if symbol in account.holdings_by_symbol:
+                                    account.skipped_duplicate_count += 1
+                                    continue
+                                if symbol in account.pending_symbols:
+                                    account.skipped_duplicate_count += 1
+                                    continue
+                                entry_date = str(row.get("entry_date") or date_text)
+                                entry_idx = date_index.get(entry_date)
+                                entry_ordinal = row.get("entry_ordinal")
+                                if entry_idx is None or entry_ordinal is None:
+                                    continue
+                                if int(entry_idx) < date_idx or (
+                                    int(entry_idx) == date_idx
+                                    and int(entry_ordinal) <= ordinal
+                                ):
+                                    continue
+                                if (
+                                    len(account.holdings)
+                                    + len(account.pending_symbols)
+                                    >= account.max_positions
+                                ):
+                                    account.skipped_slot_count += 1
+                                    continue
+                                account.accepted_signal_count += 1
+                                account.pending_entries[
+                                    (int(entry_idx), int(entry_ordinal))
+                                ].append(
+                                    _PendingEntry(
+                                        record=row,
+                                        signal_date_idx=date_idx,
+                                        selection_score=selection_score,
+                                    )
+                                )
+                                account.pending_symbols.add(symbol)
             # The next bar's open is the earliest causal fill/exit point; no
             # same-day exit is allowed for a position entered today.
         # A symbol bought during this session was not part of ``active_symbols``
@@ -1127,6 +1316,7 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
     if not results:
         raise MinutePortfolioError("minute_portfolio_seed_results_empty")
     required = {
+        "selection_ranker",
         "selection_seed",
         "strategy_id",
         "policy_id",
@@ -1135,8 +1325,9 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
         "unresolved_position_count",
         "annual",
     }
-    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
-    seen: set[tuple[int, str, str]] = set()
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    seen: set[tuple[str, int, str, str]] = set()
+    all_rankers: set[str] = set()
     all_seeds: set[int] = set()
     all_years: set[int] = set()
     for raw in results:
@@ -1146,9 +1337,10 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
                 f"minute_portfolio_seed_result_columns_missing:{','.join(missing)}"
             )
         seed = int(raw["selection_seed"])
+        ranker = str(raw["selection_ranker"])
         strategy_id = str(raw["strategy_id"])
         policy_id = str(raw["policy_id"])
-        key = (seed, strategy_id, policy_id)
+        key = (ranker, seed, strategy_id, policy_id)
         if key in seen:
             raise MinutePortfolioError("minute_portfolio_seed_result_duplicate")
         seen.add(key)
@@ -1156,9 +1348,10 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
             int(item["year"]): float(item["net_return"])
             for item in raw.get("annual", [])
         }
+        all_rankers.add(ranker)
         all_seeds.add(seed)
         all_years.update(annual)
-        grouped[(strategy_id, policy_id)].append(
+        grouped[(ranker, strategy_id, policy_id)].append(
             {
                 "selection_seed": seed,
                 "net_return": float(raw["net_return"]),
@@ -1184,11 +1377,11 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
         }
 
     summaries: list[dict[str, Any]] = []
-    for (strategy_id, policy_id), rows in grouped.items():
+    for (ranker, strategy_id, policy_id), rows in grouped.items():
         rows.sort(key=lambda item: int(item["selection_seed"]))
         if [int(item["selection_seed"]) for item in rows] != seeds:
             raise MinutePortfolioError(
-                f"minute_portfolio_seed_coverage_incomplete:{strategy_id}:{policy_id}"
+                f"minute_portfolio_seed_coverage_incomplete:{ranker}:{strategy_id}:{policy_id}"
             )
         resolved = [item for item in rows if bool(item["resolved"])]
         positive = [item for item in rows if float(item["net_return"]) > 0.0]
@@ -1229,6 +1422,7 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
             )
         summaries.append(
             {
+                "selection_ranker": ranker,
                 "strategy_id": strategy_id,
                 "policy_id": policy_id,
                 "seed_count": len(rows),
@@ -1255,12 +1449,14 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
     summaries.sort(
         key=lambda item: (
             -float(item["combined_net_return"]["median"]),
+            str(item["selection_ranker"]),
             str(item["strategy_id"]),
             str(item["policy_id"]),
         )
     )
     return {
         "schema": "quantlab.minute_strategy_selection_seed_summary/1",
+        "selection_rankers": sorted(all_rankers),
         "selection_seeds": seeds,
         "seed_count": len(seeds),
         "years": years,
@@ -1338,6 +1534,7 @@ def run_portfolio_exit_study(
     config: PortfolioConfig | None = None,
     data_config: StrategyDataConfig | None = None,
     selection_seeds: Sequence[int] | None = None,
+    selection_rankers: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Run the finite-cash exit comparison over existing event outputs."""
 
@@ -1405,6 +1602,7 @@ def run_portfolio_exit_study(
         policies=policies,
         config=selected,
         selection_seeds=selection_seeds,
+        selection_rankers=selection_rankers,
     )
     out = Path(output_root).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -1429,6 +1627,9 @@ def run_portfolio_exit_study(
         "strategy_ids": list(strategy_ids),
         "policies": [policy.as_dict() for policy in policies],
         "portfolio_config": selected.as_dict(),
+        "selection_rankers": sorted(
+            {str(result["selection_ranker"]) for result in results}
+        ),
         "selection_seeds": sorted(
             {int(result["selection_seed"]) for result in results}
         ),
@@ -1461,6 +1662,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-positions", type=int, default=5)
     parser.add_argument("--slippage-multiplier", type=float, default=1.0)
     parser.add_argument(
+        "--selection-ranker",
+        action="append",
+        dest="selection_rankers",
+        choices=SELECTION_RANKERS,
+        help="Causal same-minute ranking rule; repeat to compare rankers.",
+    )
+    parser.add_argument(
         "--selection-seed",
         type=int,
         action="append",
@@ -1486,6 +1694,7 @@ def main(argv: list[str] | None = None) -> int:
         starting_cash=args.starting_cash,
         max_positions=args.max_positions,
         slippage_multiplier=args.slippage_multiplier,
+        selection_ranker=(args.selection_rankers or ["random_hash"])[0],
         selection_seed=(args.selection_seeds or [7])[0],
         memory_floor_gib=args.memory_floor_gib,
         soft_memory_floor_gib=args.soft_memory_floor_gib,
@@ -1505,6 +1714,7 @@ def main(argv: list[str] | None = None) -> int:
         config=portfolio_config,
         data_config=data_config,
         selection_seeds=args.selection_seeds,
+        selection_rankers=args.selection_rankers,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

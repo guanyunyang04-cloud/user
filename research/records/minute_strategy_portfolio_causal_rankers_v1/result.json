@@ -1,0 +1,190 @@
+{
+  "schema": "quantlab.minute_strategy_portfolio_causal_rankers_record/1",
+  "status": "candidate_requires_more_development_months",
+  "validation_2025_used": false,
+  "signal_roots": [
+    "runs/minute_ma_month_2022_04",
+    "runs/minute_ma_month_2023_09"
+  ],
+  "signal_date_count": 39,
+  "years": [
+    2022,
+    2023
+  ],
+  "strategy_count": 21,
+  "strategy_ids": [
+    "cs_r3_leader_confirmation",
+    "fu_r3_core_pullback",
+    "ht_r3_core_pullback",
+    "ng_r1_auction_reclaim",
+    "ng_r3_volume_quality",
+    "s0_distance_only",
+    "s0_strong_no_ma",
+    "s1_break_reclaim_stable3",
+    "s1_near_reversal",
+    "s1_touch_immediate",
+    "s1_touch_reclaim",
+    "s2_first_touch_reclaim",
+    "s2_reclaim_acceleration",
+    "s2_reclaim_bull_stack",
+    "s2_reclaim_daily_trend",
+    "s2_reclaim_positive_slope",
+    "s2_reclaim_recent_high",
+    "s4_auction_confirmed_reclaim",
+    "s4_reclaim_amount_acceleration",
+    "s4_reclaim_volume_normal",
+    "s4_reclaim_volume_proxy"
+  ],
+  "excluded_strategy": {
+    "strategy_id": "s4_reclaim_vwap_support",
+    "reason": "retained signal output predates the single-price-basis VWAP correction"
+  },
+  "exit_policy_count": 7,
+  "exit_policy_ids": [
+    "next_open_1d",
+    "next_open_2d",
+    "next_open_3d",
+    "next_open_5d",
+    "protect_3pct_target6pct_3d",
+    "momentum_trail_4pct_5d",
+    "fast_failure_2pct_target4pct_2d"
+  ],
+  "selection_rankers": [
+    "flow_quality",
+    "sector_leader",
+    "trend_structure"
+  ],
+  "selection_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "account_variant_count": 441,
+  "account_result_count": 2205,
+  "run_elapsed_seconds": 2953.473,
+  "portfolio_contract": {
+    "starting_cash_cny": 100000.0,
+    "maximum_simultaneous_symbols": 5,
+    "same_time_allocation": "equal_cash_reserved_per_remaining_slot_subject_to_100_share_lots",
+    "t_plus_one": true,
+    "exit_execution": "minute_trigger_then_next_legal_minute_open",
+    "memory_floor_gib": 0.5,
+    "soft_memory_floor_gib": 1.0,
+    "duckdb_threads": 2,
+    "duckdb_memory_floor_gib": 2.0
+  },
+  "ranker_summary": {
+    "random_hash": {
+      "account_groups": 147,
+      "account_results": 735,
+      "result_mean": -0.140972514,
+      "result_median": -0.1416412716,
+      "group_seed_median_median": -0.1392860638,
+      "positive_group_seed_medians": 0,
+      "groups_positive_at_least_3_of_5": 0,
+      "groups_fully_resolved_all_seeds": 66
+    },
+    "sector_leader": {
+      "account_groups": 147,
+      "account_results": 735,
+      "result_mean": -0.202576196,
+      "result_median": -0.2103915627,
+      "group_seed_median_median": -0.2103915627,
+      "positive_group_seed_medians": 4,
+      "groups_positive_at_least_3_of_5": 4,
+      "groups_fully_resolved_all_seeds": 134,
+      "median_delta_vs_random": -0.0556547748,
+      "mean_delta_vs_random": -0.0562281287,
+      "improved_group_count": 43,
+      "equal_group_count": 0,
+      "worse_group_count": 104
+    },
+    "trend_structure": {
+      "account_groups": 147,
+      "account_results": 735,
+      "result_mean": -0.1515194307,
+      "result_median": -0.158667948,
+      "group_seed_median_median": -0.1600599438,
+      "positive_group_seed_medians": 1,
+      "groups_positive_at_least_3_of_5": 1,
+      "groups_fully_resolved_all_seeds": 91,
+      "median_delta_vs_random": -0.0056082952,
+      "mean_delta_vs_random": -0.0078088456,
+      "improved_group_count": 66,
+      "equal_group_count": 0,
+      "worse_group_count": 81
+    },
+    "flow_quality": {
+      "account_groups": 147,
+      "account_results": 735,
+      "result_mean": -0.1349053113,
+      "result_median": -0.1386179911,
+      "group_seed_median_median": -0.1390051798,
+      "positive_group_seed_medians": 1,
+      "groups_positive_at_least_3_of_5": 1,
+      "groups_fully_resolved_all_seeds": 69,
+      "median_delta_vs_random": 0.0,
+      "mean_delta_vs_random": 0.0047411632,
+      "improved_group_count": 68,
+      "equal_group_count": 18,
+      "worse_group_count": 61
+    }
+  },
+  "fair_random_baseline": {
+    "source_run": "runs/minute_strategy_portfolio_seed_stability",
+    "source_seed_count": 10,
+    "comparison_seed_subset": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "strategy_subset_count": 21,
+    "account_groups": 147,
+    "account_results": 735,
+    "selection_semantics_audit": {
+      "same_minute_groups_with_multiple_hour_buckets": 0,
+      "conclusion": "the retained random replay is comparable for this scope"
+    }
+  },
+  "best_candidate": {
+    "selection_ranker": "sector_leader",
+    "strategy_id": "s4_auction_confirmed_reclaim",
+    "policy_id": "next_open_2d",
+    "seed_count": 5,
+    "seed_returns": [
+      0.0779760137,
+      0.0779760137,
+      0.0779760137,
+      0.0779760137,
+      0.0779760137
+    ],
+    "combined_return": 0.0779760137,
+    "annual": [
+      {
+        "year": 2022,
+        "net_return": 0.06328355
+      },
+      {
+        "year": 2023,
+        "net_return": 0.0138180109
+      }
+    ],
+    "maximum_drawdown": -0.0925166094,
+    "filled_entry_count": 100,
+    "closed_trade_count": 100,
+    "delayed_exit_count": 9,
+    "unresolved_position_count": 0,
+    "positive_trade_fraction": 0.42,
+    "mean_trade_net_return": 0.0049419646,
+    "random_baseline_median_return": -0.1005023276,
+    "random_baseline_mean_return": -0.09556097964,
+    "selection_after_account_groups": 441,
+    "decision": "candidate_only_not_frozen"
+  },
+  "decision": "retain_rankers_and_expand_2022_2024",
+  "next_step": "replay_more_2022_2024_months_with_the_same_ranker_contract_before_reading_2025"
+}
