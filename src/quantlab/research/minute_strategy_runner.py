@@ -38,6 +38,10 @@ from quantlab.research.minute_ma_strategies import (
     strategy_catalog,
 )
 
+from .minute_strategy_artifacts import (
+    normalized_partition_complete,
+    write_normalized_partition,
+)
 from .minute_strategy_data import (
     StrategyDataConfig,
     build_enriched_minute_ma_states,
@@ -214,6 +218,8 @@ class DevelopmentStudyConfig:
     memory_floor_gib: float = 0.5
     soft_memory_floor_gib: float = 1.0
     duckdb_memory_floor_gib: float = 2.0
+    write_normalized_artifacts: bool = True
+    normalized_subdirectory: str = "normalized"
 
     def validate(self) -> None:
         start = date.fromisoformat(str(self.start_date))
@@ -246,6 +252,15 @@ class DevelopmentStudyConfig:
             or float(self.duckdb_memory_floor_gib) < float(self.memory_floor_gib)
         ):
             raise MinuteStrategyRunError("strategy_run_duckdb_memory_floor_invalid")
+        if not isinstance(self.write_normalized_artifacts, (bool, np.bool_)):
+            raise MinuteStrategyRunError("strategy_run_write_normalized_artifacts_invalid")
+        if (
+            not isinstance(self.normalized_subdirectory, str)
+            or not self.normalized_subdirectory.strip()
+            or Path(self.normalized_subdirectory).is_absolute()
+            or any(part in {".", ".."} for part in Path(self.normalized_subdirectory).parts)
+        ):
+            raise MinuteStrategyRunError("strategy_run_normalized_subdirectory_invalid")
         if not self.strategy_periods or tuple(sorted(set(self.strategy_periods))) != tuple(self.strategy_periods):
             raise MinuteStrategyRunError("strategy_run_periods_invalid")
         if any(int(value) not in MA_PERIODS for value in self.strategy_periods):
@@ -269,6 +284,8 @@ class DevelopmentStudyConfig:
             "memory_floor_gib": float(self.memory_floor_gib),
             "soft_memory_floor_gib": float(self.soft_memory_floor_gib),
             "duckdb_memory_floor_gib": float(self.duckdb_memory_floor_gib),
+            "write_normalized_artifacts": bool(self.write_normalized_artifacts),
+            "normalized_subdirectory": str(self.normalized_subdirectory),
         }
 
 
@@ -1307,6 +1324,7 @@ def run_development_study(
     root = Path(workspace_root).resolve()
     output_root = (root / selected.output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    normalized_root = output_root / selected.normalized_subdirectory
     _require_memory_floor(selected, "run_start")
     # Keep the development date range separate from the outcome look-ahead:
     # the latter needs a few open dates after the final target date (and may
@@ -1334,6 +1352,9 @@ def run_development_study(
         "data_config": selected_data.as_dict(),
         "minute_ma_config": selected_ma.as_dict(),
         "event_study_config": selected_event.as_dict(),
+        "normalized_artifact_root": str(normalized_root)
+        if selected.write_normalized_artifacts
+        else None,
         "months": [],
     }
     for month_start, month_end, target_dates in month_ranges:
@@ -1506,6 +1527,14 @@ def run_development_study(
             outcome_path = date_dir / "outcomes.parquet"
             date_dir.mkdir(parents=True, exist_ok=True)
             outcomes.to_parquet(outcome_path, index=False)
+            if selected.write_normalized_artifacts:
+                _require_memory_floor(selected, f"normalized_artifacts_start:{trade_date}", soft=True)
+                write_normalized_partition(
+                    outcomes,
+                    normalized_root,
+                    trade_date,
+                )
+                _require_memory_floor(selected, f"normalized_artifacts_complete:{trade_date}")
             _month_outcome_paths.append(str(outcome_path))
             _completed.add(trade_date)
             observed = int(
@@ -1530,6 +1559,9 @@ def run_development_study(
                     "signal_stats": signal_stats,
                     "elapsed_seconds": round(time.perf_counter() - started, 3),
                     "outcome_path": str(outcome_path),
+                    "normalized_root": str(normalized_root)
+                    if selected.write_normalized_artifacts
+                    else None,
                 }
             )
             _write_json(
@@ -1547,6 +1579,19 @@ def run_development_study(
             date_dir = output_root / "outcomes" / f"date={trade_date}"
             outcome_path = date_dir / "outcomes.parquet"
             if trade_date in completed and outcome_path.is_file() and not selected.force:
+                if selected.write_normalized_artifacts and not normalized_partition_complete(
+                    normalized_root, trade_date
+                ):
+                    _require_memory_floor(
+                        selected,
+                        f"normalized_resume_start:{trade_date}",
+                        soft=True,
+                    )
+                    existing = pd.read_parquet(outcome_path)
+                    write_normalized_partition(existing, normalized_root, trade_date)
+                    del existing
+                    gc.collect()
+                    _require_memory_floor(selected, f"normalized_resume_complete:{trade_date}")
                 month_outcome_paths.append(str(outcome_path))
                 continue
             date_started = time.perf_counter()
@@ -1677,6 +1722,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--soft-memory-floor-gib", type=float, default=1.0)
     parser.add_argument("--duckdb-memory-floor-gib", type=float, default=2.0)
     parser.add_argument("--temp-directory", default="")
+    parser.add_argument(
+        "--no-normalized-artifacts",
+        action="store_true",
+        help="Keep only legacy wide outcomes; skip normalized event/path artifacts.",
+    )
+    parser.add_argument(
+        "--normalized-subdirectory",
+        default="normalized",
+        help="Relative subdirectory under the output root for normalized artifacts.",
+    )
     parser.add_argument("--period", type=int, action="append", dest="periods")
     return parser
 
@@ -1704,6 +1759,8 @@ def main(argv: list[str] | None = None) -> int:
         memory_floor_gib=args.memory_floor_gib,
         soft_memory_floor_gib=args.soft_memory_floor_gib,
         duckdb_memory_floor_gib=args.duckdb_memory_floor_gib,
+        write_normalized_artifacts=not bool(args.no_normalized_artifacts),
+        normalized_subdirectory=args.normalized_subdirectory,
     )
     result = run_development_study(args.workspace_root, config=config)
     print(json.dumps(result, ensure_ascii=False, indent=2))

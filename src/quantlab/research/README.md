@@ -92,6 +92,34 @@ was selected after 441 account-group comparisons and remains a development
 hypothesis. Expand the 2022-2024 sample before freezing anything or reading
 2025.
 
+## Performance and artifacts
+
+The runner writes each completed date as compatibility-wide outcomes plus
+optional normalized artifacts under `normalized/`: a narrow causal `events`
+table, a unique forward `paths` table, and a `references` mapping table. The
+portfolio reader joins the event and path partitions by `path_id`, while old
+runs without a complete normalized set continue to use `outcomes.parquet`.
+This makes the same event path reusable across strategies, rankers, seeds and
+exit analyses without changing the old output contract. The conversion and
+bounded CPU/date-parallel benchmarks are recorded under
+`research/records/minute_strategy_performance_benchmarks_v1/`.
+
+To normalize an older wide run without recomputing minute data:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research minute-strategy-normalize `
+  --source-root H:/quant_project/runs/minute_ma_month_2022_04 `
+  --output-root H:/quant_project/runs/minute_ma_month_2022_04/normalized `
+  --memory-floor-gib 0.5
+```
+
+The tested starting point is four DuckDB threads and a 128-symbol chunk, still
+subject to the machine-wide 0.5 GiB reserve. Date parallelism remains an audit
+result rather than a default: small independent jobs showed a 1.79x wall-time
+speedup but reduced available memory substantially and duplicate month caches at
+full-universe scale. GPU acceleration is deferred until a numeric kernel can
+be isolated and measured independently of Parquet and state-machine work.
+
 ## Data contract
 
 The current repaired matrix contains 4,191,476 rows from 2012-01-04 through

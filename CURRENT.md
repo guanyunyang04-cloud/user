@@ -30,6 +30,8 @@ evidence.
   `research/records/minute_ma_v1/`.
 - Minute-MA causal-ranker replay record:
   `research/records/minute_strategy_portfolio_causal_rankers_v1/`.
+- Minute-strategy performance benchmark record:
+  `research/records/minute_strategy_performance_benchmarks_v1/`.
 - Durable study inputs and evidence: `research/studies/` and
   `research/records/`.
 - Local model outputs: `runs/`.
@@ -237,6 +239,18 @@ equity paths under ignored `runs/` storage; the durable conclusions are in
 `research/records/minute_ma_portfolio_seed_stability_v1/`, and
 `research/records/minute_strategy_portfolio_causal_rankers_v1/`.
 
+The data path now also supports persistent normalized artifacts under each
+minute-study output's `normalized/` directory: narrow `events`, unique forward
+`paths`, and `references` mapping tables. New portfolio reads prefer these
+tables and join entry fields by `path_id`; legacy wide outcomes remain a
+fallback. Existing April 2022 and September 2023 outputs have been converted
+and checked for account-result parity. Bounded performance measurements found
+four DuckDB threads with a 128-symbol chunk fastest in the tested 150-symbol
+sample; two independent date processes were 1.79x faster than serial for a
+100-symbol smoke test but are not enabled for full-universe runs because each
+worker duplicates month-level cache memory. Full benchmark details are in
+`research/records/minute_strategy_performance_benchmarks_v1/`.
+
 ## Artifact policy
 
 Retain the rev5 compatibility benchmark as historical evidence and keep it
@@ -259,7 +273,8 @@ recoverable archives or provenance needed for audit.
 
 1. Keep QDP status/quick checks and the minute-v2 month verifier as regression
    checks after any data or code change.
-2. Expand the causal-ranker replay across more 2022-2024 months and market
+2. Use the normalized event/path artifacts for new runs and expand the
+   causal-ranker replay across more 2022-2024 months and market
    regimes, retaining the random baseline and all three rankers until a rule
    family is stable.
 3. Build and audit an optional 5-minute coarse candidate pass against the exact

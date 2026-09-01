@@ -6,6 +6,11 @@ from quantlab.research.minute_strategy_portfolio import (
     ExitPolicy,
     MinutePortfolioError,
     PortfolioConfig,
+    _normalise_signal_frame,
+    _normalise_signal_frames,
+    _order_scored_records,
+    _rank_same_minute_records,
+    _score_same_minute_records,
     simulate_portfolio_accounts,
     summarize_selection_seed_results,
 )
@@ -406,3 +411,40 @@ def test_explicitly_noncausal_signal_is_not_executable() -> None:
     )
     assert results[0]["filled_entry_count"] == 0
     assert trades.empty
+
+
+def test_multi_strategy_signal_normalization_matches_single_strategy_views() -> None:
+    first = _signal("A", "sig-A")
+    second = _signal("B", "sig-B")
+    second["strategy_id"] = "s2_reclaim"
+    frame = pd.DataFrame([first, second])
+
+    combined = _normalise_signal_frames(frame, ("s1_touch_reclaim", "s2_reclaim"))
+
+    assert combined["s1_touch_reclaim"] == _normalise_signal_frame(
+        frame, "s1_touch_reclaim"
+    )
+    assert combined["s2_reclaim"] == _normalise_signal_frame(frame, "s2_reclaim")
+
+
+def test_scoring_once_matches_per_seed_ranker_results() -> None:
+    first = _signal("A", "sig-A")
+    second = _signal("B", "sig-B")
+    first.update(
+        sector_strength_rank=0.8,
+        sector_breadth=0.7,
+        leader_relative_return=0.01,
+    )
+    second.update(
+        sector_strength_rank=0.2,
+        sector_breadth=0.3,
+        leader_relative_return=-0.01,
+    )
+    records = [first, second]
+    scores = _score_same_minute_records(records, ranker="sector_leader")
+    for seed in (0, 7, 99):
+        assert _order_scored_records(records, scores, seed=seed) == _rank_same_minute_records(
+            records,
+            ranker="sector_leader",
+            seed=seed,
+        )

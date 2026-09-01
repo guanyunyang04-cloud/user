@@ -50,6 +50,12 @@ prior-session turnover matching and its minute outcomes begin at the next-open
 fill bar. That pilot is still an eight-symbol implementation check, not a
 full-universe result.
 
+Minute-strategy outputs also support additive normalized `events`, `paths`, and
+`references` tables for reusing one forward price path across rule and account
+comparisons. The performance smoke results and the decision not to enable
+unbounded date parallelism are recorded in
+`research/records/minute_strategy_performance_benchmarks_v1/`.
+
 The former `daily_research/` and `quant_data_platform/` trees are retired.
 Historical reports may still mention those names as provenance; such strings
 are not runtime imports or active data locations.

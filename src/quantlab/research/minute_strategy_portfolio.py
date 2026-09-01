@@ -27,8 +27,17 @@ import numpy as np
 import pandas as pd
 import psutil
 
+from quantlab.data.qdp_v2.duckdb_resources import (
+    DEFAULT_MEMORY_FLOOR_BYTES,
+    open_guarded_duckdb,
+)
 from quantlab.research.minute_account import default_minute_costs
 from quantlab.research.minute_ma import normalize_bar_time, session_minute_ordinal
+from quantlab.research.minute_strategy_artifacts import (
+    ENTRY_COLUMNS,
+    normalized_partition_complete,
+    normalized_partition_paths,
+)
 from quantlab.research.minute_strategy_data import (
     MinuteStrategyDataError,
     StrategyDataConfig,
@@ -331,8 +340,16 @@ def _memory_check(config: PortfolioConfig, stage: str, *, soft: bool = False) ->
         )
 
 
-def _normalise_signal_frame(frame: pd.DataFrame, strategy_id: str) -> dict[int, list[dict[str, Any]]]:
-    """Filter and compact one date's signal rows for one strategy."""
+def _normalise_signal_frames(
+    frame: pd.DataFrame,
+    strategy_ids: Sequence[str],
+) -> dict[str, dict[int, list[dict[str, Any]]]]:
+    """Normalize one date once, then split it into strategy/time groups.
+
+    Portfolio accounts share the same signal partition.  Performing the
+    expensive dtype conversion, timestamp parsing and duplicate elimination
+    once per date avoids repeating that work for every strategy account.
+    """
 
     if frame.empty:
         return {}
@@ -356,7 +373,8 @@ def _normalise_signal_frame(frame: pd.DataFrame, strategy_id: str) -> dict[int, 
     missing = sorted(required.difference(frame.columns))
     if missing:
         raise MinutePortfolioError(f"minute_portfolio_signal_columns_missing:{','.join(missing)}")
-    working = frame.loc[frame["strategy_id"].astype(str).eq(str(strategy_id))].copy()
+    requested = {str(value) for value in strategy_ids}
+    working = frame.loc[frame["strategy_id"].astype(str).isin(requested)].copy()
     if working.empty:
         return {}
     bool_columns = ("entry_observed", "entry_executable", "signal_executable", "diagnostic_only")
@@ -417,29 +435,54 @@ def _normalise_signal_frame(frame: pd.DataFrame, strategy_id: str) -> dict[int, 
     working = working.loc[valid].copy()
     if working.empty:
         return {}
-    # Multiple MA periods can produce the same symbol/hour signal.  Keep the
-    # earliest causal event for that symbol/hour; later hours remain eligible,
-    # so a full-day signal stream is not converted into an artificial daily cap.
+    # Multiple MA periods can produce the same symbol/hour signal. Keep the
+    # earliest causal event for that symbol/hour within each strategy; later
+    # hours remain eligible, so a full-day signal stream is not converted into
+    # an artificial daily cap.
     working.sort_values(
-        ["signal_ordinal", "sixty_minute_bucket", "ma_period", "symbol", "signal_id"],
+        [
+            "strategy_id",
+            "signal_ordinal",
+            "sixty_minute_bucket",
+            "ma_period",
+            "symbol",
+            "signal_id",
+        ],
         kind="stable",
         inplace=True,
     )
     working = working.drop_duplicates(
-        ["symbol", "signal_date", "sixty_minute_bucket"], keep="first"
+        ["strategy_id", "symbol", "signal_date", "sixty_minute_bucket"],
+        keep="first",
     )
-    keep = [
+    keep = (["path_id"] if "path_id" in working.columns else []) + [
         name
         for name in SIGNAL_COLUMNS
         if name in working.columns
     ] + ["signal_ordinal", "entry_ordinal"]
     working = working.loc[:, list(dict.fromkeys(keep))]
-    grouped: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[str, dict[int, list[dict[str, Any]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     for row in working.to_dict("records"):
         ordinal = int(row.pop("signal_ordinal"))
         row["entry_ordinal"] = int(row["entry_ordinal"])
-        grouped[ordinal].append(row)
-    return dict(grouped)
+        grouped[str(row["strategy_id"])][ordinal].append(row)
+    return {
+        strategy_id: dict(by_ordinal)
+        for strategy_id, by_ordinal in grouped.items()
+    }
+
+
+def _normalise_signal_frame(
+    frame: pd.DataFrame,
+    strategy_id: str,
+) -> dict[int, list[dict[str, Any]]]:
+    """Filter and compact one date's signal rows for one strategy."""
+
+    return _normalise_signal_frames(frame, (str(strategy_id),)).get(
+        str(strategy_id), {}
+    )
 
 
 def _selection_tiebreak(row: Mapping[str, Any], seed: int) -> int:
@@ -482,16 +525,15 @@ def _finite_percentiles(records: Sequence[Mapping[str, Any]], name: str) -> np.n
     return result
 
 
-def _rank_same_minute_records(
+def _score_same_minute_records(
     records: Sequence[dict[str, Any]],
     *,
     ranker: str,
-    seed: int,
-) -> list[tuple[dict[str, Any], float]]:
+) -> np.ndarray:
     if ranker not in SELECTION_RANKERS:
         raise MinutePortfolioError(f"minute_portfolio_unknown_selection_ranker:{ranker}")
     if not records:
-        return []
+        return np.empty(0, dtype=np.float64)
     missing = sorted(
         name
         for name in _RANKER_REQUIRED_COLUMNS[ranker]
@@ -559,6 +601,17 @@ def _rank_same_minute_records(
             dtype=np.float64,
         )
 
+    return scores
+
+
+def _order_scored_records(
+    records: Sequence[dict[str, Any]],
+    scores: Sequence[float],
+    *,
+    seed: int,
+) -> list[tuple[dict[str, Any], float]]:
+    if len(records) != len(scores):
+        raise MinutePortfolioError("minute_portfolio_rank_score_length_mismatch")
     order = sorted(
         range(len(records)),
         key=lambda index: (
@@ -568,6 +621,18 @@ def _rank_same_minute_records(
         ),
     )
     return [(records[index], float(scores[index])) for index in order]
+
+
+def _rank_same_minute_records(
+    records: Sequence[dict[str, Any]],
+    *,
+    ranker: str,
+    seed: int,
+) -> list[tuple[dict[str, Any], float]]:
+    """Score and order same-minute records for one deterministic seed."""
+
+    scores = _score_same_minute_records(records, ranker=ranker)
+    return _order_scored_records(records, scores, seed=seed)
 
 
 def _bar_maps(bars: pd.DataFrame) -> dict[str, dict[int, dict[str, Any]]]:
@@ -1148,11 +1213,11 @@ def simulate_portfolio_accounts(
             if callable(signal_frames_by_date)
             else signal_frames_by_date.get(date_text)
         )
-        grouped_signals: dict[str, dict[int, list[dict[str, Any]]]] = {}
-        if raw_signals is not None and not raw_signals.empty:
-            for strategy_id in strategy_ids:
-                normalised = _normalise_signal_frame(raw_signals, str(strategy_id))
-                grouped_signals[str(strategy_id)] = normalised
+        grouped_signals: dict[str, dict[int, list[dict[str, Any]]]] = (
+            _normalise_signal_frames(raw_signals, strategy_ids)
+            if raw_signals is not None and not raw_signals.empty
+            else {}
+        )
         active_symbols = {
             holding.symbol
             for account in accounts.values()
@@ -1219,10 +1284,11 @@ def simulate_portfolio_accounts(
                 if not records:
                     continue
                 for ranker in rankers:
+                    scores = _score_same_minute_records(records, ranker=ranker)
                     for seed in seeds:
-                        ranked = _rank_same_minute_records(
+                        ranked = _order_scored_records(
                             records,
-                            ranker=ranker,
+                            scores,
                             seed=seed,
                         )
                         for policy in policies:
@@ -1469,7 +1535,38 @@ def summarize_selection_seed_results(results: Sequence[Mapping[str, Any]]) -> di
 def _signal_paths(output_roots: Sequence[str | Path]) -> dict[str, Path]:
     paths: dict[str, Path] = {}
     for root in output_roots:
-        for path in sorted((Path(root).resolve() / "outcomes").glob("date=*/outcomes.parquet")):
+        root_path = Path(root).resolve()
+        legacy_candidates = sorted(
+            (root_path / "outcomes").glob("date=*/outcomes.parquet")
+        )
+        # New runs keep a narrow event table beside the compatibility-wide
+        # outcomes. Prefer it for portfolio input and fall back transparently
+        # for historical runs that have not been normalized yet.
+        candidates = normalized_partition_paths(root_path / "normalized", "events")
+        if not candidates:
+            # Accept a normalized artifact directory directly as a convenient
+            # input when a caller has materialized it separately.
+            candidates = normalized_partition_paths(root_path, "events")
+        if candidates:
+            # A partially completed migration must not make an otherwise
+            # readable legacy run fail. Use the wide source until all three
+            # tables exist for every date partition.  Coverage is checked too:
+            # a partially migrated root must not silently drop old dates.
+            normalized_root = candidates[0].parents[2]
+            normalized_dates = {
+                path.parent.name.split("=", 1)[-1] for path in candidates
+            }
+            legacy_dates = {
+                path.parent.name.split("=", 1)[-1] for path in legacy_candidates
+            }
+            if not all(
+                normalized_partition_complete(normalized_root, path.parent.name.split("=", 1)[-1])
+                for path in candidates
+            ) or (legacy_candidates and normalized_dates != legacy_dates):
+                candidates = []
+        if not candidates:
+            candidates = legacy_candidates
+        for path in candidates:
             date_text = path.parent.name.split("=", 1)[-1]
             if date_text in paths:
                 raise MinutePortfolioError(f"minute_portfolio_duplicate_signal_date:{date_text}")
@@ -1479,6 +1576,15 @@ def _signal_paths(output_roots: Sequence[str | Path]) -> dict[str, Path]:
     return paths
 
 
+def _normalized_paths_for_event_file(path: Path) -> Path:
+    """Resolve the sibling unique-path partition for one event partition."""
+
+    # .../normalized/events/date=YYYY-MM-DD/events.parquet
+    normalized_root = path.parents[2]
+    date_partition = path.parent.name
+    return normalized_root / "paths" / date_partition / "paths.parquet"
+
+
 def _read_signal_file(path: Path, strategy_ids: Sequence[str]) -> pd.DataFrame:
     try:
         import pyarrow.parquet as pq
@@ -1486,11 +1592,85 @@ def _read_signal_file(path: Path, strategy_ids: Sequence[str]) -> pd.DataFrame:
         available_columns = set(pq.ParquetFile(path).schema.names)
     except (ImportError, OSError, ValueError) as exc:
         raise MinutePortfolioError(f"minute_portfolio_signal_schema_unreadable:{path}") from exc
-    columns = [name for name in SIGNAL_COLUMNS if name in available_columns]
-    # The schema probe lets older pilot outputs remain readable when optional
-    # fields differ, without loading the complete file a second time.
-    frame = pd.read_parquet(path, columns=columns)
-    frame = frame.loc[frame["strategy_id"].astype(str).isin([str(x) for x in strategy_ids])].copy()
+    if "path_id" in available_columns:
+        path_file = _normalized_paths_for_event_file(path)
+        if not path_file.is_file():
+            raise MinutePortfolioError(
+                f"minute_portfolio_normalized_paths_missing:{path_file}"
+            )
+        try:
+            path_available = set(pq.ParquetFile(path_file).schema.names)
+        except (ImportError, OSError, ValueError) as exc:
+            raise MinutePortfolioError(
+                f"minute_portfolio_signal_schema_unreadable:{path_file}"
+            ) from exc
+        path_required = {
+            "path_id",
+            "entry_date",
+            "entry_time",
+            "entry_price",
+            "entry_adjusted_price",
+            "entry_observed",
+            "entry_executable",
+        }
+        missing = sorted(path_required.difference(path_available))
+        if missing:
+            raise MinutePortfolioError(
+                f"minute_portfolio_normalized_path_columns_missing:{','.join(missing)}"
+            )
+        event_columns = [
+            name
+            for name in SIGNAL_COLUMNS
+            if name in available_columns and name not in ENTRY_COLUMNS
+        ] + ["path_id"]
+        selected_ids = tuple(str(value) for value in strategy_ids)
+        if not selected_ids:
+            return pd.DataFrame(columns=event_columns)
+        # Let DuckDB perform the narrow join at the Parquet scan boundary.
+        # Reading two pandas frames and merging them doubles peak allocations
+        # and was slower than scanning the two compressed files directly.
+        def quote(name: str) -> str:
+            return '"' + str(name).replace('"', '""') + '"'
+
+        event_projection = [
+            f"e.{quote(name)} AS {quote(name)}"
+            for name in event_columns
+        ]
+        path_projection = [
+            f"p.{quote(name)} AS {quote(name)}"
+            for name in ENTRY_COLUMNS
+            if name in path_available
+        ]
+        placeholders = ", ".join("?" for _ in selected_ids)
+        query = (
+            f"SELECT {', '.join([*event_projection, *path_projection])} "
+            "FROM read_parquet(?) AS e "
+            "JOIN read_parquet(?) AS p ON e.path_id = p.path_id "
+            f"WHERE CAST(e.strategy_id AS VARCHAR) IN ({placeholders})"
+        )
+        connection = open_guarded_duckdb(
+            ":memory:",
+            threads=1,
+            floor_bytes=DEFAULT_MEMORY_FLOOR_BYTES,
+            minimum_limit_bytes=64 * 1024**2,
+        )
+        try:
+            connection.execute("PRAGMA threads=1")
+            frame = connection.execute(
+                query,
+                [str(path), str(path_file), *selected_ids],
+            ).fetchdf()
+        finally:
+            connection.close()
+    else:
+        columns = [name for name in SIGNAL_COLUMNS if name in available_columns]
+        # The schema probe lets older pilot outputs remain readable when
+        # optional fields differ, without loading the complete file a second
+        # time.
+        frame = pd.read_parquet(path, columns=columns)
+        frame = frame.loc[
+            frame["strategy_id"].astype(str).isin([str(x) for x in strategy_ids])
+        ].copy()
     return frame
 
 

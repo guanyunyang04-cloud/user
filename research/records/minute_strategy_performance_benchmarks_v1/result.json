@@ -1,0 +1,61 @@
+{
+  "schema": "quantlab.minute_strategy_performance_benchmarks_record/1",
+  "status": "bounded_benchmarks_complete",
+  "validation_2025_used": false,
+  "environment": {
+    "cpu": "AMD Ryzen 7 4800H",
+    "physical_cores": 8,
+    "logical_processors": 16,
+    "memory_gib": 15.419,
+    "gpu": "NVIDIA GeForce RTX 2060",
+    "gpu_memory_gib": 6.0,
+    "gpu_used": false,
+    "source_volume": "H: USB SSD"
+  },
+  "thread_chunk_matrix": [
+    {"threads": 1, "chunk": 32, "internal_seconds": 49.24, "wall_seconds": 82.477, "minimum_available_gib": 4.757, "outcome_rows": 19355},
+    {"threads": 1, "chunk": 128, "internal_seconds": 41.403, "wall_seconds": 74.96, "minimum_available_gib": 4.782, "outcome_rows": 19355},
+    {"threads": 2, "chunk": 32, "internal_seconds": 39.923, "wall_seconds": 71.192, "minimum_available_gib": 4.781, "outcome_rows": 19355},
+    {"threads": 2, "chunk": 128, "internal_seconds": 32.402, "wall_seconds": 63.429, "minimum_available_gib": 4.808, "outcome_rows": 19355},
+    {"threads": 4, "chunk": 64, "internal_seconds": 30.811, "wall_seconds": 61.924, "minimum_available_gib": 4.816, "outcome_rows": 19355},
+    {"threads": 4, "chunk": 128, "internal_seconds": 28.025, "wall_seconds": 59.176, "minimum_available_gib": 4.792, "outcome_rows": 19355}
+  ],
+  "date_parallelism": {
+    "sequential_seconds": 107.568,
+    "concurrent_two_process_seconds": 60.181,
+    "speedup": 1.79,
+    "sequential_minimum_available_gib": 6.195,
+    "concurrent_minimum_available_gib": 3.791,
+    "decision": "benchmark_only_not_enabled_by_default"
+  },
+  "temp_directory_comparison": {
+    "h_default_internal_seconds": 28.668,
+    "c_nvme_internal_seconds": 28.492,
+    "relative_speedup": 1.0062,
+    "decision": "no_material_gain"
+  },
+  "normalized_artifacts": {
+    "april_2022": {
+      "conversion_seconds": 97.751,
+      "wide_bytes": 703299971,
+      "normalized_bytes": 618621765,
+      "path_rows": 2511217,
+      "event_rows": 6113466,
+      "size_ratio": 0.8795987353
+    },
+    "september_2023": {
+      "conversion_seconds": 136.334,
+      "wide_bytes": 861331862,
+      "normalized_bytes": 737972732,
+      "path_rows": 3180006,
+      "event_rows": 8864129,
+      "size_ratio": 0.8567809512
+    },
+    "read_median_seconds": {
+      "wide": 0.427,
+      "normalized_join": 1.157
+    },
+    "decision": "retain_for_path_reuse_not_single_read_speed"
+  },
+  "decision": "use_threads_4_chunk_128_as_starting_point_defer_gpu"
+}
