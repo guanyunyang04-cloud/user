@@ -13,12 +13,54 @@
     "source_volume": "H: USB SSD"
   },
   "thread_chunk_matrix": [
-    {"threads": 1, "chunk": 32, "internal_seconds": 49.24, "wall_seconds": 82.477, "minimum_available_gib": 4.757, "outcome_rows": 19355},
-    {"threads": 1, "chunk": 128, "internal_seconds": 41.403, "wall_seconds": 74.96, "minimum_available_gib": 4.782, "outcome_rows": 19355},
-    {"threads": 2, "chunk": 32, "internal_seconds": 39.923, "wall_seconds": 71.192, "minimum_available_gib": 4.781, "outcome_rows": 19355},
-    {"threads": 2, "chunk": 128, "internal_seconds": 32.402, "wall_seconds": 63.429, "minimum_available_gib": 4.808, "outcome_rows": 19355},
-    {"threads": 4, "chunk": 64, "internal_seconds": 30.811, "wall_seconds": 61.924, "minimum_available_gib": 4.816, "outcome_rows": 19355},
-    {"threads": 4, "chunk": 128, "internal_seconds": 28.025, "wall_seconds": 59.176, "minimum_available_gib": 4.792, "outcome_rows": 19355}
+    {
+      "threads": 1,
+      "chunk": 32,
+      "internal_seconds": 49.24,
+      "wall_seconds": 82.477,
+      "minimum_available_gib": 4.757,
+      "outcome_rows": 19355
+    },
+    {
+      "threads": 1,
+      "chunk": 128,
+      "internal_seconds": 41.403,
+      "wall_seconds": 74.96,
+      "minimum_available_gib": 4.782,
+      "outcome_rows": 19355
+    },
+    {
+      "threads": 2,
+      "chunk": 32,
+      "internal_seconds": 39.923,
+      "wall_seconds": 71.192,
+      "minimum_available_gib": 4.781,
+      "outcome_rows": 19355
+    },
+    {
+      "threads": 2,
+      "chunk": 128,
+      "internal_seconds": 32.402,
+      "wall_seconds": 63.429,
+      "minimum_available_gib": 4.808,
+      "outcome_rows": 19355
+    },
+    {
+      "threads": 4,
+      "chunk": 64,
+      "internal_seconds": 30.811,
+      "wall_seconds": 61.924,
+      "minimum_available_gib": 4.816,
+      "outcome_rows": 19355
+    },
+    {
+      "threads": 4,
+      "chunk": 128,
+      "internal_seconds": 28.025,
+      "wall_seconds": 59.176,
+      "minimum_available_gib": 4.792,
+      "outcome_rows": 19355
+    }
   ],
   "date_parallelism": {
     "sequential_seconds": 107.568,
@@ -57,5 +99,21 @@
     },
     "decision": "retain_for_path_reuse_not_single_read_speed"
   },
-  "decision": "use_threads_4_chunk_128_as_starting_point_defer_gpu"
+  "decision": "use_threads_4_chunk_128_as_starting_point_defer_gpu",
+  "full_month_follow_up": {
+    "record_path": "research/records/minute_strategy_full_month_benchmark_v1/",
+    "month": "2022-04",
+    "trade_date_count": 19,
+    "outcome_rows": 6091670,
+    "unique_path_rows": 2524171,
+    "wall_seconds": 7005.635,
+    "runner_month_seconds": 6621.904,
+    "minimum_available_gib": 3.55169677734375,
+    "peak_process_tree_rss_gib": 3.398834228515625,
+    "history_chunk_size": 128,
+    "history_loader_sql_global_order_removed": true,
+    "status": "complete"
+  },
+  "numeric_kernel_record": "research/records/minute_strategy_numeric_kernel_v1/",
+  "date_parallel_admission_record": "src/quantlab/research/minute_strategy_admission.py"
 }

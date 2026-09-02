@@ -18,6 +18,7 @@ from quantlab.research.minute_strategy_data import (
     build_enriched_minute_ma_states,
     build_live_ma_alignment,
     build_minute_market_context,
+    load_hourly_history,
 )
 
 
@@ -202,3 +203,14 @@ def test_enriched_states_keep_author_filter_inputs_and_alignment() -> None:
 def test_strategy_data_config_rejects_invalid_matching_band() -> None:
     with pytest.raises(MinuteStrategyDataError, match="liquidity_match_band"):
         StrategyDataConfig(liquidity_match_band=0.5).validate()
+
+
+def test_hourly_history_rejects_negative_symbol_chunk_size(tmp_path) -> None:
+    with pytest.raises(MinuteStrategyDataError, match="symbol_chunk_size"):
+        load_hourly_history(
+            tmp_path,
+            symbols=("A",),
+            start_date="2022-01-03",
+            end_date="2022-01-03",
+            symbol_chunk_size=-1,
+        )

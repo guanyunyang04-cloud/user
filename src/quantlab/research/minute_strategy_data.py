@@ -9,6 +9,7 @@ be evaluated without materialising the multi-year minute store.
 
 from __future__ import annotations
 
+import gc
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -478,67 +479,90 @@ def load_hourly_history(
     start_date: str,
     end_date: str,
     config: StrategyDataConfig | None = None,
+    symbol_chunk_size: int = 0,
 ) -> pd.DataFrame:
-    """Aggregate historical minutes to complete 60-minute bars in DuckDB."""
+    """Aggregate historical minutes to complete 60-minute bars in DuckDB.
+
+    A full-universe history query can require several gigabytes of transient
+    hash/group-by state before it returns the relatively small hourly result.
+    When ``symbol_chunk_size`` is positive, execute independent symbol chunks
+    and release each guarded DuckDB connection before starting the next one.
+    The final concatenation and sort are identical to the unchunked path, but
+    the peak is bounded by one chunk rather than the whole universe.
+    """
 
     root = Path(workspace_root).resolve()
-    symbol_frame = _symbols_frame(symbols)
+    symbol_values = _symbols_frame(symbols)["symbol"].astype(str).tolist()
+    try:
+        requested_chunk = int(symbol_chunk_size)
+    except (TypeError, ValueError) as exc:
+        raise MinuteStrategyDataError("strategy_data_symbol_chunk_size_invalid") from exc
+    if requested_chunk < 0:
+        raise MinuteStrategyDataError("strategy_data_symbol_chunk_size_invalid")
     factors = _context(root, "adjust_factor")
     paths = _minute_paths(root, start_date, end_date)
-    con = _open_strategy_duckdb(root, config)
-    con.register("wanted_strategy_symbols", symbol_frame)
-    try:
-        frame = con.execute(
-            f"""
-            WITH raw AS (
-                SELECT CAST(m.symbol AS VARCHAR) AS symbol,
-                       CAST(m.trade_date AS VARCHAR) AS trade_date,
-                       CAST(m.bar_time AS VARCHAR) AS bar_time,
-                       TRY_CAST(m.open AS DOUBLE) AS open,
-                       TRY_CAST(m.high AS DOUBLE) AS high,
-                       TRY_CAST(m.low AS DOUBLE) AS low,
-                       TRY_CAST(m.close AS DOUBLE) AS close,
-                       TRY_CAST(m.volume AS DOUBLE) AS volume,
-                       TRY_CAST(m.amount AS DOUBLE) AS amount,
-                       TRY_CAST(f.adjust_factor AS DOUBLE) AS adjust_factor,
-                       CASE
-                         WHEN m.bar_time BETWEEN '093100000' AND '103000000' THEN 1
-                         WHEN m.bar_time BETWEEN '103100000' AND '113000000' THEN 2
-                         WHEN m.bar_time BETWEEN '130100000' AND '140000000' THEN 3
-                         WHEN m.bar_time BETWEEN '140100000' AND '150000000' THEN 4
-                       END AS sixty_minute_bucket
-                FROM {_scan(paths)} m
-                JOIN wanted_strategy_symbols w ON w.symbol = m.symbol
-                LEFT JOIN {_scan(factors.shard_paths)} f
-                  ON f.symbol = m.symbol AND f.trade_date = m.trade_date
-                WHERE m.trade_date BETWEEN ? AND ?
-                  AND (
-                    m.bar_time BETWEEN '093100000' AND '113000000'
-                    OR m.bar_time BETWEEN '130100000' AND '150000000'
-                  )
-            )
-            SELECT symbol, trade_date, sixty_minute_bucket,
-                   ARG_MIN(open, bar_time) AS open,
-                   MAX(high) AS high,
-                   MIN(low) AS low,
-                   ARG_MAX(close, bar_time) AS close,
-                   SUM(volume) AS volume,
-                   SUM(amount) AS amount,
-                   ANY_VALUE(adjust_factor) AS adjust_factor,
-                   COUNT(*) AS bar_count,
-                   COUNT(DISTINCT bar_time) AS distinct_bar_count
-            FROM raw
-            WHERE sixty_minute_bucket IS NOT NULL
-              AND adjust_factor > 0
-              AND open > 0 AND high > 0 AND low > 0 AND close > 0
-            GROUP BY symbol, trade_date, sixty_minute_bucket
-            HAVING bar_count = 60 AND distinct_bar_count = 60
-            ORDER BY symbol, trade_date, sixty_minute_bucket
-            """,
-            [start_date, end_date],
-        ).df()
-    finally:
-        con.close()
+    chunk_size = requested_chunk or len(symbol_values)
+    frames: list[pd.DataFrame] = []
+    for offset in range(0, len(symbol_values), chunk_size):
+        symbol_frame = _symbols_frame(symbol_values[offset : offset + chunk_size])
+        con = _open_strategy_duckdb(root, config)
+        con.register("wanted_strategy_symbols", symbol_frame)
+        try:
+            chunk = con.execute(
+                f"""
+                WITH raw AS (
+                    SELECT CAST(m.symbol AS VARCHAR) AS symbol,
+                           CAST(m.trade_date AS VARCHAR) AS trade_date,
+                           CAST(m.bar_time AS VARCHAR) AS bar_time,
+                           TRY_CAST(m.open AS DOUBLE) AS open,
+                           TRY_CAST(m.high AS DOUBLE) AS high,
+                           TRY_CAST(m.low AS DOUBLE) AS low,
+                           TRY_CAST(m.close AS DOUBLE) AS close,
+                           TRY_CAST(m.volume AS DOUBLE) AS volume,
+                           TRY_CAST(m.amount AS DOUBLE) AS amount,
+                           TRY_CAST(f.adjust_factor AS DOUBLE) AS adjust_factor,
+                           CASE
+                             WHEN m.bar_time BETWEEN '093100000' AND '103000000' THEN 1
+                             WHEN m.bar_time BETWEEN '103100000' AND '113000000' THEN 2
+                             WHEN m.bar_time BETWEEN '130100000' AND '140000000' THEN 3
+                             WHEN m.bar_time BETWEEN '140100000' AND '150000000' THEN 4
+                           END AS sixty_minute_bucket
+                    FROM {_scan(paths)} m
+                    JOIN wanted_strategy_symbols w ON w.symbol = m.symbol
+                    LEFT JOIN {_scan(factors.shard_paths)} f
+                      ON f.symbol = m.symbol AND f.trade_date = m.trade_date
+                    WHERE m.trade_date BETWEEN ? AND ?
+                      AND (
+                        m.bar_time BETWEEN '093100000' AND '113000000'
+                        OR m.bar_time BETWEEN '130100000' AND '150000000'
+                      )
+                )
+                SELECT symbol, trade_date, sixty_minute_bucket,
+                       ARG_MIN(open, bar_time) AS open,
+                       MAX(high) AS high,
+                       MIN(low) AS low,
+                       ARG_MAX(close, bar_time) AS close,
+                       SUM(volume) AS volume,
+                       SUM(amount) AS amount,
+                       ANY_VALUE(adjust_factor) AS adjust_factor,
+                       COUNT(*) AS bar_count,
+                       COUNT(DISTINCT bar_time) AS distinct_bar_count
+                FROM raw
+                WHERE sixty_minute_bucket IS NOT NULL
+                  AND adjust_factor > 0
+                  AND open > 0 AND high > 0 AND low > 0 AND close > 0
+                GROUP BY symbol, trade_date, sixty_minute_bucket
+                HAVING bar_count = 60 AND distinct_bar_count = 60
+                """,
+                [start_date, end_date],
+            ).df()
+        finally:
+            con.close()
+        if not chunk.empty:
+            frames.append(chunk)
+        del chunk, symbol_frame, con
+        gc.collect()
+    frame = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
     if frame.empty:
         raise MinuteStrategyDataError("strategy_data_hourly_history_empty")
     frame["trade_date"] = _normalise_date_series(frame["trade_date"])

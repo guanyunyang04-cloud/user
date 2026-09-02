@@ -1,0 +1,86 @@
+{
+  "schema": "quantlab.minute_strategy_date_parallel_admission_record/1",
+  "status": "complete",
+  "policy": {
+    "hard_floor_gib": 0.5,
+    "safety_margin_gib": 0.5,
+    "estimated_worker_gib": 3.5,
+    "max_workers": 2
+  },
+  "evidence": {
+    "prior_two_date_smoke": {
+      "serial_seconds": 107.568,
+      "concurrent_two_process_seconds": 60.181,
+      "speedup": 1.79,
+      "serial_minimum_available_gib": 6.195,
+      "concurrent_minimum_available_gib": 3.791
+    },
+    "full_month": {
+      "minimum_available_gib": 3.55169677734375,
+      "peak_process_tree_rss_gib": 3.398834228515625
+    }
+  },
+  "snapshot": {
+    "available_gib": 6.672016143798828,
+    "checks": [
+      {
+        "requested_workers": 1,
+        "active_workers": 0,
+        "admitted_workers": 1,
+        "available_bytes": 7164022784,
+        "available_gib": 6.672016143798828,
+        "floor_bytes": 536870912,
+        "floor_gib": 0.5,
+        "safety_margin_bytes": 536870912,
+        "safety_margin_gib": 0.5,
+        "estimated_worker_bytes": 3758096384,
+        "estimated_worker_gib": 3.5,
+        "max_workers": 2,
+        "total_workers_after_admission": 1,
+        "remaining_after_admission_bytes": 2332184576,
+        "remaining_after_admission_gib": 2.172016143798828,
+        "admitted": true,
+        "reason": "admitted"
+      },
+      {
+        "requested_workers": 2,
+        "active_workers": 0,
+        "admitted_workers": 1,
+        "available_bytes": 7164022784,
+        "available_gib": 6.672016143798828,
+        "floor_bytes": 536870912,
+        "floor_gib": 0.5,
+        "safety_margin_bytes": 536870912,
+        "safety_margin_gib": 0.5,
+        "estimated_worker_bytes": 3758096384,
+        "estimated_worker_gib": 3.5,
+        "max_workers": 2,
+        "total_workers_after_admission": 1,
+        "remaining_after_admission_bytes": 2332184576,
+        "remaining_after_admission_gib": 2.172016143798828,
+        "admitted": true,
+        "reason": "capped_by_memory_budget"
+      },
+      {
+        "requested_workers": 4,
+        "active_workers": 0,
+        "admitted_workers": 1,
+        "available_bytes": 7164022784,
+        "available_gib": 6.672016143798828,
+        "floor_bytes": 536870912,
+        "floor_gib": 0.5,
+        "safety_margin_bytes": 536870912,
+        "safety_margin_gib": 0.5,
+        "estimated_worker_bytes": 3758096384,
+        "estimated_worker_gib": 3.5,
+        "max_workers": 2,
+        "total_workers_after_admission": 1,
+        "remaining_after_admission_bytes": 2332184576,
+        "remaining_after_admission_gib": 2.172016143798828,
+        "admitted": true,
+        "reason": "capped_by_memory_budget"
+      }
+    ]
+  },
+  "decision": "admission_helper_only_not_default_parallelism"
+}

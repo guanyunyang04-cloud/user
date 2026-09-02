@@ -113,12 +113,29 @@ C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research minute-strat
   --memory-floor-gib 0.5
 ```
 
+To inspect the current date-worker admission without launching workers:
+
+```powershell
+C:/Users/ASUS/miniconda3/envs/yolos/python.exe -m quantlab research minute-strategy-admission `
+  --requested-workers 2
+```
+
 The tested starting point is four DuckDB threads and a 128-symbol chunk, still
 subject to the machine-wide 0.5 GiB reserve. Date parallelism remains an audit
 result rather than a default: small independent jobs showed a 1.79x wall-time
 speedup but reduced available memory substantially and duplicate month caches at
-full-universe scale. GPU acceleration is deferred until a numeric kernel can
-be isolated and measured independently of Parquet and state-machine work.
+full-universe scale. The numeric kernel has now been isolated and measured
+independently of Parquet and state-machine work.
+
+That isolation is now available in `minute_strategy_numeric.py`. The recorded
+RTX 2060 benchmark shows roughly 2.65x full-transfer speedup (about 30x for the
+device-resident arithmetic alone) for a multi-million-row batch, with exact
+parity against the NumPy reference, but the kernel is not wired into production
+yet. Date-parallel experiments can use the
+bounded admission helper in `minute_strategy_admission.py`; it reserves the
+machine floor and transient headroom, uses a conservative 3.5 GiB per-worker
+estimate from the full-month peak, and caps concurrent workers at two. The
+runner remains serial until a full-universe parallel run is admitted safely.
 
 ## Data contract
 

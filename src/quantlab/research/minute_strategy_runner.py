@@ -1449,6 +1449,13 @@ def run_development_study(
             config=selected_data,
         )
         _require_memory_floor(selected, f"daily_context_loaded:{month_start[:7]}")
+        # Use the same adaptive symbol block for historical hourly aggregation
+        # and minute-state construction.  The SQL group-by is the largest
+        # transient allocation in a full-universe month; chunking it prevents
+        # a four-thread query from exhausting DuckDB's memory budget.
+        cache_chunk_size = _chunk_size_for_memory(
+            selected, requested=selected.signal_symbol_chunk_size
+        )
         _require_memory_floor(selected, f"hourly_history_load_start:{month_start[:7]}", soft=True)
         # ``month_end`` is a lexical partition label (e.g. YYYY-MM-31), not
         # necessarily a real date.  The last actual target date is the
@@ -1459,14 +1466,12 @@ def run_development_study(
             start_date=support_start,
             end_date=target_month_dates[-1],
             config=selected_data,
+            symbol_chunk_size=cache_chunk_size,
         )
         _require_memory_floor(selected, f"hourly_history_loaded:{month_start[:7]}")
         # Rolling MA history is computed once per month, retained only for the
         # target dates, and split by period.  This removes the old repeated
         # 66-session rolling calculation from every target day.
-        cache_chunk_size = _chunk_size_for_memory(
-            selected, requested=selected.signal_symbol_chunk_size
-        )
         _require_memory_floor(
             selected, f"ma_cache_start:{month_start[:7]}", soft=True
         )

@@ -28,6 +28,10 @@ def main(argv: list[str] | None = None) -> int:
         from .minute_strategy_artifacts import main as minute_strategy_normalize_main
 
         return int(minute_strategy_normalize_main(values[1:]) or 0)
+    if values and values[0] == "minute-strategy-admission":
+        from .minute_strategy_admission import main as minute_strategy_admission_main
+
+        return int(minute_strategy_admission_main(values[1:]) or 0)
 
     parser = argparse.ArgumentParser(description="Current daily research pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)

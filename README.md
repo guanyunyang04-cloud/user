@@ -55,6 +55,12 @@ Minute-strategy outputs also support additive normalized `events`, `paths`, and
 comparisons. The performance smoke results and the decision not to enable
 unbounded date parallelism are recorded in
 `research/records/minute_strategy_performance_benchmarks_v1/`.
+The first full-universe April 2022 run with the bounded four-thread/128-symbol
+path completed safely; its throughput and memory curve are recorded in
+`research/records/minute_strategy_full_month_benchmark_v1/`.
+The optional date-parallel memory admission policy is documented in
+`research/records/minute_strategy_date_parallel_admission_v1/`; date workers
+remain disabled by default.
 
 The former `daily_research/` and `quant_data_platform/` trees are retired.
 Historical reports may still mention those names as provenance; such strings

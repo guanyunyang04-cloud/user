@@ -81,11 +81,15 @@ default is therefore acceptable until a workload actually spills heavily.
 
 Use four DuckDB threads and a 128-symbol chunk as the current benchmark
 starting point, subject to the existing memory guard. Keep date parallelism as
-an audited option rather than enabling it by default. Keep normalized artifacts
-enabled for new development runs and use the compatibility-wide files for old
-runs until their three tables are complete. GPU acceleration is deferred until
-the CPU/data-layout path has a measured numeric kernel that can amortize data
-transfer.
+an audited option rather than enabling it by default; the parent-side admission
+policy is documented in
+`research/records/minute_strategy_date_parallel_admission_v1/`. Keep
+normalized artifacts enabled for new development runs and use the
+compatibility-wide files for old runs until their three tables are complete.
+The isolated numeric kernel is GPU-friendly, but the full-transfer benchmark
+shows only about 2.65x at a large batch and does not justify moving the whole
+pipeline to CUDA; details are in
+`research/records/minute_strategy_numeric_kernel_v1/`.
 
 ## Reproduction material
 
@@ -98,3 +102,19 @@ The disposable benchmark outputs are under the ignored `tmp/` directory:
 The persistent normalized artifacts used for the read/parity checks are under
 the ignored `runs/minute_ma_month_2022_04/normalized/` and
 `runs/minute_ma_month_2023_09/normalized/` directories.
+
+## Full-month follow-up
+
+After the initial four-thread full-universe attempt exposed a DuckDB history
+aggregation OOM, the loader was changed to remove its redundant global SQL
+sort and aggregate historical minutes in bounded symbol chunks. A complete
+April 2022 run with four threads and a 128-symbol chunk then finished in
+7,005.635 wall seconds (19 trading dates, 6,091,670 outcome rows). The memory
+curve bottomed at 3.552 GiB available, with a 3.399 GiB peak process-tree RSS.
+Details and the raw telemetry paths are recorded in
+`research/records/minute_strategy_full_month_benchmark_v1/`.
+
+The same-source one-date replay with two threads and a 512-symbol chunk
+matched the four-thread/128-symbol run on all 70 output columns for all
+393,275 rows. This is a capacity and semantic check, not a profitability
+result.

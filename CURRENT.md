@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 ## Decision
 
@@ -32,6 +32,12 @@ evidence.
   `research/records/minute_strategy_portfolio_causal_rankers_v1/`.
 - Minute-strategy performance benchmark record:
   `research/records/minute_strategy_performance_benchmarks_v1/`.
+- Minute-strategy numeric-kernel benchmark record:
+  `research/records/minute_strategy_numeric_kernel_v1/`.
+- Minute-strategy full-month benchmark record:
+  `research/records/minute_strategy_full_month_benchmark_v1/`.
+- Minute-strategy date-parallel admission record:
+  `research/records/minute_strategy_date_parallel_admission_v1/`.
 - Durable study inputs and evidence: `research/studies/` and
   `research/records/`.
 - Local model outputs: `runs/`.
@@ -251,6 +257,28 @@ sample; two independent date processes were 1.79x faster than serial for a
 worker duplicates month-level cache memory. Full benchmark details are in
 `research/records/minute_strategy_performance_benchmarks_v1/`.
 
+The pure element-wise live-MA arithmetic is isolated in
+`src/quantlab/research/minute_strategy_numeric.py`. A bounded Torch-CUDA
+comparison shows about 2.65x full-transfer speedup on a 4.2-million-row batch
+(about 30x with inputs already resident on the device); host/device transfer
+and the unchanged CPU state pipeline mean that CUDA remains an optional future
+batch stage, not a default runner backend. Optional date parallelism now has a
+parent-side admission calculation in
+`src/quantlab/research/minute_strategy_admission.py`: it reserves the 0.5 GiB
+hard floor, an additional transient margin, and a conservative 3.5 GiB per
+worker estimate, with a two-worker cap. The estimate is now 3.5 GiB based on
+the full-month process-tree peak; callers can override it for a measured
+environment. The admission API also accounts for already-active workers. The
+main runner remains serial until a full-universe worker can pass this admission
+and a memory-curve audit.
+
+A complete April 2022 full-universe run using four DuckDB threads and a
+128-symbol history/signal chunk completed in 7,005.635 seconds, produced
+6,091,670 outcomes, and never fell below 3.552 GiB available memory. The first
+attempt's DuckDB OOM was resolved by removing a redundant global SQL sort and
+chunking historical aggregation. The durable benchmark is recorded in
+`research/records/minute_strategy_full_month_benchmark_v1/`.
+
 ## Artifact policy
 
 Retain the rev5 compatibility benchmark as historical evidence and keep it
@@ -274,9 +302,10 @@ recoverable archives or provenance needed for audit.
 1. Keep QDP status/quick checks and the minute-v2 month verifier as regression
    checks after any data or code change.
 2. Use the normalized event/path artifacts for new runs and expand the
-   causal-ranker replay across more 2022-2024 months and market
-   regimes, retaining the random baseline and all three rankers until a rule
-   family is stable.
+   causal-ranker replay across more 2022-2024 months and market regimes,
+   retaining the random baseline and all three rankers until a rule family is
+   stable. The April full-month capacity check is complete; choose the next
+   representative months before opening the full development window.
 3. Build and audit an optional 5-minute coarse candidate pass against the exact
    1-minute path; enable it only after its recall and coverage are measured.
 4. Report costs, missingness, turnover, delayed exits and drawdown by year and
@@ -284,8 +313,9 @@ recoverable archives or provenance needed for audit.
 5. Freeze the selected rule family, then inspect 2025 once as the held-out
    validation year. Do not tune on that pass.
 6. Add optional tree/sequence baselines only as comparators after the
-   hand-designed rules have a stable event contract. QMT integration remains
-   deferred until the inventory replay is credible.
+   hand-designed rules have a stable event contract. The isolated CUDA kernel
+   may become a later batch optimization; QMT integration remains deferred
+   until the inventory replay is credible.
 
 ## Useful commands
 
