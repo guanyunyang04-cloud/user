@@ -1,0 +1,485 @@
+{
+  "schema": "quantlab.minute_strategy_existing_samples_research/1",
+  "status": "ok",
+  "created_at": "2026-09-04T19:03:25+0800",
+  "elapsed_seconds": 1642.658,
+  "source_contract": {
+    "canonical_sample_groups": [
+      "primary_development_2022_2023_partial",
+      "supplemental_2023_09_legacy"
+    ],
+    "excluded_duplicate_and_probe_roots": [
+      {
+        "root": "H:\\quant_project\\runs\\minute_baseline_256_2024",
+        "name": "minute_baseline_256_2024",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_baseline_256_2025",
+        "name": "minute_baseline_256_2025",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_baseline_256_2025_train2023",
+        "name": "minute_baseline_256_2025_train2023",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_baseline_64_2025",
+        "name": "minute_baseline_64_2025",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_baseline_64_corrected_2025",
+        "name": "minute_baseline_64_corrected_2025",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_300_all_probe",
+        "name": "minute_ma_300_all_probe",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 2928474
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_batch_control_smoke",
+        "name": "minute_ma_batch_control_smoke",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 374125
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_compare_2022_04_01_t2_c512",
+        "name": "minute_ma_compare_2022_04_01_t2_c512",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-04-01",
+        "date_end": "2022-04-01",
+        "outcome_bytes": 42108419
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_current_probe",
+        "name": "minute_ma_full_day_current_probe",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 45582995
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_final_probe",
+        "name": "minute_ma_full_day_final_probe",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 17258982
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_optimized2_probe",
+        "name": "minute_ma_full_day_optimized2_probe",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_optimized_probe",
+        "name": "minute_ma_full_day_optimized_probe",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 25180264
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_probe",
+        "name": "minute_ma_full_day_probe",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_probe2",
+        "name": "minute_ma_full_day_probe2",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_probe3",
+        "name": "minute_ma_full_day_probe3",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_probe4",
+        "name": "minute_ma_full_day_probe4",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_probe5",
+        "name": "minute_ma_full_day_probe5",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_probe6",
+        "name": "minute_ma_full_day_probe6",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_full_day_probe7",
+        "name": "minute_ma_full_day_probe7",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 5071223
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_future_smoke",
+        "name": "minute_ma_future_smoke",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 187584
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_guarded_smoke",
+        "name": "minute_ma_guarded_smoke",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 374125
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_liquid20_smoke",
+        "name": "minute_ma_liquid20_smoke",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 278597
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_memory_sample_300",
+        "name": "minute_ma_memory_sample_300",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 4829202
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_memory_sample_full",
+        "name": "minute_ma_memory_sample_full",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_memory_sample_full_safe",
+        "name": "minute_ma_memory_sample_full_safe",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 45582995
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_month_2022_04",
+        "name": "minute_ma_month_2022_04",
+        "status": "duplicate_audit_only",
+        "reason": "overlaps canonical 2022-04 dates; retained only for duplicate/parity audit",
+        "outcome_file_count": 19,
+        "date_start": "2022-04-01",
+        "date_end": "2022-04-29",
+        "outcome_bytes": 703299971
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_month_2022_04_t4_c128",
+        "name": "minute_ma_month_2022_04_t4_c128",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_month_2022_04_t4_c128_v2",
+        "name": "minute_ma_month_2022_04_t4_c128_v2",
+        "status": "duplicate_audit_only",
+        "reason": "overlaps canonical 2022-04 dates; retained only for duplicate/parity audit",
+        "outcome_file_count": 19,
+        "date_start": "2022-04-01",
+        "date_end": "2022-04-29",
+        "outcome_bytes": 707395347
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_sequential_guarded_smoke",
+        "name": "minute_ma_sequential_guarded_smoke",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 374125
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_smoke",
+        "name": "minute_ma_smoke",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 11,
+        "date_start": "2022-06-01",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 1454096
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_smoke2",
+        "name": "minute_ma_smoke2",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 53856
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_smoke3",
+        "name": "minute_ma_smoke3",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 98590
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_vec_smoke",
+        "name": "minute_ma_vec_smoke",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 70273
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_ma_vec_smoke2",
+        "name": "minute_ma_vec_smoke2",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 1,
+        "date_start": "2022-06-16",
+        "date_end": "2022-06-16",
+        "outcome_bytes": 70273
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_strategy_portfolio_apr_sep",
+        "name": "minute_strategy_portfolio_apr_sep",
+        "status": "derived_account_artifact",
+        "reason": "portfolio result, not an independent event sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_strategy_portfolio_causal_rankers",
+        "name": "minute_strategy_portfolio_causal_rankers",
+        "status": "derived_account_artifact",
+        "reason": "portfolio result, not an independent event sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_strategy_portfolio_seed_stability",
+        "name": "minute_strategy_portfolio_seed_stability",
+        "status": "derived_account_artifact",
+        "reason": "portfolio result, not an independent event sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      },
+      {
+        "root": "H:\\quant_project\\runs\\minute_walk_forward_256_2021_2025",
+        "name": "minute_walk_forward_256_2021_2025",
+        "status": "implementation_probe_or_failed_run",
+        "reason": "smoke, benchmark, probe, or failed partial output; not a research sample",
+        "outcome_file_count": 0,
+        "date_start": null,
+        "date_end": null,
+        "outcome_bytes": 0
+      }
+    ],
+    "diagnostic_rows_excluded": true,
+    "causal_only": true,
+    "horizons": [
+      "5m",
+      "15m",
+      "30m",
+      "60m",
+      "1d",
+      "2d",
+      "3d",
+      "5d"
+    ],
+    "metrics": [
+      "gross",
+      "net",
+      "mfe_same_day",
+      "mae_same_day"
+    ],
+    "daily_inference_unit": "signal_date mean, not independent signal rows",
+    "multiple_comparison_adjustment": "Benjamini-Hochberg within sample_group and horizon"
+  },
+  "partition_audit": {
+    "partition_count": 351,
+    "schema_mismatch_count": 0,
+    "normalized_incomplete_count": 0,
+    "normalized_row_parity_failure_count": 0,
+    "event_orphan_path_count": 0,
+    "reference_orphan_path_count": 0
+  },
+  "event_metrics_rows": 5292,
+  "daily_metrics_rows": 50538,
+  "daily_consistency_rows": 2352,
+  "control_pair_summary_rows": 4320,
+  "candidate_screen_rows": 294,
+  "account_records_already_available": [
+    {
+      "record": "minute_ma_portfolio_development_v1",
+      "status": "development_not_selected",
+      "signal_date_count": 39,
+      "account_result_count": null
+    },
+    {
+      "record": "minute_ma_portfolio_seed_stability_v1",
+      "status": "random_tiebreak_rejected",
+      "signal_date_count": 39,
+      "account_result_count": 1540
+    },
+    {
+      "record": "minute_strategy_portfolio_causal_rankers_v1",
+      "status": "candidate_requires_more_development_months",
+      "signal_date_count": 39,
+      "account_result_count": 2205
+    }
+  ],
+  "account_replay_note": "Full account replays were completed separately for both canonical existing samples. The primary current-contract sample and supplemental legacy-VWAP sample remain separate; all combinations are retained, not just extrema.",
+  "account_replays": [
+    {
+      "sample_group": "primary_development_2022_2023_partial",
+      "status": "completed",
+      "run_root": "H:/quant_project/runs/minute_strategy_portfolio_existing_primary_331",
+      "signal_date_count": 331,
+      "signal_date_start": "2022-01-04",
+      "signal_date_end": "2023-05-18",
+      "outcome_calendar_end": "2023-06-02",
+      "account_result_count": 3220,
+      "lowest_available_gb": 1.5347671508789062,
+      "memory_guard_log": "H:/quant_project/tmp/minute_existing_primary_portfolio_memory_guard.json",
+      "portfolio_research_files": "account_results.csv and related files in this record directory"
+    },
+    {
+      "sample_group": "supplemental_2023_09_legacy",
+      "status": "completed",
+      "run_root": "H:/quant_project/runs/minute_strategy_portfolio_existing_supplemental_2023_09",
+      "signal_date_count": 20,
+      "signal_date_start": "2023-09-01",
+      "signal_date_end": "2023-09-28",
+      "outcome_calendar_end": "2023-10-13",
+      "account_result_count": 3080,
+      "lowest_available_gb": 5.029674530029297,
+      "memory_guard_log": "H:/quant_project/tmp/minute_existing_supplemental_portfolio_memory_guard.json",
+      "portfolio_research_files": "account_results.csv and related files in this record directory"
+    }
+  ],
+  "quality_audit": {
+    "status": "completed",
+    "result": "quality_result.json",
+    "memory_guard_log": "H:/quant_project/tmp/minute_existing_sample_quality_memory_guard_v3.json",
+    "lowest_available_gb": 0.8595695495605469,
+    "tail_summary_rows": 4704,
+    "feature_quality_rows": 294
+  },
+  "research_summary": "research_summary.md"
+}

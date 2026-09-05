@@ -119,6 +119,11 @@
       "id": "seq100_target_redundancy_audit_v1",
       "status": "completed_nonredundant_head_set",
       "path": "research/records/seq100/seq100_target_redundancy_audit_v1/result.json"
+    },
+    {
+      "id": "minute_strategy_existing_samples_v1_20260905",
+      "status": "completed_existing_sample_research_descriptive",
+      "path": "research/records/minute_strategy_existing_samples_v1/result.json"
     }
   ]
 }

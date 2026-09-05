@@ -1,0 +1,17 @@
+{
+  "schema": "quantlab.minute_strategy_existing_sample_quality/1",
+  "status": "ok",
+  "created_at": "2026-09-05T08:02:14+0800",
+  "elapsed_seconds": 15377.82,
+  "sample_group_count": 2,
+  "feature_quality_rows": 294,
+  "tail_summary_rows": 4704,
+  "files": {
+    "signal_feature_quality": "signal_feature_quality.csv",
+    "event_tail_summary": "event_tail_summary.csv",
+    "outcome_quality_summary": "outcome_quality_summary.csv",
+    "event_cost_drag": "event_cost_drag.csv",
+    "strategy_manifest": "strategy_manifest.csv",
+    "author_hypothesis_summary": "author_hypothesis_summary.csv"
+  }
+}
