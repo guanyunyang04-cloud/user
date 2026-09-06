@@ -1,0 +1,57 @@
+{
+  "schema": "quantlab.minute_strategy_mainboard_consecutive_filter/2",
+  "status": "ok",
+  "created_at": "2026-09-06T17:47:45+0800",
+  "elapsed_seconds": 525.991,
+  "samples": [
+    {
+      "sample_group": "primary_development_2022_2023_partial",
+      "variant": "current_contract",
+      "root": "H:\\quant_project\\runs\\minute_ma_development_2022_2024",
+      "signal_date_count": 331,
+      "signal_date_start": "2022-01-04",
+      "signal_date_end": "2023-05-18",
+      "outcome_file_count": 331
+    },
+    {
+      "sample_group": "supplemental_2023_09_legacy",
+      "variant": "legacy_vwap",
+      "root": "H:\\quant_project\\runs\\minute_ma_month_2023_09",
+      "signal_date_count": 20,
+      "signal_date_start": "2023-09-01",
+      "signal_date_end": "2023-09-28",
+      "outcome_file_count": 20
+    }
+  ],
+  "history_start": "2021-01-04",
+  "history_end": "2023-09-28",
+  "label_row_count_total": 1041401,
+  "board_non_main_count_total": 0,
+  "board_unresolved_count_total": 0,
+  "label_definition": {
+    "primary": "completed_prior_daily_limit_up_close",
+    "ordinary_mainboard_limit_pct": 0.1,
+    "st_limit_pct": 0.05,
+    "price_rounding_decimals": 2,
+    "half_tick_tolerance": 0.0051,
+    "signal_day_used": false,
+    "touched_limit_up_is_sensitivity_only": true,
+    "source_domains": [
+      "market_daily_raw",
+      "security_status",
+      "universe_snapshot"
+    ]
+  },
+  "event_metric_rows": 5292,
+  "daily_metric_rows": 5292,
+  "control_comparison_rows": 9720,
+  "files": {
+    "event_metrics": "event_metrics.csv",
+    "daily_metrics": "daily_metrics.csv",
+    "control_comparison": "control_comparison.csv",
+    "streak_distribution": "streak_distribution.csv",
+    "board_audit": "board_audit.csv",
+    "research_summary": "research_summary.md"
+  },
+  "label_unobserved_count_total": 0
+}
