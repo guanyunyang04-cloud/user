@@ -38,6 +38,7 @@ a trading service. No live orders are sent by this project.
   except for the daily contract manifest.
 - `research/studies`: durable study specifications.
 - `research/records`: compact reports and evidence indexes.
+- `research/records/limit_up_volume_patterns_2020_2025_v2/`: QDP event study for the two main-board volume/limit-up patterns, including forward premiums, industry resonance, and coverage audits.
 - `runs`: local model and evaluation outputs.
 - `tools`: bounded migration and maintenance utilities.
 

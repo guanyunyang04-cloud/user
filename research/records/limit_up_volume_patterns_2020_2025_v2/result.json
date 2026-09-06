@@ -1,0 +1,39 @@
+{
+  "schema": "quantlab.limit_up_volume_patterns/2",
+  "status": "ok",
+  "created_at": "2026-09-06T19:14:58+0800",
+  "elapsed_seconds": 63.36744170001475,
+  "workspace": "H:\\quant_project",
+  "output_root": "H:\\quant_project\\research\\records\\limit_up_volume_patterns_2020_2025_v2",
+  "date_start": "2020-01-01",
+  "date_end": "2025-12-31",
+  "load_start_date": "2019-12-01",
+  "load_end_date": "2026-01-31",
+  "initial_available_gib": 5.866199493408203,
+  "final_available_gib": 4.368427276611328,
+  "event_count": 4244,
+  "pattern_a_count": 3725,
+  "pattern_b_count": 519,
+  "pattern_b_immediate_count": 479,
+  "qdp_domains": [
+    "market_daily_raw",
+    "security_status",
+    "universe_snapshot",
+    "industry_concept",
+    "trading_calendar"
+  ],
+  "files": {
+    "event_records": "event_records.parquet",
+    "pattern_summary": "pattern_summary.csv",
+    "annual_summary": "annual_summary.csv",
+    "resonance_summary": "resonance_summary.csv",
+    "industry_resonance_summary": "industry_resonance_summary.csv",
+    "market_resonance_summary": "market_resonance_summary.csv",
+    "run_length_summary": "run_length_summary.csv",
+    "outcome_by_success": "outcome_by_success.csv",
+    "headline_summary": "headline_summary.csv",
+    "data_audit": "data_audit.csv",
+    "industry_fill_audit": "industry_fill_audit.csv",
+    "research_summary": "research_summary.md"
+  }
+}

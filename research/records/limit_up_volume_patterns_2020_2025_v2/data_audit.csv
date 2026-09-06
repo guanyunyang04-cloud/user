@@ -1,0 +1,7 @@
+﻿scope,domain,rows,distinct_keys,symbols,dates
+source_domain,market_daily_raw,4529499,4529499,3357,1455
+source_domain,security_status,4546259,4546259,3357,1455
+source_domain,universe_snapshot,4546259,4546259,3357,1455
+source_domain,industry_concept,4529499,4529499,3357,1455
+event,A,3725,3725,2047,1262
+event,B,519,519,459,399

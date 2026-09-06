@@ -1,6 +1,6 @@
 # Current project state
 
-Updated: 2026-09-02
+Updated: 2026-09-06
 
 ## Decision
 
@@ -40,6 +40,8 @@ evidence.
   `research/records/minute_strategy_date_parallel_admission_v1/`.
 - Durable study inputs and evidence: `research/studies/` and
   `research/records/`.
+- Main-board limit-up volume event study (canonical corrected run):
+  `research/records/limit_up_volume_patterns_2020_2025_v2/`.
 - Local model outputs: `runs/`.
 
 The former `daily_research/` and `quant_data_platform/` trees are retired.
